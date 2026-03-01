@@ -6,7 +6,7 @@ use iced::{Element, Length, Pixels, Point, Rectangle, Size, Theme, font};
 
 use crate::config::SCROLL_LINES_PER_TICK;
 use crate::message::Message;
-use crate::session::{Cell, CellColor, TerminalGrid};
+use crate::session::{Cell, CellColor, CursorStyle, TerminalGrid};
 use crate::ui::color_palette::cell_color_to_iced;
 use crate::ui::theme::TERMINAL_BG;
 
@@ -122,14 +122,35 @@ impl canvas::Program<Message> for TerminalCanvas {
                         && row_idx == grid.cursor_row
                         && col_idx == grid.cursor_col
                     {
-                        frame.fill_rectangle(
-                            Point::new(x, y),
-                            Size::new(self.cell_width, self.cell_height),
-                            iced::Color::from_rgba(0.8, 0.8, 0.8, 0.45),
-                        );
+                        match grid.cursor_style {
+                            CursorStyle::Hidden => {}
+                            CursorStyle::Block => {
+                                frame.fill_rectangle(
+                                    Point::new(x, y),
+                                    Size::new(self.cell_width, self.cell_height),
+                                    iced::Color::from_rgba(0.8, 0.8, 0.8, 0.35),
+                                );
+                            }
+                            CursorStyle::Underline => {
+                                let cursor_height = (self.cell_height * 0.16).clamp(2.0, 4.0);
+                                frame.fill_rectangle(
+                                    Point::new(x, y + self.cell_height - cursor_height),
+                                    Size::new(self.cell_width, cursor_height),
+                                    iced::Color::from_rgba(0.9, 0.9, 0.9, 0.9),
+                                );
+                            }
+                            CursorStyle::Bar => {
+                                let cursor_width = (self.cell_width * 0.14).clamp(1.0, 3.0);
+                                frame.fill_rectangle(
+                                    Point::new(x, y),
+                                    Size::new(cursor_width, self.cell_height),
+                                    iced::Color::from_rgba(0.9, 0.9, 0.9, 0.9),
+                                );
+                            }
+                        }
                     }
 
-                    if cell.c != ' ' {
+                    if !cell.c.is_empty() && cell.c != " " {
                         let fg = cell_color_to_iced(cell.fg, true);
                         let font = if cell.attrs.bold {
                             iced::Font {
@@ -140,22 +161,25 @@ impl canvas::Program<Message> for TerminalCanvas {
                             iced::Font::MONOSPACE
                         };
 
+                        let text_x = x + (self.cell_width * 0.08);
+                        let text_y = y + (self.cell_height - self.font_size).max(0.0) * 0.5;
                         frame.fill_text(canvas::Text {
-                            content: cell.c.to_string(),
-                            position: Point::new(x, y + self.cell_height - 3.0),
+                            content: cell.c.clone(),
+                            position: Point::new(text_x, text_y),
                             color: fg,
                             size: Pixels(self.font_size),
                             font,
                             ..Default::default()
                         });
+                    }
 
-                        if cell.attrs.underline {
-                            frame.fill_rectangle(
-                                Point::new(x, y + self.cell_height - 2.0),
-                                Size::new(self.cell_width, 1.0),
-                                fg,
-                            );
-                        }
+                    if cell.attrs.underline {
+                        let fg = cell_color_to_iced(cell.fg, true);
+                        frame.fill_rectangle(
+                            Point::new(x, y + self.cell_height - 2.0),
+                            Size::new(self.cell_width, 1.0),
+                            fg,
+                        );
                     }
                 }
             }
@@ -206,7 +230,7 @@ mod tests {
         for i in 0..30 {
             grid.scrollback.push_back(vec![
                 crate::session::Cell {
-                    c: char::from(b'0' + (i % 10) as u8),
+                    c: char::from(b'0' + (i % 10) as u8).to_string(),
                     ..Default::default()
                 };
                 4

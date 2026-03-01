@@ -7,8 +7,16 @@ const MAX_SCROLLBACK_MAX_LINES: usize = 200_000;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CellColor {
     Default,
-    Indexed(u8),
     Rgb(u8, u8, u8),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CursorStyle {
+    #[default]
+    Block,
+    Underline,
+    Bar,
+    Hidden,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -18,9 +26,9 @@ pub struct CellAttrs {
     pub underline: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cell {
-    pub c: char,
+    pub c: String,
     pub fg: CellColor,
     pub bg: CellColor,
     pub attrs: CellAttrs,
@@ -29,7 +37,7 @@ pub struct Cell {
 impl Default for Cell {
     fn default() -> Self {
         Self {
-            c: ' ',
+            c: String::new(),
             fg: CellColor::Default,
             bg: CellColor::Default,
             attrs: CellAttrs::default(),
@@ -46,6 +54,7 @@ pub struct TerminalGrid {
     pub use_alternate: bool,
     pub cursor_row: usize,
     pub cursor_col: usize,
+    pub cursor_style: CursorStyle,
     pub scrollback: VecDeque<Vec<Cell>>,
     pub scrollback_max_lines: usize,
 }
@@ -65,6 +74,7 @@ impl TerminalGrid {
             use_alternate: false,
             cursor_row: 0,
             cursor_col: 0,
+            cursor_style: CursorStyle::default(),
             scrollback: VecDeque::new(),
             scrollback_max_lines,
         }
@@ -78,6 +88,7 @@ impl TerminalGrid {
         }
     }
 
+    #[allow(dead_code)]
     pub fn active_cells_mut(&mut self) -> &mut Vec<Vec<Cell>> {
         if self.use_alternate {
             &mut self.alternate_grid
@@ -98,18 +109,21 @@ impl TerminalGrid {
         self.cursor_row = self.cursor_row.min(self.rows.saturating_sub(1));
     }
 
+    #[allow(dead_code)]
     pub fn set_cell(&mut self, row: usize, col: usize, cell: Cell) {
         if row < self.rows && col < self.cols {
             self.active_cells_mut()[row][col] = cell;
         }
     }
 
+    #[allow(dead_code)]
     pub fn clear_row(&mut self, row: usize) {
         if row < self.rows {
             self.active_cells_mut()[row].fill(Cell::default());
         }
     }
 
+    #[allow(dead_code)]
     pub fn clear_screen(&mut self) {
         for row in self.active_cells_mut().iter_mut() {
             row.fill(Cell::default());
@@ -118,12 +132,14 @@ impl TerminalGrid {
         self.cursor_col = 0;
     }
 
+    #[allow(dead_code)]
     pub fn switch_alternate(&mut self, enabled: bool) {
         self.use_alternate = enabled;
         self.cursor_row = self.cursor_row.min(self.rows.saturating_sub(1));
         self.cursor_col = self.cursor_col.min(self.cols.saturating_sub(1));
     }
 
+    #[allow(dead_code)]
     pub fn scroll_up(&mut self, count: usize) -> usize {
         if count == 0 {
             return 0;
@@ -156,6 +172,7 @@ impl TerminalGrid {
         lines_added
     }
 
+    #[allow(dead_code)]
     pub fn scroll_down(&mut self, count: usize) {
         if count == 0 {
             return;

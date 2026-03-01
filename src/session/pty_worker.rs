@@ -2,8 +2,20 @@ use std::io::{Read, Write};
 use std::sync::Arc;
 
 use tokio::sync::mpsc;
+use wezterm_surface::{CursorShape, CursorVisibility};
+use wezterm_term::color::{ColorAttribute, ColorPalette, SrgbaTuple};
+use wezterm_term::{
+    CellAttributes, Intensity, Line, Terminal, TerminalConfiguration, TerminalSize, Underline,
+};
 
-use super::{Cell, CellAttrs, CellColor, SessionId, TerminalGrid};
+use super::{
+    Cell as GridCell, CellAttrs as GridCellAttrs, CellColor as GridCellColor, CursorStyle,
+    SessionId, TerminalGrid,
+};
+
+const DEFAULT_DPI: u32 = 96;
+const TERM_PROGRAM: &str = "chatminal";
+const TERM_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Clone)]
 pub enum SessionEvent {
@@ -15,6 +27,258 @@ pub enum SessionEvent {
     Exited(SessionId),
 }
 
+#[derive(Debug)]
+struct EmbeddedTerminalConfig {
+    scrollback_size: usize,
+}
+
+impl TerminalConfiguration for EmbeddedTerminalConfig {
+    fn scrollback_size(&self) -> usize {
+        self.scrollback_size
+    }
+
+    fn color_palette(&self) -> ColorPalette {
+        ColorPalette::default()
+    }
+}
+
+struct PtyEngine {
+    session_id: SessionId,
+    event_tx: mpsc::Sender<SessionEvent>,
+    terminal: Terminal,
+    scrollback_max_lines: usize,
+    last_top_stable_row: Option<isize>,
+    dirty: bool,
+}
+
+impl PtyEngine {
+    fn new(
+        session_id: SessionId,
+        event_tx: mpsc::Sender<SessionEvent>,
+        cols: usize,
+        rows: usize,
+        scrollback_max_lines: usize,
+    ) -> Self {
+        let config = Arc::new(EmbeddedTerminalConfig {
+            scrollback_size: scrollback_max_lines,
+        });
+        let terminal = Terminal::new(
+            TerminalSize {
+                rows: rows.max(1),
+                cols: cols.max(1),
+                pixel_width: 0,
+                pixel_height: 0,
+                dpi: DEFAULT_DPI,
+            },
+            config,
+            TERM_PROGRAM,
+            TERM_VERSION,
+            Box::new(std::io::sink()),
+        );
+
+        Self {
+            session_id,
+            event_tx,
+            terminal,
+            scrollback_max_lines,
+            last_top_stable_row: None,
+            dirty: true,
+        }
+    }
+
+    fn advance_bytes(&mut self, bytes: &[u8]) {
+        self.terminal.advance_bytes(bytes);
+        self.dirty = true;
+    }
+
+    fn flush_update(&mut self) {
+        if !self.dirty {
+            return;
+        }
+
+        let current_top_stable_row = self.current_top_stable_row();
+        let lines_added = match (self.last_top_stable_row, current_top_stable_row) {
+            (Some(previous), Some(current)) if current >= previous => (current - previous) as usize,
+            _ => 0,
+        };
+        let snapshot = Arc::new(self.snapshot_grid());
+
+        match self.event_tx.try_send(SessionEvent::Update {
+            session_id: self.session_id,
+            grid: snapshot,
+            lines_added,
+        }) {
+            Ok(_) => {
+                self.last_top_stable_row = current_top_stable_row;
+                self.dirty = false;
+            }
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                log::warn!(
+                    "PTY update queue full for session {}, will retry latest snapshot",
+                    self.session_id
+                );
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                self.last_top_stable_row = current_top_stable_row;
+                self.dirty = false;
+            }
+        }
+    }
+
+    fn current_top_stable_row(&self) -> Option<isize> {
+        if self.terminal.is_alt_screen_active() {
+            return None;
+        }
+
+        let screen = self.terminal.screen();
+        Some(screen.visible_row_to_stable_row(0))
+    }
+
+    fn snapshot_grid(&self) -> TerminalGrid {
+        let screen = self.terminal.screen();
+        let rows = screen.physical_rows.max(1);
+        let cols = screen.physical_cols.max(1);
+        let total_rows = screen.scrollback_rows();
+        let visible_start = total_rows.saturating_sub(rows);
+        let is_alt_screen = self.terminal.is_alt_screen_active();
+        let snapshot_start = if is_alt_screen {
+            visible_start
+        } else {
+            visible_start.saturating_sub(self.scrollback_max_lines)
+        };
+        let lines = screen.lines_in_phys_range(snapshot_start..total_rows);
+        let visible_offset = visible_start.saturating_sub(snapshot_start);
+        let palette = self.terminal.palette();
+
+        let mut grid = TerminalGrid::new(cols, rows, self.scrollback_max_lines);
+        let mut visible_rows = vec![vec![GridCell::default(); cols]; rows];
+
+        for (row_idx, line) in lines.iter().skip(visible_offset).take(rows).enumerate() {
+            visible_rows[row_idx] = convert_line(line, cols, &palette);
+        }
+
+        if is_alt_screen {
+            grid.use_alternate = true;
+            grid.alternate_grid = visible_rows;
+            grid.primary_grid = vec![vec![GridCell::default(); cols]; rows];
+            grid.scrollback.clear();
+        } else {
+            grid.use_alternate = false;
+            grid.primary_grid = visible_rows;
+            for line in lines.iter().take(visible_offset) {
+                if grid.scrollback.len() >= grid.scrollback_max_lines {
+                    let _ = grid.scrollback.pop_front();
+                }
+                grid.scrollback
+                    .push_back(convert_line(line, cols, &palette));
+            }
+        }
+
+        let cursor = self.terminal.cursor_pos();
+        grid.cursor_row = (cursor.y.max(0) as usize).min(rows.saturating_sub(1));
+        grid.cursor_col = cursor.x.min(cols.saturating_sub(1));
+        grid.cursor_style = map_cursor_style(cursor.shape, cursor.visibility);
+
+        grid
+    }
+}
+
+fn send_exited_event_async(event_tx: mpsc::Sender<SessionEvent>, session_id: SessionId) {
+    let _ = std::thread::Builder::new()
+        .name(format!("chatminal-exit-{session_id}"))
+        .spawn(move || {
+            let _ = event_tx.blocking_send(SessionEvent::Exited(session_id));
+        });
+}
+
+fn convert_line(line: &Line, cols: usize, palette: &ColorPalette) -> Vec<GridCell> {
+    let mut row = vec![GridCell::default(); cols];
+
+    for cell_ref in line.visible_cells() {
+        let col = cell_ref.cell_index();
+        if col >= cols {
+            continue;
+        }
+
+        let attrs = cell_ref.attrs();
+        let fg = map_fg_color(attrs.foreground(), palette);
+        let bg = map_bg_color(attrs.background(), palette);
+        let cell_attrs = map_attrs(attrs);
+        let ch = cell_ref.str().to_string();
+
+        row[col] = GridCell {
+            c: ch,
+            fg,
+            bg,
+            attrs: cell_attrs,
+        };
+
+        let width = cell_ref.width().max(1);
+        for offset in 1..width {
+            let next_col = col + offset;
+            if next_col >= cols {
+                break;
+            }
+            row[next_col] = GridCell {
+                c: String::new(),
+                fg,
+                bg,
+                attrs: cell_attrs,
+            };
+        }
+    }
+
+    row
+}
+
+fn map_attrs(attrs: &CellAttributes) -> GridCellAttrs {
+    GridCellAttrs {
+        bold: matches!(attrs.intensity(), Intensity::Bold),
+        italic: attrs.italic(),
+        underline: !matches!(attrs.underline(), Underline::None),
+    }
+}
+
+fn map_fg_color(color: ColorAttribute, palette: &ColorPalette) -> GridCellColor {
+    match color {
+        ColorAttribute::Default => GridCellColor::Default,
+        other => srgba_to_cell_color(palette.resolve_fg(other)),
+    }
+}
+
+fn map_bg_color(color: ColorAttribute, palette: &ColorPalette) -> GridCellColor {
+    match color {
+        ColorAttribute::Default => GridCellColor::Default,
+        other => srgba_to_cell_color(palette.resolve_bg(other)),
+    }
+}
+
+fn srgba_to_cell_color(color: SrgbaTuple) -> GridCellColor {
+    GridCellColor::Rgb(
+        channel_to_u8(color.0),
+        channel_to_u8(color.1),
+        channel_to_u8(color.2),
+    )
+}
+
+fn channel_to_u8(channel: f32) -> u8 {
+    (channel.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
+fn map_cursor_style(shape: CursorShape, visibility: CursorVisibility) -> CursorStyle {
+    if matches!(visibility, CursorVisibility::Hidden) {
+        return CursorStyle::Hidden;
+    }
+
+    match shape {
+        CursorShape::Default | CursorShape::BlinkingBlock | CursorShape::SteadyBlock => {
+            CursorStyle::Block
+        }
+        CursorShape::BlinkingUnderline | CursorShape::SteadyUnderline => CursorStyle::Underline,
+        CursorShape::BlinkingBar | CursorShape::SteadyBar => CursorStyle::Bar,
+    }
+}
+
 pub fn pty_reader_thread(
     mut reader: Box<dyn Read + Send>,
     event_tx: mpsc::Sender<SessionEvent>,
@@ -23,27 +287,24 @@ pub fn pty_reader_thread(
     rows: usize,
     scrollback_max_lines: usize,
 ) {
-    let mut parser = vte::Parser::new();
-    let mut performer = PtyPerformer::new(session_id, event_tx, cols, rows, scrollback_max_lines);
+    let mut engine = PtyEngine::new(session_id, event_tx, cols, rows, scrollback_max_lines);
     let mut buf = [0u8; 4096];
 
     loop {
         match reader.read(&mut buf) {
             Ok(0) => {
-                let _ = performer
-                    .event_tx
-                    .blocking_send(SessionEvent::Exited(session_id));
+                engine.flush_update();
+                send_exited_event_async(engine.event_tx.clone(), session_id);
                 break;
             }
             Ok(n) => {
-                parser.advance(&mut performer, &buf[..n]);
-                performer.flush_update();
+                engine.advance_bytes(&buf[..n]);
+                engine.flush_update();
             }
             Err(err) => {
                 log::info!("PTY reader exited for {session_id}: {err}");
-                let _ = performer
-                    .event_tx
-                    .blocking_send(SessionEvent::Exited(session_id));
+                engine.flush_update();
+                send_exited_event_async(engine.event_tx.clone(), session_id);
                 break;
             }
         }
@@ -62,367 +323,40 @@ pub fn pty_writer_thread(mut writer: Box<dyn Write + Send>, mut input_rx: mpsc::
     }
 }
 
-struct PtyPerformer {
-    session_id: SessionId,
-    event_tx: mpsc::Sender<SessionEvent>,
-    grid: TerminalGrid,
-    fg: CellColor,
-    bg: CellColor,
-    attrs: CellAttrs,
-    saved_cursor: Option<(usize, usize)>,
-    dirty: bool,
-    lines_added: usize,
-}
-
-impl PtyPerformer {
-    fn new(
-        session_id: SessionId,
-        event_tx: mpsc::Sender<SessionEvent>,
-        cols: usize,
-        rows: usize,
-        scrollback_max_lines: usize,
-    ) -> Self {
-        Self {
-            session_id,
-            event_tx,
-            grid: TerminalGrid::new(cols, rows, scrollback_max_lines),
-            fg: CellColor::Default,
-            bg: CellColor::Default,
-            attrs: CellAttrs::default(),
-            saved_cursor: None,
-            dirty: true,
-            lines_added: 0,
-        }
-    }
-
-    fn flush_update(&mut self) {
-        if !self.dirty {
-            return;
-        }
-
-        match self.event_tx.try_send(SessionEvent::Update {
-            session_id: self.session_id,
-            grid: Arc::new(self.grid.clone()),
-            lines_added: self.lines_added,
-        }) {
-            Ok(_) => {
-                self.lines_added = 0;
-                self.dirty = false;
-            }
-            Err(mpsc::error::TrySendError::Full(_)) => {
-                log::warn!(
-                    "PTY update queue full for session {}, will retry latest snapshot",
-                    self.session_id
-                );
-            }
-            Err(mpsc::error::TrySendError::Closed(_)) => {
-                self.lines_added = 0;
-                self.dirty = false;
-            }
-        }
-    }
-
-    fn put_char(&mut self, c: char) {
-        let row = self.grid.cursor_row;
-        let col = self.grid.cursor_col;
-
-        self.grid.set_cell(
-            row,
-            col,
-            Cell {
-                c,
-                fg: self.fg,
-                bg: self.bg,
-                attrs: self.attrs,
-            },
-        );
-
-        self.grid.cursor_col += 1;
-        if self.grid.cursor_col >= self.grid.cols {
-            self.grid.cursor_col = 0;
-            self.newline();
-        }
-        self.dirty = true;
-    }
-
-    fn newline(&mut self) {
-        self.grid.cursor_row += 1;
-        if self.grid.cursor_row >= self.grid.rows {
-            self.grid.cursor_row = self.grid.rows.saturating_sub(1);
-            self.lines_added += self.grid.scroll_up(1);
-        }
-        self.dirty = true;
-    }
-
-    fn clamp_cursor(&mut self) {
-        self.grid.cursor_row = self.grid.cursor_row.min(self.grid.rows.saturating_sub(1));
-        self.grid.cursor_col = self.grid.cursor_col.min(self.grid.cols.saturating_sub(1));
-    }
-
-    fn reset_style(&mut self) {
-        self.fg = CellColor::Default;
-        self.bg = CellColor::Default;
-        self.attrs = CellAttrs::default();
-    }
-
-    fn first_param(params: &vte::Params, default: u16) -> u16 {
-        params
-            .iter()
-            .next()
-            .and_then(|sub| sub.first().copied())
-            .unwrap_or(default)
-    }
-
-    fn handle_sgr(&mut self, params: &vte::Params) {
-        let flat: Vec<u16> = params.iter().flat_map(|s| s.iter().copied()).collect();
-
-        if flat.is_empty() {
-            self.reset_style();
-            return;
-        }
-
-        let mut i = 0;
-        while i < flat.len() {
-            match flat[i] {
-                0 => self.reset_style(),
-                1 => self.attrs.bold = true,
-                3 => self.attrs.italic = true,
-                4 => self.attrs.underline = true,
-                22 => self.attrs.bold = false,
-                23 => self.attrs.italic = false,
-                24 => self.attrs.underline = false,
-                30..=37 => self.fg = CellColor::Indexed((flat[i] - 30) as u8),
-                39 => self.fg = CellColor::Default,
-                40..=47 => self.bg = CellColor::Indexed((flat[i] - 40) as u8),
-                49 => self.bg = CellColor::Default,
-                90..=97 => self.fg = CellColor::Indexed((flat[i] - 90 + 8) as u8),
-                100..=107 => self.bg = CellColor::Indexed((flat[i] - 100 + 8) as u8),
-                38 if i + 2 < flat.len() && flat[i + 1] == 5 => {
-                    self.fg = CellColor::Indexed(flat[i + 2] as u8);
-                    i += 2;
-                }
-                48 if i + 2 < flat.len() && flat[i + 1] == 5 => {
-                    self.bg = CellColor::Indexed(flat[i + 2] as u8);
-                    i += 2;
-                }
-                38 if i + 4 < flat.len() && flat[i + 1] == 2 => {
-                    self.fg =
-                        CellColor::Rgb(flat[i + 2] as u8, flat[i + 3] as u8, flat[i + 4] as u8);
-                    i += 4;
-                }
-                48 if i + 4 < flat.len() && flat[i + 1] == 2 => {
-                    self.bg =
-                        CellColor::Rgb(flat[i + 2] as u8, flat[i + 3] as u8, flat[i + 4] as u8);
-                    i += 4;
-                }
-                _ => {}
-            }
-
-            i += 1;
-        }
-
-        self.dirty = true;
-    }
-
-    fn clear_to_end_of_line(&mut self) {
-        let row = self.grid.cursor_row;
-        let start = self.grid.cursor_col;
-        for col in start..self.grid.cols {
-            self.grid.set_cell(row, col, Cell::default());
-        }
-    }
-
-    fn clear_to_start_of_line(&mut self) {
-        let row = self.grid.cursor_row;
-        let end = self.grid.cursor_col;
-        for col in 0..=end.min(self.grid.cols.saturating_sub(1)) {
-            self.grid.set_cell(row, col, Cell::default());
-        }
-    }
-}
-
-impl vte::Perform for PtyPerformer {
-    fn print(&mut self, c: char) {
-        self.put_char(c);
-    }
-
-    fn execute(&mut self, byte: u8) {
-        match byte {
-            b'\n' => self.newline(),
-            b'\r' => {
-                self.grid.cursor_col = 0;
-                self.dirty = true;
-            }
-            0x08 => {
-                self.grid.cursor_col = self.grid.cursor_col.saturating_sub(1);
-                self.dirty = true;
-            }
-            b'\t' => {
-                let next_tab = ((self.grid.cursor_col / 8) + 1) * 8;
-                self.grid.cursor_col = next_tab.min(self.grid.cols.saturating_sub(1));
-                self.dirty = true;
-            }
-            _ => {}
-        }
-    }
-
-    fn csi_dispatch(
-        &mut self,
-        params: &vte::Params,
-        intermediates: &[u8],
-        _ignore: bool,
-        action: char,
-    ) {
-        let p0 = Self::first_param(params, 0);
-
-        if intermediates.contains(&b'?') && p0 == 1049 {
-            match action {
-                'h' => {
-                    self.saved_cursor = Some((self.grid.cursor_row, self.grid.cursor_col));
-                    self.grid.switch_alternate(true);
-                    self.grid.clear_screen();
-                    self.dirty = true;
-                }
-                'l' => {
-                    self.grid.switch_alternate(false);
-                    if let Some((row, col)) = self.saved_cursor.take() {
-                        self.grid.cursor_row = row;
-                        self.grid.cursor_col = col;
-                        self.clamp_cursor();
-                    }
-                    self.dirty = true;
-                }
-                _ => {}
-            }
-            return;
-        }
-
-        match action {
-            'm' => self.handle_sgr(params),
-            'A' => {
-                let n = Self::first_param(params, 1) as usize;
-                self.grid.cursor_row = self.grid.cursor_row.saturating_sub(n);
-                self.dirty = true;
-            }
-            'B' => {
-                let n = Self::first_param(params, 1) as usize;
-                self.grid.cursor_row =
-                    (self.grid.cursor_row + n).min(self.grid.rows.saturating_sub(1));
-                self.dirty = true;
-            }
-            'C' => {
-                let n = Self::first_param(params, 1) as usize;
-                self.grid.cursor_col =
-                    (self.grid.cursor_col + n).min(self.grid.cols.saturating_sub(1));
-                self.dirty = true;
-            }
-            'D' => {
-                let n = Self::first_param(params, 1) as usize;
-                self.grid.cursor_col = self.grid.cursor_col.saturating_sub(n);
-                self.dirty = true;
-            }
-            'H' | 'f' => {
-                let row = params
-                    .iter()
-                    .next()
-                    .and_then(|sub| sub.first().copied())
-                    .unwrap_or(1)
-                    .saturating_sub(1) as usize;
-                let col = params
-                    .iter()
-                    .nth(1)
-                    .and_then(|sub| sub.first().copied())
-                    .unwrap_or(1)
-                    .saturating_sub(1) as usize;
-                self.grid.cursor_row = row;
-                self.grid.cursor_col = col;
-                self.clamp_cursor();
-                self.dirty = true;
-            }
-            'J' => {
-                match p0 {
-                    0 => {
-                        self.clear_to_end_of_line();
-                        for row in (self.grid.cursor_row + 1)..self.grid.rows {
-                            self.grid.clear_row(row);
-                        }
-                    }
-                    1 => {
-                        self.clear_to_start_of_line();
-                        for row in 0..self.grid.cursor_row {
-                            self.grid.clear_row(row);
-                        }
-                    }
-                    2 => self.grid.clear_screen(),
-                    _ => {}
-                }
-                self.dirty = true;
-            }
-            'K' => {
-                match p0 {
-                    0 => self.clear_to_end_of_line(),
-                    1 => self.clear_to_start_of_line(),
-                    2 => self.grid.clear_row(self.grid.cursor_row),
-                    _ => {}
-                }
-                self.dirty = true;
-            }
-            _ => {}
-        }
-    }
-
-    fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, byte: u8) {
-        match byte {
-            b'c' => {
-                self.grid.clear_screen();
-                self.reset_style();
-                self.dirty = true;
-            }
-            b'7' => {
-                self.saved_cursor = Some((self.grid.cursor_row, self.grid.cursor_col));
-            }
-            b'8' => {
-                if let Some((row, col)) = self.saved_cursor {
-                    self.grid.cursor_row = row;
-                    self.grid.cursor_col = col;
-                    self.clamp_cursor();
-                    self.dirty = true;
-                }
-            }
-            b'M' => {
-                if self.grid.cursor_row == 0 {
-                    self.grid.scroll_down(1);
-                } else {
-                    self.grid.cursor_row = self.grid.cursor_row.saturating_sub(1);
-                }
-                self.dirty = true;
-            }
-            _ => {}
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use crate::session::CursorStyle;
     use tokio::sync::mpsc;
 
-    use super::{PtyPerformer, SessionEvent, SessionId};
+    use super::{PtyEngine, SessionEvent, SessionId, TerminalGrid, send_exited_event_async};
 
     #[test]
-    fn reverse_index_esc_m_scrolls_down_from_top_row() {
+    fn csi_p_delete_sequence_is_parsed_by_wezterm_term() {
         let session_id = SessionId::new_v4();
         let (tx, _rx) = mpsc::channel(8);
-        let mut parser = vte::Parser::new();
-        let mut performer = PtyPerformer::new(session_id, tx, 4, 2, 100);
+        let mut engine = PtyEngine::new(session_id, tx, 8, 2, 100);
 
-        parser.advance(&mut performer, b"A\r\nB");
-        performer.grid.cursor_row = 0;
-        performer.grid.cursor_col = 0;
+        engine.advance_bytes(b"abc\x1b[2D\x1b[P");
+        let grid = engine.snapshot_grid();
 
-        parser.advance(&mut performer, b"\x1bM");
+        assert_eq!(grid.active_cells()[0][0].c, "a");
+        assert_eq!(grid.active_cells()[0][1].c, "c");
+        assert_eq!(grid.active_cells()[0][2].c, "");
+    }
 
-        assert_eq!(performer.grid.active_cells()[0][0].c, ' ');
-        assert_eq!(performer.grid.active_cells()[1][0].c, 'A');
+    #[test]
+    fn reverse_index_sequence_is_handled_by_wezterm_term() {
+        let session_id = SessionId::new_v4();
+        let (tx, _rx) = mpsc::channel(8);
+        let mut engine = PtyEngine::new(session_id, tx, 4, 2, 100);
+
+        engine.advance_bytes(b"A\r\nB\x1b[H\x1bM");
+        let grid = engine.snapshot_grid();
+
+        assert_eq!(grid.active_cells()[0][0].c, "");
+        assert_eq!(grid.active_cells()[1][0].c, "A");
     }
 
     #[test]
@@ -432,15 +366,98 @@ mod tests {
         tx.try_send(SessionEvent::Exited(session_id))
             .expect("channel must be fillable");
 
-        let mut performer = PtyPerformer::new(session_id, tx, 4, 2, 100);
-        performer.put_char('X');
-        performer.flush_update();
+        let mut engine = PtyEngine::new(session_id, tx, 4, 2, 100);
+        engine.advance_bytes(b"X");
+        engine.flush_update();
 
-        assert!(performer.dirty);
+        assert!(engine.dirty);
         assert!(matches!(rx.try_recv(), Ok(SessionEvent::Exited(_))));
 
-        performer.flush_update();
-        assert!(!performer.dirty);
+        engine.flush_update();
+        assert!(!engine.dirty);
         assert!(matches!(rx.try_recv(), Ok(SessionEvent::Update { .. })));
+    }
+
+    #[test]
+    fn lines_added_advances_even_when_scrollback_is_full() {
+        let session_id = SessionId::new_v4();
+        let (tx, mut rx) = mpsc::channel(16);
+        let mut engine = PtyEngine::new(session_id, tx, 8, 2, 3);
+
+        engine.advance_bytes(b"1\r\n2\r\n3\r\n4\r\n");
+        engine.flush_update();
+        let _ = rx.try_recv();
+
+        let before = engine.snapshot_grid().scrollback.len();
+        assert_eq!(before, 3);
+
+        engine.advance_bytes(b"5\r\n6\r\n");
+        engine.flush_update();
+
+        match rx.try_recv() {
+            Ok(SessionEvent::Update {
+                lines_added, grid, ..
+            }) => {
+                assert!(lines_added > 0);
+                assert_eq!(grid.scrollback.len(), 3);
+            }
+            other => panic!("expected update event, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cursor_shape_sequences_are_mapped_from_wezterm() {
+        let session_id = SessionId::new_v4();
+        let (tx, _rx) = mpsc::channel(8);
+        let mut engine = PtyEngine::new(session_id, tx, 8, 2, 100);
+
+        engine.advance_bytes(b"\x1b[4 q");
+        assert_eq!(engine.snapshot_grid().cursor_style, CursorStyle::Underline);
+
+        engine.advance_bytes(b"\x1b[6 q");
+        assert_eq!(engine.snapshot_grid().cursor_style, CursorStyle::Bar);
+    }
+
+    #[test]
+    fn cursor_visibility_sequence_is_mapped_from_wezterm() {
+        let session_id = SessionId::new_v4();
+        let (tx, _rx) = mpsc::channel(8);
+        let mut engine = PtyEngine::new(session_id, tx, 8, 2, 100);
+
+        engine.advance_bytes(b"\x1b[?25l");
+        assert_eq!(engine.snapshot_grid().cursor_style, CursorStyle::Hidden);
+
+        engine.advance_bytes(b"\x1b[?25h");
+        assert_eq!(engine.snapshot_grid().cursor_style, CursorStyle::Block);
+    }
+
+    #[test]
+    fn cursor_row_tracks_visible_viewport_after_scrollback() {
+        let session_id = SessionId::new_v4();
+        let (tx, _rx) = mpsc::channel(8);
+        let mut engine = PtyEngine::new(session_id, tx, 4, 2, 100);
+
+        engine.advance_bytes(b"1\r\n2\r\n3");
+        let grid = engine.snapshot_grid();
+
+        assert_eq!(grid.cursor_row, 1);
+        assert_eq!(grid.cursor_col, 1);
+        assert_eq!(grid.active_cells()[1][0].c, "3");
+    }
+
+    #[test]
+    fn exited_event_is_eventually_delivered_when_queue_frees_up() {
+        let session_id = SessionId::new_v4();
+        let (tx, mut rx) = mpsc::channel(1);
+        tx.try_send(SessionEvent::Update {
+            session_id,
+            grid: Arc::new(TerminalGrid::new(4, 2, 100)),
+            lines_added: 0,
+        })
+        .expect("channel must be fillable");
+
+        send_exited_event_async(tx, session_id);
+        assert!(matches!(rx.try_recv(), Ok(SessionEvent::Update { .. })));
+        assert!(matches!(rx.blocking_recv(), Some(SessionEvent::Exited(_))));
     }
 }

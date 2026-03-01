@@ -17,7 +17,7 @@ Chatminal uses a single-process desktop architecture with event-driven UI state 
             |                                   v
 +-----------+-----------------------------------+-------------+
 | PTY Worker Threads (per session)                            |
-| - reader thread: read PTY -> vte parser -> TerminalGrid     |
+| - reader thread: read PTY -> wezterm-term -> TerminalGrid   |
 | - writer thread: input channel -> PTY writer                |
 +-----------+-----------------------------------+-------------+
             |
@@ -60,12 +60,11 @@ Files: `src/session/manager.rs`, `src/session/mod.rs`
 
 ### 4. Terminal Emulation Layer
 Files: `src/session/grid.rs`, `src/session/pty_worker.rs`
-- Parses terminal control sequences through `vte::Parser`.
-- Applies cursor, erase, SGR, alternate buffer semantics to `TerminalGrid`.
+- Uses `wezterm-term::Terminal` for parsing/control-sequence/state handling.
+- Snapshots wezterm screen into `TerminalGrid` cells (text cluster/fg/bg/attrs) for rendering.
+  - Snapshot range is bounded to `scrollback window + visible window` (not full history).
 - Emits immutable snapshots (`Arc<TerminalGrid>`) for UI rendering.
-- Implements reverse index (`ESC M`) semantics:
-  - top row -> `scroll_down(1)`
-  - otherwise -> cursor row decrements by one
+- Maps cursor row/col plus cursor shape/visibility from wezterm into UI cursor style.
 - Handles update queue backpressure by retrying latest dirty snapshot after `TrySendError::Full`.
 
 ### 5. Presentation Layer
@@ -84,13 +83,14 @@ Files: `src/ui/sidebar.rs`, `src/ui/input_handler.rs`, `src/ui/terminal_pane.rs`
 
 ### PTY Output Flow
 1. Reader thread reads bytes from PTY master reader.
-2. `vte::Parser` drives `PtyPerformer` mutations on `TerminalGrid`.
-3. Performer sends `SessionEvent::Update` with grid snapshot + `lines_added` using `try_send`.
-4. If update queue is full, performer keeps state dirty and retries on next flush.
-5. On EOF/read error, reader emits `SessionEvent::Exited` with `blocking_send`.
-6. Subscription converts event to `Message::TerminalUpdated` / `Message::SessionExited`.
-7. `AppState::update()` merges snapshot and adjusts scroll offset.
-8. Terminal canvas redraws when generation changes.
+2. `wezterm-term` advances terminal state (`advance_bytes`) and manages buffer/wrap/unicode.
+3. Worker snapshots visible rows + scrollback + cursor metadata into `TerminalGrid`.
+4. Worker sends `SessionEvent::Update` with snapshot + `lines_added` using `try_send`.
+5. If update queue is full, worker keeps state dirty and retries on next flush.
+6. On EOF/read error, reader schedules `SessionEvent::Exited` through a dedicated async sender thread.
+7. Subscription converts event to `Message::TerminalUpdated` / `Message::SessionExited`.
+8. `AppState::update()` merges snapshot and adjusts scroll offset.
+9. Terminal canvas redraws when generation changes.
 
 ### Input Flow
 1. Keyboard event reaches `AppState::handle_event()`.
@@ -110,7 +110,7 @@ Files: `src/ui/sidebar.rs`, `src/ui/input_handler.rs`, `src/ui/terminal_pane.rs`
 - Shared UI data model for terminal snapshots uses `Arc<TerminalGrid>`.
 
 ## Error and Shutdown Behavior
-- PTY read EOF/error emits `SessionEvent::Exited` via blocking send.
+- PTY read EOF/error emits `SessionEvent::Exited` via an async sender to avoid blocking reader teardown.
 - `Message::SessionExited` triggers `Message::CloseSession`.
 - Close path kills child, drops channels/PTY handles, joins worker threads.
 - Oversized input or closed/full channel errors return `SessionError` and are logged.

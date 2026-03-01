@@ -5,7 +5,7 @@ pub mod pty_worker;
 #[cfg(test)]
 mod tests;
 
-pub use grid::{Cell, CellAttrs, CellColor, SessionId, TerminalGrid};
+pub use grid::{Cell, CellAttrs, CellColor, CursorStyle, SessionId, TerminalGrid};
 pub use manager::SessionManager;
 pub use pty_worker::SessionEvent;
 

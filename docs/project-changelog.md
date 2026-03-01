@@ -2,6 +2,56 @@
 
 All notable project-level changes are tracked here.
 
+## 2026-03-01 (terminal fidelity hardening round 2)
+
+### Changed
+- Improved canvas text placement to remove manual baseline offset drift:
+  - render text from cell top with consistent vertical centering.
+  - adjusted terminal cell metrics (`CELL_WIDTH_RATIO`, `CELL_HEIGHT_RATIO`) for tighter cursor/text alignment.
+- Expanded keyboard encoding coverage in input mapper:
+  - added `Shift+Tab`, `Insert`, `F1..F12`.
+  - improved `Ctrl` symbol combos (`Ctrl+@`, `Ctrl+[`, `Ctrl+\\`, `Ctrl+]`, `Ctrl+^`, `Ctrl+_`, `Ctrl+?`).
+  - added `Alt` prefix handling for non-empty key sequences.
+- Upgraded terminal cell payload from single `char` to `String`:
+  - preserves grapheme clusters better (emoji/combining sequences) when snapshotting from wezterm.
+- Reduced hot-path allocations for blank cells:
+  - default/continuation cells now use empty string sentinel instead of allocating `" "`.
+- Improved style fidelity:
+  - underline is now rendered based on cell attributes even when glyph content is blank/continuation.
+- Color fidelity now resolves through wezterm active palette for non-default colors.
+
+### Added
+- New input-handler tests for:
+  - `Shift+Tab`
+  - `Alt+Arrow`
+  - `F-key` sequence mapping
+- Test baseline increased to 23 passing tests.
+
+## 2026-03-01 (wezterm cursor-map hardening)
+
+### Changed
+- Completed terminal snapshot path on top of `wezterm-term` state:
+  - PTY bytes -> `wezterm-term` -> screen snapshot -> `TerminalGrid` cells.
+- Replaced hardcoded cursor rendering mode with mapped cursor metadata from wezterm:
+  - `CursorShape` + `CursorVisibility` -> `CursorStyle::{Block, Underline, Bar, Hidden}`.
+- Added dependency pin for `wezterm-surface` with the same git `rev` as `wezterm-term`.
+- Hardened shutdown event flow to avoid reader-thread deadlock on queue backpressure:
+  - reader no longer blocks on same thread when emitting `SessionEvent::Exited`.
+  - `Exited` delivery is delegated to a short-lived async sender thread.
+- Optimized snapshot extraction to avoid re-reading full physical history on each flush:
+  - only reads `scrollback window + visible window` from wezterm screen range.
+
+### Added
+- PTY worker regression tests for cursor behavior:
+  - cursor shape sequences (`CSI Ps SP q`) map to underline/bar.
+  - cursor visibility (`CSI ? 25 l/h`) maps to hidden/visible styles.
+  - cursor row/col stays aligned with visible viewport after scrollback growth.
+  - exited event is delivered when queue becomes available.
+- Test baseline increased to 20 passing tests.
+
+### Documented
+- Updated `docs/system-architecture.md` to reflect wezterm-based parsing/snapshot flow and cursor metadata mapping.
+
 ## 2026-03-01 (Latest docs sync for recent runtime hardening)
 
 ### Changed

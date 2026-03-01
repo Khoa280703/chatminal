@@ -68,7 +68,11 @@ impl AppState {
 
         state.create_new_session();
 
-        (state, Task::none())
+        let initial_resize = window::latest()
+            .and_then(window::size)
+            .map(|size| Message::WindowResized(size.width as u32, size.height as u32));
+
+        (state, initial_resize)
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {

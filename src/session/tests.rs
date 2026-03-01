@@ -7,12 +7,12 @@ fn set_cell_writes_character() {
         0,
         0,
         Cell {
-            c: 'A',
+            c: "A".to_string(),
             ..Default::default()
         },
     );
 
-    assert_eq!(grid.active_cells()[0][0].c, 'A');
+    assert_eq!(grid.active_cells()[0][0].c, "A");
 }
 
 #[test]
@@ -22,7 +22,7 @@ fn primary_scroll_pushes_to_scrollback() {
         0,
         0,
         Cell {
-            c: 'X',
+            c: "X".to_string(),
             ..Default::default()
         },
     );
@@ -31,7 +31,7 @@ fn primary_scroll_pushes_to_scrollback() {
 
     assert_eq!(added, 1);
     assert_eq!(grid.scrollback.len(), 1);
-    assert_eq!(grid.scrollback[0][0].c, 'X');
+    assert_eq!(grid.scrollback[0][0].c, "X");
 }
 
 #[test]
@@ -58,7 +58,7 @@ fn scrollback_capacity_is_enforced() {
             0,
             0,
             Cell {
-                c: char::from(b'0' + (i % 10) as u8),
+                c: char::from(b'0' + (i % 10) as u8).to_string(),
                 ..Default::default()
             },
         );
@@ -76,7 +76,7 @@ fn scroll_down_inserts_blank_line_at_top() {
         0,
         0,
         Cell {
-            c: 'A',
+            c: "A".to_string(),
             ..Default::default()
         },
     );
@@ -84,15 +84,15 @@ fn scroll_down_inserts_blank_line_at_top() {
         1,
         0,
         Cell {
-            c: 'B',
+            c: "B".to_string(),
             ..Default::default()
         },
     );
 
     grid.scroll_down(1);
 
-    assert_eq!(grid.active_cells()[0][0].c, ' ');
-    assert_eq!(grid.active_cells()[1][0].c, 'A');
+    assert_eq!(grid.active_cells()[0][0].c, "");
+    assert_eq!(grid.active_cells()[1][0].c, "A");
     assert!(grid.scrollback.is_empty());
 }
 
