@@ -3,81 +3,78 @@
 Last updated: 2026-03-01
 Version: 0.1.0
 
-## Project Overview
-Chatminal is a desktop terminal workspace that lets users run and switch multiple local shell sessions in one GUI window.
-Current implementation is Rust + Iced for rendering and portable-pty for shell process management.
+## Overview
+Chatminal is a local desktop terminal workspace for running multiple shell sessions in one window.
+Current implementation is Rust + Iced UI, `portable-pty` for process control, and `wezterm-term` for terminal parsing/state.
 
-## Problem Statement
-Standard terminal tabs split workflow across multiple windows or apps.
-Chatminal targets a single-window, keyboard-first workflow with explicit session list, fast switching, and readable scrollback.
+## Problem
+Developers often split work across many terminal windows/tabs with weak cross-session visibility.
+Chatminal targets one-window, keyboard-first session management with reliable scrollback and ANSI fidelity.
 
-## Goals
-1. Run multiple local shell sessions concurrently.
-2. Render ANSI terminal output with colors, styles, cursor, scrollback.
-3. Keep interaction low-latency under normal developer shell usage.
-4. Keep behavior safe by validating shell execution path and bounding risky inputs.
+## Product Goals
+1. Manage multiple local shell sessions concurrently.
+2. Render terminal output with cursor styles, colors, and text attributes.
+3. Keep UI responsive under typical interactive shell workloads.
+4. Keep runtime safe with shell validation, bounded channels, and input-size limits.
 
 ## Non-Goals (Current Scope)
-1. Remote terminal protocols (SSH client mode).
-2. Session persistence across app restart.
-3. Plugin system and external extensions.
-4. Multi-platform parity beyond current Unix-oriented implementation.
+1. Remote protocols (SSH client mode).
+2. Session restore across app restarts.
+3. Plugin/extension system.
+4. Full cross-platform parity beyond current Unix-oriented flow.
 
 ## Functional Requirements
 | ID | Requirement | Status |
 | --- | --- | --- |
-| FR-01 | User can create a new session from sidebar and keyboard shortcut. | Implemented |
-| FR-02 | User can switch active session from sidebar. | Implemented |
-| FR-03 | User can close active/selected session. | Implemented |
-| FR-04 | Keyboard input is forwarded to active PTY session. | Implemented |
-| FR-05 | ANSI text/styles/colors render in terminal view. | Implemented |
-| FR-06 | Scrollback review is available by wheel and Shift+PageUp/PageDown. | Implemented |
-| FR-07 | Active sessions resize with window changes. | Implemented |
-| FR-08 | Session exit triggers cleanup and UI removal. | Implemented |
+| FR-01 | Create new terminal session from sidebar or shortcut. | Implemented |
+| FR-02 | Switch active session from sidebar list. | Implemented |
+| FR-03 | Close selected/active session and cleanup resources. | Implemented |
+| FR-04 | Forward keyboard input bytes to active PTY writer channel. | Implemented |
+| FR-05 | Parse/render ANSI output using wezterm terminal state. | Implemented |
+| FR-06 | Support scrollback viewport via wheel and `Shift+PageUp/PageDown`. | Implemented |
+| FR-07 | Resize PTY sessions on window size updates. | Implemented |
+| FR-08 | Handle PTY EOF/read error and remove exited session from UI. | Implemented |
 
 ## Non-Functional Requirements
-| ID | Requirement | Current Evidence |
+| ID | Requirement | Evidence in code |
 | --- | --- | --- |
-| NFR-01 | App should not terminate on PTY write after peer exit. | `main.rs` ignores broken-pipe signal at startup. |
-| NFR-02 | App should reject oversized input payloads to PTY channel. | `MAX_INPUT_BYTES = 65_536` enforced in `SessionManager::send_input`. |
-| NFR-03 | Shell launch should accept only valid system shells. | Validation via `/etc/shells`, canonical path, executable bit check. |
-| NFR-04 | Rendering should avoid full redraw when no state change. | Canvas cache + generation invalidation in terminal canvas state. |
-| NFR-05 | Code should include automated tests for core state behavior. | `cargo test` passes with 13 unit tests. |
-| NFR-06 | Runtime numeric settings should stay in safe bounds. | `Config::normalized()` clamps scrollback/font/sidebar values before use. |
+| NFR-01 | App should not terminate on broken pipe writes. | `main.rs` ignores broken-pipe signal. |
+| NFR-02 | PTY input payload must be bounded. | `MAX_INPUT_BYTES = 65_536` in `SessionManager::send_input`. |
+| NFR-03 | Shell path must be validated before spawn. | `/etc/shells` allowlist + canonicalization + executable bit checks. |
+| NFR-04 | UI redraw should be generation-driven. | `terminal_generation` + canvas cache invalidation. |
+| NFR-05 | Scroll position should remain stable while new output arrives. | `lines_added` from stable-row delta updates scroll offsets. |
+| NFR-06 | Core behavior must be covered by automated tests. | `cargo test` passes 23 unit tests (2026-03-01). |
 
 ## Acceptance Criteria
-1. Running `cargo run` launches window with at least one created session.
-2. `Alt+N` creates session; `Alt+W` closes active session.
-3. `Shift+PageUp` and wheel scrolling move viewport upward when scrollback exists.
-4. ANSI output from commands like `ls --color=auto` renders expected color variants.
+1. `cargo run` starts app and creates an initial session.
+2. `Alt+N` creates a session; `Alt+W` closes active session.
+3. Scroll controls work on primary buffer output.
+4. Cursor style changes (`block/underline/bar/hidden`) are rendered.
 5. `cargo test` passes without failures.
 
 ## Technical Constraints
-1. Rust toolchain pinned by manifest requirement: `rust-version = 1.93`.
-2. Rendering stack is coupled to Iced canvas model.
-3. PTY behavior and `/etc/shells` validation assume Unix-like host.
-4. No persistence layer exists; all session state is in-memory.
+1. Rust toolchain requirement from manifest: `rust-version = 1.93`.
+2. UI is coupled to Iced canvas rendering primitives.
+3. Shell validation and signal handling are Unix-centric.
+4. Session/grid state is in-memory only.
 
-## Dependencies
+## Dependencies (Runtime)
 - `iced`
 - `portable-pty`
-- `vte`
+- `wezterm-term`
+- `wezterm-surface`
 - `tokio`
 - `uuid`
 - `indexmap`
-- `serde`
-- `toml`
-- `dirs`
-- `log`, `env_logger`
-- `libc`
+- `serde`, `toml`, `dirs`
+- `log`, `env_logger`, `libc`
 
 ## Risks and Mitigations
-| Risk | Impact | Mitigation |
+| Risk | Impact | Mitigation direction |
 | --- | --- | --- |
-| High-volume output can outpace UI updates | Lag or dropped updates | Keep channel bounded in design, add stress test/bench in next phase. |
-| Linux-specific assumptions in shell path handling | Portability limits | Document Linux-first support and add platform abstraction phase. |
-| No persistent sessions | Data loss on app exit/crash | Add optional restore design in future milestone. |
+| High PTY output rate vs UI event queue | Snapshot lag under pressure | Coalesced update retry exists; add throughput/load tests. |
+| Unix-specific shell policy | Portability limits | Keep Linux-first docs; add platform abstraction phase. |
+| No persistence boundary | State lost on restart/crash | Plan optional restore/import milestone later. |
 
-## Requirement Change Log
-- 2026-03-01: Initial PDR created from implemented codebase.
-- 2026-03-01: Updated NFR evidence for config clamp hardening and expanded unit-test baseline.
+## Change Notes
+- 2026-03-01: Updated PDR to wezterm-based parser/runtime flow, stable-row `lines_added`, exited-event sender-thread model, and 23-test baseline.

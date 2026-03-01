@@ -5,40 +5,40 @@ Last updated: 2026-03-01
 ## Phase Status
 | Phase | Scope | Status |
 | --- | --- | --- |
-| Phase 1 | Project setup and app shell | Completed |
-| Phase 2 | PTY session manager and worker threads | Completed |
-| Phase 3 | Iced UI base layout | Completed |
-| Phase 4 | Terminal canvas rendering | Completed |
-| Phase 5 | Input handling + resize integration | Completed |
-| Phase 6 | Virtual scrolling and scrollback behavior | Completed |
-| Phase 7 | Integration polish and baseline tests | In progress (latest hardening patch applied) |
-| Phase 8 | Hardening, CI, packaging | Planned |
+| Phase 1 | Project bootstrap and app shell | Completed |
+| Phase 2 | PTY session manager and worker threading | Completed |
+| Phase 3 | Iced UI layout and app message loop | Completed |
+| Phase 4 | Terminal rendering and cursor style mapping | Completed |
+| Phase 5 | Input mapping and resize integration | Completed |
+| Phase 6 | Scrollback viewport and stable offset behavior | Completed |
+| Phase 7 | Runtime hardening + regression tests | Completed |
+| Phase 8 | Integration tests, CI, packaging | In progress |
 
-## Recently Completed (Latest Edit Batch)
-1. Config clamp hardening for `scrollback_lines`, `font_size`, and `sidebar_width`.
-2. Runtime terminal cell metrics derived from `font_size` and used in resize calculations.
-3. Parser handling fix for reverse index (`ESC M`).
-4. PTY queue-full behavior improvement for update snapshot retry.
-5. Regression test additions for `ESC M` and queue-full retry; total unit tests now 13.
+## Recently Completed
+1. Runtime parser/state path migrated to `wezterm-term` (+ `wezterm-surface`).
+2. Snapshot extraction constrained to `scrollback window + visible window`.
+3. `lines_added` derived from top stable row delta to preserve scroll offset.
+4. Exited-event dispatch moved to spawned sender thread with `blocking_send` to avoid reader-thread blocking.
+5. Keyboard mapper expanded (`Shift+Tab`, function keys `F1..F12`, Alt prefix, Ctrl symbols).
+6. Grid cell payload moved from `char` to `String` for grapheme-friendly snapshots.
+7. Test baseline increased to 23 passing tests.
 
-## Upcoming Engineering Backlog
-1. Add integration tests under `tests/` for end-to-end session open/close behavior.
-2. Add load test script for high-output PTY scenarios.
-3. Add CI pipeline (`cargo test`, `cargo build --release`) for Linux target.
-4. Add platform compatibility checks for shell path strategy.
-5. Add optional telemetry hooks for redraw and update frequency.
-6. Evaluate final-snapshot flush behavior when EOF happens immediately after queue-full update.
+## Active Backlog (Phase 8)
+1. Add integration tests for full session lifecycle under sustained output.
+2. Add load/stress scenarios for update queue pressure.
+3. Add CI workflow for `cargo test` and release build.
+4. Define packaging strategy for at least one target platform.
 
-## Dependency Notes
-- Runtime stack currently stable with:
-  - `iced 0.14.0`
-  - `portable-pty 0.9.0`
-  - `vte 0.15.0`
-- Before dependency upgrades, run parser + rendering regression checks.
+## Dependency Snapshot
+- `iced 0.14.0`
+- `portable-pty 0.9.0`
+- `wezterm-term` (git rev `05343b3...`)
+- `wezterm-surface` (git rev `05343b3...`)
 
-## Documentation Synchronization Checklist
-For each feature or fix:
-1. Update `docs/project-changelog.md`.
-2. Update architecture if runtime flow changes.
-3. Update PDR if scope or acceptance criteria changes.
-4. Re-run docs validator.
+## Documentation Sync Checklist
+For each runtime change:
+1. Update `docs/system-architecture.md`.
+2. Update `docs/codebase-summary.md`.
+3. Update `docs/project-overview-pdr.md` if requirement impact exists.
+4. Update `docs/project-roadmap.md` and changelog entries.
+5. Re-run docs validation script.

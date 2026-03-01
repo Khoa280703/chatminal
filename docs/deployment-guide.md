@@ -3,28 +3,31 @@
 Last updated: 2026-03-01
 
 ## Environment
-- OS: Unix-like environment (uses `/etc/shells`, `libc` signal APIs).
+- OS: Unix-like (uses `/etc/shells` and `libc` signal APIs).
 - Rust: `1.93+`.
 - Cargo: bundled with Rust toolchain.
+- Network access required for initial dependency fetch (includes git deps: `wezterm-term`, `wezterm-surface`).
 
-## Local Development
-1. Install dependencies:
-   - `rustup toolchain install 1.93.0`
-2. Build debug binary:
-   - `cargo build`
-3. Run app:
-   - `cargo run`
-4. Run tests:
-   - `cargo test`
-   - Expected current baseline: `13 passed; 0 failed`
+## Local Build and Run
+```bash
+cargo build
+cargo run
+```
+
+## Test Verification
+```bash
+cargo test
+```
+Expected current baseline (2026-03-01): `23 passed; 0 failed`.
 
 ## Release Build
-1. Build optimized binary:
-   - `cargo build --release`
-2. Output binary:
-   - `target/release/chatminal`
+```bash
+cargo build --release
+```
+Binary output:
+- `target/release/chatminal`
 
-`Cargo.toml` release profile is preconfigured with:
+Release profile in `Cargo.toml`:
 - `opt-level = 3`
 - `lto = true`
 - `codegen-units = 1`
@@ -41,34 +44,26 @@ font_size = 14.0
 sidebar_width = 240.0
 ```
 
-Notes:
-- If file is missing or invalid TOML, app falls back to defaults.
-- `shell` must resolve to an executable path allowed by `/etc/shells`.
-- Numeric values are normalized/clamped at runtime:
-  - `scrollback_lines`: `100..=200_000`
-  - `font_size`: `8.0..=48.0` (non-finite values fallback to default)
-  - `sidebar_width`: `160.0..=640.0` (non-finite values fallback to default)
+Runtime normalization:
+- `scrollback_lines`: `100..=200_000`
+- `font_size`: `8.0..=48.0`
+- `sidebar_width`: `160.0..=640.0`
 
-## Operational Checks
-1. Verify app starts and auto-opens first session.
-2. Verify session shortcuts:
-   - `Alt+N` new session
-   - `Alt+W` close session
-3. Verify scrolling:
-   - mouse wheel
-   - `Shift+PageUp`, `Shift+PageDown`
-4. Verify output color/style rendering with command examples:
-   - `ls --color=auto`
-   - `printf '\e[31mred\e[0m\n'`
+## Smoke Checklist
+1. App starts and creates first session automatically.
+2. Session shortcuts work (`Alt+N`, `Alt+W`).
+3. Scroll controls work (mouse wheel, `Shift+PageUp/PageDown`).
+4. ANSI rendering works (`ls --color=auto`, simple SGR tests).
+5. Cursor visibility/style changes are reflected (block/underline/bar/hidden).
 
 ## Troubleshooting
 | Symptom | Likely Cause | Action |
 | --- | --- | --- |
-| Session does not start | Invalid shell path | Remove/adjust `shell` in config; ensure path is listed in `/etc/shells`. |
-| App exits on startup | Platform mismatch or dependency issue | Run from terminal and inspect logs with `RUST_LOG=debug cargo run`. |
-| No terminal output | PTY child exited quickly | Check shell validity and permissions. |
-| Keyboard input ignored | No active session | Select session from sidebar or create new one. |
+| Session cannot start | Invalid shell config | Check `shell` value and `/etc/shells` allowlist. |
+| Build fails on clean machine | Missing toolchain or network for git deps | Install Rust 1.93+, ensure outbound access for Cargo git dependencies. |
+| Session exits immediately | Shell process exits early | Run app with logs: `RUST_LOG=info cargo run`. |
+| UI not updating under heavy output | Event queue pressure | Check warnings about full update queue; rerun stress scenario. |
 
-## Packaging Notes
-Current repo does not include installer scripts or OS packaging metadata.
-For distribution, add platform-specific packaging files (deb/rpm/homebrew/etc.) in a separate release phase.
+## Packaging Status
+No repository-managed packaging scripts are present yet.
+Packaging remains part of Phase 8 roadmap scope.
