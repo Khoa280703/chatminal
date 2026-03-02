@@ -1,78 +1,80 @@
 # Code Standards
 
-Last updated: 2026-03-01
-Scope: Rust code in `src/`.
+Last updated: 2026-03-02  
+Scope: active runtime code in `src-tauri/` and `frontend/`.
+
+## Runtime Scope Rule
+- Treat `src-tauri/` + `frontend/` as the default runtime.
+- Treat `src/` (Iced) as legacy; only touch it for explicit legacy tasks.
 
 ## Core Principles
-1. Keep modules narrow and explicit; one clear responsibility per module.
-2. Prefer bounded queues and explicit backpressure handling.
-3. Preserve terminal correctness before visual polish shortcuts.
-4. Use typed domain errors for session/runtime boundaries.
-5. Keep behavior testable and add regression tests for stateful logic.
+1. Keep Rust/TypeScript contracts stable and explicitly versioned in docs.
+2. Keep PTY paths bounded and fail-fast on invalid input/state.
+3. Keep persistence off PTY hot paths (queue + batch writer only).
+4. Keep UI session-safe during async operations (guard by active IDs).
+5. Keep docs synchronized whenever command/event/runtime behavior changes.
 
-## Module Boundaries
-| Layer | Files | Rule |
+## Architecture Boundaries
+| Layer | Primary Files | Rules |
 | --- | --- | --- |
-| Bootstrap | `src/main.rs`, `src/config.rs` | Startup and config only; no terminal rendering logic. |
-| App state machine | `src/app.rs`, `src/message.rs` | `Message` is the only mutation surface for app runtime state. |
-| Session runtime | `src/session/*` | PTY lifecycle, parser state, grid snapshots. |
-| Presentation/UI | `src/ui/*` | Rendering and input translation only; do not spawn/manage PTY here. |
+| Tauri bridge | `src-tauri/src/main.rs` | Register/invoke commands only; no PTY business logic. |
+| PTY service | `src-tauri/src/service.rs` | Own session/profile orchestration, runtime spawn, events, workers. |
+| Persistence | `src-tauri/src/persistence.rs` | Own SQLite schema, state keys, retention, migrations. |
+| Contracts | `src-tauri/src/models.rs`, `frontend/src/lib/types.ts` | Keep request/response/event fields aligned (snake_case). |
+| UI runtime | `frontend/src/App.svelte` | Own xterm lifecycle, workspace hydration, activation and event handling. |
 
-## Naming and Data Types
-1. Use snake_case for functions/fields and PascalCase for types/enums.
-2. Keep public enums exhaustive (`SessionError`, `CursorStyle`, `Message`).
-3. Avoid magic numbers when shared across code paths (use constants).
-4. Use `String` cell payload (`Cell.c`) for grapheme-safe rendering snapshots.
+## API and Naming Rules
+1. Rust naming: `snake_case` functions/fields, UpperCamelCase types.
+2. Tauri payload field names stay `snake_case` for Rust model parity.
+3. Command names are API contracts; avoid rename without migration notes.
+4. Event names are API contracts; `pty/output`, `pty/exited`, `pty/error` must remain stable.
+5. Profile command set must stay coherent: `list_profiles`, `create_profile`, `switch_profile`, `rename_profile`, `delete_profile`.
 
-## Error Handling Rules
-1. PTY/session APIs should return `Result<_, SessionError>`.
-2. Convert queue states to explicit domain errors (`SessionError::ChannelFull`, `SessionError::ChannelClosed`).
-3. Log recoverable runtime issues and keep UI process alive.
-4. Do not use unwrap calls in runtime IO/process paths.
+## Session and Reconnect Rules
+1. `activate_session` is the reconnect boundary for disconnected sessions.
+2. `write_input` and `resize_session` must reject disconnected sessions.
+3. Session `cwd` updates come from CWD sync worker, not frontend assumptions.
+4. New session default `cwd`: explicit payload -> home directory -> `/` fallback.
+5. Session status contract values remain `running` or `disconnected`.
 
-## Concurrency Rules
-1. Per session: one reader thread and one writer thread.
-2. Reader thread must never deadlock on shutdown event delivery.
-3. Use bounded `tokio::sync::mpsc` channels for session events and PTY input.
-4. Share terminal snapshots with UI as immutable `Arc<TerminalGrid>`.
+## Persistence Rules
+1. Preserve state keys:
+- `active_profile_id`
+- `active_session_id:{profile_id}`
+2. Keep legacy key migration support for `active_session_id` until explicit removal.
+3. Append history using batch pipeline only; no direct DB writes in PTY read loop.
+4. Enforce retention in batch writes (line cap + TTL).
+5. Profile deletion must prevent deleting the last profile.
 
-## Terminal Runtime Rules
-1. ANSI/parser state must flow through `wezterm-term` in `src/session/pty_worker.rs`.
-2. `SessionEvent::Update` must be non-blocking (`try_send`) with retry semantics when queue is full.
-3. EOF/read error must dispatch `SessionEvent::Exited` without blocking reader teardown (spawn sender thread + `blocking_send`).
-4. Snapshot extraction should stay bounded to `scrollback window + visible window`.
-5. `lines_added` should track stable row delta for scroll offset continuity.
+## Security and Reliability Rules
+1. Validate shell path with `/etc/shells`, canonicalization, executable-bit checks.
+2. Enforce the backend input-size guard constant before enqueueing writes.
+3. Keep the input queue bounded and surface backpressure errors.
+4. Cap snapshot size with the backend snapshot-size guard.
+5. Emit deterministic `pty/exited` and `pty/error` signals for UI consistency.
 
-## Rendering Rules
-1. `terminal_pane_view` consumes read-only grid snapshots.
-2. Cursor rendering must respect style enum (`CursorStyle::Block`, `CursorStyle::Underline`, `CursorStyle::Bar`, `CursorStyle::Hidden`).
-3. Underline draw is attribute-driven, including empty/continuation cells.
-4. Non-default fg/bg colors must come from resolved palette values.
-5. Canvas invalidation must stay generation-based.
-
-## Input Mapping Rules
-1. Keep terminal-compatible byte sequences in `src/ui/input_handler.rs`.
-2. Maintain coverage for Shift+Tab, Insert, F1..F12, and Alt-prefix handling.
-3. Preserve control-symbol combo mapping (`@`, `[`, `\\`, `]`, `^`, `_`, `?`).
-4. Keep app-level shortcuts (Alt+N, Alt+W) handled in app layer, not mapper.
-
-## Security Rules
-1. Ignore broken-pipe signal at process startup.
-2. Validate shell path via `/etc/shells`, canonicalization, executable checks.
-3. Enforce PTY input size limit constant in `SessionManager::send_input` before enqueue.
-4. Clamp PTY resize dimensions to valid `u16` bounds.
-5. Clamp configurable numeric values before runtime use.
-
-## Testing Standards
-1. `cargo test` must pass before documenting major behavior updates.
-2. Add regression tests for parser/runtime edge cases when fixing bugs.
-3. Keep coverage across config, session runtime, input mapping, and renderer logic.
-4. Current baseline reference: `23` passing unit tests (2026-03-01).
+## Frontend Rules
+1. Guard async actions with current `activeSessionId` where race conditions are possible.
+2. Hydrate with `get_session_snapshot` before connect/resize paths.
+3. Use `ensureSessionConnected`/`activate_session` before sending input to disconnected sessions.
+4. Keep xterm addon loading fault-tolerant (WebGL fallback to canvas renderer).
+5. Re-run `resize_session` only for running sessions.
 
 ## Documentation Sync Rules
-When session/runtime behavior changes, update at least:
-1. `docs/system-architecture.md`
-2. `docs/codebase-summary.md`
-3. `docs/project-overview-pdr.md`
-4. `docs/project-roadmap.md` and/or `docs/development-roadmap.md`
-5. `docs/project-changelog.md`
+When runtime contracts change, update:
+1. `README.md`
+2. `docs/system-architecture.md`
+3. `docs/codebase-summary.md`
+4. `docs/project-overview-pdr.md`
+5. `docs/project-roadmap.md`
+6. `docs/development-roadmap.md`
+7. `docs/deployment-guide.md`
+8. `docs/design-guidelines.md` (if UI behavior changed)
+9. `docs/project-changelog.md`
+
+## Validation Commands
+```bash
+cargo test --manifest-path src-tauri/Cargo.toml
+npm --prefix frontend run build
+node $HOME/.claude/scripts/validate-docs.cjs docs/
+```

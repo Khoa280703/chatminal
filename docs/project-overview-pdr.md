@@ -1,80 +1,80 @@
 # Project Overview and PDR
 
-Last updated: 2026-03-01
-Version: 0.1.0
+Last updated: 2026-03-02  
+Version: 0.2.1-doc-sync
 
-## Overview
-Chatminal is a local desktop terminal workspace for running multiple shell sessions in one window.
-Current implementation is Rust + Iced UI, `portable-pty` for process control, and `wezterm-term` for terminal parsing/state.
+## Product Overview
+Chatminal is a local desktop terminal workspace with profile-scoped sessions.
 
-## Problem
-Developers often split work across many terminal windows/tabs with weak cross-session visibility.
-Chatminal targets one-window, keyboard-first session management with reliable scrollback and ANSI fidelity.
+Active runtime:
+- Desktop host: `Tauri v2` (`src-tauri/`)
+- Backend: `Rust + portable-pty`
+- Frontend: `Svelte 5 + xterm.js` (`frontend/`)
 
-## Product Goals
-1. Manage multiple local shell sessions concurrently.
-2. Render terminal output with cursor styles, colors, and text attributes.
-3. Keep UI responsive under typical interactive shell workloads.
-4. Keep runtime safe with shell validation, bounded channels, and input-size limits.
+Legacy runtime note:
+- Root `Cargo.toml` + `src/` (Iced) remain buildable but are not default runtime flow.
 
-## Non-Goals (Current Scope)
-1. Remote protocols (SSH client mode).
-2. Session restore across app restarts.
-3. Plugin/extension system.
-4. Full cross-platform parity beyond current Unix-oriented flow.
+## Goals
+1. Manage multiple profiles and multiple terminal sessions per profile.
+2. Stream PTY output to UI with stable session/event contracts.
+3. Keep reconnect predictable with disconnected previews and explicit activation.
+4. Persist workspace/session metadata and scrollback with retention controls.
+5. Keep shell execution constrained by validation and bounded IO.
+
+## Non-Goals (Current)
+1. Remote SSH orchestration.
+2. Cross-device sync.
+3. Plugin/extension ecosystem.
 
 ## Functional Requirements
 | ID | Requirement | Status |
 | --- | --- | --- |
-| FR-01 | Create new terminal session from sidebar or shortcut. | Implemented |
-| FR-02 | Switch active session from sidebar list. | Implemented |
-| FR-03 | Close selected/active session and cleanup resources. | Implemented |
-| FR-04 | Forward keyboard input bytes to active PTY writer channel. | Implemented |
-| FR-05 | Parse/render ANSI output using wezterm terminal state. | Implemented |
-| FR-06 | Support scrollback viewport via wheel and `Shift+PageUp/PageDown`. | Implemented |
-| FR-07 | Resize PTY sessions on window size updates. | Implemented |
-| FR-08 | Handle PTY EOF/read error and remove exited session from UI. | Implemented |
+| FR-01 | Provide workspace bootstrap via `load_workspace` (profiles, sessions, active IDs). | Implemented |
+| FR-02 | Provide profile lifecycle commands (`list_profiles`, `create_profile`, `switch_profile`, `rename_profile`, `delete_profile`). | Implemented |
+| FR-03 | Provide session lifecycle commands (`list_sessions`, `create_session`, `activate_session`, `rename_session`, `close_session`). | Implemented |
+| FR-04 | Bridge terminal IO (`write_input`, `resize_session`, `get_session_snapshot`). | Implemented |
+| FR-05 | Emit runtime events (`pty/output`, `pty/exited`, `pty/error`). | Implemented |
+| FR-06 | Persist session metadata (`name`, `cwd`, `status`, `persist_history`, `last_seq`). | Implemented |
+| FR-07 | Persist and trim scrollback by line cap and TTL. | Implemented |
+| FR-08 | Support lazy reconnect for disconnected sessions on activation/input path. | Implemented |
+| FR-09 | Track active workspace state keys per profile. | Implemented |
 
 ## Non-Functional Requirements
-| ID | Requirement | Evidence in code |
+| ID | Requirement | Evidence |
 | --- | --- | --- |
-| NFR-01 | App should not terminate on broken pipe writes. | `main.rs` ignores broken-pipe signal. |
-| NFR-02 | PTY input payload must be bounded. | `MAX_INPUT_BYTES = 65_536` in `SessionManager::send_input`. |
-| NFR-03 | Shell path must be validated before spawn. | `/etc/shells` allowlist + canonicalization + executable bit checks. |
-| NFR-04 | UI redraw should be generation-driven. | `terminal_generation` + canvas cache invalidation. |
-| NFR-05 | Scroll position should remain stable while new output arrives. | `lines_added` from stable-row delta updates scroll offsets. |
-| NFR-06 | Core behavior must be covered by automated tests. | `cargo test` passes 23 unit tests (2026-03-01). |
+| NFR-01 | Input payload must be bounded. | Input-size guard in `src-tauri/src/service.rs` |
+| NFR-02 | Input queue must be bounded and non-blocking on hot path. | Bounded queue + `try_send` in `src-tauri/src/service.rs` |
+| NFR-03 | Snapshot output must be bounded. | Snapshot-size guard in `src-tauri/src/service.rs` |
+| NFR-04 | Shell path must be validated before spawn. | `/etc/shells` + canonicalization + executable checks |
+| NFR-05 | Persistence writes must not block PTY reader path. | history queue + batch writer worker (`50ms`, batch `128`) |
+| NFR-06 | Session status cleanup should be deterministic on exit/disconnect. | cleanup worker updates session state and emits exit event |
+| NFR-07 | CWD state must remain current across long-running sessions. | CWD sync worker (`500ms`) persists updates |
 
 ## Acceptance Criteria
-1. `cargo run` starts app and creates an initial session.
-2. `Alt+N` creates a session; `Alt+W` closes active session.
-3. Scroll controls work on primary buffer output.
-4. Cursor style changes (`block/underline/bar/hidden`) are rendered.
-5. `cargo test` passes without failures.
+1. `npm --prefix frontend install` succeeds.
+2. `npx --prefix frontend tauri dev` launches app and `load_workspace` returns a coherent state.
+3. Profile lifecycle operations work end-to-end from UI.
+4. Session lifecycle operations work end-to-end from UI.
+5. Output is streamed via `pty/output`; errors/exits surface via `pty/error` and `pty/exited`.
+6. Restart restores profile/session workspace with disconnected preview content.
+7. Activating a disconnected session reconnects it and resumes live output.
+8. New session default `cwd` is home (`~`) when available (fallback `/` only if home resolution fails).
 
 ## Technical Constraints
-1. Rust toolchain requirement from manifest: `rust-version = 1.93`.
-2. UI is coupled to Iced canvas rendering primitives.
-3. Shell validation and signal handling are Unix-centric.
-4. Session/grid state is in-memory only.
-
-## Dependencies (Runtime)
-- `iced`
-- `portable-pty`
-- `wezterm-term`
-- `wezterm-surface`
-- `tokio`
-- `uuid`
-- `indexmap`
-- `serde`, `toml`, `dirs`
-- `log`, `env_logger`, `libc`
+1. Rust toolchain `1.93+`, Node.js/npm required.
+2. GUI desktop context required (macOS or Linux desktop with display).
+3. Unix shell policy enforced through `/etc/shells`.
+4. SQLite persistence uses local filesystem data/config directories.
 
 ## Risks and Mitigations
-| Risk | Impact | Mitigation direction |
+| Risk | Impact | Mitigation |
 | --- | --- | --- |
-| High PTY output rate vs UI event queue | Snapshot lag under pressure | Coalesced update retry exists; add throughput/load tests. |
-| Unix-specific shell policy | Portability limits | Keep Linux-first docs; add platform abstraction phase. |
-| No persistence boundary | State lost on restart/crash | Plan optional restore/import milestone later. |
+| Invalid shell config | Session spawn failure | Multi-candidate shell fallback + strict shell validation + troubleshooting docs |
+| Queue pressure under heavy output | Input lag or dropped writes | bounded queue + backpressure error surface |
+| Persistence failures | Missing restore/history | runtime fallback when persistence unavailable + warning logs |
+| Docs drift during runtime evolution | Integration confusion | required docs sync checklist in `docs/code-standards.md` |
 
-## Change Notes
-- 2026-03-01: Updated PDR to wezterm-based parser/runtime flow, stable-row `lines_added`, exited-event sender-thread model, and 23-test baseline.
+## Requirement Change Notes
+- 2026-03-02: Added explicit profile lifecycle requirements and active-state key semantics.
+- 2026-03-02: Clarified lazy reconnect path and default `cwd` behavior.
+- 2026-03-02: Updated constraints and acceptance criteria to current Tauri runtime.

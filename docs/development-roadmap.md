@@ -1,44 +1,46 @@
 # Development Roadmap
 
-Last updated: 2026-03-01
+Last updated: 2026-03-02
 
 ## Phase Status
 | Phase | Scope | Status |
 | --- | --- | --- |
-| Phase 1 | Project bootstrap and app shell | Completed |
-| Phase 2 | PTY session manager and worker threading | Completed |
-| Phase 3 | Iced UI layout and app message loop | Completed |
-| Phase 4 | Terminal rendering and cursor style mapping | Completed |
-| Phase 5 | Input mapping and resize integration | Completed |
-| Phase 6 | Scrollback viewport and stable offset behavior | Completed |
-| Phase 7 | Runtime hardening + regression tests | Completed |
-| Phase 8 | Integration tests, CI, packaging | In progress |
+| Phase 1 | Tauri host + frontend migration foundation | Completed |
+| Phase 2 | PTY session orchestration and command bridge | Completed |
+| Phase 3 | Workspace persistence (sessions + history + state) | Completed |
+| Phase 4 | Lazy reconnect and snapshot hydration | Completed |
+| Phase 5 | Profile lifecycle management | Completed |
+| Phase 6 | Runtime hardening and docs realignment | Completed |
+| Phase 7 | CI + integration tests + packaging hardening | In Progress |
 
 ## Recently Completed
-1. Runtime parser/state path migrated to `wezterm-term` (+ `wezterm-surface`).
-2. Snapshot extraction constrained to `scrollback window + visible window`.
-3. `lines_added` derived from top stable row delta to preserve scroll offset.
-4. Exited-event dispatch moved to spawned sender thread with `blocking_send` to avoid reader-thread blocking.
-5. Keyboard mapper expanded (`Shift+Tab`, function keys `F1..F12`, Alt prefix, Ctrl symbols).
-6. Grid cell payload moved from `char` to `String` for grapheme-friendly snapshots.
-7. Test baseline increased to 23 passing tests.
+1. Workspace/profile contracts stabilized (`load_workspace`, profile CRUD/switch).
+2. Persistence keys normalized to profile-scoped active session key pattern.
+3. Reconnect workflow centered on `activate_session` for disconnected sessions.
+4. CWD sync worker integrated for runtime path continuity after `cd`.
+5. Core docs were rewritten to remove active-runtime ambiguity.
 
-## Active Backlog (Phase 8)
-1. Add integration tests for full session lifecycle under sustained output.
-2. Add load/stress scenarios for update queue pressure.
-3. Add CI workflow for `cargo test` and release build.
-4. Define packaging strategy for at least one target platform.
+## Active Backlog
+1. Integration tests for profile switch + reconnect + retention edge cases.
+2. CI matrix for Linux/macOS build + test + bundle verification.
+3. Release checklist and artifact validation by target format.
+4. Legacy runtime deprecation strategy (`src/`) and cleanup criteria.
 
-## Dependency Snapshot
-- `iced 0.14.0`
+## Dependency Snapshot (Active Runtime)
+- `tauri 2.0.0`
+- `tauri-plugin-store 2.4.1`
 - `portable-pty 0.9.0`
-- `wezterm-term` (git rev `05343b3...`)
-- `wezterm-surface` (git rev `05343b3...`)
+- `rusqlite 0.32.1` (bundled SQLite)
+- `svelte ^5.0.0`
+- `xterm ^5.3.0`
 
 ## Documentation Sync Checklist
-For each runtime change:
-1. Update `docs/system-architecture.md`.
-2. Update `docs/codebase-summary.md`.
-3. Update `docs/project-overview-pdr.md` if requirement impact exists.
-4. Update `docs/project-roadmap.md` and changelog entries.
-5. Re-run docs validation script.
+For runtime contract changes:
+1. Update `README.md`.
+2. Update `docs/system-architecture.md`.
+3. Update `docs/codebase-summary.md`.
+4. Update `docs/project-overview-pdr.md` if requirements changed.
+5. Update `docs/project-roadmap.md` and `docs/development-roadmap.md`.
+6. Update `docs/deployment-guide.md` and `docs/design-guidelines.md` if behavior/UI changed.
+7. Append entry in `docs/project-changelog.md`.
+8. Run docs validation script.

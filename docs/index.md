@@ -1,24 +1,25 @@
 # Chatminal Documentation
 
-Last updated: 2026-03-01
+Last updated: 2026-03-02
 
-Chatminal is a local desktop terminal workspace built with Rust + Iced + portable-pty, with terminal state parsing/render snapshot fed by `wezterm-term`.
-This documentation set reflects current code in `src/` and the latest `repomix-output.xml` snapshot.
+Chatminal currently runs on `Tauri v2 + Rust + Svelte 5 + xterm.js`.
+This docs set is synced against the active runtime in `src-tauri/` and `frontend/`.
+
+Legacy note:
+- `src/` + root `Cargo.toml` (Iced runtime) are legacy and not the default run/build path.
 
 ## Start Here
-- [Repository README](../README.md) - Setup, quick start, config, troubleshooting.
-- [Project Overview & PDR](./project-overview-pdr.md) - Scope, requirements, acceptance criteria.
+- [Repository README](../README.md) - setup, run/build commands, runtime config, troubleshooting.
+- [Project Overview and PDR](./project-overview-pdr.md) - product scope, requirements, acceptance criteria.
 
-## Core Technical Docs
-- [System Architecture](./system-architecture.md) - Runtime components, PTY/data flow, concurrency.
-- [Codebase Summary](./codebase-summary.md) - Verified repository snapshot and module map.
-- [Code Standards](./code-standards.md) - Implementation rules and sync standards.
+## Core Engineering Docs
+- [System Architecture](./system-architecture.md)
+- [Codebase Summary](./codebase-summary.md)
+- [Code Standards](./code-standards.md)
 
-## Product and Planning Docs
-- [Project Roadmap](./project-roadmap.md) - Milestones, progress, upcoming tracks.
-- [Development Roadmap](./development-roadmap.md) - Engineering-phase execution view.
-- [Project Changelog](./project-changelog.md) - Timeline of notable implementation/docs changes.
-
-## Supplemental Docs
-- [Deployment Guide](./deployment-guide.md) - Build/test/release workflow.
-- [Design Guidelines](./design-guidelines.md) - UI behavior and rendering constraints.
+## Delivery and Operations Docs
+- [Deployment Guide](./deployment-guide.md)
+- [Design Guidelines](./design-guidelines.md)
+- [Project Roadmap](./project-roadmap.md)
+- [Development Roadmap](./development-roadmap.md)
+- [Project Changelog](./project-changelog.md)

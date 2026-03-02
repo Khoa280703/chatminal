@@ -15,12 +15,9 @@
 .env
 .env.local
 .env.*.local
-
-
-# Added by cargo
-
-/target
-
 # Generated artifacts
 repomix-output.xml
 home/
+frontend/node_modules/
+frontend/dist/
+src-tauri/target/

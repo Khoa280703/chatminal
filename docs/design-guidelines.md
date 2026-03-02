@@ -1,59 +1,75 @@
 # Design Guidelines
 
-Last updated: 2026-03-01
+Last updated: 2026-03-02
 
 ## Design Intent
-Chatminal is terminal-first: dense information, low chrome, keyboard-first flow, predictable viewport behavior.
+Chatminal UI is terminal-first:
+- fast session switching
+- low-friction keyboard usage
+- high-contrast terminal readability
+- clear profile/session state visibility
 
-## Layout Contract
-- Two-pane layout:
-  - Left: session sidebar.
-  - Right: terminal canvas.
-- Default sidebar width: `240.0`.
-- Terminal background: black (`TERMINAL_BG`).
+## Visual Language (Current Frontend)
+Source: `frontend/src/styles.css`
 
-## Typography and Cell Metrics
-- Font family: Iced monospace.
-- Default font size: `14.0`.
-- `metrics_for_font(14.0)` yields approximately:
-  - cell width: `8.68`
-  - cell height: `16.8`
+- Primary UI font: `Space Grotesk`
+- Monospace terminal/support text: `Space Mono` plus xterm fallback stack
+- Layout: two-column grid (`320px` sidebar + terminal pane)
+- Sidebar: dark layered gradient with session cards and profile footer
+- Terminal pane: dark canvas with xterm rendering
 
-## Session List Behavior
-1. Active session indicator uses `●`; inactive uses `○`.
-2. Session order follows insertion order from `SessionManager`.
-3. Footer keeps primary shortcuts visible (Alt+N, Alt+W).
+## Color Tokens
+`frontend/src/styles.css` defines root tokens:
+- `--bg-deep`, `--bg-surface`, `--bg-surface-soft`, `--bg-terminal`
+- `--text-main`, `--text-dim`
+- `--line`, `--primary`, `--danger`
 
-## Terminal Rendering Rules
-1. Draw non-default background color per cell rectangle.
-2. Draw cursor only when viewport is at live bottom (`scroll_offset == 0`).
-3. Cursor styles must map exactly to runtime state:
-   - `CursorStyle::Block`
-   - `CursorStyle::Underline`
-   - `CursorStyle::Bar`
-   - `CursorStyle::Hidden`
-4. Underline is attribute-driven and should render even for empty/continuation cells.
-5. Draw loop must stay clipped to canvas bounds.
+Session tone badges use semantic classes:
+- `tone-indigo`
+- `tone-emerald`
+- `tone-rose`
+- `tone-amber`
+- `tone-slate`
 
-## Color Behavior
-- Default fg: white.
-- Default bg: black.
-- Non-default colors are produced from wezterm palette resolution in runtime snapshot stage.
-- UI maps `CellColor::Rgb` directly to Iced `Color::from_rgb8`.
+## Layout and Interaction Contracts
+1. Sidebar contains:
+- brand header
+- new-session CTA
+- session search
+- filtered session list
+- profile menu/footer actions
+2. Terminal pane contains:
+- active session meta bar
+- session-scoped actions (rename/persist/clear history)
+- xterm host area
+3. Session cards show:
+- glyph/avatar
+- name and cwd
+- status (`running` or `disconnected`)
+- inline controls
 
-## Input and Interaction
-1. App-level shortcuts handled in app state layer.
-2. Terminal input mapper handles terminal sequences (Shift+Tab, Insert, F1..F12, Alt prefix, control symbols).
-3. Scroll behavior is line-based and deterministic for both line and pixel wheel deltas.
+## Session UX Rules
+1. Search filters by session name + cwd.
+2. Session status labels must reflect backend status values (`running`, `disconnected`).
+3. Active session hydration uses snapshot before live reconnect.
+4. Disconnected sessions should be visually distinct and reconnect on activation.
 
-## Usability Gaps
-1. No in-app settings panel yet.
-2. No keybinding customization UI.
-3. No explicit accessibility/screen-reader mode.
-4. No visible scrollback position indicator.
+## Input and Shortcut Rules
+1. App-level shortcuts:
+- `Alt+N`: create new session
+- `Alt+W`: close active session
+2. Other terminal input should flow to PTY via `write_input`.
+3. Reconnect should happen before input if session is disconnected.
+4. Rename/profile inputs must support Enter confirm and Escape cancel.
 
-## Next UX Priorities
-1. Add settings panel (font/theme/sidebar width).
-2. Add scrollback position indicator.
-3. Add session rename flow.
-4. Add command palette for keyboard actions.
+## Terminal Behavior Rules
+1. Keep xterm `scrollback` aligned with app preview strategy.
+2. Preserve output ordering using per-session sequence checks.
+3. If WebGL addon load fails, continue with renderer fallback.
+4. Keep terminal resize responsive with the fit addon plus `resize_session` for running sessions.
+
+## Accessibility and Usability Backlog
+1. Add keyboard-first focus ring improvements for session controls.
+2. Add explicit high-contrast theme toggle in settings.
+3. Add explicit reconnect affordance text for disconnected sessions.
+4. Add screen-reader semantics audit for profile/session menus.

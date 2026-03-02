@@ -1,85 +1,199 @@
 # Chatminal
 
-Chatminal is a local desktop terminal workspace built with Rust + Iced.
-It runs multiple PTY sessions in one window and renders terminal output through `wezterm-term` state snapshots.
+Chatminal is a local desktop terminal workspace.
 
-Last updated: 2026-03-01
+Current runtime stack:
+- Host shell: `Tauri v2` (`src-tauri/`)
+- Backend: `Rust + portable-pty`
+- Frontend: `Svelte 5 + xterm.js` (`frontend/`)
 
-## What It Does
-- Multi-session local shell workspace (create, switch, close sessions).
-- PTY reader/writer threads per session with bounded channels.
-- Terminal parsing/state via `wezterm-term` (+ `wezterm-surface` cursor metadata).
-- Scrollback-aware rendering with virtual viewport offsets.
-- Keyboard-first workflow with terminal key mapping and app shortcuts.
+Last updated: 2026-03-02
 
-## Runtime Highlights
-- PTY bytes are fed into `Terminal::advance_bytes`.
-- UI snapshots are built from `scrollback window + visible window` (not full history scan each flush).
-- `lines_added` is calculated from top stable row delta to keep scroll offset stable.
-- EOF/read error sends `SessionEvent::Exited` from a short-lived sender thread using `blocking_send`.
+## Runtime Status
+- Active runtime is `src-tauri/` + `frontend/`.
+- Legacy Rust/Iced code still exists in `src/` and root `Cargo.toml`.
+- Legacy code is kept for reference/backward maintenance only; it is not the default runtime flow.
 
-## Requirements
-- Unix-like OS (uses `/etc/shells` validation and `libc` signal APIs).
-- Rust `1.93+`.
-- Cargo.
+## Core Features
+- Multi-profile workspace management:
+  - `list_profiles`
+  - `create_profile`
+  - `switch_profile`
+  - `rename_profile`
+  - `delete_profile`
+- Multi-session terminal management inside the active profile:
+  - create, list, activate, rename, close
+  - resize, write input, snapshot hydration
+- Real-time PTY events:
+  - `pty/output`
+  - `pty/exited`
+  - `pty/error`
+- Persistence (SQLite):
+  - profiles
+  - session metadata (`name`, `cwd`, `status`, `persist_history`, `last_seq`)
+  - scrollback chunks with retention
+  - app state keys (`active_profile_id`, `active_session_id:{profile_id}`)
+- Lazy reconnect:
+  - disconnected sessions are hydrated from preview
+  - PTY respawn happens on `activate_session` (also triggered before input when needed)
 
-## Quick Start
+## Architecture At A Glance
+- `src-tauri/src/main.rs`: Tauri command registration and app wiring.
+- `src-tauri/src/service.rs`: PTY session lifecycle, IO, workers, event emit.
+- `src-tauri/src/persistence.rs`: SQLite schema, workspace restore, retention.
+- `src-tauri/src/config.rs`: `settings.json` + legacy `config.toml` shell fallback.
+- `frontend/src/App.svelte`: xterm UI, profile/session UX, invoke/listen bridge.
+
+## Project Layout
+- `frontend/`: Svelte app and xterm integration.
+- `src-tauri/`: Tauri runtime and PTY service.
+- `src/`: legacy Iced implementation.
+- `docs/`: project documentation.
+- `plans/`: planning artifacts and reports.
+
+## Prerequisites
+- macOS 13+ or Linux desktop with GUI (Wayland/X11).
+- Rust/Cargo stable (`rust-version = 1.93`).
+- Node.js + npm.
+
+macOS:
 ```bash
-cargo build
-cargo run
+xcode-select --install
 ```
 
-Run tests:
+Ubuntu/Debian example:
 ```bash
-cargo test
+sudo apt update
+sudo apt install -y \
+  libwebkit2gtk-4.1-dev \
+  libgtk-3-dev \
+  libappindicator3-dev \
+  librsvg2-dev \
+  patchelf
 ```
 
-Current baseline (2026-03-01): `23 passed; 0 failed`.
-
-## Configuration
-Optional config file:
-`~/.config/chatminal/config.toml`
-
-Example:
-```toml
-shell = "/bin/bash"
-scrollback_lines = 10000
-font_size = 14.0
-sidebar_width = 240.0
+## Development Run
+```bash
+npm --prefix frontend install
+npx --prefix frontend tauri dev
 ```
-
-Runtime normalization:
-- `scrollback_lines`: `100..=200_000`
-- `font_size`: `8.0..=48.0`
-- `sidebar_width`: `160.0..=640.0`
 
 Notes:
-- Invalid/missing config falls back to defaults.
-- `shell` must be executable and listed in `/etc/shells` (or canonicalized equivalent).
+- Do not use `cargo run` at repo root for the active runtime.
+- GUI runtime requires display access (`DISPLAY` or `WAYLAND_DISPLAY` on Linux).
 
-## Default Controls
-- `Alt+N`: New session
-- `Alt+W`: Close active session
-- `Shift+PageUp`: Scroll up one viewport
-- `Shift+PageDown`: Scroll down one viewport
-- Mouse wheel: Scroll terminal viewport
+## Build
+```bash
+npm --prefix frontend run build
+npx --prefix frontend tauri build
+```
 
-Input mapper also supports terminal sequences for keys including `Shift+Tab`, `Insert`, `F1..F12`, `Alt+<key>` prefix, and `Ctrl` symbol combos.
+Debug bundle build:
+```bash
+npx --prefix frontend tauri build --debug
+```
+
+Expected artifact roots:
+- Bundles: `src-tauri/target/release/bundle/` (or `src-tauri/target/debug/bundle/` with `--debug`)
+- Rust binary: `src-tauri/target/release/`
+
+Bundle formats depend on host platform/toolchain (for example `.app`/`.dmg` on macOS, `.deb`/`.AppImage`/`.rpm` on Linux when supported).
+
+## Runtime Configuration
+Primary config file: `settings.json`
+- Linux: `~/.config/chatminal/settings.json`
+- macOS: `~/Library/Application Support/chatminal/settings.json`
+
+Supported keys:
+```json
+{
+  "theme": "system",
+  "font_size": 14.0,
+  "default_shell": "/bin/bash",
+  "persist_scrollback_enabled": false,
+  "max_lines_per_session": 5000,
+  "auto_delete_after_days": 30,
+  "preview_lines": 100
+}
+```
+
+Normalization in backend:
+- `font_size`: `8.0..=48.0`
+- `max_lines_per_session`: `100..=5000`
+- `auto_delete_after_days`: `0..=3650`
+- `preview_lines`: `10..=5000`
+
+Legacy shell file (still read as fallback):
+- Linux: `~/.config/chatminal/config.toml`
+- macOS: `~/Library/Application Support/chatminal/config.toml`
+
+```toml
+shell = "/bin/bash"
+```
+
+Shell resolution order:
+1. `settings.json` -> `default_shell`
+2. legacy `config.toml` -> `shell`
+3. `$SHELL`
+4. `/bin/zsh`
+5. `/bin/bash`
+6. `/bin/sh`
+
+Shell path must pass:
+- `/etc/shells` allow-list
+- canonicalization
+- executable bit check
+
+## Session and CWD Behavior
+- Session create `cwd` behavior:
+  - use payload `cwd` when provided
+  - otherwise use user home directory (`~`) when available
+  - fallback to `/` only if home cannot be resolved
+- Running sessions are tracked by a CWD sync worker (`500ms` interval).
+- Reconnect uses latest persisted `cwd` for session respawn.
+
+## Persistence Paths
+Database file:
+- Linux: `~/.local/share/chatminal/chatminal.db`
+- macOS: `~/Library/Application Support/chatminal/chatminal.db`
+
+Key SQLite tables:
+- `profiles`
+- `sessions`
+- `scrollback`
+- `app_state`
+
+Important app-state keys:
+- `active_profile_id`
+- `active_session_id:{profile_id}`
+
+## Quick Smoke Checklist
+1. App starts and loads workspace via `load_workspace`.
+2. If no sessions exist, UI creates one session.
+3. Creating/switching/renaming/deleting profiles works.
+4. Creating/activating/renaming/closing sessions works.
+5. Terminal input goes through `write_input` and output appears via `pty/output`.
+6. Restart restores disconnected previews; activate reconnects and resumes output.
+7. `cwd` changes persist after restart/reconnect.
 
 ## Troubleshooting
 | Symptom | Likely Cause | Action |
 | --- | --- | --- |
-| Session fails to start | Invalid shell path | Check `shell` in config; ensure shell exists, executable, and present in `/etc/shells`. |
-| No output / session exits fast | Shell exits immediately | Run `RUST_LOG=info cargo run` and verify shell command works standalone. |
-| Input feels dropped | Input/event channel pressure | Retry after output settles; inspect warnings for queue pressure. |
-| Scrollback not moving | Active buffer is alternate screen | Exit full-screen TUI app or return to primary screen. |
+| App window does not open | Missing GUI/display environment | Run in local desktop environment. |
+| `tauri dev` fails before app launch | Missing WebKit/GTK libs | Install Linux prerequisites above. |
+| macOS build/dev fails early | Missing Xcode CLI tools | Run `xcode-select --install`. |
+| Session creation fails | Invalid shell config | Fix/remove `default_shell`/`shell`; ensure shell is in `/etc/shells`. |
+| App opens but no session appears | Session spawn failed on startup | Check terminal logs, validate shell path and permissions, then create session manually. |
+| No persisted preview/history | `persist_history` disabled or retention trimmed | Enable persist for session; verify retention settings. |
 
-## Project Documentation
-- [Docs index](./docs/index.md)
-- [Project overview & PDR](./docs/project-overview-pdr.md)
-- [System architecture](./docs/system-architecture.md)
-- [Codebase summary](./docs/codebase-summary.md)
-- [Code standards](./docs/code-standards.md)
-- [Project roadmap](./docs/project-roadmap.md)
-- [Development roadmap](./docs/development-roadmap.md)
-- [Project changelog](./docs/project-changelog.md)
+## Documentation
+- [Docs Index](./docs/index.md)
+- [Project Overview and PDR](./docs/project-overview-pdr.md)
+- [Codebase Summary](./docs/codebase-summary.md)
+- [System Architecture](./docs/system-architecture.md)
+- [Code Standards](./docs/code-standards.md)
+- [Deployment Guide](./docs/deployment-guide.md)
+- [Design Guidelines](./docs/design-guidelines.md)
+- [Project Roadmap](./docs/project-roadmap.md)
+- [Development Roadmap](./docs/development-roadmap.md)
+- [Project Changelog](./docs/project-changelog.md)

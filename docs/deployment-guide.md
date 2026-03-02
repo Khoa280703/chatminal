@@ -1,69 +1,131 @@
 # Deployment Guide
 
-Last updated: 2026-03-01
+Last updated: 2026-03-02
 
-## Environment
-- OS: Unix-like (uses `/etc/shells` and `libc` signal APIs).
-- Rust: `1.93+`.
-- Cargo: bundled with Rust toolchain.
-- Network access required for initial dependency fetch (includes git deps: `wezterm-term`, `wezterm-surface`).
+## Runtime Target
+Deploy and run the active runtime only:
+- `src-tauri/` + `frontend/`
 
-## Local Build and Run
+Legacy note:
+- root `src/` + root `Cargo.toml` are legacy and not default deployment path.
+
+## Prerequisites
+- macOS 13+ or Linux desktop with GUI.
+- Rust/Cargo stable (`rust-version = 1.93`).
+- Node.js + npm.
+
+macOS:
 ```bash
-cargo build
-cargo run
+xcode-select --install
 ```
 
-## Test Verification
+Ubuntu/Debian example:
 ```bash
-cargo test
+sudo apt update
+sudo apt install -y \
+  libwebkit2gtk-4.1-dev \
+  libgtk-3-dev \
+  libappindicator3-dev \
+  librsvg2-dev \
+  patchelf
 ```
-Expected current baseline (2026-03-01): `23 passed; 0 failed`.
+
+## Development Run
+```bash
+npm --prefix frontend install
+npx --prefix frontend tauri dev
+```
 
 ## Release Build
 ```bash
-cargo build --release
+npm --prefix frontend run build
+npx --prefix frontend tauri build
 ```
-Binary output:
-- `target/release/chatminal`
 
-Release profile in `Cargo.toml`:
-- `opt-level = 3`
-- `lto = true`
-- `codegen-units = 1`
+Debug bundle:
+```bash
+npx --prefix frontend tauri build --debug
+```
 
-## Runtime Configuration
-Optional config path:
-- `~/.config/chatminal/config.toml`
+## Release Artifacts
+Default output roots:
+- `src-tauri/target/release/bundle/`
+- `src-tauri/target/debug/bundle/` (when using `--debug`)
+
+Typical artifact formats depend on host OS/tooling:
+- macOS: `.app`, `.dmg`
+- Linux: `.AppImage`, `.deb`, `.rpm` (toolchain-dependent)
+
+## Runtime Settings (`settings.json`)
+Config file:
+- Linux: `~/.config/chatminal/settings.json`
+- macOS: `~/Library/Application Support/chatminal/settings.json`
 
 Example:
-```toml
-shell = "/bin/bash"
-scrollback_lines = 10000
-font_size = 14.0
-sidebar_width = 240.0
+```json
+{
+  "theme": "system",
+  "font_size": 14.0,
+  "default_shell": "/bin/bash",
+  "persist_scrollback_enabled": false,
+  "max_lines_per_session": 5000,
+  "auto_delete_after_days": 30,
+  "preview_lines": 100
+}
 ```
 
-Runtime normalization:
-- `scrollback_lines`: `100..=200_000`
+Backend normalization:
 - `font_size`: `8.0..=48.0`
-- `sidebar_width`: `160.0..=640.0`
+- `max_lines_per_session`: `100..=5000`
+- `auto_delete_after_days`: `0..=3650`
+- `preview_lines`: `10..=5000`
 
-## Smoke Checklist
-1. App starts and creates first session automatically.
-2. Session shortcuts work (`Alt+N`, `Alt+W`).
-3. Scroll controls work (mouse wheel, `Shift+PageUp/PageDown`).
-4. ANSI rendering works (`ls --color=auto`, simple SGR tests).
-5. Cursor visibility/style changes are reflected (block/underline/bar/hidden).
+Legacy shell fallback file (optional):
+- Linux: `~/.config/chatminal/config.toml`
+- macOS: `~/Library/Application Support/chatminal/config.toml`
+
+```toml
+shell = "/bin/bash"
+```
+
+Shell resolution order:
+1. `settings.json` `default_shell`
+2. legacy `config.toml` `shell`
+3. `$SHELL`
+4. `/bin/zsh`
+5. `/bin/bash`
+6. `/bin/sh`
+
+Shell must pass `/etc/shells` + canonicalization + executable checks.
+
+## Persistence and State
+Database path:
+- Linux: `~/.local/share/chatminal/chatminal.db`
+- macOS: `~/Library/Application Support/chatminal/chatminal.db`
+
+Core tables:
+- `profiles`, `sessions`, `scrollback`, `app_state`
+
+Important state keys:
+- `active_profile_id`
+- `active_session_id:{profile_id}`
+
+## Operational Smoke Checklist
+1. Launch app and confirm `load_workspace` succeeds.
+2. Create/switch/rename/delete profile flows work.
+3. Create session, run commands, and confirm `pty/output` stream.
+4. Resize window and confirm `resize_session` behavior for running sessions.
+5. Restart app and verify disconnected preview restore.
+6. Activate a disconnected session and verify reconnect.
+7. Change directories in shell, restart, and verify latest `cwd` is reused.
+8. Validate history retention settings by trimming scenarios (line cap/TTL).
 
 ## Troubleshooting
 | Symptom | Likely Cause | Action |
 | --- | --- | --- |
-| Session cannot start | Invalid shell config | Check `shell` value and `/etc/shells` allowlist. |
-| Build fails on clean machine | Missing toolchain or network for git deps | Install Rust 1.93+, ensure outbound access for Cargo git dependencies. |
-| Session exits immediately | Shell process exits early | Run app with logs: `RUST_LOG=info cargo run`. |
-| UI not updating under heavy output | Event queue pressure | Check warnings about full update queue; rerun stress scenario. |
-
-## Packaging Status
-No repository-managed packaging scripts are present yet.
-Packaging remains part of Phase 8 roadmap scope.
+| App does not open | No GUI/display context | Run inside local desktop environment. |
+| `tauri dev` fails early | Missing system dependencies | Install listed platform dependencies. |
+| Session creation fails | Invalid shell path/config | Fix `default_shell`/`shell`; ensure path appears in `/etc/shells`. |
+| App opens but no session is available | Startup spawn failed and no persisted sessions | Check logs, then create session manually after fixing shell config. |
+| `settings.json` edits seem ignored | Values are clamped/normalized | Check normalization ranges above. |
+| Persisted history missing | `persist_history` disabled or data trimmed | Enable persist and review retention settings. |

@@ -1,120 +1,116 @@
 # System Architecture
 
-Last updated: 2026-03-01
+Last updated: 2026-03-02
 
-## Overview
-Chatminal is a single-process desktop app with event-driven UI state and per-session PTY worker threads.
-The terminal runtime/parser is backed by `wezterm-term`; UI renders immutable `TerminalGrid` snapshots.
+## Runtime Topology
+Chatminal runs as a desktop Tauri app with a Rust PTY backend and Svelte frontend.
 
 ```text
-+----------------------+         +---------------------------+
-| Iced App Runtime     |<------->| SessionManager            |
-| - AppState::update   | events  | - create/close/resize     |
-| - AppState::view     |         | - send_input              |
-| - subscriptions      |         | - shell validation        |
-+----------+-----------+         +-------------+-------------+
-           ^                                     |
-           | SessionEvent via mpsc               |
-           |                                     v
-+----------+-------------------------------------+-----------+
-| PTY Worker Threads (per session)                           |
-| - reader: bytes -> wezterm advance_bytes -> snapshot grid  |
-| - writer: input bytes channel -> PTY writer                |
-+----------+-------------------------------------+-----------+
-           |
-           v
-+----------------------+ 
-| TerminalGrid         |
-| - primary/alternate  |
-| - scrollback deque   |
-| - cursor style/pos   |
-+----------------------+
++-------------------------------+      invoke()       +-------------------------------+
+| Frontend (Svelte + xterm.js)  |-------------------->| Tauri command layer (main.rs) |
+| frontend/src/App.svelte       |<--------------------| load/profile/session commands  |
+| - workspace/profile/session UX|      events         +---------------+---------------+
+| - xterm IO + reconnect logic  |  pty/output|exited|error            |
++---------------+---------------+                                      |
+                |                                                      v
+                |                                   +------------------+------------------+
+                |                                   | PtyService (service.rs)              |
+                |                                   | - profile/session maps               |
+                |                                   | - runtime spawn/activate/close       |
+                |                                   | - shell validation + bounds          |
+                |                                   | - history/cleanup/cwd workers        |
+                |                                   +------------------+------------------+
+                |                                                      |
+                |                                                      v
+                |                                   +------------------+------------------+
+                +---------------------------------->| Persistence (persistence.rs)         |
+                                                    | SQLite: profiles/sessions/scrollback |
+                                                    | app_state keys + retention/migration |
+                                                    +--------------------------------------+
 ```
 
-## Components
+## Active vs Legacy Runtime
+- Active runtime: `src-tauri/` + `frontend/`.
+- Legacy runtime: `src/` + root `Cargo.toml` (Iced). Keep as legacy reference only.
 
-### 1. Bootstrap
-Files: `src/main.rs`, `src/config.rs`
-- Initializes logger and ignores broken-pipe signal.
-- Loads optional config from `~/.config/chatminal/config.toml`.
-- Normalizes runtime numeric config values before app boot.
+## Component Responsibilities
+| Component | Files | Responsibilities |
+| --- | --- | --- |
+| App bootstrap and command exposure | `src-tauri/src/main.rs` | Register Tauri commands and app state. |
+| PTY orchestration | `src-tauri/src/service.rs` | Session lifecycle, profile operations, event emit, worker startup. |
+| Data contracts | `src-tauri/src/models.rs` | Request/response/event payload models. |
+| Persistence | `src-tauri/src/persistence.rs` | Schema, migrations, state keys, history retention. |
+| Runtime config | `src-tauri/src/config.rs` | `settings.json` normalization + legacy shell fallback. |
+| Frontend shell | `frontend/src/App.svelte` | Workspace hydration, terminal rendering, profile/session actions. |
 
-### 2. App State Machine
-File: `src/app.rs`
-- Owns active session ID, session grids, per-session scroll offsets.
-- Maintains runtime cols/rows and cell metrics.
-- Routes UI events + session events through `Message`.
-- Uses `terminal_generation` to invalidate canvas cache.
+## Command Contracts
+### Workspace and Profile
+- `load_workspace`
+- `list_profiles`
+- `create_profile`
+- `switch_profile`
+- `rename_profile`
+- `delete_profile`
 
-### 3. Session Orchestration
-Files: `src/session/manager.rs`, `src/session/mod.rs`
-- Creates PTY, spawns shell process, and starts worker threads.
-- Preserves stable session order in `IndexMap`.
-- Applies shell allowlist validation and input-size bounds.
-- Exposes APIs for create/close/resize/send input.
+### Session and Terminal
+- `list_sessions`
+- `create_session`
+- `activate_session`
+- `write_input`
+- `resize_session`
+- `rename_session`
+- `set_session_persist`
+- `close_session`
+- `clear_session_history`
+- `clear_all_history`
+- `get_session_snapshot`
 
-### 4. Terminal Runtime
-Files: `src/session/pty_worker.rs`, `src/session/grid.rs`
-- Reader thread feeds PTY bytes to `Terminal::advance_bytes`.
-- Builds `TerminalGrid` snapshot from wezterm screen lines.
-- Snapshot range is bounded to `scrollback window + visible window`.
-- Computes `lines_added` from stable-row delta to preserve user scroll position.
-- Maps cursor shape/visibility to `CursorStyle::{Block, Underline, Bar, Hidden}`.
+## Event Contracts
+- `pty/output` -> `{ session_id, chunk, seq, ts }`
+- `pty/exited` -> `{ session_id, exit_code, reason }`
+- `pty/error` -> `{ session_id, message }`
 
-### 5. UI Layer
-Files: `src/ui/*`
-- Sidebar for session listing/actions.
-- Input mapper converts keyboard events to PTY byte sequences.
-- Terminal canvas draws grid cells, background, underline, and cursor overlays.
-- Color rendering uses `CellColor` emitted from runtime snapshots.
+## Lifecycle and Data Flow
+1. App boot initializes the PTY service, workers, and persistence restore.
+2. Frontend calls `load_workspace` and applies profile/session state.
+3. Frontend hydrates current terminal using `get_session_snapshot`.
+4. Disconnected sessions remain preview-only until activation.
+5. Frontend calls `activate_session` to reconnect/spawn runtime for disconnected sessions.
+6. Frontend sends keyboard input via `write_input`.
+7. Reader thread emits `pty/output`; frontend applies ordered chunks by `seq`.
+8. On reader EOF/error, cleanup worker emits `pty/exited`, closes runtime, and sets status to disconnected.
 
-## PTY Output Flow
-1. Reader thread reads bytes from PTY master.
-2. `PtyEngine::advance_bytes()` forwards bytes to wezterm terminal state.
-3. `snapshot_grid` captures scrollback + visible range into `TerminalGrid`.
-4. Worker emits `SessionEvent::Update` via `try_send`.
-5. If queue is full, worker keeps state dirty and retries latest snapshot later.
-6. On EOF/read error, worker flushes once then spawns a sender thread.
-7. Sender thread calls `blocking_send(SessionEvent::Exited(...))`.
-8. App subscription maps events to `Message::TerminalUpdated` / `Message::SessionExited`.
-9. App updates grid + scroll offsets and increments generation for redraw.
+## Persistence Design
+SQLite tables:
+- `profiles`
+- `sessions`
+- `scrollback`
+- `app_state`
 
-## Input Flow
-1. Keyboard events enter `AppState::handle_event()`.
-2. App-level shortcuts handled first (Alt+N, Alt+W, Shift+PageUp/PageDown).
-3. Remaining keys go through `key_to_bytes`.
-4. Bytes are enqueued with `SessionManager::send_input()`.
-5. Writer thread writes and flushes bytes to PTY.
+State keys:
+- `active_profile_id`
+- `active_session_id:{profile_id}`
+- legacy key migration: `active_session_id`
 
-## Scrollback and Viewport Model
-- `TerminalGrid` keeps primary grid, alternate grid, and scrollback deque.
-- Alternate screen disables scrollback view (`offset = 0`).
-- On new updates while user is scrolled up, offset is shifted by `lines_added` and clamped.
-- Renderer builds visible rows from scrollback + active cells using current offset.
+History retention:
+- line cap: `max_lines_per_session`
+- TTL: `auto_delete_after_days`
 
-## Concurrency Model
-- Main thread: Iced runtime + app state updates.
-- Per session:
-  - 1 blocking PTY reader thread
-  - 1 blocking PTY writer thread
-- Channels:
-  - session event channel capacity: `64`
-  - per-session input channel capacity: `16`
+## Background Workers
+- `chatminal-cleanup`: finalizes exited sessions and disconnect state.
+- `chatminal-history-writer`: buffers and batches history writes (`50ms` interval, batch `128`).
+- `chatminal-cwd-sync`: polls process cwd every `500ms`, updates in-memory and DB state.
 
-## Error and Shutdown Behavior
-- Reader EOF/read error triggers `SessionEvent::Exited` through spawned sender thread.
-- `Message::SessionExited` is transformed into `Message::CloseSession`.
-- Close flow kills child process, drops handles, joins reader/writer threads.
-- Channel full/closed and PTY/shell errors are surfaced via `SessionError` and logged.
+## Runtime Controls and Limits
+- `MAX_INPUT_BYTES = 65_536`
+- `INPUT_QUEUE_SIZE = 128`
+- `MAX_SNAPSHOT_BYTES = 512 * 1024`
+- `HISTORY_FLUSH_INTERVAL = 50ms`
+- `HISTORY_BATCH_SIZE = 128`
+- `CWD_SYNC_INTERVAL = 500ms`
 
-## Security and Safety Controls
-1. Ignore broken-pipe signal to avoid process-level termination.
-2. Validate shell path against `/etc/shells` and executable permissions.
-3. Reject oversized PTY input payloads.
-4. Clamp PTY resize dimensions and config-driven numeric values.
-5. Keep queue boundaries explicit to avoid unbounded memory growth.
-
-## Current Gaps
-1. No integration test suite for full lifecycle under sustained output.
-2. No metrics/telemetry for render latency and queue pressure.
-3. Linux/Unix assumptions still embedded in shell and signal handling paths.
+## Security and Validation Controls
+- Shell path allow-list from `/etc/shells`.
+- Canonical path + executable-bit checks before spawn.
+- Input-size guard and bounded queues for write path.
+- Fallback shell order: configured shell -> `$SHELL` -> `/bin/zsh` -> `/bin/bash` -> `/bin/sh`.

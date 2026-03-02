@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>TermiChat - Terminal Interface</title>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        primary: "#1392ec",
+                        "background-light": "#f6f7f8",
+                        "background-dark": "#101a22",
+                        "surface-dark": "#1a2632",
+                        "surface-hover": "#243442",
+                        "text-main": "#e2e8f0",
+                        "text-muted": "#94a3b8",
+                        "term-bg": "#0d1117", // Darker terminal background
+                        "term-green": "#2ea043",
+                        "term-blue": "#58a6ff",
+                        "term-yellow": "#d29922",
+                        "term-red": "#ff7b72",
+                    },
+                    fontFamily: {
+                        display: ["Space Grotesk", "sans-serif"],
+                        mono: ["Space Mono", "monospace", "Menlo", "Monaco", "Consolas", "Liberation Mono", "Courier New"] 
+                    },
+                    borderRadius: {
+                        DEFAULT: "0.25rem",
+                        lg: "0.5rem",
+                        xl: "0.75rem",
+                        full: "9999px"
+                    },
+                },
+            },
+        }
+    </script>
+<style>::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0d1117; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #30363d; 
+            border-radius: 5px;
+            border: 2px solid #0d1117;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #484f58; 
+        }
+        body {
+            font-family: 'Space Grotesk', sans-serif;
+        }
+        .terminal-text {
+            font-family: 'Space Mono', monospace;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-text-main h-screen overflow-hidden flex flex-col">
+<div class="flex h-full w-full overflow-hidden">
+<aside class="w-80 flex-shrink-0 flex flex-col border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-surface-dark transition-all duration-300">
+<div class="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center gap-3">
+<div class="h-10 w-10 bg-primary/20 rounded-xl flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-2xl">terminal</span>
+</div>
+<div>
+<h1 class="font-bold text-lg leading-tight tracking-tight">TermiChat</h1>
+<div class="flex items-center gap-1.5">
+<span class="relative flex h-2 w-2">
+<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+<span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+</span>
+<p class="text-xs text-text-muted font-medium">Online</p>
+</div>
+</div>
+</div>
+<div class="px-4 pt-4 pb-2">
+<div class="relative">
+<span class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-text-muted">
+<span class="material-symbols-outlined text-xl">search</span>
+</span>
+<input class="w-full pl-10 pr-4 py-2 bg-slate-100 dark:bg-background-dark border-none rounded-lg text-sm placeholder-text-muted focus:ring-1 focus:ring-primary text-slate-900 dark:text-white" placeholder="Search sessions..." type="text"/>
+</div>
+</div>
+<div class="flex-1 overflow-y-auto py-2 px-2 space-y-1">
+<div class="px-3 py-2 text-xs font-bold text-text-muted uppercase tracking-wider">Active Sessions</div>
+<button class="w-full flex items-center gap-3 px-3 py-3 rounded-lg bg-primary/10 border-l-4 border-primary transition-colors text-left group">
+<div class="relative flex-shrink-0">
+<div class="h-10 w-10 rounded-lg bg-indigo-500/20 flex items-center justify-center text-indigo-400">
+<span class="material-symbols-outlined">dns</span>
+</div>
+<span class="absolute -bottom-1 -right-1 h-3 w-3 bg-green-500 border-2 border-white dark:border-surface-dark rounded-full"></span>
+</div>
+<div class="flex-1 min-w-0">
+<div class="flex justify-between items-baseline mb-0.5">
+<h3 class="font-medium text-sm text-slate-900 dark:text-white truncate">Production Server</h3>
+<span class="text-[10px] text-text-muted">Now</span>
+</div>
+<p class="text-xs text-text-muted truncate group-hover:text-primary transition-colors">root@192.168.1.10</p>
+</div>
+</button>
+<button class="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-slate-100 dark:hover:bg-surface-hover transition-colors text-left group">
+<div class="relative flex-shrink-0">
+<div class="h-10 w-10 rounded-lg bg-amber-500/20 flex items-center justify-center text-amber-400">
+<span class="material-symbols-outlined">code</span>
+</div>
+<span class="absolute -bottom-1 -right-1 h-3 w-3 bg-slate-500 border-2 border-white dark:border-surface-dark rounded-full"></span>
+</div>
+<div class="flex-1 min-w-0">
+<div class="flex justify-between items-baseline mb-0.5">
+<h3 class="font-medium text-sm text-slate-900 dark:text-text-main truncate">Local Development</h3>
+<span class="text-[10px] text-text-muted">2h</span>
+</div>
+<p class="text-xs text-text-muted truncate">npm start</p>
+</div>
+</button>
+<button class="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-slate-100 dark:hover:bg-surface-hover transition-colors text-left group">
+<div class="relative flex-shrink-0">
+<div class="h-10 w-10 rounded-lg bg-emerald-500/20 flex items-center justify-center text-emerald-400">
+<span class="material-symbols-outlined">database</span>
+</div>
+<span class="absolute -bottom-1 -right-1 h-3 w-3 bg-green-500 border-2 border-white dark:border-surface-dark rounded-full"></span>
+</div>
+<div class="flex-1 min-w-0">
+<div class="flex justify-between items-baseline mb-0.5">
+<h3 class="font-medium text-sm text-slate-900 dark:text-text-main truncate">DB Migration</h3>
+<span class="text-[10px] text-text-muted">1d</span>
+</div>
+<p class="text-xs text-text-muted truncate">psql -U admin</p>
+</div>
+</button>
+<button class="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-slate-100 dark:hover:bg-surface-hover transition-colors text-left group">
+<div class="relative flex-shrink-0">
+<div class="h-10 w-10 rounded-lg bg-rose-500/20 flex items-center justify-center text-rose-400">
+<span class="material-symbols-outlined">cloud_off</span>
+</div>
+<span class="absolute -bottom-1 -right-1 h-3 w-3 bg-red-500 border-2 border-white dark:border-surface-dark rounded-full"></span>
+</div>
+<div class="flex-1 min-w-0">
+<div class="flex justify-between items-baseline mb-0.5">
+<h3 class="font-medium text-sm text-slate-900 dark:text-text-main truncate">Staging Environment</h3>
+<span class="text-[10px] text-text-muted">Offline</span>
+</div>
+<p class="text-xs text-text-muted truncate">Connection timeout</p>
+</div>
+</button>
+<div class="px-3 py-2 mt-4 text-xs font-bold text-text-muted uppercase tracking-wider">System</div>
+<button class="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-slate-100 dark:hover:bg-surface-hover transition-colors text-left group">
+<div class="relative flex-shrink-0">
+<div class="h-10 w-10 rounded-lg bg-slate-500/20 flex items-center justify-center text-slate-400">
+<span class="material-symbols-outlined">description</span>
+</div>
+</div>
+<div class="flex-1 min-w-0">
+<div class="flex justify-between items-baseline mb-0.5">
+<h3 class="font-medium text-sm text-slate-900 dark:text-text-main truncate">Audit Logs</h3>
+</div>
+<p class="text-xs text-text-muted truncate">View recent activity</p>
+</div>
+</button>
+</div>
+<div class="p-4 border-t border-slate-200 dark:border-slate-800">
+<div class="flex items-center gap-3">
+<div class="h-10 w-10 rounded-full bg-cover bg-center" data-alt="Portrait of the current user" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuAZouY3G1Nc4pLcINZO9CC5-y11Bghk3X9wqzExjNnyOE0Le8slxLAaFli1A8wJ7jEeQTL-ZU1ohwB9KL2k1H3ZfA9CkC-v3ozf6IgEJxPRgNyB-AaertcWCGdoAER1eLCK29fq9JMw2jzldUEX7Ty1UDlsyYT3Hntn3gq-dYyx1rpwzKMt5FYrhMN5okhZPpVrL1C81ZUDMDW75u4K0sZMGrMGl8ArARJCWggJqWE4ttNwmZv061aevaZb1K-nzcrfUEmr67zgD7Y')"></div>
+<div class="flex-1 min-w-0">
+<p class="text-sm font-medium text-slate-900 dark:text-white truncate">DevUser</p>
+<p class="text-xs text-text-muted truncate">Admin Access</p>
+</div>
+<button class="text-text-muted hover:text-white transition-colors">
+<span class="material-symbols-outlined">settings</span>
+</button>
+</div>
+</div>
+</aside>
+<main class="flex-1 flex flex-col min-w-0 bg-term-bg relative">
+<header class="h-16 flex items-center justify-between px-6 border-b border-slate-800 bg-surface-dark z-10 flex-shrink-0">
+<div class="flex items-center gap-4">
+<div class="h-10 w-10 rounded-lg bg-indigo-500/20 flex items-center justify-center text-indigo-400">
+<span class="material-symbols-outlined">dns</span>
+</div>
+<div>
+<h2 class="text-lg font-bold text-white leading-tight">Production Server</h2>
+<div class="flex items-center text-xs text-text-muted gap-2">
+<span class="flex items-center gap-1 font-mono text-term-green">ubuntu@192.168.1.10</span>
+<span class="w-1 h-1 rounded-full bg-slate-600"></span>
+<span class="text-green-500 flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> SSH Connected</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-2">
+<button class="p-2 text-text-muted hover:text-primary hover:bg-primary/10 rounded-lg transition-colors" title="Search History">
+<span class="material-symbols-outlined">search</span>
+</button>
+<button class="p-2 text-text-muted hover:text-primary hover:bg-primary/10 rounded-lg transition-colors" title="Pin Session">
+<span class="material-symbols-outlined">push_pin</span>
+</button>
+<div class="h-6 w-px bg-slate-700 mx-1"></div>
+<button class="p-2 text-text-muted hover:text-primary hover:bg-primary/10 rounded-lg transition-colors" title="Session Info">
+<span class="material-symbols-outlined">info</span>
+</button>
+</div>
+</header>
+<div class="flex-1 overflow-y-auto p-4 scroll-smooth font-mono text-sm text-slate-300 bg-term-bg">
+<div class="max-w-6xl mx-auto space-y-4">
+<div class="text-slate-400 mb-6">
+<p>Welcome to Ubuntu 20.04.3 LTS (GNU/Linux 5.4.0-91-generic x86_64)</p>
+<br/>
+<p> * Documentation:  https://help.ubuntu.com</p>
+<p> * Management:     https://landscape.canonical.com</p>
+<p> * Support:        https://ubuntu.com/advantage</p>
+<br/>
+<p>Last login: Tue Oct 12 10:21:44 2023 from 10.0.0.5</p>
+</div>
+<div class="terminal-block group">
+<div class="flex items-baseline flex-wrap">
+<span class="text-term-green font-bold mr-2">user@prod-server:~$</span>
+<span class="text-white">sudo apt-get update &amp;&amp; sudo apt-get upgrade -y</span>
+<span class="ml-auto text-xs text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity select-none">10:24 AM</span>
+</div>
+<div class="mt-1 pl-0 text-slate-400 leading-tight">
+<div class="text-slate-400">Hit:1 http://us.archive.ubuntu.com/ubuntu focal InRelease</div>
+<div class="text-slate-400">Get:2 http://us.archive.ubuntu.com/ubuntu focal-updates InRelease [114 kB]</div>
+<div class="text-slate-400">Get:3 http://us.archive.ubuntu.com/ubuntu focal-backports InRelease [108 kB]</div>
+<div class="text-slate-400">Get:4 http://security.ubuntu.com/ubuntu focal-security InRelease [114 kB]</div>
+<div class="text-slate-500 mt-1">Fetched 336 kB in 1s (432 kB/s)</div>
+<div class="mt-1">Reading package lists... Done</div>
+<div>Building dependency tree       </div>
+<div>Reading state information... Done</div>
+<div class="text-term-blue mt-1">7 packages can be upgraded. Run 'apt list --upgradable' to see them.</div>
+</div>
+</div>
+<div class="terminal-block group pt-2">
+<div class="flex items-baseline flex-wrap">
+<span class="text-term-green font-bold mr-2">user@prod-server:~$</span>
+<span class="text-white">docker ps --format "table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Names}}"</span>
+<span class="ml-auto text-xs text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity select-none">10:25 AM</span>
+</div>
+<div class="mt-2 pl-0 text-slate-300 w-full overflow-x-auto">
+<pre class="whitespace-pre font-mono">CONTAINER ID   IMAGE            STATUS         NAMES
+<span class="text-term-yellow">a1b2c3d4e5f6</span>   nginx:latest     <span class="text-term-green">Up 2 hours</span>     web-server
+<span class="text-term-yellow">f6e5d4c3b2a1</span>   postgres:14      <span class="text-term-green">Up 2 days</span>      db-primary
+<span class="text-term-yellow">9z8y7x6w5v4u</span>   redis:alpine     <span class="text-term-red">Exited (0)</span>     cache-worker</pre>
+</div>
+</div>
+<div class="terminal-block group pt-2">
+<div class="flex items-baseline flex-wrap">
+<span class="text-term-green font-bold mr-2">user@prod-server:~$</span>
+<span class="text-white typing-effect">tail -f /var/log/syslog<span class="inline-block w-2.5 h-5 bg-slate-400 ml-1 align-middle animate-pulse"></span></span>
+</div>
+</div>
+</div>
+</div>
+<div class="p-4 bg-surface-dark border-t border-slate-800">
+<div class="relative flex items-center gap-2 bg-term-bg rounded-lg p-3 ring-1 ring-slate-700 focus-within:ring-2 focus-within:ring-primary transition-shadow">
+<span class="text-term-green font-bold font-mono shrink-0 select-none">$</span>
+<div class="flex-1 min-w-0">
+<input autofocus="" class="w-full bg-transparent border-none p-0 text-white placeholder-slate-600 focus:ring-0 font-mono text-sm" placeholder="Type a command..." type="text"/>
+</div>
+<div class="flex items-center gap-2 text-slate-500">
+<span class="text-xs font-mono bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700">Tab</span>
+<span class="text-xs font-mono bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700">↵</span>
+</div>
+</div>
+<div class="flex justify-between items-center px-2 mt-2">
+<p class="text-[10px] text-slate-500">Session ID: <span class="font-mono text-slate-400">#8291-A</span></p>
+<div class="flex items-center gap-4">
+<button class="text-[10px] text-slate-500 hover:text-slate-300 flex items-center gap-1 transition-colors">
+<span class="material-symbols-outlined text-[14px]">history</span> History
+                        </button>
+<p class="text-[10px] text-slate-500 flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                            SSH: Port 22
+                        </p>
+</div>
+</div>
+</div>
+</main>
+</div>
+
+</body></html>

@@ -2,58 +2,63 @@
 
 All notable implementation and documentation changes are tracked here.
 
-## 2026-03-01 (docs synchronization refresh)
+## 2026-03-02 (docs realignment from merged scouting + doc-read reports)
 
 ### Changed
-- Added root `README.md` as repository entrypoint.
-- Updated core docs to match current runtime implementation:
-  - parser/runtime based on `wezterm-term` + `wezterm-surface`
-  - snapshot extraction limited to `scrollback window + visible window`
-  - `lines_added` derived from stable-row delta
-  - EOF/read-error `SessionEvent::Exited` dispatch via spawned sender thread + `blocking_send`
-- Aligned all references to current test baseline: `23 passed`.
-- Updated roadmap state and cross-links between roadmap/changelog docs.
+- Re-synced docs to active runtime: `Tauri v2 + Rust + Svelte 5 + xterm.js`.
+- Added complete profile command coverage in architecture/summary/PDR docs:
+  - `list_profiles`, `create_profile`, `switch_profile`, `rename_profile`, `delete_profile`.
+- Corrected default session `cwd` docs to match runtime behavior:
+  - payload `cwd` -> home directory (`~`) -> `/` fallback.
+- Added persistence state-key documentation:
+  - `active_profile_id`
+  - `active_session_id:{profile_id}`
+- Expanded deployment docs with release artifact locations and `settings.json` normalization ranges.
+- Updated design/development roadmap docs to remove legacy-Iced-as-active ambiguity.
+- Regenerated `repomix-output.xml` and rebuilt `docs/codebase-summary.md` from the new compaction.
 
-## 2026-03-01 (terminal fidelity hardening round 2)
+### Docs Updated
+- `README.md`
+- `docs/index.md`
+- `docs/project-overview-pdr.md`
+- `docs/codebase-summary.md`
+- `docs/code-standards.md`
+- `docs/system-architecture.md`
+- `docs/project-roadmap.md`
+- `docs/deployment-guide.md`
+- `docs/design-guidelines.md`
+- `docs/development-roadmap.md`
+- `docs/project-changelog.md`
+
+## 2026-03-02 (persistence v1 + lazy reconnect implementation)
+
+### Added
+- SQLite persistence layer at `src-tauri/src/persistence.rs`:
+  - tables `sessions`, `scrollback`, `app_state`
+  - batch writer path for scrollback chunks
+  - retention controls: line-cap + TTL
+- New workspace/runtime commands:
+  - `load_workspace`
+  - `activate_session`
+  - `set_session_persist`
+  - `clear_session_history`
+  - `clear_all_history`
+- Session model extensions:
+  - session status contract now uses `running | disconnected`
+  - metadata fields `cwd`, `persist_history`
 
 ### Changed
-- Expanded keyboard mapping (`Shift+Tab`, function keys `F1..F12`, extended Ctrl symbols, Alt prefix).
-- Moved grid cell payload from `char` to `String` for better grapheme handling.
-- Improved underline rendering for empty/continuation cells.
-- Updated color fidelity path to use resolved wezterm palette for non-default colors.
+- Frontend startup flow now restores workspace via `load_workspace`.
+- Lazy reconnect restores disconnected previews and respawns on activation/input.
+- Added session-level actions in UI: rename, toggle persistence, clear history.
 
-### Added
-- Input-handler tests for key mapping expansions.
-- Test baseline increased to 23 passing tests.
-
-## 2026-03-01 (wezterm cursor-map hardening)
+## 2026-03-02 (tauri + svelte runtime docs baseline)
 
 ### Changed
-- Completed PTY output path using wezterm terminal state snapshots.
-- Added cursor style mapping from wezterm cursor shape/visibility.
-- Optimized snapshot extraction to avoid scanning full physical history.
-- Hardened exited-event delivery via dedicated sender thread to avoid reader-thread stalls.
+- Established core docs baseline for active Tauri runtime.
+- Added legacy note clarifying `src/` as non-default runtime path.
 
-### Added
-- Regression tests for cursor shape/visibility mapping and exited-event delivery behavior.
-- Test baseline increased to 20 passing tests.
-
-## 2026-03-01 (runtime hardening baseline)
-
-### Changed
-- Config clamp hardening for `scrollback_lines`, `font_size`, `sidebar_width`.
-- Runtime cell-metric path tied to `font_size` via `metrics_for_font`.
-- Queue-full update behavior changed to retry latest dirty snapshot.
-- Reverse-index parser behavior covered (`ESC M`).
-
-### Added
-- Regression tests for reverse-index and queue-full retry.
-- Test baseline increased to 13 passing tests.
-
-## 2026-03-01 (initial docs baseline)
-
-### Added
-- Established `docs/` structure and initial architecture/PDR/standards/roadmap docs.
+## 2026-03-01 (historical baseline)
 
 ### Notes
-- This was the initial documentation bootstrap point for the repository.
+- Earlier docs/workplans were centered on the Rust/Iced runtime before Tauri became the active runtime.
