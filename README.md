@@ -32,6 +32,10 @@ Last updated: 2026-03-02
   - close main window -> hide to tray (configurable)
   - tray menu supports show/new session/quit completely
   - optional start-in-tray preference
+- Runtime backend introspection:
+  - `get_runtime_backend_info`
+  - `ping_runtime_backend`
+  - daemon staging support without changing default in-process PTY runtime
 - Persistence (SQLite):
   - profiles
   - session metadata (`name`, `cwd`, `status`, `persist_history`, `last_seq`)
@@ -47,6 +51,8 @@ Last updated: 2026-03-02
 - `src-tauri/src/service.rs`: PTY session lifecycle, IO, workers, event emit.
 - `src-tauri/src/persistence.rs`: SQLite schema, workspace restore, retention.
 - `src-tauri/src/config.rs`: `settings.json` + legacy `config.toml` shell fallback.
+- `src-tauri/src/runtime_backend.rs`: runtime backend mode resolver and daemon ping contract.
+- `src-tauri/src/chatminald_client.rs`: lightweight local IPC daemon health client (`PING`/`PONG`).
 - `frontend/src/App.svelte`: xterm UI, profile/session UX, invoke/listen bridge.
 
 ## Project Layout
@@ -127,6 +133,16 @@ Normalization in backend:
 - `max_lines_per_session`: `100..=5000`
 - `auto_delete_after_days`: `0..=3650`
 - `preview_lines`: `10..=5000`
+
+Optional runtime backend environment variables:
+- `CHATMINAL_RUNTIME_BACKEND`
+  - `in_process` (default)
+  - `daemon` (daemon mode intent; current PTY runtime still defaults to in-process)
+- `CHATMINAL_DAEMON_ENDPOINT`
+  - local IPC endpoint path:
+    - Linux/macOS example: `/tmp/chatminald.sock`
+    - Windows example: `\\.\pipe\chatminald-user`
+- Backward compatibility: `CHATMINAL_DAEMON_ADDR` still accepted as fallback alias.
 
 Legacy shell file (still read as fallback):
 - Linux: `~/.config/chatminal/config.toml`

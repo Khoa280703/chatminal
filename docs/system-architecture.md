@@ -38,6 +38,7 @@ Chatminal runs as a desktop Tauri app with a Rust PTY backend and Svelte fronten
 | --- | --- | --- |
 | App bootstrap and command exposure | `src-tauri/src/main.rs` | Register Tauri commands and app state. |
 | PTY orchestration | `src-tauri/src/service.rs` | Session lifecycle, profile operations, event emit, worker startup. |
+| Runtime backend mode and daemon probing | `src-tauri/src/runtime_backend.rs`, `src-tauri/src/chatminald_client.rs` | Resolve runtime mode and provide daemon health ping contract over local IPC (UDS/Named Pipe). |
 | Data contracts | `src-tauri/src/models.rs` | Request/response/event payload models. |
 | Persistence | `src-tauri/src/persistence.rs` | Schema, migrations, state keys, history retention. |
 | Runtime config | `src-tauri/src/config.rs` | `settings.json` normalization + legacy shell fallback. |
@@ -62,6 +63,8 @@ Chatminal runs as a desktop Tauri app with a Rust PTY backend and Svelte fronten
 - `set_session_persist`
 - `get_lifecycle_preferences`
 - `set_lifecycle_preferences`
+- `get_runtime_backend_info`
+- `ping_runtime_backend`
 - `shutdown_app`
 - `close_session`
 - `clear_session_history`
@@ -85,6 +88,7 @@ Chatminal runs as a desktop Tauri app with a Rust PTY backend and Svelte fronten
 7. Reader thread emits `pty/output`; frontend applies ordered chunks by `seq`.
 8. On reader EOF/error, cleanup worker emits `pty/exited`, closes runtime, and sets status to disconnected.
 9. Window close event có thể được intercept để hide-to-tray thay vì thoát process, dựa trên lifecycle preferences.
+10. Runtime backend mode can be inspected at runtime; daemon health ping is exposed without switching default PTY execution path.
 
 ## Persistence Design
 SQLite tables:

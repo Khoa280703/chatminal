@@ -17,6 +17,29 @@ pub struct SessionInfo {
     pub seq: u64,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeBackendMode {
+    InProcess,
+    Daemon,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RuntimeBackendInfo {
+    pub mode: RuntimeBackendMode,
+    pub daemon_endpoint: Option<String>,
+    pub note: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RuntimeBackendPing {
+    pub mode: RuntimeBackendMode,
+    pub daemon_endpoint: Option<String>,
+    pub reachable: bool,
+    pub latency_ms: Option<u128>,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ProfileInfo {
     pub profile_id: String,

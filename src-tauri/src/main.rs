@@ -1,6 +1,8 @@
+mod chatminald_client;
 mod config;
 mod models;
 mod persistence;
+mod runtime_backend;
 mod service;
 
 use std::sync::{
@@ -11,10 +13,11 @@ use std::sync::{
 use models::{
     ActivateSessionPayload, CreateProfilePayload, CreateSessionPayload, CreateSessionResponse,
     DeleteProfilePayload, LifecyclePreferences, ProfileInfo, RenameProfilePayload,
-    RenameSessionPayload, ResizeSessionPayload, SessionActionPayload, SessionInfo, SessionSnapshot,
-    SetLifecyclePreferencesPayload, SetSessionPersistPayload, SwitchProfilePayload, WorkspaceState,
-    WriteInputPayload,
+    RenameSessionPayload, ResizeSessionPayload, RuntimeBackendInfo, RuntimeBackendPing,
+    SessionActionPayload, SessionInfo, SessionSnapshot, SetLifecyclePreferencesPayload,
+    SetSessionPersistPayload, SwitchProfilePayload, WorkspaceState, WriteInputPayload,
 };
+use runtime_backend::RuntimeBackend;
 use service::PtyService;
 use tauri::{Emitter, Manager, State, WindowEvent, menu::MenuBuilder, tray::TrayIconBuilder};
 
@@ -24,6 +27,7 @@ const TRAY_QUIT_ID: &str = "tray_quit";
 
 struct AppState {
     service: Arc<PtyService>,
+    runtime_backend: RuntimeBackend,
     is_quitting: AtomicBool,
 }
 
@@ -222,6 +226,16 @@ fn shutdown_app(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<(),
     request_quit(&app, &state)
 }
 
+#[tauri::command]
+fn get_runtime_backend_info(state: State<'_, AppState>) -> RuntimeBackendInfo {
+    state.runtime_backend.info()
+}
+
+#[tauri::command]
+fn ping_runtime_backend(state: State<'_, AppState>) -> RuntimeBackendPing {
+    state.runtime_backend.ping()
+}
+
 fn main() {
     let _ = env_logger::try_init();
 
@@ -229,9 +243,11 @@ fn main() {
         .setup(|app| {
             let config = config::load_config();
             let service = Arc::new(PtyService::new(app.handle().clone(), config));
+            let runtime_backend = RuntimeBackend::from_env();
             let lifecycle_preferences = service.get_lifecycle_preferences().unwrap_or_default();
             app.manage(AppState {
                 service,
+                runtime_backend,
                 is_quitting: AtomicBool::new(false),
             });
 
@@ -289,6 +305,8 @@ fn main() {
             clear_session_history,
             clear_all_history,
             get_session_snapshot,
+            get_runtime_backend_info,
+            ping_runtime_backend,
             shutdown_app
         ])
         .run(tauri::generate_context!())

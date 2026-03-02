@@ -2,6 +2,29 @@
 
 All notable implementation and documentation changes are tracked here.
 
+## 2026-03-02 (native daemon staging baseline)
+
+### Added
+- Runtime backend staging modules:
+  - `src-tauri/src/runtime_backend.rs`
+  - `src-tauri/src/chatminald_client.rs`
+- New Tauri commands for runtime backend introspection:
+  - `get_runtime_backend_info`
+  - `ping_runtime_backend`
+- New runtime backend models:
+  - `RuntimeBackendMode`
+  - `RuntimeBackendInfo`
+  - `RuntimeBackendPing`
+
+### Changed
+- `AppState` now includes runtime backend mode resolver alongside PTY service.
+- Windows shell-path validation now resolves executable candidates instead of accepting non-empty strings.
+- Daemon ping transport switched to local IPC only:
+  - Unix Domain Socket on Linux/macOS
+  - Named Pipe on Windows
+  - TCP removed from production path
+- README and architecture docs now describe daemon staging env vars and command contracts.
+
 ## 2026-03-02 (tray lifecycle + app keep-alive)
 
 ### Added
