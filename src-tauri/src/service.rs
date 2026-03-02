@@ -1,4 +1,5 @@
 use std::io::{Read, Write};
+#[cfg(not(target_os = "windows"))]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, mpsc as std_mpsc};
@@ -16,10 +17,11 @@ use uuid::Uuid;
 use crate::config::{AppConfig, UserSettings};
 use crate::models::{
     ActivateSessionPayload, CreateProfilePayload, CreateSessionPayload, CreateSessionResponse,
-    DeleteProfilePayload, ProfileInfo, PtyErrorEvent, PtyExitedEvent, PtyOutputEvent,
-    RenameProfilePayload, RenameSessionPayload, ResizeSessionPayload, SessionActionPayload,
-    SessionInfo, SessionSnapshot, SessionStatus, SetSessionPersistPayload, SwitchProfilePayload,
-    WorkspaceState, WriteInputPayload,
+    DeleteProfilePayload, LifecyclePreferences, ProfileInfo, PtyErrorEvent, PtyExitedEvent,
+    PtyOutputEvent, RenameProfilePayload, RenameSessionPayload, ResizeSessionPayload,
+    SessionActionPayload, SessionInfo, SessionSnapshot, SessionStatus,
+    SetLifecyclePreferencesPayload, SetSessionPersistPayload, SwitchProfilePayload, WorkspaceState,
+    WriteInputPayload,
 };
 use crate::persistence::{
     HistoryChunk, PersistedProfile, PersistedWorkspace, Persistence, SessionRecord, now_ts_millis,
@@ -32,6 +34,8 @@ const MAX_SESSION_NAME_CHARS: usize = 120;
 const HISTORY_FLUSH_INTERVAL: Duration = Duration::from_millis(50);
 const HISTORY_BATCH_SIZE: usize = 128;
 const CWD_SYNC_INTERVAL: Duration = Duration::from_millis(500);
+const KEEP_ALIVE_ON_CLOSE_KEY: &str = "keep_alive_on_close";
+const START_IN_TRAY_KEY: &str = "start_in_tray";
 
 struct SessionShared {
     output: String,
@@ -163,6 +167,46 @@ impl PtyService {
                 Vec::new()
             }
         }
+    }
+
+    pub fn get_lifecycle_preferences(&self) -> Result<LifecyclePreferences, String> {
+        let Some(persistence) = &self.persistence else {
+            return Ok(LifecyclePreferences::default());
+        };
+
+        Ok(LifecyclePreferences {
+            keep_alive_on_close: persistence.get_bool_state(
+                KEEP_ALIVE_ON_CLOSE_KEY,
+                LifecyclePreferences::default().keep_alive_on_close,
+            )?,
+            start_in_tray: persistence.get_bool_state(
+                START_IN_TRAY_KEY,
+                LifecyclePreferences::default().start_in_tray,
+            )?,
+        })
+    }
+
+    pub fn set_lifecycle_preferences(
+        &self,
+        payload: SetLifecyclePreferencesPayload,
+    ) -> Result<LifecyclePreferences, String> {
+        let mut current = self.get_lifecycle_preferences()?;
+
+        if let Some(next) = payload.keep_alive_on_close {
+            current.keep_alive_on_close = next;
+        }
+        if let Some(next) = payload.start_in_tray {
+            current.start_in_tray = next;
+        }
+
+        let Some(persistence) = &self.persistence else {
+            return Ok(current);
+        };
+
+        persistence.set_bool_state(KEEP_ALIVE_ON_CLOSE_KEY, current.keep_alive_on_close)?;
+        persistence.set_bool_state(START_IN_TRAY_KEY, current.start_in_tray)?;
+
+        Ok(current)
     }
 
     pub fn create_profile(&self, payload: CreateProfilePayload) -> Result<ProfileInfo, String> {
@@ -638,6 +682,48 @@ impl PtyService {
         Ok(())
     }
 
+    pub fn shutdown_graceful(&self) -> Result<(), String> {
+        let removed = {
+            let mut sessions = self
+                .sessions
+                .lock()
+                .map_err(|_| "sessions lock poisoned".to_string())?;
+            let targets: Vec<Uuid> = sessions.keys().copied().collect();
+            let mut removed = Vec::with_capacity(targets.len());
+
+            for session_id in targets {
+                if let Some(session) = sessions.shift_remove(&session_id) {
+                    removed.push(session);
+                }
+            }
+            removed
+        };
+
+        for mut session in removed {
+            emit_exited_once(
+                &self.app_handle,
+                session.id,
+                &session.shared,
+                "killed",
+                Some(0),
+            );
+            if let Some(runtime) = session.runtime.take() {
+                close_runtime(runtime);
+            }
+
+            if let Some(persistence) = &self.persistence {
+                let _ = persistence
+                    .set_session_status(&session.id.to_string(), SessionStatus::Disconnected);
+                if let Ok(record) = session_to_record(&session) {
+                    let _ = persistence.upsert_session(&record);
+                }
+            }
+        }
+
+        self.set_active_session(None);
+        Ok(())
+    }
+
     pub fn get_session_snapshot(
         &self,
         payload: SessionActionPayload,
@@ -690,13 +776,26 @@ impl PtyService {
             candidates.push(shell.to_string());
         }
 
-        if let Ok(shell) = std::env::var("SHELL") {
-            candidates.push(shell);
+        #[cfg(not(target_os = "windows"))]
+        {
+            if let Ok(shell) = std::env::var("SHELL") {
+                candidates.push(shell);
+            }
+
+            candidates.push("/bin/zsh".to_string());
+            candidates.push("/bin/bash".to_string());
+            candidates.push("/bin/sh".to_string());
         }
 
-        candidates.push("/bin/zsh".to_string());
-        candidates.push("/bin/bash".to_string());
-        candidates.push("/bin/sh".to_string());
+        #[cfg(target_os = "windows")]
+        {
+            if let Ok(shell) = std::env::var("COMSPEC") {
+                candidates.push(shell);
+            }
+            candidates.push("pwsh.exe".to_string());
+            candidates.push("powershell.exe".to_string());
+            candidates.push("cmd.exe".to_string());
+        }
 
         for candidate in candidates {
             if self.validate_shell_path(&candidate).is_ok() {
@@ -708,27 +807,43 @@ impl PtyService {
     }
 
     fn validate_shell_path(&self, raw_path: &str) -> Result<(), String> {
-        let raw = PathBuf::from(raw_path);
-
-        std::fs::symlink_metadata(&raw).map_err(|err| format!("invalid shell path: {err}"))?;
-
-        let canonical = std::fs::canonicalize(&raw)
-            .map_err(|err| format!("cannot canonicalize shell: {err}"))?;
-
-        if !self.is_allowed_shell(&raw, &canonical)? {
-            return Err(format!("shell is not in /etc/shells: {}", raw.display()));
+        #[cfg(target_os = "windows")]
+        {
+            let normalized = raw_path.trim().trim_matches('"');
+            if normalized.is_empty() {
+                return Err("shell path is empty".to_string());
+            }
+            if Self::resolve_windows_shell_candidate(normalized).is_none() {
+                return Err(format!("shell is not resolvable: {normalized}"));
+            }
+            return Ok(());
         }
 
-        let meta =
-            std::fs::metadata(&canonical).map_err(|err| format!("cannot stat shell: {err}"))?;
+        #[cfg(not(target_os = "windows"))]
+        {
+            let raw = PathBuf::from(raw_path);
 
-        if !meta.is_file() || meta.permissions().mode() & 0o111 == 0 {
-            return Err("shell is not executable".to_string());
+            std::fs::symlink_metadata(&raw).map_err(|err| format!("invalid shell path: {err}"))?;
+
+            let canonical = std::fs::canonicalize(&raw)
+                .map_err(|err| format!("cannot canonicalize shell: {err}"))?;
+
+            if !self.is_allowed_shell(&raw, &canonical)? {
+                return Err(format!("shell is not in /etc/shells: {}", raw.display()));
+            }
+
+            let meta =
+                std::fs::metadata(&canonical).map_err(|err| format!("cannot stat shell: {err}"))?;
+
+            if !meta.is_file() || meta.permissions().mode() & 0o111 == 0 {
+                return Err("shell is not executable".to_string());
+            }
+
+            Ok(())
         }
-
-        Ok(())
     }
 
+    #[cfg(not(target_os = "windows"))]
     fn is_allowed_shell(&self, raw: &Path, canonical: &Path) -> Result<bool, String> {
         let shells = std::fs::read_to_string("/etc/shells")
             .map_err(|err| format!("cannot read /etc/shells: {err}"))?;
@@ -752,6 +867,78 @@ impl PtyService {
         }
 
         Ok(false)
+    }
+
+    #[cfg(target_os = "windows")]
+    fn validate_windows_path_candidate(path: &Path) -> bool {
+        std::fs::metadata(path)
+            .map(|meta| meta.is_file())
+            .unwrap_or(false)
+    }
+
+    #[cfg(target_os = "windows")]
+    fn windows_pathexts() -> Vec<String> {
+        let default = vec![
+            ".com".to_string(),
+            ".exe".to_string(),
+            ".bat".to_string(),
+            ".cmd".to_string(),
+        ];
+
+        let Some(raw) = std::env::var_os("PATHEXT") else {
+            return default;
+        };
+
+        let value = raw.to_string_lossy();
+        let mut parsed = Vec::new();
+        for token in value.split(';') {
+            let token = token.trim();
+            if token.is_empty() {
+                continue;
+            }
+            if token.starts_with('.') {
+                parsed.push(token.to_ascii_lowercase());
+            } else {
+                parsed.push(format!(".{}", token.to_ascii_lowercase()));
+            }
+        }
+
+        if parsed.is_empty() { default } else { parsed }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn resolve_windows_shell_candidate(raw: &str) -> Option<PathBuf> {
+        let candidate = PathBuf::from(raw);
+        if candidate.components().count() > 1 || candidate.is_absolute() {
+            let canonical = std::fs::canonicalize(candidate).ok()?;
+            if Self::validate_windows_path_candidate(&canonical) {
+                return Some(canonical);
+            }
+            return None;
+        }
+
+        let path_var = std::env::var_os("PATH")?;
+        let has_extension = Path::new(raw).extension().is_some();
+        let pathexts = Self::windows_pathexts();
+
+        for dir in std::env::split_paths(&path_var) {
+            if has_extension {
+                let full = dir.join(raw);
+                if Self::validate_windows_path_candidate(&full) {
+                    return Some(full);
+                }
+                continue;
+            }
+
+            for ext in &pathexts {
+                let full = dir.join(format!("{raw}{ext}"));
+                if Self::validate_windows_path_candidate(&full) {
+                    return Some(full);
+                }
+            }
+        }
+
+        None
     }
 
     fn validate_session_name(&self, raw_name: &str) -> Result<String, String> {
@@ -966,11 +1153,11 @@ fn hydrate_sessions_from_workspace(service: &PtyService, workspace: PersistedWor
 }
 
 fn session_to_info(session: &Session) -> SessionInfo {
-    let (status, persist_history) = session
+    let (status, persist_history, seq) = session
         .shared
         .lock()
-        .map(|shared| (shared.status.clone(), shared.persist_history))
-        .unwrap_or((SessionStatus::Disconnected, false));
+        .map(|shared| (shared.status.clone(), shared.persist_history, shared.seq))
+        .unwrap_or((SessionStatus::Disconnected, false, 0));
 
     SessionInfo {
         session_id: session.id.to_string(),
@@ -978,6 +1165,7 @@ fn session_to_info(session: &Session) -> SessionInfo {
         cwd: session.cwd.clone(),
         status,
         persist_history,
+        seq,
     }
 }
 

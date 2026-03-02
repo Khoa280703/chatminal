@@ -3,11 +3,16 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { FitAddon } from "@xterm/addon-fit";
+  import { SearchAddon } from "@xterm/addon-search";
+  import { SerializeAddon } from "@xterm/addon-serialize";
+  import { Unicode11Addon } from "@xterm/addon-unicode11";
+  import { WebLinksAddon } from "@xterm/addon-web-links";
   import { WebglAddon } from "@xterm/addon-webgl";
   import { Terminal } from "xterm";
 
   import type {
     CreateSessionResponse,
+    LifecyclePreferences,
     ProfileInfo,
     PtyErrorEvent,
     PtyExitedEvent,
@@ -20,6 +25,8 @@
   let terminalHost: HTMLDivElement | null = null;
   let terminal: Terminal | null = null;
   let fitAddon: FitAddon | null = null;
+  let searchAddon: SearchAddon | null = null;
+  let serializeAddon: SerializeAddon | null = null;
   let resizeObserver: ResizeObserver | null = null;
 
   let profiles: ProfileInfo[] = [];
@@ -44,10 +51,22 @@
   let unlistenOutput: UnlistenFn | null = null;
   let unlistenExited: UnlistenFn | null = null;
   let unlistenError: UnlistenFn | null = null;
+  let unlistenTrayNewSession: UnlistenFn | null = null;
 
   const TERMINAL_SCROLLBACK = 1000;
+  const MAX_SERIALIZED_CACHE_SESSIONS = 24;
   const activationInFlight = new Map<string, Promise<void>>();
   const localInputBufferBySession = new Map<string, string>();
+  const sessionRenderedSeqById = new Map<string, number>();
+  const sessionLiveSeqById = new Map<string, number>();
+  const serializedSnapshotBySession = new Map<string, string>();
+  let renderedSessionId: string | null = null;
+  let searchQuery = "";
+  let lifecyclePreferences: LifecyclePreferences = {
+    keep_alive_on_close: true,
+    start_in_tray: false,
+  };
+  let lifecyclePreferencesBusy = false;
 
   $: activeSession =
     sessions.find((session) => session.session_id === activeSessionId) ?? null;
@@ -65,6 +84,129 @@
     const haystack = `${session.name} ${session.cwd}`.toLowerCase();
     return haystack.includes(needle);
   });
+
+  function primeSessionSeqMap(source: SessionInfo[]) {
+    for (const session of source) {
+      if (session.seq === 0) {
+        sessionLiveSeqById.set(session.session_id, 0);
+        sessionRenderedSeqById.set(session.session_id, 0);
+        serializedSnapshotBySession.delete(session.session_id);
+        continue;
+      }
+      sessionLiveSeqById.set(session.session_id, session.seq);
+      if (!sessionRenderedSeqById.has(session.session_id) && session.seq > 0) {
+        sessionRenderedSeqById.set(session.session_id, session.seq);
+      }
+    }
+  }
+
+  function updateRenderedSeq(sessionId: string, seq: number) {
+    if (seq <= 0) {
+      return;
+    }
+    const current = sessionRenderedSeqById.get(sessionId) ?? 0;
+    if (seq > current) {
+      sessionRenderedSeqById.set(sessionId, seq);
+    }
+  }
+
+  function setSerializedCache(sessionId: string, serialized: string) {
+    if (!serialized.trim()) {
+      return;
+    }
+
+    if (serializedSnapshotBySession.has(sessionId)) {
+      serializedSnapshotBySession.delete(sessionId);
+    }
+    serializedSnapshotBySession.set(sessionId, serialized);
+
+    while (serializedSnapshotBySession.size > MAX_SERIALIZED_CACHE_SESSIONS) {
+      const oldest = serializedSnapshotBySession.keys().next().value;
+      if (!oldest) {
+        break;
+      }
+      serializedSnapshotBySession.delete(oldest);
+    }
+  }
+
+  function captureActiveTerminalSnapshot() {
+    if (!terminal || !serializeAddon || !activeSessionId || renderedSessionId !== activeSessionId) {
+      return;
+    }
+
+    try {
+      const serialized = serializeAddon.serialize({ scrollback: TERMINAL_SCROLLBACK });
+      setSerializedCache(activeSessionId, serialized);
+      updateRenderedSeq(activeSessionId, activeSessionSeq);
+    } catch (_error) {
+      // Serialize failure should not block runtime.
+    }
+  }
+
+  function restoreTerminalFromSerializedCache(sessionId: string, liveSeq: number): boolean {
+    const serialized = serializedSnapshotBySession.get(sessionId);
+    const cachedSeq = sessionRenderedSeqById.get(sessionId) ?? 0;
+    if (!serialized || cachedSeq < liveSeq || !terminal || liveSeq <= 0) {
+      return false;
+    }
+
+    terminal.reset();
+    terminal.write(serialized);
+    renderedSessionId = sessionId;
+    activeSessionSeq = cachedSeq;
+    activeSnapshotNeedsReconnectBreak = !serialized.endsWith("\n") && !serialized.endsWith("\r");
+    return true;
+  }
+
+  function safeOpenExternalLink(uri: string) {
+    try {
+      const url = new URL(uri);
+      if (url.protocol !== "http:" && url.protocol !== "https:") {
+        return;
+      }
+      window.open(url.toString(), "_blank", "noopener,noreferrer");
+    } catch (_error) {
+      // Ignore invalid URIs from terminal output.
+    }
+  }
+
+  function onGlobalKeydown(event: KeyboardEvent) {
+    if (!searchAddon) {
+      return;
+    }
+
+    const target = event.target as HTMLElement | null;
+    if (
+      target &&
+      (target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.tagName === "SELECT" ||
+        target.isContentEditable)
+    ) {
+      return;
+    }
+
+    const key = event.key.toLowerCase();
+    if ((event.ctrlKey || event.metaKey) && key === "f") {
+      event.preventDefault();
+      const next = window.prompt("Find in terminal", searchQuery);
+      if (!next) {
+        return;
+      }
+      searchQuery = next;
+      searchAddon.findNext(searchQuery, { caseSensitive: false });
+      return;
+    }
+
+    if (event.key === "F3" && searchQuery.trim().length > 0) {
+      event.preventDefault();
+      if (event.shiftKey) {
+        searchAddon.findPrevious(searchQuery, { caseSensitive: false });
+      } else {
+        searchAddon.findNext(searchQuery, { caseSensitive: false });
+      }
+    }
+  }
 
   function sessionTone(session: SessionInfo) {
     const subject = `${session.name} ${session.cwd}`.toLowerCase();
@@ -121,14 +263,18 @@
 
   async function listSessions() {
     sessions = await invoke<SessionInfo[]>("list_sessions");
+    primeSessionSeqMap(sessions);
   }
 
   async function applyWorkspace(workspace: WorkspaceState) {
+    captureActiveTerminalSnapshot();
     profiles = workspace.profiles;
     activeProfileId = workspace.active_profile_id ?? profiles[0]?.profile_id ?? null;
     sessions = workspace.sessions;
+    primeSessionSeqMap(sessions);
     activeSessionId = workspace.active_session_id ?? sessions[0]?.session_id ?? null;
     activeSessionSeq = 0;
+    renderedSessionId = null;
     activationInFlight.clear();
 
     if (
@@ -145,6 +291,35 @@
   async function loadWorkspaceState() {
     const workspace = await invoke<WorkspaceState>("load_workspace");
     await applyWorkspace(workspace);
+  }
+
+  async function loadLifecyclePreferences() {
+    try {
+      lifecyclePreferences = await invoke<LifecyclePreferences>("get_lifecycle_preferences");
+    } catch (error) {
+      lastError = `get_lifecycle_preferences failed: ${String(error)}`;
+    }
+  }
+
+  async function setLifecyclePreferences(next: Partial<LifecyclePreferences>) {
+    if (lifecyclePreferencesBusy) {
+      return;
+    }
+
+    lifecyclePreferencesBusy = true;
+    try {
+      lifecyclePreferences = await invoke<LifecyclePreferences>("set_lifecycle_preferences", {
+        payload: {
+          keep_alive_on_close: next.keep_alive_on_close,
+          start_in_tray: next.start_in_tray,
+        },
+      });
+      lastError = "";
+    } catch (error) {
+      lastError = `set_lifecycle_preferences failed: ${String(error)}`;
+    } finally {
+      lifecyclePreferencesBusy = false;
+    }
   }
 
   function toggleProfileMenu() {
@@ -322,6 +497,12 @@
       payload: { session_id: sessionId },
     });
     localInputBufferBySession.delete(sessionId);
+    sessionRenderedSeqById.delete(sessionId);
+    sessionLiveSeqById.delete(sessionId);
+    serializedSnapshotBySession.delete(sessionId);
+    if (renderedSessionId === sessionId) {
+      renderedSessionId = null;
+    }
 
     if (renamingSessionId === sessionId) {
       cancelRename();
@@ -406,6 +587,7 @@
       return;
     }
 
+    captureActiveTerminalSnapshot();
     activeSessionId = sessionId;
     activeSessionSeq = 0;
 
@@ -494,7 +676,11 @@
         payload: { session_id: activeSessionId },
       });
       activeSessionSeq = 0;
+      sessionRenderedSeqById.set(activeSessionId, 0);
+      sessionLiveSeqById.set(activeSessionId, 0);
+      serializedSnapshotBySession.delete(activeSessionId);
       terminal?.reset();
+      renderedSessionId = activeSessionId;
       await hydrateActiveSession();
     } catch (error) {
       lastError = `clear_session_history failed: ${String(error)}`;
@@ -505,7 +691,11 @@
     try {
       await invoke<void>("clear_all_history");
       activeSessionSeq = 0;
+      sessionRenderedSeqById.clear();
+      sessionLiveSeqById.clear();
+      serializedSnapshotBySession.clear();
       terminal?.reset();
+      renderedSessionId = activeSessionId;
       await hydrateActiveSession();
       localInputBufferBySession.clear();
     } catch (error) {
@@ -557,6 +747,9 @@
         payload: { session_id: sessionId },
       });
       activeSessionSeq = 0;
+      sessionRenderedSeqById.set(sessionId, 0);
+      sessionLiveSeqById.set(sessionId, 0);
+      serializedSnapshotBySession.delete(sessionId);
       lastError = "";
     } catch (error) {
       lastError = `clear_session_history failed: ${String(error)}`;
@@ -584,11 +777,26 @@
     }
 
     const requestedSessionId = activeSessionId;
-    terminal.reset();
-
     if (!requestedSessionId) {
+      if (renderedSessionId !== null) {
+        terminal.reset();
+      }
       activeSessionSeq = 0;
       activeSnapshotNeedsReconnectBreak = false;
+      renderedSessionId = null;
+      return;
+    }
+
+    const listedSeq =
+      sessions.find((session) => session.session_id === requestedSessionId)?.seq ?? 0;
+    const liveSeq = Math.max(listedSeq, sessionLiveSeqById.get(requestedSessionId) ?? 0);
+    sessionLiveSeqById.set(requestedSessionId, liveSeq);
+
+    if (renderedSessionId === requestedSessionId && activeSessionSeq >= liveSeq) {
+      return;
+    }
+
+    if (restoreTerminalFromSerializedCache(requestedSessionId, liveSeq)) {
       return;
     }
 
@@ -628,13 +836,18 @@
       return;
     }
 
+    terminal.reset();
+    renderedSessionId = requestedSessionId;
     activeSessionSeq = snapshot.seq;
+    sessionLiveSeqById.set(requestedSessionId, snapshot.seq);
+    updateRenderedSeq(requestedSessionId, snapshot.seq);
     activeSnapshotNeedsReconnectBreak =
       snapshot.content.length > 0 &&
       !snapshot.content.endsWith("\n") &&
       !snapshot.content.endsWith("\r");
     if (snapshot.content.length > 0) {
       terminal.write(snapshot.content);
+      setSerializedCache(requestedSessionId, snapshot.content);
     }
   }
 
@@ -686,6 +899,37 @@
     terminal.loadAddon(fitAddon);
 
     try {
+      const unicode11Addon = new Unicode11Addon();
+      terminal.loadAddon(unicode11Addon);
+      terminal.unicode.activeVersion = "11";
+    } catch (_error) {
+      // Keep default unicode provider if addon unavailable.
+    }
+
+    try {
+      searchAddon = new SearchAddon();
+      terminal.loadAddon(searchAddon);
+    } catch (_error) {
+      searchAddon = null;
+    }
+
+    try {
+      serializeAddon = new SerializeAddon();
+      terminal.loadAddon(serializeAddon);
+    } catch (_error) {
+      serializeAddon = null;
+    }
+
+    try {
+      const webLinksAddon = new WebLinksAddon((_event, uri) => {
+        safeOpenExternalLink(uri);
+      });
+      terminal.loadAddon(webLinksAddon);
+    } catch (_error) {
+      // Continue without link detection.
+    }
+
+    try {
       const webgl = new WebglAddon();
       terminal.loadAddon(webgl);
     } catch (_error) {
@@ -731,7 +975,17 @@
 
   async function setupEventListeners() {
     unlistenOutput = await listen<PtyOutputEvent>("pty/output", ({ payload }) => {
-      if (!terminal || payload.session_id !== activeSessionId) {
+      sessionLiveSeqById.set(payload.session_id, payload.seq);
+
+      if (!terminal) {
+        return;
+      }
+
+      if (payload.session_id !== activeSessionId) {
+        const cachedSeq = sessionRenderedSeqById.get(payload.session_id) ?? 0;
+        if (payload.seq > cachedSeq) {
+          serializedSnapshotBySession.delete(payload.session_id);
+        }
         return;
       }
 
@@ -740,6 +994,8 @@
       }
 
       activeSessionSeq = payload.seq;
+      renderedSessionId = payload.session_id;
+      updateRenderedSeq(payload.session_id, payload.seq);
       terminal.write(payload.chunk);
     });
 
@@ -749,6 +1005,14 @@
 
     unlistenError = await listen<PtyErrorEvent>("pty/error", ({ payload }) => {
       lastError = `[${payload.session_id}] ${payload.message}`;
+    });
+
+    unlistenTrayNewSession = await listen("app/tray-new-session", async () => {
+      try {
+        await createSession();
+      } catch (error) {
+        lastError = `tray new session failed: ${String(error)}`;
+      }
     });
   }
 
@@ -794,8 +1058,10 @@
 
   onMount(async () => {
     document.addEventListener("mousedown", onDocumentPointerDown, true);
+    document.addEventListener("keydown", onGlobalKeydown, true);
     await bootstrapTerminal();
     await setupEventListeners();
+    await loadLifecyclePreferences();
 
     await loadWorkspaceState();
     if (sessions.length === 0) {
@@ -805,10 +1071,13 @@
 
   onDestroy(() => {
     document.removeEventListener("mousedown", onDocumentPointerDown, true);
+    document.removeEventListener("keydown", onGlobalKeydown, true);
+    captureActiveTerminalSnapshot();
     resizeObserver?.disconnect();
     unlistenOutput?.();
     unlistenExited?.();
     unlistenError?.();
+    unlistenTrayNewSession?.();
     terminal?.dispose();
     activationInFlight.clear();
   });
@@ -972,6 +1241,34 @@
             <button class="mini-btn" disabled={creatingProfile} on:click={() => void createProfile()}>
               {creatingProfile ? "..." : "Create"}
             </button>
+          </div>
+          <div class="profile-pref-row">
+            <label class="profile-pref-label">
+              <input
+                type="checkbox"
+                checked={lifecyclePreferences.keep_alive_on_close}
+                disabled={lifecyclePreferencesBusy}
+                on:change={(event) =>
+                  void setLifecyclePreferences({
+                    keep_alive_on_close: (event.currentTarget as HTMLInputElement).checked,
+                  })}
+              />
+              Keep running in tray when close
+            </label>
+          </div>
+          <div class="profile-pref-row">
+            <label class="profile-pref-label">
+              <input
+                type="checkbox"
+                checked={lifecyclePreferences.start_in_tray}
+                disabled={lifecyclePreferencesBusy}
+                on:change={(event) =>
+                  void setLifecyclePreferences({
+                    start_in_tray: (event.currentTarget as HTMLInputElement).checked,
+                  })}
+              />
+              Start in tray
+            </label>
           </div>
           <button
             class="mini-btn danger profile-delete-btn"

@@ -2,6 +2,26 @@
 
 All notable implementation and documentation changes are tracked here.
 
+## 2026-03-02 (tray lifecycle + app keep-alive)
+
+### Added
+- Tray integration in Tauri runtime:
+  - menu actions `Show Chatminal`, `New Session`, `Quit Completely`
+  - frontend tray event bridge via `app/tray-new-session`
+- New lifecycle commands:
+  - `get_lifecycle_preferences`
+  - `set_lifecycle_preferences`
+  - `shutdown_app`
+- Lifecycle preference models and persistence keys:
+  - `keep_alive_on_close`
+  - `start_in_tray`
+
+### Changed
+- Main window close flow now supports hide-to-tray instead of hard exit when enabled.
+- Backend gained `shutdown_graceful` session teardown path for controlled app quit.
+- Shell resolution logic now has explicit Windows candidate branch (`COMSPEC`, `pwsh`, `powershell`, `cmd`).
+- Frontend profile menu now exposes lifecycle toggles (keep-alive on close, start in tray).
+
 ## 2026-03-02 (docs realignment from merged scouting + doc-read reports)
 
 ### Changed

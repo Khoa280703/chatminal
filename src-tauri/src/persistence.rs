@@ -241,6 +241,45 @@ impl Persistence {
         Ok(())
     }
 
+    pub fn get_bool_state(&self, key: &str, default: bool) -> Result<bool, String> {
+        let conn = self.open_connection()?;
+        let value = conn
+            .query_row(
+                "SELECT value FROM app_state WHERE key = ?1",
+                params![key],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|err| format!("load app state failed: {err}"))?;
+
+        let Some(value) = value else {
+            return Ok(default);
+        };
+
+        let normalized = value.trim().to_ascii_lowercase();
+        let parsed = match normalized.as_str() {
+            "1" | "true" | "yes" | "on" => Some(true),
+            "0" | "false" | "no" | "off" => Some(false),
+            _ => None,
+        };
+
+        Ok(parsed.unwrap_or(default))
+    }
+
+    pub fn set_bool_state(&self, key: &str, value: bool) -> Result<(), String> {
+        let conn = self.open_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO app_state (key, value)
+            VALUES (?1, ?2)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            "#,
+            params![key, if value { "1" } else { "0" }],
+        )
+        .map_err(|err| format!("set app state failed: {err}"))?;
+        Ok(())
+    }
+
     pub fn upsert_session(&self, record: &SessionRecord) -> Result<(), String> {
         let conn = self.open_connection()?;
         let now = now_ts_millis() as i64;

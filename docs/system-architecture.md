@@ -60,6 +60,9 @@ Chatminal runs as a desktop Tauri app with a Rust PTY backend and Svelte fronten
 - `resize_session`
 - `rename_session`
 - `set_session_persist`
+- `get_lifecycle_preferences`
+- `set_lifecycle_preferences`
+- `shutdown_app`
 - `close_session`
 - `clear_session_history`
 - `clear_all_history`
@@ -69,6 +72,8 @@ Chatminal runs as a desktop Tauri app with a Rust PTY backend and Svelte fronten
 - `pty/output` -> `{ session_id, chunk, seq, ts }`
 - `pty/exited` -> `{ session_id, exit_code, reason }`
 - `pty/error` -> `{ session_id, message }`
+- `app/tray-new-session` -> tray yêu cầu frontend tạo session mới
+- `app/lifecycle-hidden` -> main window vừa được hide về tray
 
 ## Lifecycle and Data Flow
 1. App boot initializes the PTY service, workers, and persistence restore.
@@ -79,6 +84,7 @@ Chatminal runs as a desktop Tauri app with a Rust PTY backend and Svelte fronten
 6. Frontend sends keyboard input via `write_input`.
 7. Reader thread emits `pty/output`; frontend applies ordered chunks by `seq`.
 8. On reader EOF/error, cleanup worker emits `pty/exited`, closes runtime, and sets status to disconnected.
+9. Window close event có thể được intercept để hide-to-tray thay vì thoát process, dựa trên lifecycle preferences.
 
 ## Persistence Design
 SQLite tables:
@@ -90,6 +96,8 @@ SQLite tables:
 State keys:
 - `active_profile_id`
 - `active_session_id:{profile_id}`
+- `keep_alive_on_close`
+- `start_in_tray`
 - legacy key migration: `active_session_id`
 
 History retention:

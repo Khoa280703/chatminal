@@ -28,11 +28,16 @@ Last updated: 2026-03-02
   - `pty/output`
   - `pty/exited`
   - `pty/error`
+- App lifecycle + tray mode:
+  - close main window -> hide to tray (configurable)
+  - tray menu supports show/new session/quit completely
+  - optional start-in-tray preference
 - Persistence (SQLite):
   - profiles
   - session metadata (`name`, `cwd`, `status`, `persist_history`, `last_seq`)
   - scrollback chunks with retention
   - app state keys (`active_profile_id`, `active_session_id:{profile_id}`)
+  - lifecycle preference keys (`keep_alive_on_close`, `start_in_tray`)
 - Lazy reconnect:
   - disconnected sessions are hydrated from preview
   - PTY respawn happens on `activate_session` (also triggered before input when needed)
@@ -151,6 +156,11 @@ Shell path must pass:
   - fallback to `/` only if home cannot be resolved
 - Running sessions are tracked by a CWD sync worker (`500ms` interval).
 - Reconnect uses latest persisted `cwd` for session respawn.
+
+## Window Lifecycle Behavior
+- If `keep_alive_on_close = true`, closing the main window hides it to tray and keeps PTY sessions alive.
+- `Quit Completely` from tray triggers backend graceful shutdown and exits the app process.
+- If `start_in_tray = true`, app starts hidden and can be restored from tray.
 
 ## Persistence Paths
 Database file:

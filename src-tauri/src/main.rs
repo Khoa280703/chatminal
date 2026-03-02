@@ -3,19 +3,93 @@ mod models;
 mod persistence;
 mod service;
 
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 use models::{
     ActivateSessionPayload, CreateProfilePayload, CreateSessionPayload, CreateSessionResponse,
-    DeleteProfilePayload, ProfileInfo, RenameProfilePayload, RenameSessionPayload,
-    ResizeSessionPayload, SessionActionPayload, SessionInfo, SessionSnapshot,
-    SetSessionPersistPayload, SwitchProfilePayload, WorkspaceState, WriteInputPayload,
+    DeleteProfilePayload, LifecyclePreferences, ProfileInfo, RenameProfilePayload,
+    RenameSessionPayload, ResizeSessionPayload, SessionActionPayload, SessionInfo, SessionSnapshot,
+    SetLifecyclePreferencesPayload, SetSessionPersistPayload, SwitchProfilePayload, WorkspaceState,
+    WriteInputPayload,
 };
 use service::PtyService;
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State, WindowEvent, menu::MenuBuilder, tray::TrayIconBuilder};
+
+const TRAY_SHOW_ID: &str = "tray_show";
+const TRAY_NEW_SESSION_ID: &str = "tray_new_session";
+const TRAY_QUIT_ID: &str = "tray_quit";
 
 struct AppState {
     service: Arc<PtyService>,
+    is_quitting: AtomicBool,
+}
+
+fn show_main_window(app: &tauri::AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window not found".to_string())?;
+
+    window
+        .show()
+        .map_err(|err| format!("show window failed: {err}"))?;
+    window
+        .set_focus()
+        .map_err(|err| format!("focus window failed: {err}"))?;
+    Ok(())
+}
+
+fn request_quit(app: &tauri::AppHandle, state: &AppState) -> Result<(), String> {
+    if state.is_quitting.swap(true, Ordering::SeqCst) {
+        return Ok(());
+    }
+
+    if let Err(err) = state.service.shutdown_graceful() {
+        log::warn!("graceful shutdown failed: {err}");
+    }
+
+    app.exit(0);
+    Ok(())
+}
+
+fn build_tray(app: &tauri::AppHandle) -> Result<(), String> {
+    let menu = MenuBuilder::new(app)
+        .text(TRAY_SHOW_ID, "Show Chatminal")
+        .text(TRAY_NEW_SESSION_ID, "New Session")
+        .separator()
+        .text(TRAY_QUIT_ID, "Quit Completely")
+        .build()
+        .map_err(|err| format!("build tray menu failed: {err}"))?;
+
+    TrayIconBuilder::with_id("chatminal-tray")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            TRAY_SHOW_ID => {
+                if let Err(err) = show_main_window(app) {
+                    log::warn!("show main window failed: {err}");
+                }
+            }
+            TRAY_NEW_SESSION_ID => {
+                if let Err(err) = show_main_window(app) {
+                    log::warn!("show main window before new session failed: {err}");
+                }
+                let _ = app.emit("app/tray-new-session", ());
+            }
+            TRAY_QUIT_ID => {
+                let state = app.state::<AppState>();
+                if let Err(err) = request_quit(app, &state) {
+                    log::warn!("quit from tray failed: {err}");
+                }
+            }
+            _ => {}
+        })
+        .build(app)
+        .map_err(|err| format!("build tray icon failed: {err}"))?;
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -105,6 +179,19 @@ fn set_session_persist(
 }
 
 #[tauri::command]
+fn get_lifecycle_preferences(state: State<'_, AppState>) -> Result<LifecyclePreferences, String> {
+    state.service.get_lifecycle_preferences()
+}
+
+#[tauri::command]
+fn set_lifecycle_preferences(
+    state: State<'_, AppState>,
+    payload: SetLifecyclePreferencesPayload,
+) -> Result<LifecyclePreferences, String> {
+    state.service.set_lifecycle_preferences(payload)
+}
+
+#[tauri::command]
 fn close_session(state: State<'_, AppState>, payload: SessionActionPayload) -> Result<(), String> {
     state.service.close_session(payload)
 }
@@ -130,6 +217,11 @@ fn get_session_snapshot(
     state.service.get_session_snapshot(payload)
 }
 
+#[tauri::command]
+fn shutdown_app(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<(), String> {
+    request_quit(&app, &state)
+}
+
 fn main() {
     let _ = env_logger::try_init();
 
@@ -137,8 +229,44 @@ fn main() {
         .setup(|app| {
             let config = config::load_config();
             let service = Arc::new(PtyService::new(app.handle().clone(), config));
-            app.manage(AppState { service });
+            let lifecycle_preferences = service.get_lifecycle_preferences().unwrap_or_default();
+            app.manage(AppState {
+                service,
+                is_quitting: AtomicBool::new(false),
+            });
+
+            build_tray(&app.handle())?;
+
+            if lifecycle_preferences.start_in_tray
+                && let Some(window) = app.get_webview_window("main")
+            {
+                let _ = window.hide();
+            }
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if window.label() != "main" {
+                return;
+            }
+
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                let state = window.state::<AppState>();
+                if state.is_quitting.load(Ordering::SeqCst) {
+                    return;
+                }
+
+                let keep_alive_on_close = state
+                    .service
+                    .get_lifecycle_preferences()
+                    .map(|prefs| prefs.keep_alive_on_close)
+                    .unwrap_or(true);
+
+                if keep_alive_on_close {
+                    api.prevent_close();
+                    let _ = window.hide();
+                    let _ = window.app_handle().emit("app/lifecycle-hidden", ());
+                }
+            }
         })
         .plugin(tauri_plugin_store::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
@@ -155,10 +283,13 @@ fn main() {
             resize_session,
             rename_session,
             set_session_persist,
+            get_lifecycle_preferences,
+            set_lifecycle_preferences,
             close_session,
             clear_session_history,
             clear_all_history,
-            get_session_snapshot
+            get_session_snapshot,
+            shutdown_app
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

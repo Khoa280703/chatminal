@@ -14,6 +14,7 @@ pub struct SessionInfo {
     pub cwd: String,
     pub status: SessionStatus,
     pub persist_history: bool,
+    pub seq: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -94,6 +95,27 @@ pub struct RenameSessionPayload {
 pub struct SetSessionPersistPayload {
     pub session_id: String,
     pub persist_history: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LifecyclePreferences {
+    pub keep_alive_on_close: bool,
+    pub start_in_tray: bool,
+}
+
+impl Default for LifecyclePreferences {
+    fn default() -> Self {
+        Self {
+            keep_alive_on_close: true,
+            start_in_tray: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SetLifecyclePreferencesPayload {
+    pub keep_alive_on_close: Option<bool>,
+    pub start_in_tray: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]

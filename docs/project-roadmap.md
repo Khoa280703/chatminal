@@ -15,6 +15,7 @@ Overall progress: 90%
 | M6 - Profile lifecycle UX + backend contracts | Completed | list/create/switch/rename/delete profile shipped. |
 | M7 - Docs realignment to active runtime | Completed | core docs and deployment/design docs synchronized. |
 | M8 - CI, integration tests, release packaging hardening | In Progress | release readiness track. |
+| M9 - Tray lifecycle + keep-alive on close | Completed | close-to-tray, start-in-tray preference, graceful quit hooks shipped. |
 
 ## Current Priorities
 1. Add integration tests for profile-switch + reconnect + retention edge cases.

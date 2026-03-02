@@ -6,11 +6,17 @@ export interface SessionInfo {
   cwd: string;
   status: SessionStatus;
   persist_history: boolean;
+  seq: number;
 }
 
 export interface ProfileInfo {
   profile_id: string;
   name: string;
+}
+
+export interface LifecyclePreferences {
+  keep_alive_on_close: boolean;
+  start_in_tray: boolean;
 }
 
 export interface WorkspaceState {

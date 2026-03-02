@@ -470,6 +470,24 @@ body {
   border-color: rgba(19, 146, 236, 0.6);
 }
 
+.profile-pref-row {
+  padding: 2px 2px 0;
+}
+
+.profile-pref-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #dbe7f3;
+  font-size: 11px;
+}
+
+.profile-pref-label input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: #1392ec;
+}
+
 .profile-delete-btn {
   width: 100%;
   justify-content: center;
