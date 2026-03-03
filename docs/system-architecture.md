@@ -71,11 +71,17 @@ Chatminal runs as a desktop Tauri app with a Rust PTY backend and Svelte fronten
 - `clear_session_history`
 - `clear_all_history`
 - `get_session_snapshot`
+- `get_session_explorer_state`
+- `set_session_explorer_root`
+- `update_session_explorer_state`
+- `list_session_explorer_entries`
+- `read_session_explorer_file`
 
 ## Event Contracts
 - `pty/output` -> `{ session_id, chunk, seq, ts }`
 - `pty/exited` -> `{ session_id, exit_code, reason }`
 - `pty/error` -> `{ session_id, message }`
+- `explorer/fs-changed` -> `{ session_id, root_path, changed_paths[], full_resync, revision }`
 - `app/tray-new-session` -> tray yêu cầu frontend tạo session mới
 - `app/lifecycle-hidden` -> main window vừa được hide về tray
 
@@ -98,6 +104,7 @@ SQLite tables:
 - `sessions`
 - `scrollback`
 - `app_state`
+- `session_explorer_state`
 
 State keys:
 - `active_profile_id`
@@ -114,6 +121,7 @@ History retention:
 - `chatminal-cleanup`: finalizes exited sessions and disconnect state.
 - `chatminal-history-writer`: buffers and batches history writes (`50ms` interval, batch `128`).
 - `chatminal-cwd-sync`: polls process cwd every `500ms`, updates in-memory and DB state.
+- `chatminal-explorer-watch`: watches active explorer root and emits debounced fs-change events for realtime explorer refresh.
 
 ## Runtime Controls and Limits
 - `MAX_INPUT_BYTES = 65_536`
@@ -122,9 +130,15 @@ History retention:
 - `HISTORY_FLUSH_INTERVAL = 50ms`
 - `HISTORY_BATCH_SIZE = 128`
 - `CWD_SYNC_INTERVAL = 500ms`
+- `MAX_EXPLORER_FILE_PREVIEW_BYTES = 512 * 1024` (frontend currently requests `256 * 1024`)
+- `MAX_EXPLORER_ENTRIES_PER_DIR = 2_000`
+- `EXPLORER_WATCH_DEBOUNCE = 180ms`
+- `EXPLORER_WATCH_MAX_CHANGED_PATHS = 128`
 
 ## Security and Validation Controls
 - Shell path allow-list from `/etc/shells`.
 - Canonical path + executable-bit checks before spawn.
 - Input-size guard and bounded queues for write path.
+- Explorer path guards: reject absolute path and `..`, canonicalize root/target, block root escape.
+- Explorer preview is read-only and rejects binary content (zero-byte detection).
 - Fallback shell order: configured shell -> `$SHELL` -> `/bin/zsh` -> `/bin/bash` -> `/bin/sh`.

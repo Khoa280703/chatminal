@@ -1,14 +1,20 @@
+use std::fs::File;
 use std::io::{Read, Write};
 #[cfg(not(target_os = "windows"))]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, mpsc as std_mpsc};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicU64, Ordering},
+    mpsc as std_mpsc,
+};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 #[cfg(target_os = "macos")]
 use std::{ffi::CStr, mem};
 
 use indexmap::IndexMap;
+use notify::{Config as NotifyConfig, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
@@ -19,12 +25,15 @@ use crate::models::{
     ActivateSessionPayload, CreateProfilePayload, CreateSessionPayload, CreateSessionResponse,
     DeleteProfilePayload, LifecyclePreferences, ProfileInfo, PtyErrorEvent, PtyExitedEvent,
     PtyOutputEvent, RenameProfilePayload, RenameSessionPayload, ResizeSessionPayload,
-    RuntimeUiSettings, SessionActionPayload, SessionInfo, SessionSnapshot, SessionStatus,
-    SetLifecyclePreferencesPayload, SetSessionPersistPayload, SwitchProfilePayload, WorkspaceState,
-    WriteInputPayload,
+    RuntimeUiSettings, SessionActionPayload, SessionExplorerEntry, SessionExplorerFileContent,
+    SessionExplorerFsChangedEvent, SessionExplorerListPayload, SessionExplorerReadFilePayload,
+    SessionExplorerRootPayload, SessionExplorerState, SessionExplorerUpdateStatePayload,
+    SessionInfo, SessionSnapshot, SessionStatus, SetLifecyclePreferencesPayload,
+    SetSessionPersistPayload, SwitchProfilePayload, WorkspaceState, WriteInputPayload,
 };
 use crate::persistence::{
-    HistoryChunk, PersistedProfile, PersistedWorkspace, Persistence, SessionRecord, now_ts_millis,
+    HistoryChunk, PersistedProfile, PersistedSessionExplorerState, PersistedWorkspace, Persistence,
+    SessionRecord, now_ts_millis,
 };
 
 const MAX_INPUT_BYTES: usize = 65_536;
@@ -34,6 +43,10 @@ const MAX_SESSION_NAME_CHARS: usize = 120;
 const HISTORY_FLUSH_INTERVAL: Duration = Duration::from_millis(50);
 const HISTORY_BATCH_SIZE: usize = 128;
 const CWD_SYNC_INTERVAL: Duration = Duration::from_millis(500);
+const MAX_EXPLORER_FILE_PREVIEW_BYTES: usize = 512 * 1024;
+const MAX_EXPLORER_ENTRIES_PER_DIR: usize = 2_000;
+const EXPLORER_WATCH_DEBOUNCE: Duration = Duration::from_millis(180);
+const EXPLORER_WATCH_MAX_CHANGED_PATHS: usize = 128;
 const KEEP_ALIVE_ON_CLOSE_KEY: &str = "keep_alive_on_close";
 const START_IN_TRAY_KEY: &str = "start_in_tray";
 
@@ -73,6 +86,19 @@ struct HistoryWriteRequest {
     chunk: HistoryChunk,
 }
 
+struct ExplorerWatchRequest {
+    session_id: Uuid,
+    root: PathBuf,
+    root_path: String,
+    revision: u64,
+}
+
+enum ExplorerWatchControl {
+    Set(ExplorerWatchRequest),
+    Stop,
+    Shutdown,
+}
+
 pub struct PtyService {
     app_handle: AppHandle,
     configured_shell: Option<String>,
@@ -84,6 +110,8 @@ pub struct PtyService {
     active_session_id: Mutex<Option<Uuid>>,
     cleanup_tx: std_mpsc::Sender<CleanupMessage>,
     history_tx: std_mpsc::Sender<HistoryWriteRequest>,
+    explorer_watch_tx: std_mpsc::Sender<ExplorerWatchControl>,
+    explorer_watch_revision: AtomicU64,
 }
 
 impl PtyService {
@@ -99,6 +127,7 @@ impl PtyService {
 
         let (cleanup_tx, cleanup_rx) = std_mpsc::channel::<CleanupMessage>();
         let (history_tx, history_rx) = std_mpsc::channel::<HistoryWriteRequest>();
+        let (explorer_watch_tx, explorer_watch_rx) = std_mpsc::channel::<ExplorerWatchControl>();
 
         let service = Self {
             app_handle: app_handle.clone(),
@@ -111,6 +140,8 @@ impl PtyService {
             active_session_id: Mutex::new(None),
             cleanup_tx,
             history_tx,
+            explorer_watch_tx,
+            explorer_watch_revision: AtomicU64::new(0),
         };
 
         spawn_cleanup_worker(
@@ -121,7 +152,9 @@ impl PtyService {
         );
         spawn_history_writer(history_rx, persistence, config.settings.clone());
         spawn_cwd_sync_worker(service.sessions.clone(), service.persistence.clone());
+        spawn_explorer_watch_worker(app_handle, explorer_watch_rx);
         service.restore_from_persistence();
+        service.refresh_explorer_watch_target();
 
         service
     }
@@ -727,6 +760,7 @@ impl PtyService {
         }
 
         self.set_active_session(None);
+        let _ = self.explorer_watch_tx.send(ExplorerWatchControl::Shutdown);
         Ok(())
     }
 
@@ -766,6 +800,244 @@ impl PtyService {
         Ok(SessionSnapshot { content, seq })
     }
 
+    pub fn get_session_explorer_state(
+        &self,
+        payload: SessionActionPayload,
+    ) -> Result<SessionExplorerState, String> {
+        let session_id = parse_session_id(&payload.session_id)?;
+        if !self.session_exists(session_id) {
+            return Err("session not found".to_string());
+        }
+
+        let Some(persistence) = &self.persistence else {
+            return Err("file explorer persistence is disabled".to_string());
+        };
+
+        let state = persistence.get_session_explorer_state(&session_id.to_string())?;
+        Ok(explorer_state_to_model(session_id, state))
+    }
+
+    pub fn set_session_explorer_root(
+        &self,
+        payload: SessionExplorerRootPayload,
+    ) -> Result<SessionExplorerState, String> {
+        let session_id = parse_session_id(&payload.session_id)?;
+        if !self.session_exists(session_id) {
+            return Err("session not found".to_string());
+        }
+
+        let Some(persistence) = &self.persistence else {
+            return Err("file explorer persistence is disabled".to_string());
+        };
+
+        let root_path = resolve_explorer_root_path(&payload.root_path)?
+            .to_string_lossy()
+            .to_string();
+        let persisted =
+            persistence.set_session_explorer_root(&session_id.to_string(), &root_path)?;
+        self.refresh_explorer_watch_target();
+        Ok(explorer_state_to_model(session_id, Some(persisted)))
+    }
+
+    pub fn update_session_explorer_state(
+        &self,
+        payload: SessionExplorerUpdateStatePayload,
+    ) -> Result<SessionExplorerState, String> {
+        let session_id = parse_session_id(&payload.session_id)?;
+        if !self.session_exists(session_id) {
+            return Err("session not found".to_string());
+        }
+
+        let Some(persistence) = &self.persistence else {
+            return Err("file explorer persistence is disabled".to_string());
+        };
+
+        let session_id_text = session_id.to_string();
+        let Some(current_state) = persistence.get_session_explorer_state(&session_id_text)? else {
+            return Err("session explorer root is not set".to_string());
+        };
+
+        let root = resolve_explorer_root_path(&current_state.root_path)?;
+        let current_dir = normalize_relative_path(&payload.current_dir)?;
+        let current_dir_path = resolve_explorer_target(&root, &current_dir)?;
+        if !current_dir_path.is_dir() {
+            return Err("current explorer directory is not valid".to_string());
+        }
+
+        let selected_path = match payload.selected_path.as_deref() {
+            Some(value) => {
+                let normalized = normalize_relative_path(value)?;
+                if !normalized.is_empty() {
+                    let target = resolve_explorer_target(&root, &normalized)?;
+                    if !target.exists() {
+                        return Err("selected explorer path does not exist".to_string());
+                    }
+                }
+                Some(normalized)
+            }
+            None => None,
+        };
+
+        let open_file_path = match payload.open_file_path.as_deref() {
+            Some(value) => {
+                let normalized = normalize_relative_path(value)?;
+                let target = resolve_explorer_target(&root, &normalized)?;
+                if !target.is_file() {
+                    return Err("open file path is not a file".to_string());
+                }
+                Some(normalized)
+            }
+            None => None,
+        };
+
+        let persisted = persistence.update_session_explorer_state(
+            &session_id_text,
+            &current_dir,
+            selected_path.as_deref(),
+            open_file_path.as_deref(),
+        )?;
+        Ok(explorer_state_to_model(session_id, Some(persisted)))
+    }
+
+    pub fn list_session_explorer_entries(
+        &self,
+        payload: SessionExplorerListPayload,
+    ) -> Result<Vec<SessionExplorerEntry>, String> {
+        let session_id = parse_session_id(&payload.session_id)?;
+        if !self.session_exists(session_id) {
+            return Err("session not found".to_string());
+        }
+
+        let Some(persistence) = &self.persistence else {
+            return Err("file explorer persistence is disabled".to_string());
+        };
+
+        let session_id_text = session_id.to_string();
+        let Some(state) = persistence.get_session_explorer_state(&session_id_text)? else {
+            return Err("session explorer root is not set".to_string());
+        };
+
+        let root = resolve_explorer_root_path(&state.root_path)?;
+        let relative_path = match payload.relative_path.as_deref() {
+            Some(value) => normalize_relative_path(value)?,
+            None => state.current_dir,
+        };
+
+        let target_dir = resolve_explorer_target(&root, &relative_path)?;
+        if !target_dir.is_dir() {
+            return Err("explorer target is not a directory".to_string());
+        }
+
+        let mut entries = Vec::new();
+        let read_dir = std::fs::read_dir(&target_dir)
+            .map_err(|err| format!("read explorer directory failed: {err}"))?;
+
+        for item in read_dir {
+            if entries.len() >= MAX_EXPLORER_ENTRIES_PER_DIR {
+                break;
+            }
+
+            let entry = match item {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
+
+            let canonical = match std::fs::canonicalize(entry.path()) {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
+            if !canonical.starts_with(&root) {
+                continue;
+            }
+
+            let metadata = match std::fs::metadata(&canonical) {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
+
+            let is_dir = metadata.is_dir();
+            let relative = match canonical.strip_prefix(&root) {
+                Ok(path) => normalize_relative_path(&path.to_string_lossy())?,
+                Err(_) => continue,
+            };
+            let name = entry.file_name().to_string_lossy().to_string();
+
+            entries.push(SessionExplorerEntry {
+                name,
+                relative_path: relative,
+                is_dir,
+                size: if is_dir { None } else { Some(metadata.len()) },
+            });
+        }
+
+        entries.sort_by(|a, b| match (a.is_dir, b.is_dir) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a
+                .name
+                .to_ascii_lowercase()
+                .cmp(&b.name.to_ascii_lowercase()),
+        });
+
+        Ok(entries)
+    }
+
+    pub fn read_session_explorer_file(
+        &self,
+        payload: SessionExplorerReadFilePayload,
+    ) -> Result<SessionExplorerFileContent, String> {
+        let session_id = parse_session_id(&payload.session_id)?;
+        if !self.session_exists(session_id) {
+            return Err("session not found".to_string());
+        }
+
+        let Some(persistence) = &self.persistence else {
+            return Err("file explorer persistence is disabled".to_string());
+        };
+
+        let session_id_text = session_id.to_string();
+        let Some(state) = persistence.get_session_explorer_state(&session_id_text)? else {
+            return Err("session explorer root is not set".to_string());
+        };
+
+        let root = resolve_explorer_root_path(&state.root_path)?;
+        let relative_path = normalize_relative_path(&payload.relative_path)?;
+        let target = resolve_explorer_target(&root, &relative_path)?;
+        if !target.is_file() {
+            return Err("explorer target is not a file".to_string());
+        }
+
+        let max_bytes = payload
+            .max_bytes
+            .unwrap_or(256 * 1024)
+            .clamp(1_024, MAX_EXPLORER_FILE_PREVIEW_BYTES);
+
+        let file =
+            File::open(&target).map_err(|err| format!("open explorer file failed: {err}"))?;
+        let mut buffer = Vec::new();
+        file.take((max_bytes + 1) as u64)
+            .read_to_end(&mut buffer)
+            .map_err(|err| format!("read explorer file failed: {err}"))?;
+
+        let truncated = buffer.len() > max_bytes;
+        if truncated {
+            buffer.truncate(max_bytes);
+        }
+
+        if buffer.contains(&0) {
+            return Err("binary file preview is not supported yet".to_string());
+        }
+
+        let content = String::from_utf8_lossy(&buffer).to_string();
+
+        Ok(SessionExplorerFileContent {
+            relative_path,
+            content,
+            truncated,
+            byte_len: buffer.len(),
+        })
+    }
+
     fn pty_size(cols: usize, rows: usize) -> PtySize {
         PtySize {
             cols: cols.max(1).min(u16::MAX as usize) as u16,
@@ -773,6 +1045,13 @@ impl PtyService {
             pixel_width: 0,
             pixel_height: 0,
         }
+    }
+
+    fn session_exists(&self, session_id: Uuid) -> bool {
+        self.sessions
+            .lock()
+            .map(|sessions| sessions.contains_key(&session_id))
+            .unwrap_or(false)
     }
 
     fn resolve_shell_path(&self, config_shell: Option<&str>) -> Result<String, String> {
@@ -1056,6 +1335,63 @@ impl PtyService {
                 log::warn!("persist active session failed: {err}");
             }
         }
+
+        self.refresh_explorer_watch_target();
+    }
+
+    fn refresh_explorer_watch_target(&self) {
+        let active_session_id = self
+            .active_session_id
+            .lock()
+            .ok()
+            .and_then(|active| *active);
+
+        let Some(session_id) = active_session_id else {
+            let _ = self.explorer_watch_tx.send(ExplorerWatchControl::Stop);
+            return;
+        };
+
+        let Some(persistence) = &self.persistence else {
+            let _ = self.explorer_watch_tx.send(ExplorerWatchControl::Stop);
+            return;
+        };
+
+        let session_state = match persistence.get_session_explorer_state(&session_id.to_string()) {
+            Ok(value) => value,
+            Err(err) => {
+                log::warn!("load explorer state for watch failed: {err}");
+                let _ = self.explorer_watch_tx.send(ExplorerWatchControl::Stop);
+                return;
+            }
+        };
+
+        let Some(state) = session_state else {
+            let _ = self.explorer_watch_tx.send(ExplorerWatchControl::Stop);
+            return;
+        };
+
+        let root = match resolve_explorer_root_path(&state.root_path) {
+            Ok(value) => value,
+            Err(err) => {
+                log::warn!("resolve explorer watch root failed: {err}");
+                let _ = self.explorer_watch_tx.send(ExplorerWatchControl::Stop);
+                return;
+            }
+        };
+
+        let revision = self
+            .explorer_watch_revision
+            .fetch_add(1, Ordering::SeqCst)
+            .saturating_add(1);
+
+        let _ = self
+            .explorer_watch_tx
+            .send(ExplorerWatchControl::Set(ExplorerWatchRequest {
+                session_id,
+                root_path: root.to_string_lossy().to_string(),
+                root,
+                revision,
+            }));
     }
 }
 
@@ -1182,6 +1518,29 @@ fn profile_to_info(profile: &PersistedProfile) -> ProfileInfo {
     }
 }
 
+fn explorer_state_to_model(
+    session_id: Uuid,
+    state: Option<PersistedSessionExplorerState>,
+) -> SessionExplorerState {
+    if let Some(state) = state {
+        return SessionExplorerState {
+            session_id: state.session_id,
+            root_path: Some(state.root_path),
+            current_dir: state.current_dir,
+            selected_path: state.selected_path,
+            open_file_path: state.open_file_path,
+        };
+    }
+
+    SessionExplorerState {
+        session_id: session_id.to_string(),
+        root_path: None,
+        current_dir: String::new(),
+        selected_path: None,
+        open_file_path: None,
+    }
+}
+
 fn session_to_record(session: &Session) -> Result<SessionRecord, String> {
     let (status, persist_history, seq) = session
         .shared
@@ -1203,6 +1562,65 @@ fn session_to_record(session: &Session) -> Result<SessionRecord, String> {
 
 fn parse_session_id(session_id: &str) -> Result<Uuid, String> {
     Uuid::parse_str(session_id).map_err(|err| format!("invalid session id: {err}"))
+}
+
+fn normalize_relative_path(raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(String::new());
+    }
+
+    let path = Path::new(trimmed);
+    if path.is_absolute() {
+        return Err("absolute path is not allowed in session explorer".to_string());
+    }
+
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::Normal(part) => normalized.push(part),
+            std::path::Component::ParentDir => {
+                return Err("parent path '..' is not allowed in session explorer".to_string());
+            }
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                return Err("invalid path component in session explorer".to_string());
+            }
+        }
+    }
+
+    Ok(normalized.to_string_lossy().replace('\\', "/"))
+}
+
+fn resolve_explorer_root_path(raw: &str) -> Result<PathBuf, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("explorer root path cannot be empty".to_string());
+    }
+
+    let canonical = std::fs::canonicalize(trimmed)
+        .map_err(|err| format!("invalid explorer root '{trimmed}': {err}"))?;
+    if !canonical.is_dir() {
+        return Err("explorer root is not a directory".to_string());
+    }
+    Ok(canonical)
+}
+
+fn resolve_explorer_target(root: &Path, relative: &str) -> Result<PathBuf, String> {
+    let normalized = normalize_relative_path(relative)?;
+    let joined = if normalized.is_empty() {
+        root.to_path_buf()
+    } else {
+        root.join(normalized)
+    };
+
+    let canonical = std::fs::canonicalize(&joined)
+        .map_err(|err| format!("invalid explorer path '{}': {err}", joined.display()))?;
+    if !canonical.starts_with(root) {
+        return Err("explorer path escapes selected root".to_string());
+    }
+
+    Ok(canonical)
 }
 
 fn resolve_cwd(raw_cwd: Option<&str>) -> Result<String, String> {
@@ -1487,6 +1905,195 @@ fn spawn_cwd_sync_worker(
                 }
             }
         });
+}
+
+fn spawn_explorer_watch_worker(
+    app_handle: AppHandle,
+    control_rx: std_mpsc::Receiver<ExplorerWatchControl>,
+) {
+    let _ = thread::Builder::new()
+        .name("chatminal-explorer-watch".to_string())
+        .spawn(move || {
+            let (watch_event_tx, watch_event_rx) =
+                std_mpsc::channel::<notify::Result<notify::Event>>();
+            let mut _watcher: Option<RecommendedWatcher> = None;
+            let mut current_watch: Option<ExplorerWatchRequest> = None;
+            let mut pending_paths = std::collections::BTreeSet::<String>::new();
+            let mut pending_full_resync = false;
+            let mut pending_since: Option<Instant> = None;
+            let mut running = true;
+
+            while running {
+                loop {
+                    match control_rx.try_recv() {
+                        Ok(ExplorerWatchControl::Set(request)) => {
+                            pending_paths.clear();
+                            pending_full_resync = false;
+                            pending_since = None;
+                            _watcher = None;
+                            current_watch = Some(request);
+
+                            while watch_event_rx.try_recv().is_ok() {}
+
+                            if let Some(target) = current_watch.as_ref() {
+                                match create_explorer_watcher(
+                                    target.root.as_path(),
+                                    watch_event_tx.clone(),
+                                ) {
+                                    Ok(new_watcher) => _watcher = Some(new_watcher),
+                                    Err(err) => {
+                                        log::warn!("start explorer watcher failed: {err}");
+                                        pending_full_resync = true;
+                                        pending_since = Some(Instant::now());
+                                    }
+                                }
+                            }
+                        }
+                        Ok(ExplorerWatchControl::Stop) => {
+                            _watcher = None;
+                            current_watch = None;
+                            pending_paths.clear();
+                            pending_full_resync = false;
+                            pending_since = None;
+                        }
+                        Ok(ExplorerWatchControl::Shutdown) => {
+                            running = false;
+                            break;
+                        }
+                        Err(std_mpsc::TryRecvError::Empty) => break,
+                        Err(std_mpsc::TryRecvError::Disconnected) => {
+                            running = false;
+                            break;
+                        }
+                    }
+                }
+
+                if !running {
+                    break;
+                }
+
+                while let Ok(message) = watch_event_rx.try_recv() {
+                    let Some(target) = current_watch.as_ref() else {
+                        continue;
+                    };
+
+                    match message {
+                        Ok(event) => {
+                            if !should_queue_explorer_notify_event(&event.kind) {
+                                continue;
+                            }
+
+                            if event.paths.is_empty() {
+                                pending_full_resync = true;
+                            } else {
+                                for changed_path in &event.paths {
+                                    if !push_explorer_changed_path(
+                                        changed_path,
+                                        &target.root,
+                                        &mut pending_paths,
+                                    ) {
+                                        pending_full_resync = true;
+                                    }
+
+                                    if pending_paths.len() >= EXPLORER_WATCH_MAX_CHANGED_PATHS {
+                                        pending_full_resync = true;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            pending_since.get_or_insert_with(Instant::now);
+                        }
+                        Err(err) => {
+                            log::warn!("explorer watcher event error: {err}");
+                            pending_full_resync = true;
+                            pending_since.get_or_insert_with(Instant::now);
+                        }
+                    }
+                }
+
+                if let Some(queued_at) = pending_since
+                    && queued_at.elapsed() >= EXPLORER_WATCH_DEBOUNCE
+                {
+                    if let Some(target) = current_watch.as_ref() {
+                        let mut changed_paths = pending_paths.iter().cloned().collect::<Vec<_>>();
+                        changed_paths.sort();
+                        let full_resync = pending_full_resync || changed_paths.is_empty();
+
+                        emit_explorer_fs_changed(
+                            &app_handle,
+                            target,
+                            changed_paths,
+                            full_resync,
+                        );
+                    }
+
+                    pending_paths.clear();
+                    pending_full_resync = false;
+                    pending_since = None;
+                }
+
+                thread::sleep(Duration::from_millis(30));
+            }
+        });
+}
+
+fn create_explorer_watcher(
+    root: &Path,
+    watch_event_tx: std_mpsc::Sender<notify::Result<notify::Event>>,
+) -> Result<RecommendedWatcher, String> {
+    let mut watcher = RecommendedWatcher::new(
+        move |event| {
+            let _ = watch_event_tx.send(event);
+        },
+        NotifyConfig::default(),
+    )
+    .map_err(|err| format!("init notify watcher failed: {err}"))?;
+
+    watcher
+        .watch(root, RecursiveMode::Recursive)
+        .map_err(|err| format!("watch path '{}' failed: {err}", root.display()))?;
+
+    Ok(watcher)
+}
+
+fn should_queue_explorer_notify_event(kind: &EventKind) -> bool {
+    !matches!(kind, EventKind::Access(_) | EventKind::Other)
+}
+
+fn push_explorer_changed_path(
+    changed_path: &Path,
+    root: &Path,
+    output: &mut std::collections::BTreeSet<String>,
+) -> bool {
+    let relative = match changed_path.strip_prefix(root) {
+        Ok(path) => path,
+        Err(_) => return false,
+    };
+
+    match normalize_relative_path(&relative.to_string_lossy()) {
+        Ok(value) => {
+            output.insert(value);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+fn emit_explorer_fs_changed(
+    app_handle: &AppHandle,
+    watch: &ExplorerWatchRequest,
+    changed_paths: Vec<String>,
+    full_resync: bool,
+) {
+    let payload = SessionExplorerFsChangedEvent {
+        session_id: watch.session_id.to_string(),
+        root_path: watch.root_path.clone(),
+        changed_paths,
+        full_resync,
+        revision: watch.revision,
+    };
+    let _ = app_handle.emit("explorer/fs-changed", payload);
 }
 
 fn reader_thread(

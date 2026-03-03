@@ -162,6 +162,67 @@ pub struct SessionSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct SessionExplorerState {
+    pub session_id: String,
+    pub root_path: Option<String>,
+    pub current_dir: String,
+    pub selected_path: Option<String>,
+    pub open_file_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SessionExplorerRootPayload {
+    pub session_id: String,
+    pub root_path: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SessionExplorerListPayload {
+    pub session_id: String,
+    pub relative_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SessionExplorerReadFilePayload {
+    pub session_id: String,
+    pub relative_path: String,
+    pub max_bytes: Option<usize>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SessionExplorerUpdateStatePayload {
+    pub session_id: String,
+    pub current_dir: String,
+    pub selected_path: Option<String>,
+    pub open_file_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionExplorerEntry {
+    pub name: String,
+    pub relative_path: String,
+    pub is_dir: bool,
+    pub size: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionExplorerFileContent {
+    pub relative_path: String,
+    pub content: String,
+    pub truncated: bool,
+    pub byte_len: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionExplorerFsChangedEvent {
+    pub session_id: String,
+    pub root_path: String,
+    pub changed_paths: Vec<String>,
+    pub full_resync: bool,
+    pub revision: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct WorkspaceState {
     pub profiles: Vec<ProfileInfo>,
     pub active_profile_id: Option<String>,

@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+  import { open } from "@tauri-apps/plugin-dialog";
   import { FitAddon } from "@xterm/addon-fit";
   import { SearchAddon } from "@xterm/addon-search";
   import { SerializeAddon } from "@xterm/addon-serialize";
@@ -17,8 +18,11 @@
     PtyErrorEvent,
     PtyExitedEvent,
     PtyOutputEvent,
-    RuntimeBackendInfo,
     RuntimeUiSettings,
+    SessionExplorerEntry,
+    SessionExplorerFsChangedEvent,
+    SessionExplorerFileContent,
+    SessionExplorerState,
     SessionInfo,
     SessionSnapshot,
     WorkspaceState,
@@ -42,6 +46,7 @@
   let renameBusy = false;
   let lastError = "";
   let sessionSearch = "";
+  let isSidebarCollapsed = false;
   let profileMenuOpen = false;
   let creatingProfile = false;
   let newProfileDraft = "";
@@ -54,10 +59,15 @@
   let unlistenExited: UnlistenFn | null = null;
   let unlistenError: UnlistenFn | null = null;
   let unlistenTrayNewSession: UnlistenFn | null = null;
+  let unlistenMenuSettings: UnlistenFn | null = null;
+  let unlistenMenuNewSession: UnlistenFn | null = null;
+  let unlistenMenuReconnectActiveSession: UnlistenFn | null = null;
+  let unlistenExplorerFsChanged: UnlistenFn | null = null;
 
   const TERMINAL_SCROLLBACK = 1000;
   const MAX_SERIALIZED_CACHE_SESSIONS = 24;
   const MAX_LIVE_REPLAY_CHARS = 700_000;
+  const EXPLORER_MAX_FILE_PREVIEW_BYTES = 256 * 1024;
   const activationInFlight = new Map<string, Promise<void>>();
   const localInputBufferBySession = new Map<string, string>();
   const knownSessionIds = new Set<string>();
@@ -69,7 +79,6 @@
   const sessionReplayTruncatedById = new Map<string, boolean>();
   let renderedSessionId: string | null = null;
   let searchQuery = "";
-  let runtimeBackendInfo: RuntimeBackendInfo | null = null;
   let runtimeUiSettings: RuntimeUiSettings = {
     sync_clear_command_to_history: false,
   };
@@ -78,6 +87,28 @@
     start_in_tray: false,
   };
   let lifecyclePreferencesBusy = false;
+  let activePaneMode: "terminal" | "explorer" | "settings" = "terminal";
+  let isExplorerTreeCollapsed = false;
+  let explorerLoading = false;
+  let explorerChangingRoot = false;
+  let explorerReadingFile = false;
+  let explorerError = "";
+  let explorerState: SessionExplorerState | null = null;
+  let explorerFilePreview: SessionExplorerFileContent | null = null;
+  let explorerReadSeq = 0;
+  const explorerTreeEntriesByDir = new Map<string, SessionExplorerEntry[]>();
+  const explorerExpandedDirs = new Set<string>();
+  let explorerTreeRevision = 0;
+  let explorerRefreshSeq = 0;
+  let explorerWatchRevision = 0;
+  let explorerVisibleNodes: Array<{ entry: SessionExplorerEntry; depth: number }> = [];
+
+  $: explorerRootMissing =
+    !!activeSessionId && (!!activeSession ? explorerState?.root_path == null : false);
+  $: {
+    explorerTreeRevision;
+    explorerVisibleNodes = buildVisibleExplorerNodes();
+  }
 
   $: activeSession =
     sessions.find((session) => session.session_id === activeSessionId) ?? null;
@@ -373,6 +404,464 @@
     return `${words[0][0] ?? ""}${words[1][0] ?? ""}`.toUpperCase();
   }
 
+  function normalizeExplorerRelativePath(input: string): string {
+    const normalized = input.replace(/\\/g, "/").trim();
+    if (!normalized) {
+      return "";
+    }
+    return normalized
+      .split("/")
+      .filter((part) => part.length > 0 && part !== ".")
+      .join("/");
+  }
+
+  function explorerPathAncestors(input: string): string[] {
+    const normalized = normalizeExplorerRelativePath(input);
+    if (!normalized) {
+      return [];
+    }
+
+    const parts = normalized.split("/");
+    const result: string[] = [];
+    let current = "";
+    for (const part of parts) {
+      current = current ? `${current}/${part}` : part;
+      result.push(current);
+    }
+    return result;
+  }
+
+  function explorerParentPath(input: string): string {
+    const normalized = normalizeExplorerRelativePath(input);
+    if (!normalized) {
+      return "";
+    }
+    const parts = normalized.split("/");
+    parts.pop();
+    return parts.join("/");
+  }
+
+  function markExplorerTreeChanged() {
+    explorerTreeRevision += 1;
+  }
+
+  function clearExplorerTree() {
+    explorerTreeEntriesByDir.clear();
+    explorerExpandedDirs.clear();
+    markExplorerTreeChanged();
+  }
+
+  function buildVisibleExplorerNodes(): Array<{ entry: SessionExplorerEntry; depth: number }> {
+    const nodes: Array<{ entry: SessionExplorerEntry; depth: number }> = [];
+
+    const walk = (dirPath: string, depth: number) => {
+      const entries = explorerTreeEntriesByDir.get(dirPath) ?? [];
+      for (const entry of entries) {
+        nodes.push({ entry, depth });
+        if (entry.is_dir && explorerExpandedDirs.has(entry.relative_path)) {
+          walk(entry.relative_path, depth + 1);
+        }
+      }
+    };
+
+    walk("", 0);
+    return nodes;
+  }
+
+  let explorerLoadSeq = 0;
+
+  async function loadExplorerStateForSession(sessionId: string | null) {
+    const requestSeq = ++explorerLoadSeq;
+    if (!sessionId) {
+      explorerState = null;
+      clearExplorerTree();
+      explorerFilePreview = null;
+      explorerError = "";
+      explorerWatchRevision = 0;
+      return;
+    }
+
+    const previousState = explorerState;
+    explorerLoading = true;
+    explorerError = "";
+    try {
+      const state = await invoke<SessionExplorerState>("get_session_explorer_state", {
+        payload: { session_id: sessionId },
+      });
+      if (requestSeq !== explorerLoadSeq || sessionId !== activeSessionId) {
+        return;
+      }
+
+      explorerState = state;
+      explorerWatchRevision = 0;
+      clearExplorerTree();
+      explorerFilePreview = null;
+
+      if (!state.root_path) {
+        return;
+      }
+
+      await ensureExplorerDirLoaded("", { sessionId });
+
+      const dirsToExpand = new Set<string>();
+      const currentDir = normalizeExplorerRelativePath(state.current_dir);
+      for (const dir of explorerPathAncestors(currentDir)) {
+        if (dir) {
+          dirsToExpand.add(dir);
+        }
+      }
+
+      if (state.selected_path) {
+        const selectedPath = normalizeExplorerRelativePath(state.selected_path);
+        const parentDir = state.open_file_path
+          ? explorerParentPath(selectedPath)
+          : selectedPath;
+        for (const dir of explorerPathAncestors(parentDir)) {
+          if (dir) {
+            dirsToExpand.add(dir);
+          }
+        }
+      }
+
+      for (const dir of dirsToExpand) {
+        explorerExpandedDirs.add(dir);
+      }
+      markExplorerTreeChanged();
+
+      for (const dir of dirsToExpand) {
+        await ensureExplorerDirLoaded(dir, { sessionId });
+      }
+
+      if (state.open_file_path) {
+        await openExplorerFile(state.open_file_path, { persistState: false, sessionId });
+      }
+    } catch (error) {
+      if (requestSeq !== explorerLoadSeq || sessionId !== activeSessionId) {
+        return;
+      }
+      clearExplorerTree();
+      explorerFilePreview = null;
+      if (
+        !previousState ||
+        previousState.session_id !== sessionId ||
+        String(error).toLowerCase().includes("root is not set")
+      ) {
+        explorerState = {
+          session_id: sessionId,
+          root_path: null,
+          current_dir: "",
+          selected_path: null,
+          open_file_path: null,
+        };
+      }
+      explorerError = `load explorer failed: ${String(error)}`;
+    } finally {
+      if (requestSeq === explorerLoadSeq) {
+        explorerLoading = false;
+      }
+    }
+  }
+
+  async function persistExplorerState(next: {
+    currentDir?: string;
+    selectedPath?: string | null;
+    openFilePath?: string | null;
+  }, options: { sessionId?: string } = {}) {
+    const sessionId = options.sessionId ?? activeSessionId;
+    if (!sessionId || !explorerState?.root_path) {
+      return;
+    }
+
+    const payload = {
+      session_id: sessionId,
+      current_dir: normalizeExplorerRelativePath(next.currentDir ?? explorerState.current_dir ?? ""),
+      selected_path:
+        next.selectedPath === undefined ? explorerState.selected_path : next.selectedPath,
+      open_file_path:
+        next.openFilePath === undefined ? explorerState.open_file_path : next.openFilePath,
+    };
+
+    const updated = await invoke<SessionExplorerState>("update_session_explorer_state", { payload });
+    if (sessionId === activeSessionId) {
+      explorerState = updated;
+    }
+  }
+
+  async function ensureExplorerDirLoaded(
+    relativePath: string,
+    options: { sessionId?: string } = {},
+  ): Promise<SessionExplorerEntry[]> {
+    const sessionId = options.sessionId ?? activeSessionId;
+    if (!sessionId || !explorerState?.root_path) {
+      return [];
+    }
+
+    const normalized = normalizeExplorerRelativePath(relativePath);
+    const payload = {
+      session_id: sessionId,
+      relative_path: normalized.length === 0 ? null : normalized,
+    };
+    const entries = await invoke<SessionExplorerEntry[]>("list_session_explorer_entries", {
+      payload,
+    });
+    if (sessionId === activeSessionId) {
+      explorerTreeEntriesByDir.set(normalized, entries);
+      markExplorerTreeChanged();
+    }
+    return entries;
+  }
+
+  async function chooseExplorerRoot() {
+    const sessionId = activeSessionId;
+    if (!sessionId) {
+      return;
+    }
+
+    explorerChangingRoot = true;
+    explorerError = "";
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: "Select session root folder",
+      });
+
+      if (typeof selected !== "string" || !selected) {
+        return;
+      }
+
+      const state = await invoke<SessionExplorerState>("set_session_explorer_root", {
+        payload: {
+          session_id: sessionId,
+          root_path: selected,
+        },
+      });
+      if (sessionId === activeSessionId) {
+        explorerState = state;
+        clearExplorerTree();
+        explorerFilePreview = null;
+        await ensureExplorerDirLoaded("", { sessionId });
+      }
+    } catch (error) {
+      explorerError = `set explorer root failed: ${String(error)}`;
+    } finally {
+      explorerChangingRoot = false;
+    }
+  }
+
+  async function toggleExplorerFolder(relativePath: string) {
+    const sessionId = activeSessionId;
+    if (!sessionId || !explorerState?.root_path) {
+      return;
+    }
+
+    const normalized = normalizeExplorerRelativePath(relativePath);
+    explorerError = "";
+    try {
+      const shouldExpand = !explorerExpandedDirs.has(normalized);
+      if (shouldExpand) {
+        explorerExpandedDirs.add(normalized);
+        markExplorerTreeChanged();
+        await ensureExplorerDirLoaded(normalized, { sessionId });
+      } else {
+        explorerExpandedDirs.delete(normalized);
+        markExplorerTreeChanged();
+      }
+
+      if (sessionId !== activeSessionId) {
+        return;
+      }
+      await persistExplorerState({
+        currentDir: normalized,
+        selectedPath: normalized || null,
+        openFilePath: explorerState?.open_file_path ?? null,
+      }, { sessionId });
+    } catch (error) {
+      explorerError = `toggle explorer folder failed: ${String(error)}`;
+    }
+  }
+
+  async function openExplorerFile(
+    relativePath: string,
+    options: { persistState?: boolean; sessionId?: string } = {},
+  ) {
+    const sessionId = options.sessionId ?? activeSessionId;
+    if (!sessionId || !explorerState?.root_path) {
+      return;
+    }
+
+    const readSeq = ++explorerReadSeq;
+    explorerReadingFile = true;
+    explorerError = "";
+    const normalized = normalizeExplorerRelativePath(relativePath);
+    try {
+      const preview = await invoke<SessionExplorerFileContent>("read_session_explorer_file", {
+        payload: {
+          session_id: sessionId,
+          relative_path: normalized,
+          max_bytes: EXPLORER_MAX_FILE_PREVIEW_BYTES,
+        },
+      });
+      if (sessionId !== activeSessionId || readSeq !== explorerReadSeq) {
+        return;
+      }
+      explorerFilePreview = preview;
+
+      if (options.persistState ?? true) {
+        await persistExplorerState({
+          selectedPath: normalized,
+          openFilePath: normalized,
+        }, { sessionId });
+      }
+    } catch (error) {
+      if (sessionId === activeSessionId && readSeq === explorerReadSeq) {
+        explorerError = `read explorer file failed: ${String(error)}`;
+      }
+    } finally {
+      if (readSeq === explorerReadSeq) {
+        explorerReadingFile = false;
+      }
+    }
+  }
+
+  async function onExplorerEntryClick(entry: SessionExplorerEntry) {
+    if (entry.is_dir) {
+      await toggleExplorerFolder(entry.relative_path);
+      return;
+    }
+    await openExplorerFile(entry.relative_path);
+  }
+
+  function explorerPathAffected(targetPath: string, changedPath: string) {
+    if (!targetPath) {
+      return false;
+    }
+    if (!changedPath) {
+      return true;
+    }
+    return (
+      targetPath === changedPath ||
+      targetPath.startsWith(`${changedPath}/`) ||
+      changedPath.startsWith(`${targetPath}/`)
+    );
+  }
+
+  async function refreshExplorerFromFsChanged(payload: SessionExplorerFsChangedEvent) {
+    const sessionId = activeSessionId;
+    if (!sessionId || payload.session_id !== sessionId) {
+      return;
+    }
+    if (!explorerState?.root_path || payload.root_path !== explorerState.root_path) {
+      return;
+    }
+    if (payload.revision < explorerWatchRevision) {
+      return;
+    }
+    explorerWatchRevision = payload.revision;
+
+    const requestSeq = ++explorerRefreshSeq;
+    const changedPaths = payload.changed_paths
+      .map((path) => normalizeExplorerRelativePath(path))
+      .filter((path, index, source) => source.indexOf(path) === index);
+    const shouldFullResync = payload.full_resync || changedPaths.length === 0;
+    const dirsToReload = new Set<string>();
+    if (shouldFullResync) {
+      dirsToReload.add("");
+      for (const dir of explorerExpandedDirs) {
+        dirsToReload.add(dir);
+      }
+    } else {
+      for (const changedPath of changedPaths) {
+        const parentDir = explorerParentPath(changedPath);
+        dirsToReload.add(parentDir);
+        for (const ancestor of explorerPathAncestors(changedPath)) {
+          if (explorerExpandedDirs.has(ancestor)) {
+            dirsToReload.add(ancestor);
+          }
+        }
+        if (explorerExpandedDirs.has(changedPath)) {
+          dirsToReload.add(changedPath);
+        }
+      }
+
+      if (dirsToReload.size === 0) {
+        dirsToReload.add("");
+      }
+    }
+
+    explorerError = "";
+
+    try {
+      const orderedDirs = Array.from(dirsToReload).sort((a, b) => a.length - b.length);
+      for (const dir of orderedDirs) {
+        if (requestSeq !== explorerRefreshSeq || sessionId !== activeSessionId) {
+          return;
+        }
+        if (dir !== "" && !explorerExpandedDirs.has(dir)) {
+          continue;
+        }
+        await ensureExplorerDirLoaded(dir, { sessionId });
+      }
+
+      if (requestSeq !== explorerRefreshSeq || sessionId !== activeSessionId) {
+        return;
+      }
+
+      const openFilePath = explorerState?.open_file_path;
+      if (!openFilePath) {
+        return;
+      }
+
+      const shouldRefreshOpenFile =
+        shouldFullResync ||
+        changedPaths.some((changedPath) => explorerPathAffected(openFilePath, changedPath));
+
+      if (shouldRefreshOpenFile) {
+        await openExplorerFile(openFilePath, { persistState: false, sessionId });
+      }
+    } catch (error) {
+      if (requestSeq === explorerRefreshSeq && sessionId === activeSessionId) {
+        explorerError = `realtime explorer refresh failed: ${String(error)}`;
+      }
+    }
+  }
+
+  function swapPaneMode() {
+    if (activePaneMode === "settings") {
+      activePaneMode = "terminal";
+    } else {
+      activePaneMode = activePaneMode === "terminal" ? "explorer" : "terminal";
+    }
+    if (activePaneMode !== "terminal") {
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      void resizeActiveSession();
+      requestAnimationFrame(() => {
+        void resizeActiveSession();
+      });
+    });
+  }
+
+  function toggleSettingsPane() {
+    activePaneMode = activePaneMode === "settings" ? "terminal" : "settings";
+    if (activePaneMode !== "terminal") {
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      void resizeActiveSession();
+      requestAnimationFrame(() => {
+        void resizeActiveSession();
+      });
+    });
+  }
+
+  function toggleExplorerTree() {
+    isExplorerTreeCollapsed = !isExplorerTreeCollapsed;
+  }
+
   async function listSessions() {
     sessions = await invoke<SessionInfo[]>("list_sessions");
     syncKnownSessionIds(sessions);
@@ -401,20 +890,13 @@
     }
 
     await hydrateActiveSession();
+    await loadExplorerStateForSession(activeSessionId);
     await resizeActiveSession();
   }
 
   async function loadWorkspaceState() {
     const workspace = await invoke<WorkspaceState>("load_workspace");
     await applyWorkspace(workspace);
-  }
-
-  async function loadRuntimeBackendInfo() {
-    try {
-      runtimeBackendInfo = await invoke<RuntimeBackendInfo>("get_runtime_backend_info");
-    } catch (_error) {
-      runtimeBackendInfo = null;
-    }
   }
 
   async function loadRuntimeUiSettings() {
@@ -602,6 +1084,18 @@
     closeProfileMenu();
   }
 
+  function toggleSidebar() {
+    isSidebarCollapsed = !isSidebarCollapsed;
+    if (isSidebarCollapsed) {
+      closeProfileMenu();
+    }
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        void resizeActiveSession();
+      }, 220);
+    });
+  }
+
   function getSession(sessionId: string | null) {
     if (!sessionId) {
       return null;
@@ -648,6 +1142,7 @@
       activeSessionId = next?.session_id ?? null;
       activeSessionSeq = 0;
       await hydrateActiveSession();
+      await loadExplorerStateForSession(activeSessionId);
       await resizeActiveSession();
     }
   }
@@ -713,6 +1208,7 @@
     options: { connect?: boolean } = {},
   ) {
     if (activeSessionId === sessionId) {
+      await loadExplorerStateForSession(activeSessionId);
       if (options.connect ?? true) {
         await ensureSessionConnected(sessionId);
       }
@@ -725,6 +1221,7 @@
     activeSessionSeq = 0;
 
     await hydrateActiveSession();
+    await loadExplorerStateForSession(activeSessionId);
 
     if (options.connect ?? true) {
       const connected = await ensureSessionConnected(sessionId);
@@ -911,6 +1408,24 @@
     await resizeActiveSession();
   }
 
+  async function autoReconnectActiveSessionOnStartup() {
+    if (!activeSessionId) {
+      return;
+    }
+
+    const session = getSession(activeSessionId);
+    if (!session || session.status === "running") {
+      return;
+    }
+
+    const connected = await ensureSessionConnected(activeSessionId);
+    if (!connected) {
+      return;
+    }
+
+    await resizeActiveSession();
+  }
+
   async function hydrateActiveSession() {
     if (!terminal) {
       return;
@@ -1028,13 +1543,27 @@
     };
   }
 
+  function isTerminalPaneVisible() {
+    if (activePaneMode !== "terminal" || !terminalHost) {
+      return false;
+    }
+    return terminalHost.clientWidth > 0 && terminalHost.clientHeight > 0;
+  }
+
   async function resizeActiveSession() {
     if (!activeSessionId || !terminal || !fitAddon) {
       return;
     }
 
+    if (!isTerminalPaneVisible()) {
+      return;
+    }
+
     fitAddon.fit();
     const { cols, rows } = getTerminalSize();
+    if (cols < 2 || rows < 2) {
+      return;
+    }
 
     if (!isSessionRunning(activeSessionId)) {
       return;
@@ -1140,6 +1669,9 @@
     });
 
     resizeObserver = new ResizeObserver(() => {
+      if (!isTerminalPaneVisible()) {
+        return;
+      }
       void resizeActiveSession();
     });
     resizeObserver.observe(terminalHost);
@@ -1191,6 +1723,38 @@
         lastError = `tray new session failed: ${String(error)}`;
       }
     });
+
+    unlistenMenuSettings = await listen("app/menu-settings", () => {
+      activePaneMode = "settings";
+    });
+
+    unlistenMenuNewSession = await listen("app/menu-new-session", async () => {
+      try {
+        activePaneMode = "terminal";
+        await createSession();
+      } catch (error) {
+        lastError = `menu new session failed: ${String(error)}`;
+      }
+    });
+
+    unlistenMenuReconnectActiveSession = await listen(
+      "app/menu-reconnect-active-session",
+      async () => {
+        try {
+          activePaneMode = "terminal";
+          await activateActiveSession();
+        } catch (error) {
+          lastError = `menu reconnect active session failed: ${String(error)}`;
+        }
+      },
+    );
+
+    unlistenExplorerFsChanged = await listen<SessionExplorerFsChangedEvent>(
+      "explorer/fs-changed",
+      ({ payload }) => {
+        void refreshExplorerFromFsChanged(payload);
+      },
+    );
   }
 
   function onSessionKeydown(event: KeyboardEvent, sessionId: string) {
@@ -1241,10 +1805,10 @@
     await Promise.all([
       loadLifecyclePreferences(),
       loadRuntimeUiSettings(),
-      loadRuntimeBackendInfo(),
     ]);
 
     await loadWorkspaceState();
+    await autoReconnectActiveSessionOnStartup();
     if (sessions.length === 0) {
       await createSession();
     }
@@ -1259,12 +1823,16 @@
     unlistenExited?.();
     unlistenError?.();
     unlistenTrayNewSession?.();
+    unlistenMenuSettings?.();
+    unlistenMenuNewSession?.();
+    unlistenMenuReconnectActiveSession?.();
+    unlistenExplorerFsChanged?.();
     terminal?.dispose();
     activationInFlight.clear();
   });
 </script>
 
-<div class="termi-layout">
+<div class={`termi-layout ${isSidebarCollapsed ? "sidebar-collapsed" : ""}`}>
   <aside class="termi-sidebar">
     <div class="brand-header">
       <div class="brand-copy">
@@ -1274,7 +1842,14 @@
           <p><span class="online-dot"></span> Online</p>
         </div>
       </div>
-      <button class="new-session-btn" on:click={() => void createSession()}>New</button>
+      <button
+        class="new-session-btn"
+        title="Settings"
+        aria-label="Settings"
+        on:click={toggleSettingsPane}
+      >
+        ⚙
+      </button>
     </div>
 
     <div class="search-box-wrap">
@@ -1283,7 +1858,17 @@
     </div>
 
     <div class="sessions-panel">
-      <p class="section-title">Active Sessions</p>
+      <div class="section-title-row">
+        <p class="section-title">Active Sessions</p>
+        <button
+          class="section-add-btn"
+          title="New session"
+          aria-label="New session"
+          on:click={() => void createSession()}
+        >
+          +
+        </button>
+      </div>
 
       <ul class="session-list">
         {#if filteredSessions.length === 0}
@@ -1423,34 +2008,6 @@
               {creatingProfile ? "..." : "Create"}
             </button>
           </div>
-          <div class="profile-pref-row">
-            <label class="profile-pref-label">
-              <input
-                type="checkbox"
-                checked={lifecyclePreferences.keep_alive_on_close}
-                disabled={lifecyclePreferencesBusy}
-                on:change={(event) =>
-                  void setLifecyclePreferences({
-                    keep_alive_on_close: (event.currentTarget as HTMLInputElement).checked,
-                  })}
-              />
-              Keep running in tray when close
-            </label>
-          </div>
-          <div class="profile-pref-row">
-            <label class="profile-pref-label">
-              <input
-                type="checkbox"
-                checked={lifecyclePreferences.start_in_tray}
-                disabled={lifecyclePreferencesBusy}
-                on:change={(event) =>
-                  void setLifecyclePreferences({
-                    start_in_tray: (event.currentTarget as HTMLInputElement).checked,
-                  })}
-              />
-              Start in tray
-            </label>
-          </div>
           <button
             class="mini-btn danger profile-delete-btn"
             disabled={deletingProfileBusy || profiles.length <= 1 || !activeProfileId}
@@ -1465,20 +2022,31 @@
 
   <main class="terminal-shell">
     <div class="terminal-header">
+      <button
+        class="header-btn sidebar-toggle-btn"
+        on:click={toggleSidebar}
+        title={isSidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+        aria-label={isSidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+      >
+        {isSidebarCollapsed ? "☰" : "⟨"}
+      </button>
       <div class="terminal-meta">
         <span>
           {activeSession ? `Active: ${activeSession.name} (${activeSession.status})` : "No active session"}
         </span>
-        {#if activeSession}
-          <span class="terminal-cwd" title={activeSession.cwd}>{activeSession.cwd}</span>
-        {/if}
-        {#if runtimeBackendInfo}
-          <span class="terminal-cwd" title={runtimeBackendInfo.note}>
-            Owner: {runtimeBackendInfo.runtime_owner} · Requested: {runtimeBackendInfo.requested_mode}
-          </span>
-        {/if}
       </div>
       <div class="terminal-actions-row">
+        <button class="header-btn" on:click={swapPaneMode}>
+          Mode: {activePaneMode === "terminal" ? "Terminal" : activePaneMode === "explorer" ? "Explorer" : "Settings"}
+        </button>
+        <button class="header-btn" on:click={toggleSettingsPane}>
+          {activePaneMode === "settings" ? "Back to terminal" : "Settings"}
+        </button>
+        {#if activePaneMode === "explorer"}
+          <button class="header-btn" on:click={toggleExplorerTree}>
+            {isExplorerTreeCollapsed ? "Show tree" : "Hide tree"}
+          </button>
+        {/if}
         {#if activeSession && activeSession.status === "disconnected"}
           <button class="header-btn" on:click={() => void activateActiveSession()}>Reconnect</button>
         {/if}
@@ -1498,18 +2066,168 @@
       <div class="error-bar">{lastError}</div>
     {/if}
 
-    <div class="terminal-pane">
-      {#if sessions.length === 0}
-        <div class="empty-state">No sessions yet</div>
-      {/if}
+    <div class="terminal-content">
+      <div class={`terminal-pane ${activePaneMode === "terminal" ? "pane-active" : "pane-hidden"}`}>
+        {#if sessions.length === 0}
+          <div class="empty-state">No sessions yet</div>
+        {/if}
 
-      <div class="terminal-host" bind:this={terminalHost}></div>
+        <div class="terminal-host" bind:this={terminalHost}></div>
 
-      {#if activeSession && activeSession.status === "disconnected"}
-        <div class="terminal-overlay">
-          Session disconnected. Click Reconnect hoặc gõ lệnh để spawn lại PTY.
+        {#if activeSession && activeSession.status === "disconnected"}
+          <div class="terminal-overlay">
+            Session disconnected. Click Reconnect hoặc gõ lệnh để spawn lại PTY.
+          </div>
+        {/if}
+      </div>
+
+      <aside class={`explorer-pane ${activePaneMode === "explorer" ? "pane-active" : "pane-hidden"}`}>
+        {#if !activeSessionId}
+          <div class="explorer-empty">Select a session to use file explorer.</div>
+        {:else if explorerLoading}
+          <div class="explorer-empty">Loading explorer...</div>
+        {:else if explorerRootMissing}
+          <div class="explorer-empty">
+            <p>This session has no root folder yet.</p>
+            <button
+              class="mini-btn"
+              disabled={explorerChangingRoot}
+              on:click={() => void chooseExplorerRoot()}
+            >
+              {explorerChangingRoot ? "Opening..." : "Select root folder"}
+            </button>
+            {#if explorerError}
+              <p class="explorer-inline-error">{explorerError}</p>
+            {/if}
+          </div>
+        {:else}
+          <div class={`explorer-editor-layout ${isExplorerTreeCollapsed ? "tree-collapsed" : ""}`}>
+            <section class="explorer-file-pane">
+              <div class="vscode-editor-titlebar">
+                <span class="vscode-editor-dot"></span>
+                <span class="vscode-editor-title" title={explorerFilePreview?.relative_path ?? "No file selected"}>
+                  {explorerFilePreview?.relative_path ?? "No file selected"}
+                </span>
+              </div>
+              <div class="explorer-preview vscode-editor-surface">
+                {#if explorerReadingFile}
+                  <div class="explorer-empty">Reading file...</div>
+                {:else if explorerFilePreview}
+                  <textarea
+                    class="vscode-code-textarea"
+                    readonly
+                    spellcheck="false"
+                    wrap="off"
+                    autocapitalize="off"
+                    autocomplete="off"
+                    autocorrect="off"
+                    value={explorerFilePreview.content}
+                  ></textarea>
+                  {#if explorerFilePreview.truncated}
+                    <p class="explorer-truncated">Preview truncated.</p>
+                  {/if}
+                {:else}
+                  <div class="explorer-empty">Choose a file to preview.</div>
+                {/if}
+              </div>
+            </section>
+
+            <section class={`explorer-tree-pane ${isExplorerTreeCollapsed ? "tree-collapsed" : ""}`}>
+              <div class="explorer-header">
+                <p>EXPLORER</p>
+                <button
+                  class="mini-btn"
+                  disabled={!activeSessionId || explorerChangingRoot}
+                  on:click={() => void chooseExplorerRoot()}
+                >
+                  {explorerChangingRoot ? "..." : "Change root"}
+                </button>
+              </div>
+
+              <div class="explorer-root-path" title={explorerState?.root_path ?? ""}>
+                {explorerState?.root_path}
+              </div>
+              <div class="explorer-nav">
+                <span class="explorer-nav-label">Selected</span>
+                <span title={explorerState?.selected_path || "/"}>{explorerState?.selected_path || "/"}</span>
+              </div>
+
+              {#if explorerError}
+                <div class="explorer-error">{explorerError}</div>
+              {/if}
+
+              <div class="explorer-list">
+                {#if explorerVisibleNodes.length === 0}
+                  <div class="explorer-empty">Folder is empty.</div>
+                {/if}
+
+                {#each explorerVisibleNodes as node (node.entry.relative_path)}
+                  <button
+                    class={`explorer-entry ${explorerState?.selected_path === node.entry.relative_path ? "active" : ""}`}
+                    style={`--tree-depth: ${node.depth};`}
+                    on:click={() => void onExplorerEntryClick(node.entry)}
+                  >
+                    <span class="explorer-entry-name">
+                      {#if node.entry.is_dir}
+                        <span class="explorer-disclosure">
+                          {explorerExpandedDirs.has(node.entry.relative_path) ? "▾" : "▸"}
+                        </span>
+                      {:else}
+                        <span class="explorer-disclosure file">•</span>
+                      {/if}
+                      <span class="explorer-entry-label">{node.entry.name}</span>
+                    </span>
+                    {#if !node.entry.is_dir && node.entry.size !== null}
+                      <span class="explorer-entry-size">{node.entry.size}B</span>
+                    {/if}
+                  </button>
+                {/each}
+              </div>
+            </section>
+          </div>
+        {/if}
+      </aside>
+
+      <section class={`settings-pane ${activePaneMode === "settings" ? "pane-active" : "pane-hidden"}`}>
+        <div class="settings-wrap">
+          <h2>Settings</h2>
+          <p class="settings-lead">Application lifecycle preferences</p>
+
+          <div class="settings-card">
+            <label class="settings-option">
+              <input
+                type="checkbox"
+                checked={lifecyclePreferences.keep_alive_on_close}
+                disabled={lifecyclePreferencesBusy}
+                on:change={(event) =>
+                  void setLifecyclePreferences({
+                    keep_alive_on_close: (event.currentTarget as HTMLInputElement).checked,
+                  })}
+              />
+              <span>
+                <strong>Keep running in tray when close</strong>
+                <small>Closing window only hides app to tray, sessions keep running.</small>
+              </span>
+            </label>
+
+            <label class="settings-option">
+              <input
+                type="checkbox"
+                checked={lifecyclePreferences.start_in_tray}
+                disabled={lifecyclePreferencesBusy}
+                on:change={(event) =>
+                  void setLifecyclePreferences({
+                    start_in_tray: (event.currentTarget as HTMLInputElement).checked,
+                  })}
+              />
+              <span>
+                <strong>Start in tray</strong>
+                <small>App launches hidden and can be opened from the system tray.</small>
+              </span>
+            </label>
+          </div>
         </div>
-      {/if}
+      </section>
     </div>
   </main>
 </div>

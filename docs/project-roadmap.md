@@ -2,7 +2,7 @@
 
 Last updated: 2026-03-03  
 Current phase: Release hardening for Tauri runtime  
-Overall progress: 94%
+Overall progress: 95%
 
 ## Milestones
 | Milestone | Status | Notes |
@@ -17,6 +17,7 @@ Overall progress: 94%
 | M8 - CI, integration tests, release packaging hardening | In Progress | release readiness track. |
 | M9 - Tray lifecycle + keep-alive on close | Completed | close-to-tray, start-in-tray preference, graceful quit hooks shipped. |
 | M10 - Native daemon runtime staging (`chatminald`) | In Progress | mode abstraction + local IPC ping + owner observability shipped; runtime cutover pending. |
+| M11 - Session-scoped file explorer v1 | In Progress | realtime fs watcher + debounced refresh + native preview scroll shipped; extended runtime QA still in progress. |
 
 ## Current Priorities
 1. Add integration tests for profile-switch + reconnect + retention edge cases.

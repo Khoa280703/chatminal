@@ -30,6 +30,15 @@ pub struct PersistedSession {
 }
 
 #[derive(Debug, Clone)]
+pub struct PersistedSessionExplorerState {
+    pub session_id: String,
+    pub root_path: String,
+    pub current_dir: String,
+    pub selected_path: Option<String>,
+    pub open_file_path: Option<String>,
+}
+
+#[derive(Debug, Clone)]
 pub struct PersistedWorkspace {
     pub active_profile_id: Option<String>,
     pub sessions: Vec<PersistedSession>,
@@ -510,6 +519,131 @@ impl Persistence {
         Ok(())
     }
 
+    pub fn get_session_explorer_state(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<PersistedSessionExplorerState>, String> {
+        let conn = self.open_connection()?;
+        conn.query_row(
+            r#"
+            SELECT session_id, root_path, current_dir, selected_path, open_file_path
+            FROM session_explorer_state
+            WHERE session_id = ?1
+            "#,
+            params![session_id],
+            |row| {
+                Ok(PersistedSessionExplorerState {
+                    session_id: row.get::<_, String>(0)?,
+                    root_path: row.get::<_, String>(1)?,
+                    current_dir: row.get::<_, String>(2)?,
+                    selected_path: row.get::<_, Option<String>>(3)?,
+                    open_file_path: row.get::<_, Option<String>>(4)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|err| format!("load session explorer state failed: {err}"))
+    }
+
+    pub fn set_session_explorer_root(
+        &self,
+        session_id: &str,
+        root_path: &str,
+    ) -> Result<PersistedSessionExplorerState, String> {
+        let mut conn = self.open_connection()?;
+        let tx = conn
+            .transaction()
+            .map_err(|err| format!("open session explorer root transaction failed: {err}"))?;
+
+        let exists = tx
+            .query_row(
+                "SELECT COUNT(1) FROM sessions WHERE id = ?1",
+                params![session_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|err| format!("validate session explorer root failed: {err}"))?;
+
+        if exists == 0 {
+            return Err("session not found".to_string());
+        }
+
+        tx.execute(
+            r#"
+            INSERT INTO session_explorer_state (
+                session_id, root_path, current_dir, selected_path, open_file_path, updated_at
+            ) VALUES (?1, ?2, '', NULL, NULL, ?3)
+            ON CONFLICT(session_id) DO UPDATE SET
+                root_path = excluded.root_path,
+                current_dir = '',
+                selected_path = NULL,
+                open_file_path = NULL,
+                updated_at = excluded.updated_at
+            "#,
+            params![session_id, root_path, now_ts_millis() as i64],
+        )
+        .map_err(|err| format!("set session explorer root failed: {err}"))?;
+
+        let state = tx
+            .query_row(
+                r#"
+                SELECT session_id, root_path, current_dir, selected_path, open_file_path
+                FROM session_explorer_state
+                WHERE session_id = ?1
+                "#,
+                params![session_id],
+                |row| {
+                    Ok(PersistedSessionExplorerState {
+                        session_id: row.get::<_, String>(0)?,
+                        root_path: row.get::<_, String>(1)?,
+                        current_dir: row.get::<_, String>(2)?,
+                        selected_path: row.get::<_, Option<String>>(3)?,
+                        open_file_path: row.get::<_, Option<String>>(4)?,
+                    })
+                },
+            )
+            .map_err(|err| format!("reload session explorer state failed: {err}"))?;
+
+        tx.commit()
+            .map_err(|err| format!("commit session explorer root failed: {err}"))?;
+        Ok(state)
+    }
+
+    pub fn update_session_explorer_state(
+        &self,
+        session_id: &str,
+        current_dir: &str,
+        selected_path: Option<&str>,
+        open_file_path: Option<&str>,
+    ) -> Result<PersistedSessionExplorerState, String> {
+        let conn = self.open_connection()?;
+        let affected = conn
+            .execute(
+                r#"
+                UPDATE session_explorer_state
+                SET current_dir = ?1,
+                    selected_path = ?2,
+                    open_file_path = ?3,
+                    updated_at = ?4
+                WHERE session_id = ?5
+                "#,
+                params![
+                    current_dir,
+                    selected_path,
+                    open_file_path,
+                    now_ts_millis() as i64,
+                    session_id
+                ],
+            )
+            .map_err(|err| format!("update session explorer state failed: {err}"))?;
+
+        if affected == 0 {
+            return Err("session explorer root is not set".to_string());
+        }
+
+        self.get_session_explorer_state(session_id)?
+            .ok_or_else(|| "session explorer state disappeared".to_string())
+    }
+
     pub fn delete_session(&self, session_id: &str) -> Result<(), String> {
         let conn = self.open_connection()?;
         conn.execute("DELETE FROM sessions WHERE id = ?1", params![session_id])
@@ -556,6 +690,16 @@ impl Persistence {
                 value TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS session_explorer_state (
+                session_id TEXT PRIMARY KEY,
+                root_path TEXT NOT NULL,
+                current_dir TEXT NOT NULL DEFAULT '',
+                selected_path TEXT,
+                open_file_path TEXT,
+                updated_at INTEGER NOT NULL,
+                FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+
             CREATE INDEX IF NOT EXISTS idx_profiles_updated_at
               ON profiles(updated_at DESC, created_at ASC);
 
@@ -564,6 +708,9 @@ impl Persistence {
 
             CREATE INDEX IF NOT EXISTS idx_scrollback_session_ts
               ON scrollback(session_id, ts);
+
+            CREATE INDEX IF NOT EXISTS idx_session_explorer_updated
+              ON session_explorer_state(updated_at DESC);
             "#,
         )
         .map_err(|err| format!("initialize schema failed: {err}"))?;

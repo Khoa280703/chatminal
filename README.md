@@ -42,6 +42,11 @@ Last updated: 2026-03-03
   - scrollback chunks with retention
   - app state keys (`active_profile_id`, `active_session_id:{profile_id}`)
   - lifecycle preference keys (`keep_alive_on_close`, `start_in_tray`)
+- Session-scoped file explorer (read-only preview):
+  - root folder is mandatory per session
+  - root is user-driven and does not follow `cwd`
+  - per-session explorer UI state is persisted in SQLite
+  - realtime filesystem tracking for active session root via `explorer/fs-changed`
 - Lazy reconnect:
   - disconnected sessions are hydrated from preview
   - PTY respawn happens on `activate_session` (also triggered before input when needed)
@@ -190,6 +195,7 @@ Key SQLite tables:
 - `sessions`
 - `scrollback`
 - `app_state`
+- `session_explorer_state` (`root_path`, `current_dir`, `selected_path`, `open_file_path`)
 
 Important app-state keys:
 - `active_profile_id`
@@ -203,6 +209,8 @@ Important app-state keys:
 5. Terminal input goes through `write_input` and output appears via `pty/output`.
 6. Restart restores disconnected previews; activate reconnects and resumes output.
 7. `cwd` changes persist after restart/reconnect.
+8. File explorer first open per session requires root selection; switching sessions restores each session explorer root/state; explorer does not follow terminal `cwd`.
+9. Changing files/folders under active explorer root from external tools triggers realtime explorer refresh.
 
 ## Terminal Compatibility Checklist (Linux)
 Run these inside Chatminal and verify expected behavior:

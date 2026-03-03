@@ -2,6 +2,52 @@
 
 All notable implementation and documentation changes are tracked here.
 
+## 2026-03-03 (settings page for lifecycle preferences)
+
+### Added
+- New Settings pane in main content area (`terminal | explorer | settings`).
+- Dedicated lifecycle section in Settings for:
+  - `Keep running in tray when close`
+  - `Start in tray`
+
+### Changed
+- Removed lifecycle preference controls from profile popup menu.
+- Added mobile override when sidebar is collapsed to keep terminal shell at full height.
+
+## 2026-03-03 (realtime explorer tracking + native preview scroll)
+
+### Added
+- Backend realtime explorer watcher worker (`notify`) for active session root.
+- New frontend event contract:
+  - `explorer/fs-changed` (`session_id`, `root_path`, `changed_paths`, `full_resync`, `revision`)
+- Debounced fs-change batching in backend to reduce UI refresh bursts.
+
+### Changed
+- Explorer frontend now auto-refreshes visible tree/open preview when matching fs-change events arrive.
+- File preview renderer switched to native `readonly textarea` for stable default touchpad/mouse scroll behavior on Linux WebKitGTK.
+- Explorer header now supports toggling right file tree panel (`Hide tree` / `Show tree`).
+
+## 2026-03-03 (session-scoped file explorer v1)
+
+### Added
+- File explorer backend contracts:
+  - `get_session_explorer_state`
+  - `set_session_explorer_root`
+  - `update_session_explorer_state`
+  - `list_session_explorer_entries`
+  - `read_session_explorer_file`
+- SQLite table `session_explorer_state` with per-session persisted fields:
+  - `root_path`
+  - `current_dir`
+  - `selected_path`
+  - `open_file_path`
+- Frontend explorer panel with mandatory root-picker flow per session.
+
+### Changed
+- Explorer behavior now strictly session-scoped (not profile-scoped).
+- Explorer root is user-driven and no longer tied to terminal `cwd`.
+- Added native folder-picker integration via dialog plugin for root selection.
+
 ## 2026-03-03 (live-path fidelity + owner observability)
 
 ### Added

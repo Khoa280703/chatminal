@@ -14,17 +14,26 @@ use models::{
     ActivateSessionPayload, CreateProfilePayload, CreateSessionPayload, CreateSessionResponse,
     DeleteProfilePayload, LifecyclePreferences, ProfileInfo, RenameProfilePayload,
     RenameSessionPayload, ResizeSessionPayload, RuntimeBackendInfo, RuntimeBackendPing,
-    RuntimeUiSettings, SessionActionPayload, SessionInfo, SessionSnapshot,
+    RuntimeUiSettings, SessionActionPayload, SessionExplorerEntry, SessionExplorerFileContent,
+    SessionExplorerListPayload, SessionExplorerReadFilePayload, SessionExplorerRootPayload,
+    SessionExplorerState, SessionExplorerUpdateStatePayload, SessionInfo, SessionSnapshot,
     SetLifecyclePreferencesPayload, SetSessionPersistPayload, SwitchProfilePayload, WorkspaceState,
     WriteInputPayload,
 };
 use runtime_backend::RuntimeBackend;
 use service::PtyService;
 use tauri::{Emitter, Manager, State, WindowEvent, menu::MenuBuilder, tray::TrayIconBuilder};
+#[cfg(target_os = "macos")]
+use tauri::menu::{MenuItemBuilder, SubmenuBuilder};
 
 const TRAY_SHOW_ID: &str = "tray_show";
 const TRAY_NEW_SESSION_ID: &str = "tray_new_session";
 const TRAY_QUIT_ID: &str = "tray_quit";
+const MENU_SETTINGS_ID: &str = "menu_settings";
+const MENU_NEW_SESSION_ID: &str = "menu_new_session";
+const MENU_RECONNECT_ACTIVE_SESSION_ID: &str = "menu_reconnect_active_session";
+const MENU_SHOW_ID: &str = "menu_show";
+const MENU_QUIT_ID: &str = "menu_quit";
 
 struct AppState {
     service: Arc<PtyService>,
@@ -94,6 +103,74 @@ fn build_tray(app: &tauri::AppHandle) -> Result<(), String> {
         .build(app)
         .map_err(|err| format!("build tray icon failed: {err}"))?;
 
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn build_app_menu(app: &tauri::AppHandle) -> Result<(), String> {
+    let settings_item = MenuItemBuilder::with_id(MENU_SETTINGS_ID, "Settings…")
+        .accelerator("CmdOrCtrl+,")
+        .build(app)
+        .map_err(|err| format!("build settings menu item failed: {err}"))?;
+    let quit_item = MenuItemBuilder::with_id(MENU_QUIT_ID, "Quit Chatminal")
+        .accelerator("CmdOrCtrl+Q")
+        .build(app)
+        .map_err(|err| format!("build quit menu item failed: {err}"))?;
+    let new_session_item = MenuItemBuilder::with_id(MENU_NEW_SESSION_ID, "New Session")
+        .accelerator("CmdOrCtrl+N")
+        .build(app)
+        .map_err(|err| format!("build new session menu item failed: {err}"))?;
+    let reconnect_item = MenuItemBuilder::with_id(
+        MENU_RECONNECT_ACTIVE_SESSION_ID,
+        "Reconnect Active Session",
+    )
+    .accelerator("CmdOrCtrl+R")
+    .build(app)
+    .map_err(|err| format!("build reconnect menu item failed: {err}"))?;
+    let show_item = MenuItemBuilder::with_id(MENU_SHOW_ID, "Show Chatminal")
+        .build(app)
+        .map_err(|err| format!("build show menu item failed: {err}"))?;
+
+    let app_submenu = SubmenuBuilder::new(app, "Chatminal")
+        .item(&settings_item)
+        .separator()
+        .hide()
+        .hide_others()
+        .show_all()
+        .separator()
+        .item(&quit_item)
+        .build()
+        .map_err(|err| format!("build app submenu failed: {err}"))?;
+
+    let file_submenu = SubmenuBuilder::new(app, "File")
+        .item(&new_session_item)
+        .item(&reconnect_item)
+        .build()
+        .map_err(|err| format!("build file submenu failed: {err}"))?;
+
+    let window_submenu = SubmenuBuilder::new(app, "Window")
+        .item(&show_item)
+        .separator()
+        .minimize()
+        .close_window()
+        .build()
+        .map_err(|err| format!("build window submenu failed: {err}"))?;
+
+    let menu = MenuBuilder::new(app)
+        .item(&app_submenu)
+        .item(&file_submenu)
+        .item(&window_submenu)
+        .build()
+        .map_err(|err| format!("build app menu failed: {err}"))?;
+
+    app.set_menu(menu)
+        .map_err(|err| format!("set app menu failed: {err}"))?;
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn build_app_menu(_app: &tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
@@ -223,6 +300,46 @@ fn get_session_snapshot(
 }
 
 #[tauri::command]
+fn get_session_explorer_state(
+    state: State<'_, AppState>,
+    payload: SessionActionPayload,
+) -> Result<SessionExplorerState, String> {
+    state.service.get_session_explorer_state(payload)
+}
+
+#[tauri::command]
+fn set_session_explorer_root(
+    state: State<'_, AppState>,
+    payload: SessionExplorerRootPayload,
+) -> Result<SessionExplorerState, String> {
+    state.service.set_session_explorer_root(payload)
+}
+
+#[tauri::command]
+fn update_session_explorer_state(
+    state: State<'_, AppState>,
+    payload: SessionExplorerUpdateStatePayload,
+) -> Result<SessionExplorerState, String> {
+    state.service.update_session_explorer_state(payload)
+}
+
+#[tauri::command]
+fn list_session_explorer_entries(
+    state: State<'_, AppState>,
+    payload: SessionExplorerListPayload,
+) -> Result<Vec<SessionExplorerEntry>, String> {
+    state.service.list_session_explorer_entries(payload)
+}
+
+#[tauri::command]
+fn read_session_explorer_file(
+    state: State<'_, AppState>,
+    payload: SessionExplorerReadFilePayload,
+) -> Result<SessionExplorerFileContent, String> {
+    state.service.read_session_explorer_file(payload)
+}
+
+#[tauri::command]
 fn shutdown_app(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<(), String> {
     request_quit(&app, &state)
 }
@@ -246,6 +363,38 @@ fn main() {
     let _ = env_logger::try_init();
 
     tauri::Builder::default()
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            MENU_SETTINGS_ID => {
+                if let Err(err) = show_main_window(app) {
+                    log::warn!("show main window for settings failed: {err}");
+                }
+                let _ = app.emit("app/menu-settings", ());
+            }
+            MENU_NEW_SESSION_ID => {
+                if let Err(err) = show_main_window(app) {
+                    log::warn!("show main window for new session failed: {err}");
+                }
+                let _ = app.emit("app/menu-new-session", ());
+            }
+            MENU_RECONNECT_ACTIVE_SESSION_ID => {
+                if let Err(err) = show_main_window(app) {
+                    log::warn!("show main window for reconnect failed: {err}");
+                }
+                let _ = app.emit("app/menu-reconnect-active-session", ());
+            }
+            MENU_SHOW_ID => {
+                if let Err(err) = show_main_window(app) {
+                    log::warn!("show main window from app menu failed: {err}");
+                }
+            }
+            MENU_QUIT_ID => {
+                let state = app.state::<AppState>();
+                if let Err(err) = request_quit(app, &state) {
+                    log::warn!("quit from app menu failed: {err}");
+                }
+            }
+            _ => {}
+        })
         .setup(|app| {
             let config = config::load_config();
             let service = Arc::new(PtyService::new(app.handle().clone(), config));
@@ -257,6 +406,7 @@ fn main() {
                 is_quitting: AtomicBool::new(false),
             });
 
+            build_app_menu(&app.handle())?;
             build_tray(&app.handle())?;
 
             if lifecycle_preferences.start_in_tray
@@ -291,6 +441,7 @@ fn main() {
             }
         })
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             load_workspace,
             list_profiles,
@@ -311,6 +462,11 @@ fn main() {
             clear_session_history,
             clear_all_history,
             get_session_snapshot,
+            get_session_explorer_state,
+            set_session_explorer_root,
+            update_session_explorer_state,
+            list_session_explorer_entries,
+            read_session_explorer_file,
             get_runtime_backend_info,
             ping_runtime_backend,
             get_runtime_ui_settings,

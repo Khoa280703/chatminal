@@ -74,6 +74,36 @@ export interface SessionSnapshot {
   seq: number;
 }
 
+export interface SessionExplorerState {
+  session_id: string;
+  root_path: string | null;
+  current_dir: string;
+  selected_path: string | null;
+  open_file_path: string | null;
+}
+
+export interface SessionExplorerEntry {
+  name: string;
+  relative_path: string;
+  is_dir: boolean;
+  size: number | null;
+}
+
+export interface SessionExplorerFileContent {
+  relative_path: string;
+  content: string;
+  truncated: boolean;
+  byte_len: number;
+}
+
+export interface SessionExplorerFsChangedEvent {
+  session_id: string;
+  root_path: string;
+  changed_paths: string[];
+  full_resync: boolean;
+  revision: number;
+}
+
 export interface PtyOutputEvent {
   session_id: string;
   chunk: string;
