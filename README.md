@@ -7,7 +7,7 @@ Current runtime stack:
 - Backend: `Rust + portable-pty`
 - Frontend: `Svelte 5 + xterm.js` (`frontend/`)
 
-Last updated: 2026-03-02
+Last updated: 2026-03-03
 
 ## Runtime Status
 - Active runtime is `src-tauri/` + `frontend/`.
@@ -124,7 +124,8 @@ Supported keys:
   "persist_scrollback_enabled": false,
   "max_lines_per_session": 5000,
   "auto_delete_after_days": 30,
-  "preview_lines": 100
+  "preview_lines": 100,
+  "sync_clear_command_to_history": false
 }
 ```
 
@@ -133,6 +134,7 @@ Normalization in backend:
 - `max_lines_per_session`: `100..=5000`
 - `auto_delete_after_days`: `0..=3650`
 - `preview_lines`: `10..=5000`
+- `sync_clear_command_to_history`: `false` by default (opt-in)
 
 Optional runtime backend environment variables:
 - `CHATMINAL_RUNTIME_BACKEND`
@@ -201,6 +203,23 @@ Important app-state keys:
 5. Terminal input goes through `write_input` and output appears via `pty/output`.
 6. Restart restores disconnected previews; activate reconnects and resumes output.
 7. `cwd` changes persist after restart/reconnect.
+
+## Terminal Compatibility Checklist (Linux)
+Run these inside Chatminal and verify expected behavior:
+1. `vim /tmp/chatminal-vim.txt`
+- Enter/exit insert mode, save file, quit (`:wq`), cursor/prompt must restore correctly.
+2. `btop` (or `htop` if unavailable)
+- Full-screen redraw stable, keys responsive, exit returns prompt cleanly.
+3. `printf '%s\n' alpha beta gamma | fzf`
+- Interactive filtering, arrows/enter work, prompt restore after quit.
+4. `seq 1 300 | less`
+- Paging up/down, `/` search, quit with `q` restores prompt.
+5. `nano /tmp/chatminal-unicode.txt`
+- Edit/save/quit cycle works without cursor misalignment.
+6. `printf 'e\u0301 | 你 | 😀\n'`
+- Combining chars, CJK wide chars, emoji render and cursor step are correct.
+7. Resize app window then run `stty size`
+- Rows/cols reflect actual terminal size after each resize.
 
 ## Troubleshooting
 | Symptom | Likely Cause | Action |

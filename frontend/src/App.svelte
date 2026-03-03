@@ -17,6 +17,8 @@
     PtyErrorEvent,
     PtyExitedEvent,
     PtyOutputEvent,
+    RuntimeBackendInfo,
+    RuntimeUiSettings,
     SessionInfo,
     SessionSnapshot,
     WorkspaceState,
@@ -55,13 +57,22 @@
 
   const TERMINAL_SCROLLBACK = 1000;
   const MAX_SERIALIZED_CACHE_SESSIONS = 24;
+  const MAX_LIVE_REPLAY_CHARS = 700_000;
   const activationInFlight = new Map<string, Promise<void>>();
   const localInputBufferBySession = new Map<string, string>();
+  const knownSessionIds = new Set<string>();
   const sessionRenderedSeqById = new Map<string, number>();
   const sessionLiveSeqById = new Map<string, number>();
   const serializedSnapshotBySession = new Map<string, string>();
+  const sessionReplayChunksById = new Map<string, string[]>();
+  const sessionReplayLengthById = new Map<string, number>();
+  const sessionReplayTruncatedById = new Map<string, boolean>();
   let renderedSessionId: string | null = null;
   let searchQuery = "";
+  let runtimeBackendInfo: RuntimeBackendInfo | null = null;
+  let runtimeUiSettings: RuntimeUiSettings = {
+    sync_clear_command_to_history: false,
+  };
   let lifecyclePreferences: LifecyclePreferences = {
     keep_alive_on_close: true,
     start_in_tray: false,
@@ -91,11 +102,45 @@
         sessionLiveSeqById.set(session.session_id, 0);
         sessionRenderedSeqById.set(session.session_id, 0);
         serializedSnapshotBySession.delete(session.session_id);
+        clearSessionReplay(session.session_id);
         continue;
       }
       sessionLiveSeqById.set(session.session_id, session.seq);
       if (!sessionRenderedSeqById.has(session.session_id) && session.seq > 0) {
         sessionRenderedSeqById.set(session.session_id, session.seq);
+      }
+    }
+  }
+
+  function syncKnownSessionIds(source: SessionInfo[]) {
+    knownSessionIds.clear();
+    for (const session of source) {
+      knownSessionIds.add(session.session_id);
+    }
+  }
+
+  function pruneTransientSessionCaches(validSessionIds: Set<string>) {
+    for (const sessionId of sessionReplayChunksById.keys()) {
+      if (!validSessionIds.has(sessionId)) {
+        clearSessionReplay(sessionId);
+      }
+    }
+
+    for (const sessionId of sessionRenderedSeqById.keys()) {
+      if (!validSessionIds.has(sessionId)) {
+        sessionRenderedSeqById.delete(sessionId);
+      }
+    }
+
+    for (const sessionId of sessionLiveSeqById.keys()) {
+      if (!validSessionIds.has(sessionId)) {
+        sessionLiveSeqById.delete(sessionId);
+      }
+    }
+
+    for (const sessionId of serializedSnapshotBySession.keys()) {
+      if (!validSessionIds.has(sessionId)) {
+        serializedSnapshotBySession.delete(sessionId);
       }
     }
   }
@@ -127,6 +172,73 @@
       }
       serializedSnapshotBySession.delete(oldest);
     }
+  }
+
+  function setSessionReplay(sessionId: string, replay: string) {
+    if (!replay) {
+      clearSessionReplay(sessionId);
+      return;
+    }
+
+    sessionReplayChunksById.set(sessionId, [replay]);
+    sessionReplayLengthById.set(sessionId, replay.length);
+    sessionReplayTruncatedById.set(sessionId, false);
+  }
+
+  function appendSessionReplay(sessionId: string, chunk: string) {
+    if (!chunk) {
+      return;
+    }
+
+    let chunks = sessionReplayChunksById.get(sessionId);
+    if (!chunks) {
+      chunks = [];
+      sessionReplayChunksById.set(sessionId, chunks);
+    }
+    chunks.push(chunk);
+
+    let replayLength = (sessionReplayLengthById.get(sessionId) ?? 0) + chunk.length;
+    let truncated = sessionReplayTruncatedById.get(sessionId) ?? false;
+
+    while (replayLength > MAX_LIVE_REPLAY_CHARS && chunks.length > 0) {
+      const overflow = replayLength - MAX_LIVE_REPLAY_CHARS;
+      const oldestChunk = chunks[0] ?? "";
+      if (oldestChunk.length <= overflow) {
+        chunks.shift();
+        replayLength -= oldestChunk.length;
+      } else {
+        chunks[0] = oldestChunk.slice(overflow);
+        replayLength -= overflow;
+      }
+      truncated = true;
+    }
+
+    sessionReplayLengthById.set(sessionId, replayLength);
+    sessionReplayTruncatedById.set(sessionId, truncated);
+  }
+
+  function getSessionReplay(sessionId: string): { content: string; truncated: boolean } {
+    const chunks = sessionReplayChunksById.get(sessionId);
+    if (!chunks || chunks.length === 0) {
+      return { content: "", truncated: false };
+    }
+
+    return {
+      content: chunks.join(""),
+      truncated: sessionReplayTruncatedById.get(sessionId) ?? false,
+    };
+  }
+
+  function clearSessionReplay(sessionId: string) {
+    sessionReplayChunksById.delete(sessionId);
+    sessionReplayLengthById.delete(sessionId);
+    sessionReplayTruncatedById.delete(sessionId);
+  }
+
+  function clearAllSessionReplay() {
+    sessionReplayChunksById.clear();
+    sessionReplayLengthById.clear();
+    sessionReplayTruncatedById.clear();
   }
 
   function captureActiveTerminalSnapshot() {
@@ -263,7 +375,9 @@
 
   async function listSessions() {
     sessions = await invoke<SessionInfo[]>("list_sessions");
+    syncKnownSessionIds(sessions);
     primeSessionSeqMap(sessions);
+    pruneTransientSessionCaches(new Set(sessions.map((session) => session.session_id)));
   }
 
   async function applyWorkspace(workspace: WorkspaceState) {
@@ -271,7 +385,9 @@
     profiles = workspace.profiles;
     activeProfileId = workspace.active_profile_id ?? profiles[0]?.profile_id ?? null;
     sessions = workspace.sessions;
+    syncKnownSessionIds(sessions);
     primeSessionSeqMap(sessions);
+    pruneTransientSessionCaches(new Set(sessions.map((session) => session.session_id)));
     activeSessionId = workspace.active_session_id ?? sessions[0]?.session_id ?? null;
     activeSessionSeq = 0;
     renderedSessionId = null;
@@ -291,6 +407,22 @@
   async function loadWorkspaceState() {
     const workspace = await invoke<WorkspaceState>("load_workspace");
     await applyWorkspace(workspace);
+  }
+
+  async function loadRuntimeBackendInfo() {
+    try {
+      runtimeBackendInfo = await invoke<RuntimeBackendInfo>("get_runtime_backend_info");
+    } catch (_error) {
+      runtimeBackendInfo = null;
+    }
+  }
+
+  async function loadRuntimeUiSettings() {
+    try {
+      runtimeUiSettings = await invoke<RuntimeUiSettings>("get_runtime_ui_settings");
+    } catch (_error) {
+      runtimeUiSettings = { sync_clear_command_to_history: false };
+    }
   }
 
   async function loadLifecyclePreferences() {
@@ -500,6 +632,7 @@
     sessionRenderedSeqById.delete(sessionId);
     sessionLiveSeqById.delete(sessionId);
     serializedSnapshotBySession.delete(sessionId);
+    clearSessionReplay(sessionId);
     if (renderedSessionId === sessionId) {
       renderedSessionId = null;
     }
@@ -679,6 +812,7 @@
       sessionRenderedSeqById.set(activeSessionId, 0);
       sessionLiveSeqById.set(activeSessionId, 0);
       serializedSnapshotBySession.delete(activeSessionId);
+      clearSessionReplay(activeSessionId);
       terminal?.reset();
       renderedSessionId = activeSessionId;
       await hydrateActiveSession();
@@ -694,6 +828,7 @@
       sessionRenderedSeqById.clear();
       sessionLiveSeqById.clear();
       serializedSnapshotBySession.clear();
+      clearAllSessionReplay();
       terminal?.reset();
       renderedSessionId = activeSessionId;
       await hydrateActiveSession();
@@ -704,6 +839,10 @@
   }
 
   async function tryHandleLocalSlashCommand(sessionId: string, data: string): Promise<boolean> {
+    if (!runtimeUiSettings.sync_clear_command_to_history) {
+      return false;
+    }
+
     if (!terminal || terminal.buffer.active.type !== "normal") {
       return false;
     }
@@ -750,6 +889,7 @@
       sessionRenderedSeqById.set(sessionId, 0);
       sessionLiveSeqById.set(sessionId, 0);
       serializedSnapshotBySession.delete(sessionId);
+      clearSessionReplay(sessionId);
       lastError = "";
     } catch (error) {
       lastError = `clear_session_history failed: ${String(error)}`;
@@ -789,6 +929,8 @@
 
     const listedSeq =
       sessions.find((session) => session.session_id === requestedSessionId)?.seq ?? 0;
+    const isRunningSession =
+      sessions.find((session) => session.session_id === requestedSessionId)?.status === "running";
     const liveSeq = Math.max(listedSeq, sessionLiveSeqById.get(requestedSessionId) ?? 0);
     sessionLiveSeqById.set(requestedSessionId, liveSeq);
 
@@ -796,7 +938,32 @@
       return;
     }
 
-    if (restoreTerminalFromSerializedCache(requestedSessionId, liveSeq)) {
+    if (isRunningSession) {
+      const replay = getSessionReplay(requestedSessionId);
+      if (!replay.truncated && replay.content.length > 0) {
+        terminal.reset();
+        terminal.write(replay.content);
+        renderedSessionId = requestedSessionId;
+        activeSessionSeq = liveSeq;
+        updateRenderedSeq(requestedSessionId, liveSeq);
+        setSerializedCache(requestedSessionId, replay.content);
+        activeSnapshotNeedsReconnectBreak =
+          !replay.content.endsWith("\n") && !replay.content.endsWith("\r");
+        return;
+      }
+
+      if (restoreTerminalFromSerializedCache(requestedSessionId, liveSeq)) {
+        return;
+      }
+
+      if (liveSeq === 0) {
+        terminal.reset();
+        renderedSessionId = requestedSessionId;
+        activeSessionSeq = 0;
+        activeSnapshotNeedsReconnectBreak = false;
+        return;
+      }
+    } else if (restoreTerminalFromSerializedCache(requestedSessionId, liveSeq)) {
       return;
     }
 
@@ -847,7 +1014,10 @@
       !snapshot.content.endsWith("\r");
     if (snapshot.content.length > 0) {
       terminal.write(snapshot.content);
+      setSessionReplay(requestedSessionId, snapshot.content);
       setSerializedCache(requestedSessionId, snapshot.content);
+    } else if (!isRunningSession) {
+      clearSessionReplay(requestedSessionId);
     }
   }
 
@@ -945,9 +1115,11 @@
       }
 
       const sessionId = activeSessionId;
-      const localCommandHandled = await tryHandleLocalSlashCommand(sessionId, data);
-      if (localCommandHandled) {
-        return;
+      if (runtimeUiSettings.sync_clear_command_to_history) {
+        const localCommandHandled = await tryHandleLocalSlashCommand(sessionId, data);
+        if (localCommandHandled) {
+          return;
+        }
       }
 
       const connected = await ensureSessionConnected(sessionId);
@@ -975,7 +1147,12 @@
 
   async function setupEventListeners() {
     unlistenOutput = await listen<PtyOutputEvent>("pty/output", ({ payload }) => {
+      if (!knownSessionIds.has(payload.session_id)) {
+        return;
+      }
+
       sessionLiveSeqById.set(payload.session_id, payload.seq);
+      appendSessionReplay(payload.session_id, payload.chunk);
 
       if (!terminal) {
         return;
@@ -1061,7 +1238,11 @@
     document.addEventListener("keydown", onGlobalKeydown, true);
     await bootstrapTerminal();
     await setupEventListeners();
-    await loadLifecyclePreferences();
+    await Promise.all([
+      loadLifecyclePreferences(),
+      loadRuntimeUiSettings(),
+      loadRuntimeBackendInfo(),
+    ]);
 
     await loadWorkspaceState();
     if (sessions.length === 0) {
@@ -1290,6 +1471,11 @@
         </span>
         {#if activeSession}
           <span class="terminal-cwd" title={activeSession.cwd}>{activeSession.cwd}</span>
+        {/if}
+        {#if runtimeBackendInfo}
+          <span class="terminal-cwd" title={runtimeBackendInfo.note}>
+            Owner: {runtimeBackendInfo.runtime_owner} · Requested: {runtimeBackendInfo.requested_mode}
+          </span>
         {/if}
       </div>
       <div class="terminal-actions-row">

@@ -1,8 +1,8 @@
 # Project Roadmap
 
-Last updated: 2026-03-02  
+Last updated: 2026-03-03  
 Current phase: Release hardening for Tauri runtime  
-Overall progress: 92%
+Overall progress: 94%
 
 ## Milestones
 | Milestone | Status | Notes |
@@ -16,7 +16,7 @@ Overall progress: 92%
 | M7 - Docs realignment to active runtime | Completed | core docs and deployment/design docs synchronized. |
 | M8 - CI, integration tests, release packaging hardening | In Progress | release readiness track. |
 | M9 - Tray lifecycle + keep-alive on close | Completed | close-to-tray, start-in-tray preference, graceful quit hooks shipped. |
-| M10 - Native daemon runtime staging (`chatminald`) | In Progress | mode abstraction + daemon health ping commands shipped; runtime cutover pending. |
+| M10 - Native daemon runtime staging (`chatminald`) | In Progress | mode abstraction + local IPC ping + owner observability shipped; runtime cutover pending. |
 
 ## Current Priorities
 1. Add integration tests for profile-switch + reconnect + retention edge cases.
@@ -24,6 +24,7 @@ Overall progress: 92%
 3. Finalize release checklist and artifact verification under `src-tauri/target/release/bundle/`.
 4. Define legacy deprecation policy and timeline for `src/` runtime code.
 5. Implement daemon transport contract and cutover strategy for cross-process PTY ownership.
+6. Automate compatibility regression commands (`vim/btop/fzf/less/nano/unicode/resize`) in release checks.
 
 ## Release Gate for v0.2.x
 1. `npx --prefix frontend tauri build` passes in release environment.

@@ -1,10 +1,12 @@
-use crate::chatminald_client::ChatminaldClient;
-use crate::models::{RuntimeBackendInfo, RuntimeBackendMode, RuntimeBackendPing};
+use crate::chatminald_client::{ChatminaldClient, DaemonPingStatus};
+use crate::models::{RuntimeBackendInfo, RuntimeBackendMode, RuntimeBackendPing, RuntimeOwner};
 
 #[derive(Debug, Clone)]
 pub struct RuntimeBackend {
-    mode: RuntimeBackendMode,
+    requested_mode: RuntimeBackendMode,
+    runtime_owner: RuntimeOwner,
     daemon_client: Option<ChatminaldClient>,
+    startup_probe: Option<DaemonPingStatus>,
 }
 
 impl RuntimeBackend {
@@ -17,15 +19,25 @@ impl RuntimeBackend {
         );
 
         let daemon_client = ChatminaldClient::from_env();
-        let mode = if daemon_requested {
+        let requested_mode = if daemon_requested {
             RuntimeBackendMode::Daemon
         } else {
             RuntimeBackendMode::InProcess
         };
+        let startup_probe = if daemon_requested {
+            daemon_client.as_ref().map(ChatminaldClient::ping)
+        } else {
+            None
+        };
+
+        // Safe-slice rule: until daemon proxy is fully wired, commands always execute in-process.
+        let runtime_owner = RuntimeOwner::InProcess;
 
         Self {
-            mode,
+            requested_mode,
+            runtime_owner,
             daemon_client,
+            startup_probe,
         }
     }
 
@@ -35,22 +47,32 @@ impl RuntimeBackend {
             .as_ref()
             .map(|client| client.endpoint().to_string());
 
-        let note = match self.mode {
+        let note = match self.requested_mode {
             RuntimeBackendMode::InProcess => {
                 "PTY runtime is handled in-process by Tauri backend".to_string()
             }
             RuntimeBackendMode::Daemon => {
-                if daemon_endpoint.is_some() {
-                    "daemon mode requested; run ping_runtime_backend to verify reachability"
-                        .to_string()
-                } else {
+                if daemon_endpoint.is_none() {
                     "daemon mode requested but CHATMINAL_DAEMON_ENDPOINT is missing".to_string()
+                } else if let Some(probe) = &self.startup_probe {
+                    if probe.reachable {
+                        "daemon reachable at startup; runtime owner is still in_process until cutover is enabled".to_string()
+                    } else {
+                        format!(
+                            "daemon mode requested but probe failed; fallback owner=in_process ({})",
+                            probe.message
+                        )
+                    }
+                } else {
+                    "daemon mode requested; startup probe unavailable; fallback owner=in_process"
+                        .to_string()
                 }
             }
         };
 
         RuntimeBackendInfo {
-            mode: self.mode,
+            requested_mode: self.requested_mode,
+            runtime_owner: self.runtime_owner,
             daemon_endpoint,
             note,
         }
@@ -62,9 +84,10 @@ impl RuntimeBackend {
             .as_ref()
             .map(|client| client.endpoint().to_string());
 
-        if self.mode == RuntimeBackendMode::InProcess {
+        if self.requested_mode == RuntimeBackendMode::InProcess {
             return RuntimeBackendPing {
-                mode: self.mode,
+                requested_mode: self.requested_mode,
+                runtime_owner: self.runtime_owner,
                 daemon_endpoint,
                 reachable: false,
                 latency_ms: None,
@@ -74,7 +97,8 @@ impl RuntimeBackend {
 
         let Some(client) = &self.daemon_client else {
             return RuntimeBackendPing {
-                mode: self.mode,
+                requested_mode: self.requested_mode,
+                runtime_owner: self.runtime_owner,
                 daemon_endpoint,
                 reachable: false,
                 latency_ms: None,
@@ -84,7 +108,8 @@ impl RuntimeBackend {
 
         let ping = client.ping();
         RuntimeBackendPing {
-            mode: self.mode,
+            requested_mode: self.requested_mode,
+            runtime_owner: self.runtime_owner,
             daemon_endpoint,
             reachable: ping.reachable,
             latency_ms: ping.latency_ms,

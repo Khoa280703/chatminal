@@ -1,4 +1,6 @@
 export type SessionStatus = "running" | "disconnected";
+export type RuntimeBackendMode = "in_process" | "daemon";
+export type RuntimeOwner = "in_process" | "daemon";
 
 export interface SessionInfo {
   session_id: string;
@@ -17,6 +19,26 @@ export interface ProfileInfo {
 export interface LifecyclePreferences {
   keep_alive_on_close: boolean;
   start_in_tray: boolean;
+}
+
+export interface RuntimeUiSettings {
+  sync_clear_command_to_history: boolean;
+}
+
+export interface RuntimeBackendInfo {
+  requested_mode: RuntimeBackendMode;
+  runtime_owner: RuntimeOwner;
+  daemon_endpoint: string | null;
+  note: string;
+}
+
+export interface RuntimeBackendPing {
+  requested_mode: RuntimeBackendMode;
+  runtime_owner: RuntimeOwner;
+  daemon_endpoint: string | null;
+  reachable: boolean;
+  latency_ms: number | null;
+  message: string;
 }
 
 export interface WorkspaceState {

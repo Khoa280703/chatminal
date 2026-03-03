@@ -1,6 +1,6 @@
 # System Architecture
 
-Last updated: 2026-03-02
+Last updated: 2026-03-03
 
 ## Runtime Topology
 Chatminal runs as a desktop Tauri app with a Rust PTY backend and Svelte frontend.
@@ -65,6 +65,7 @@ Chatminal runs as a desktop Tauri app with a Rust PTY backend and Svelte fronten
 - `set_lifecycle_preferences`
 - `get_runtime_backend_info`
 - `ping_runtime_backend`
+- `get_runtime_ui_settings`
 - `shutdown_app`
 - `close_session`
 - `clear_session_history`
@@ -89,6 +90,7 @@ Chatminal runs as a desktop Tauri app with a Rust PTY backend and Svelte fronten
 8. On reader EOF/error, cleanup worker emits `pty/exited`, closes runtime, and sets status to disconnected.
 9. Window close event có thể được intercept để hide-to-tray thay vì thoát process, dựa trên lifecycle preferences.
 10. Runtime backend mode can be inspected at runtime; daemon health ping is exposed without switching default PTY execution path.
+11. Runtime owner currently fails closed to `in_process` when daemon is unavailable or cutover is not enabled.
 
 ## Persistence Design
 SQLite tables:

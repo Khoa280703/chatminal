@@ -19,7 +19,7 @@ use crate::models::{
     ActivateSessionPayload, CreateProfilePayload, CreateSessionPayload, CreateSessionResponse,
     DeleteProfilePayload, LifecyclePreferences, ProfileInfo, PtyErrorEvent, PtyExitedEvent,
     PtyOutputEvent, RenameProfilePayload, RenameSessionPayload, ResizeSessionPayload,
-    SessionActionPayload, SessionInfo, SessionSnapshot, SessionStatus,
+    RuntimeUiSettings, SessionActionPayload, SessionInfo, SessionSnapshot, SessionStatus,
     SetLifecyclePreferencesPayload, SetSessionPersistPayload, SwitchProfilePayload, WorkspaceState,
     WriteInputPayload,
 };
@@ -140,6 +140,12 @@ impl PtyService {
                 .lock()
                 .ok()
                 .and_then(|value| value.map(|id| id.to_string())),
+        }
+    }
+
+    pub fn runtime_ui_settings(&self) -> RuntimeUiSettings {
+        RuntimeUiSettings {
+            sync_clear_command_to_history: self.settings.sync_clear_command_to_history,
         }
     }
 

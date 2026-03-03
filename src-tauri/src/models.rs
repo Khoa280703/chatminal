@@ -24,20 +24,34 @@ pub enum RuntimeBackendMode {
     Daemon,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeOwner {
+    InProcess,
+    Daemon,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct RuntimeBackendInfo {
-    pub mode: RuntimeBackendMode,
+    pub requested_mode: RuntimeBackendMode,
+    pub runtime_owner: RuntimeOwner,
     pub daemon_endpoint: Option<String>,
     pub note: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RuntimeBackendPing {
-    pub mode: RuntimeBackendMode,
+    pub requested_mode: RuntimeBackendMode,
+    pub runtime_owner: RuntimeOwner,
     pub daemon_endpoint: Option<String>,
     pub reachable: bool,
     pub latency_ms: Option<u128>,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RuntimeUiSettings {
+    pub sync_clear_command_to_history: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

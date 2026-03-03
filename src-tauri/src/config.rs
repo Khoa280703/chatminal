@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 const DEFAULT_PREVIEW_LINES: usize = 100;
 const DEFAULT_MAX_LINES_PER_SESSION: usize = 5_000;
 const DEFAULT_AUTO_DELETE_AFTER_DAYS: u32 = 30;
+const DEFAULT_SYNC_CLEAR_COMMAND_TO_HISTORY: bool = false;
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {
@@ -19,6 +20,8 @@ pub struct UserSettings {
     pub max_lines_per_session: usize,
     pub auto_delete_after_days: u32,
     pub preview_lines: usize,
+    #[serde(default = "default_sync_clear_command_to_history")]
+    pub sync_clear_command_to_history: bool,
 }
 
 impl Default for UserSettings {
@@ -31,6 +34,7 @@ impl Default for UserSettings {
             max_lines_per_session: DEFAULT_MAX_LINES_PER_SESSION,
             auto_delete_after_days: DEFAULT_AUTO_DELETE_AFTER_DAYS,
             preview_lines: DEFAULT_PREVIEW_LINES,
+            sync_clear_command_to_history: DEFAULT_SYNC_CLEAR_COMMAND_TO_HISTORY,
         }
     }
 }
@@ -103,4 +107,8 @@ fn normalize_settings(mut settings: UserSettings) -> UserSettings {
     settings.preview_lines = settings.preview_lines.clamp(10, 5000);
     settings.font_size = settings.font_size.clamp(8.0, 48.0);
     settings
+}
+
+fn default_sync_clear_command_to_history() -> bool {
+    DEFAULT_SYNC_CLEAR_COMMAND_TO_HISTORY
 }

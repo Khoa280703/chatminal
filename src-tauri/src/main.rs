@@ -14,8 +14,9 @@ use models::{
     ActivateSessionPayload, CreateProfilePayload, CreateSessionPayload, CreateSessionResponse,
     DeleteProfilePayload, LifecyclePreferences, ProfileInfo, RenameProfilePayload,
     RenameSessionPayload, ResizeSessionPayload, RuntimeBackendInfo, RuntimeBackendPing,
-    SessionActionPayload, SessionInfo, SessionSnapshot, SetLifecyclePreferencesPayload,
-    SetSessionPersistPayload, SwitchProfilePayload, WorkspaceState, WriteInputPayload,
+    RuntimeUiSettings, SessionActionPayload, SessionInfo, SessionSnapshot,
+    SetLifecyclePreferencesPayload, SetSessionPersistPayload, SwitchProfilePayload, WorkspaceState,
+    WriteInputPayload,
 };
 use runtime_backend::RuntimeBackend;
 use service::PtyService;
@@ -236,6 +237,11 @@ fn ping_runtime_backend(state: State<'_, AppState>) -> RuntimeBackendPing {
     state.runtime_backend.ping()
 }
 
+#[tauri::command]
+fn get_runtime_ui_settings(state: State<'_, AppState>) -> RuntimeUiSettings {
+    state.service.runtime_ui_settings()
+}
+
 fn main() {
     let _ = env_logger::try_init();
 
@@ -307,6 +313,7 @@ fn main() {
             get_session_snapshot,
             get_runtime_backend_info,
             ping_runtime_backend,
+            get_runtime_ui_settings,
             shutdown_app
         ])
         .run(tauri::generate_context!())

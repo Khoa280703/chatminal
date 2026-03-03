@@ -1,6 +1,6 @@
 # Code Standards
 
-Last updated: 2026-03-02  
+Last updated: 2026-03-03  
 Scope: active runtime code in `src-tauri/` and `frontend/`.
 
 ## Runtime Scope Rule
@@ -22,6 +22,11 @@ Scope: active runtime code in `src-tauri/` and `frontend/`.
 | Persistence | `src-tauri/src/persistence.rs` | Own SQLite schema, state keys, retention, migrations. |
 | Contracts | `src-tauri/src/models.rs`, `frontend/src/lib/types.ts` | Keep request/response/event fields aligned (snake_case). |
 | UI runtime | `frontend/src/App.svelte` | Own xterm lifecycle, workspace hydration, activation and event handling. |
+
+## Runtime Owner Rules
+1. Runtime owner observability must be explicit (`requested_mode` vs `runtime_owner`).
+2. Until daemon cutover is complete, runtime owner must fail-closed to `in_process`.
+3. Daemon probe failures must never block app startup.
 
 ## API and Naming Rules
 1. Rust naming: `snake_case` functions/fields, UpperCamelCase types.
@@ -59,6 +64,7 @@ Scope: active runtime code in `src-tauri/` and `frontend/`.
 3. Use `ensureSessionConnected`/`activate_session` before sending input to disconnected sessions.
 4. Keep xterm addon loading fault-tolerant (WebGL fallback to canvas renderer).
 5. Re-run `resize_session` only for running sessions.
+6. Treat command-level DB sync behavior as opt-in; default behavior must match normal terminal semantics.
 
 ## Documentation Sync Rules
 When runtime contracts change, update:
@@ -77,4 +83,15 @@ When runtime contracts change, update:
 cargo test --manifest-path src-tauri/Cargo.toml
 npm --prefix frontend run build
 node $HOME/.claude/scripts/validate-docs.cjs docs/
+```
+
+## Compatibility Regression Commands (Linux)
+```bash
+vim /tmp/chatminal-vim.txt
+btop
+printf '%s\n' alpha beta gamma | fzf
+seq 1 300 | less
+nano /tmp/chatminal-unicode.txt
+printf 'e\u0301 | 你 | 😀\n'
+stty size
 ```

@@ -1,6 +1,6 @@
 # Deployment Guide
 
-Last updated: 2026-03-02
+Last updated: 2026-03-03
 
 ## Runtime Target
 Deploy and run the active runtime only:
@@ -70,7 +70,8 @@ Example:
   "persist_scrollback_enabled": false,
   "max_lines_per_session": 5000,
   "auto_delete_after_days": 30,
-  "preview_lines": 100
+  "preview_lines": 100,
+  "sync_clear_command_to_history": false
 }
 ```
 
@@ -79,6 +80,7 @@ Backend normalization:
 - `max_lines_per_session`: `100..=5000`
 - `auto_delete_after_days`: `0..=3650`
 - `preview_lines`: `10..=5000`
+- `sync_clear_command_to_history`: default `false` (opt-in DB sync on `clear`)
 
 Legacy shell fallback file (optional):
 - Linux: `~/.config/chatminal/config.toml`
@@ -119,6 +121,22 @@ Important state keys:
 6. Activate a disconnected session and verify reconnect.
 7. Change directories in shell, restart, and verify latest `cwd` is reused.
 8. Validate history retention settings by trimming scenarios (line cap/TTL).
+
+## Terminal Compatibility Gate (Linux)
+Run these commands in Chatminal before release:
+1. `vim /tmp/chatminal-vim.txt`
+2. `btop` (or `htop`)
+3. `printf '%s\n' alpha beta gamma | fzf`
+4. `seq 1 300 | less`
+5. `nano /tmp/chatminal-unicode.txt`
+6. `printf 'e\u0301 | 你 | 😀\n'`
+7. Resize window repeatedly + `stty size`
+
+Pass criteria:
+- no cursor drift or prompt overlap after exit from full-screen TUIs
+- paging/search hotkeys work in interactive tools
+- unicode/wide-char spacing remains correct
+- resize produces accurate rows/cols and no hard desync
 
 ## Troubleshooting
 | Symptom | Likely Cause | Action |

@@ -2,6 +2,23 @@
 
 All notable implementation and documentation changes are tracked here.
 
+## 2026-03-03 (live-path fidelity + owner observability)
+
+### Added
+- Runtime UI setting contract:
+  - `get_runtime_ui_settings`
+  - `sync_clear_command_to_history` (default off)
+- Runtime backend observability fields:
+  - `requested_mode`
+  - `runtime_owner`
+- Live replay buffer path in frontend to reduce snapshot dependence for running sessions.
+- Linux compatibility checklist for `vim/btop/fzf/less/nano/unicode/resize`.
+
+### Changed
+- Frontend hydrate flow now prioritizes live replay/cache for running sessions before snapshot fallback.
+- `clear` command interception path is now opt-in via runtime UI settings.
+- Daemon staging now uses local IPC endpoint naming with fail-closed in-process owner behavior.
+
 ## 2026-03-02 (native daemon staging baseline)
 
 ### Added
@@ -11,10 +28,7 @@ All notable implementation and documentation changes are tracked here.
 - New Tauri commands for runtime backend introspection:
   - `get_runtime_backend_info`
   - `ping_runtime_backend`
-- New runtime backend models:
-  - `RuntimeBackendMode`
-  - `RuntimeBackendInfo`
-  - `RuntimeBackendPing`
+- New runtime backend model set for mode/info/ping contracts.
 
 ### Changed
 - `AppState` now includes runtime backend mode resolver alongside PTY service.
@@ -42,7 +56,7 @@ All notable implementation and documentation changes are tracked here.
 ### Changed
 - Main window close flow now supports hide-to-tray instead of hard exit when enabled.
 - Backend gained `shutdown_graceful` session teardown path for controlled app quit.
-- Shell resolution logic now has explicit Windows candidate branch (`COMSPEC`, `pwsh`, `powershell`, `cmd`).
+- Shell resolution logic now has explicit Windows candidate branch for common shell executables.
 - Frontend profile menu now exposes lifecycle toggles (keep-alive on close, start in tray).
 
 ## 2026-03-02 (docs realignment from merged scouting + doc-read reports)
