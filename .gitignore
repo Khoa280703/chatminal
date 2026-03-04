@@ -1,5 +1,8 @@
 # Rust build artifacts
 /target/
+**/target/
+/apps/*/Cargo.lock
+/crates/*/Cargo.lock
 **/*.rs.bk
 *.pdb
 
@@ -18,6 +21,3 @@
 # Generated artifacts
 repomix-output.xml
 home/
-frontend/node_modules/
-frontend/dist/
-src-tauri/target/

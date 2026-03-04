@@ -1,252 +1,66 @@
 # Chatminal
 
-Chatminal is a local desktop terminal workspace.
+Chatminal hiện dùng kiến trúc native Rust theo hướng WezTerm-first.
 
-Current runtime stack:
-- Host shell: `Tauri v2` (`src-tauri/`)
-- Backend: `Rust + portable-pty`
-- Frontend: `Svelte 5 + xterm.js` (`frontend/`)
+## Runtime hiện tại
+- Native client: `apps/chatminal-app` (dùng `wezterm-term` để giữ terminal state)
+- Daemon: `apps/chatminald` (quản lý session/profile/PTY/history)
+- Shared contracts: `crates/chatminal-protocol`
+- Shared persistence: `crates/chatminal-store` (SQLite)
 
-Last updated: 2026-03-03
+## Cấu trúc repo
+- `apps/chatminal-app/`: native client CLI/TUI cho runtime WezTerm
+- `apps/chatminald/`: daemon local IPC + PTY runtime
+- `crates/chatminal-protocol/`: request/response/event types
+- `crates/chatminal-store/`: SQLite store (profiles/sessions/scrollback)
+- `docs/`: tài liệu kiến trúc, roadmap, changelog
 
-## Runtime Status
-- Active runtime is `src-tauri/` + `frontend/`.
-- Legacy Rust/Iced code still exists in `src/` and root `Cargo.toml`.
-- Legacy code is kept for reference/backward maintenance only; it is not the default runtime flow.
+## Yêu cầu
+- Rust stable (khuyến nghị >= 1.93)
+- Linux/macOS
 
-## Core Features
-- Multi-profile workspace management:
-  - `list_profiles`
-  - `create_profile`
-  - `switch_profile`
-  - `rename_profile`
-  - `delete_profile`
-- Multi-session terminal management inside the active profile:
-  - create, list, activate, rename, close
-  - resize, write input, snapshot hydration
-- Real-time PTY events:
-  - `pty/output`
-  - `pty/exited`
-  - `pty/error`
-- App lifecycle + tray mode:
-  - close main window -> hide to tray (configurable)
-  - tray menu supports show/new session/quit completely
-  - optional start-in-tray preference
-- Runtime backend introspection:
-  - `get_runtime_backend_info`
-  - `ping_runtime_backend`
-  - daemon staging support without changing default in-process PTY runtime
-- Persistence (SQLite):
-  - profiles
-  - session metadata (`name`, `cwd`, `status`, `persist_history`, `last_seq`)
-  - scrollback chunks with retention
-  - app state keys (`active_profile_id`, `active_session_id:{profile_id}`)
-  - lifecycle preference keys (`keep_alive_on_close`, `start_in_tray`)
-- Session-scoped file explorer (read-only preview):
-  - root folder is mandatory per session
-  - root is user-driven and does not follow `cwd`
-  - per-session explorer UI state is persisted in SQLite
-  - realtime filesystem tracking for active session root via `explorer/fs-changed`
-- Lazy reconnect:
-  - disconnected sessions are hydrated from preview
-  - PTY respawn happens on `activate_session` (also triggered before input when needed)
-
-## Architecture At A Glance
-- `src-tauri/src/main.rs`: Tauri command registration and app wiring.
-- `src-tauri/src/service.rs`: PTY session lifecycle, IO, workers, event emit.
-- `src-tauri/src/persistence.rs`: SQLite schema, workspace restore, retention.
-- `src-tauri/src/config.rs`: `settings.json` + legacy `config.toml` shell fallback.
-- `src-tauri/src/runtime_backend.rs`: runtime backend mode resolver and daemon ping contract.
-- `src-tauri/src/chatminald_client.rs`: lightweight local IPC daemon health client (`PING`/`PONG`).
-- `frontend/src/App.svelte`: xterm UI, profile/session UX, invoke/listen bridge.
-
-## Project Layout
-- `frontend/`: Svelte app and xterm integration.
-- `src-tauri/`: Tauri runtime and PTY service.
-- `src/`: legacy Iced implementation.
-- `docs/`: project documentation.
-- `plans/`: planning artifacts and reports.
-
-## Prerequisites
-- macOS 13+ or Linux desktop with GUI (Wayland/X11).
-- Rust/Cargo stable (`rust-version = 1.93`).
-- Node.js + npm.
-
-macOS:
+## Chạy local
+Terminal 1:
 ```bash
-xcode-select --install
+CHATMINAL_DAEMON_ENDPOINT=/tmp/chatminald.sock cargo run --manifest-path apps/chatminald/Cargo.toml
 ```
 
-Ubuntu/Debian example:
+Terminal 2:
 ```bash
-sudo apt update
-sudo apt install -y \
-  libwebkit2gtk-4.1-dev \
-  libgtk-3-dev \
-  libappindicator3-dev \
-  librsvg2-dev \
-  patchelf
+CHATMINAL_DAEMON_ENDPOINT=/tmp/chatminald.sock cargo run --manifest-path apps/chatminal-app/Cargo.toml -- dashboard-tui-wezterm 120 200 120 32 20
 ```
 
-## Development Run
+Các lệnh client khác:
 ```bash
-npm --prefix frontend install
-npx --prefix frontend tauri dev
+cargo run --manifest-path apps/chatminal-app/Cargo.toml -- workspace
+cargo run --manifest-path apps/chatminal-app/Cargo.toml -- sessions
+cargo run --manifest-path apps/chatminal-app/Cargo.toml -- create "Dev"
+cargo run --manifest-path apps/chatminal-app/Cargo.toml -- activate-wezterm <session_id> 120 32 200
 ```
 
-Notes:
-- Do not use `cargo run` at repo root for the active runtime.
-- GUI runtime requires display access (`DISPLAY` or `WAYLAND_DISPLAY` on Linux).
-
-## Build
-```bash
-npm --prefix frontend run build
-npx --prefix frontend tauri build
-```
-
-Debug bundle build:
-```bash
-npx --prefix frontend tauri build --debug
-```
-
-Expected artifact roots:
-- Bundles: `src-tauri/target/release/bundle/` (or `src-tauri/target/debug/bundle/` with `--debug`)
-- Rust binary: `src-tauri/target/release/`
-
-Bundle formats depend on host platform/toolchain (for example `.app`/`.dmg` on macOS, `.deb`/`.AppImage`/`.rpm` on Linux when supported).
-
-## Runtime Configuration
-Primary config file: `settings.json`
-- Linux: `~/.config/chatminal/settings.json`
-- macOS: `~/Library/Application Support/chatminal/settings.json`
-
-Supported keys:
-```json
-{
-  "theme": "system",
-  "font_size": 14.0,
-  "default_shell": "/bin/bash",
-  "persist_scrollback_enabled": false,
-  "max_lines_per_session": 5000,
-  "auto_delete_after_days": 30,
-  "preview_lines": 100,
-  "sync_clear_command_to_history": false
-}
-```
-
-Normalization in backend:
-- `font_size`: `8.0..=48.0`
-- `max_lines_per_session`: `100..=5000`
-- `auto_delete_after_days`: `0..=3650`
-- `preview_lines`: `10..=5000`
-- `sync_clear_command_to_history`: `false` by default (opt-in)
-
-Optional runtime backend environment variables:
-- `CHATMINAL_RUNTIME_BACKEND`
-  - `in_process` (default)
-  - `daemon` (daemon mode intent; current PTY runtime still defaults to in-process)
+## Biến môi trường
 - `CHATMINAL_DAEMON_ENDPOINT`
-  - local IPC endpoint path:
-    - Linux/macOS example: `/tmp/chatminald.sock`
-    - Windows example: `\\.\pipe\chatminald-user`
-- Backward compatibility: `CHATMINAL_DAEMON_ADDR` still accepted as fallback alias.
+- `CHATMINAL_PREVIEW_LINES`
+- `CHATMINAL_MAX_LINES_PER_SESSION`
+- `CHATMINAL_DEFAULT_COLS`
+- `CHATMINAL_DEFAULT_ROWS`
+- `CHATMINAL_HEALTH_INTERVAL_MS`
 
-Legacy shell file (still read as fallback):
-- Linux: `~/.config/chatminal/config.toml`
-- macOS: `~/Library/Application Support/chatminal/config.toml`
-
-```toml
-shell = "/bin/bash"
+## Validate
+```bash
+cargo check --workspace
+cargo test --manifest-path crates/chatminal-protocol/Cargo.toml
+cargo test --manifest-path crates/chatminal-store/Cargo.toml
+cargo test --manifest-path apps/chatminald/Cargo.toml
+cargo test --manifest-path apps/chatminal-app/Cargo.toml
 ```
 
-Shell resolution order:
-1. `settings.json` -> `default_shell`
-2. legacy `config.toml` -> `shell`
-3. `$SHELL`
-4. `/bin/zsh`
-5. `/bin/bash`
-6. `/bin/sh`
-
-Shell path must pass:
-- `/etc/shells` allow-list
-- canonicalization
-- executable bit check
-
-## Session and CWD Behavior
-- Session create `cwd` behavior:
-  - use payload `cwd` when provided
-  - otherwise use user home directory (`~`) when available
-  - fallback to `/` only if home cannot be resolved
-- Running sessions are tracked by a CWD sync worker (`500ms` interval).
-- Reconnect uses latest persisted `cwd` for session respawn.
-
-## Window Lifecycle Behavior
-- If `keep_alive_on_close = true`, closing the main window hides it to tray and keeps PTY sessions alive.
-- `Quit Completely` from tray triggers backend graceful shutdown and exits the app process.
-- If `start_in_tray = true`, app starts hidden and can be restored from tray.
-
-## Persistence Paths
-Database file:
-- Linux: `~/.local/share/chatminal/chatminal.db`
-- macOS: `~/Library/Application Support/chatminal/chatminal.db`
-
-Key SQLite tables:
-- `profiles`
-- `sessions`
-- `scrollback`
-- `app_state`
-- `session_explorer_state` (`root_path`, `current_dir`, `selected_path`, `open_file_path`)
-
-Important app-state keys:
-- `active_profile_id`
-- `active_session_id:{profile_id}`
-
-## Quick Smoke Checklist
-1. App starts and loads workspace via `load_workspace`.
-2. If no sessions exist, UI creates one session.
-3. Creating/switching/renaming/deleting profiles works.
-4. Creating/activating/renaming/closing sessions works.
-5. Terminal input goes through `write_input` and output appears via `pty/output`.
-6. Restart restores disconnected previews; activate reconnects and resumes output.
-7. `cwd` changes persist after restart/reconnect.
-8. File explorer first open per session requires root selection; switching sessions restores each session explorer root/state; explorer does not follow terminal `cwd`.
-9. Changing files/folders under active explorer root from external tools triggers realtime explorer refresh.
-
-## Terminal Compatibility Checklist (Linux)
-Run these inside Chatminal and verify expected behavior:
-1. `vim /tmp/chatminal-vim.txt`
-- Enter/exit insert mode, save file, quit (`:wq`), cursor/prompt must restore correctly.
-2. `btop` (or `htop` if unavailable)
-- Full-screen redraw stable, keys responsive, exit returns prompt cleanly.
-3. `printf '%s\n' alpha beta gamma | fzf`
-- Interactive filtering, arrows/enter work, prompt restore after quit.
-4. `seq 1 300 | less`
-- Paging up/down, `/` search, quit with `q` restores prompt.
-5. `nano /tmp/chatminal-unicode.txt`
-- Edit/save/quit cycle works without cursor misalignment.
-6. `printf 'e\u0301 | 你 | 😀\n'`
-- Combining chars, CJK wide chars, emoji render and cursor step are correct.
-7. Resize app window then run `stty size`
-- Rows/cols reflect actual terminal size after each resize.
-
-## Troubleshooting
-| Symptom | Likely Cause | Action |
-| --- | --- | --- |
-| App window does not open | Missing GUI/display environment | Run in local desktop environment. |
-| `tauri dev` fails before app launch | Missing WebKit/GTK libs | Install Linux prerequisites above. |
-| macOS build/dev fails early | Missing Xcode CLI tools | Run `xcode-select --install`. |
-| Session creation fails | Invalid shell config | Fix/remove `default_shell`/`shell`; ensure shell is in `/etc/shells`. |
-| App opens but no session appears | Session spawn failed on startup | Check terminal logs, validate shell path and permissions, then create session manually. |
-| No persisted preview/history | `persist_history` disabled or retention trimmed | Enable persist for session; verify retention settings. |
-
-## Documentation
+## Tài liệu
 - [Docs Index](./docs/index.md)
-- [Project Overview and PDR](./docs/project-overview-pdr.md)
-- [Codebase Summary](./docs/codebase-summary.md)
 - [System Architecture](./docs/system-architecture.md)
+- [Codebase Summary](./docs/codebase-summary.md)
 - [Code Standards](./docs/code-standards.md)
 - [Deployment Guide](./docs/deployment-guide.md)
-- [Design Guidelines](./docs/design-guidelines.md)
 - [Project Roadmap](./docs/project-roadmap.md)
 - [Development Roadmap](./docs/development-roadmap.md)
 - [Project Changelog](./docs/project-changelog.md)

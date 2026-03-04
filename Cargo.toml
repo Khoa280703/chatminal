@@ -1,23 +1,22 @@
-[package]
-name = "chatminal"
-version = "0.1.0"
+[workspace]
+members = [
+  "apps/chatminald",
+  "apps/chatminal-app",
+  "crates/chatminal-protocol",
+  "crates/chatminal-store",
+]
+default-members = [
+  "apps/chatminald",
+  "apps/chatminal-app",
+  "crates/chatminal-protocol",
+  "crates/chatminal-store",
+]
+resolver = "2"
+
+[workspace.package]
 edition = "2024"
 rust-version = "1.93"
-
-[dependencies]
-iced = { version = "0.14.0", features = ["wgpu", "tokio", "canvas"] }
-portable-pty = "0.9.0"
-tokio = { version = "1.49.0", features = ["sync", "rt-multi-thread", "macros"] }
-uuid = { version = "1.21.0", features = ["v4"] }
-indexmap = "2.13.0"
-log = "0.4.29"
-env_logger = "0.11.9"
-libc = "0.2.182"
-serde = { version = "1.0.228", features = ["derive"] }
-toml = "1.0.3"
-dirs = "6.0.0"
-wezterm-term = { git = "https://github.com/wez/wezterm", rev = "05343b387085842b434d267f91b6b0ec157e4331" }
-wezterm-surface = { git = "https://github.com/wez/wezterm", rev = "05343b387085842b434d267f91b6b0ec157e4331" }
+version = "0.1.0"
 
 [profile.release]
 opt-level = 3

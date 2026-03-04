@@ -1,144 +1,28 @@
 # System Architecture
 
-Last updated: 2026-03-03
+Last updated: 2026-03-04
 
-## Runtime Topology
-Chatminal runs as a desktop Tauri app with a Rust PTY backend and Svelte frontend.
-
+## Topology
 ```text
-+-------------------------------+      invoke()       +-------------------------------+
-| Frontend (Svelte + xterm.js)  |-------------------->| Tauri command layer (main.rs) |
-| frontend/src/App.svelte       |<--------------------| load/profile/session commands  |
-| - workspace/profile/session UX|      events         +---------------+---------------+
-| - xterm IO + reconnect logic  |  pty/output|exited|error            |
-+---------------+---------------+                                      |
-                |                                                      v
-                |                                   +------------------+------------------+
-                |                                   | PtyService (service.rs)              |
-                |                                   | - profile/session maps               |
-                |                                   | - runtime spawn/activate/close       |
-                |                                   | - shell validation + bounds          |
-                |                                   | - history/cleanup/cwd workers        |
-                |                                   +------------------+------------------+
-                |                                                      |
-                |                                                      v
-                |                                   +------------------+------------------+
-                +---------------------------------->| Persistence (persistence.rs)         |
-                                                    | SQLite: profiles/sessions/scrollback |
-                                                    | app_state keys + retention/migration |
-                                                    +--------------------------------------+
+chatminal-app (native client)
+  -> local IPC (UDS / Named Pipe)
+chatminald (daemon)
+  -> portable-pty sessions
+  -> sqlite store (profiles/sessions/scrollback)
 ```
 
-## Active vs Legacy Runtime
-- Active runtime: `src-tauri/` + `frontend/`.
-- Legacy runtime: `src/` + root `Cargo.toml` (Iced). Keep as legacy reference only.
+## Runtime flow
+1. Client connect daemon endpoint.
+2. Client gọi `workspace_load` để hydrate profiles/sessions.
+3. Client activate session để daemon attach/spawn PTY.
+4. Client gửi input/resize; daemon trả event output/exited/error.
+5. Daemon batch persist scrollback vào SQLite.
 
-## Component Responsibilities
-| Component | Files | Responsibilities |
-| --- | --- | --- |
-| App bootstrap and command exposure | `src-tauri/src/main.rs` | Register Tauri commands and app state. |
-| PTY orchestration | `src-tauri/src/service.rs` | Session lifecycle, profile operations, event emit, worker startup. |
-| Runtime backend mode and daemon probing | `src-tauri/src/runtime_backend.rs`, `src-tauri/src/chatminald_client.rs` | Resolve runtime mode and provide daemon health ping contract over local IPC (UDS/Named Pipe). |
-| Data contracts | `src-tauri/src/models.rs` | Request/response/event payload models. |
-| Persistence | `src-tauri/src/persistence.rs` | Schema, migrations, state keys, history retention. |
-| Runtime config | `src-tauri/src/config.rs` | `settings.json` normalization + legacy shell fallback. |
-| Frontend shell | `frontend/src/App.svelte` | Workspace hydration, terminal rendering, profile/session actions. |
+## Main components
+- Client: command bridge + wezterm-term pane state + TUI/dashboard rendering.
+- Daemon: request parser, session lifecycle, persistence, health events.
+- Shared protocol/store crates: contract và storage reuse cho cả hai app.
 
-## Command Contracts
-### Workspace and Profile
-- `load_workspace`
-- `list_profiles`
-- `create_profile`
-- `switch_profile`
-- `rename_profile`
-- `delete_profile`
-
-### Session and Terminal
-- `list_sessions`
-- `create_session`
-- `activate_session`
-- `write_input`
-- `resize_session`
-- `rename_session`
-- `set_session_persist`
-- `get_lifecycle_preferences`
-- `set_lifecycle_preferences`
-- `get_runtime_backend_info`
-- `ping_runtime_backend`
-- `get_runtime_ui_settings`
-- `shutdown_app`
-- `close_session`
-- `clear_session_history`
-- `clear_all_history`
-- `get_session_snapshot`
-- `get_session_explorer_state`
-- `set_session_explorer_root`
-- `update_session_explorer_state`
-- `list_session_explorer_entries`
-- `read_session_explorer_file`
-
-## Event Contracts
-- `pty/output` -> `{ session_id, chunk, seq, ts }`
-- `pty/exited` -> `{ session_id, exit_code, reason }`
-- `pty/error` -> `{ session_id, message }`
-- `explorer/fs-changed` -> `{ session_id, root_path, changed_paths[], full_resync, revision }`
-- `app/tray-new-session` -> tray yêu cầu frontend tạo session mới
-- `app/lifecycle-hidden` -> main window vừa được hide về tray
-
-## Lifecycle and Data Flow
-1. App boot initializes the PTY service, workers, and persistence restore.
-2. Frontend calls `load_workspace` and applies profile/session state.
-3. Frontend hydrates current terminal using `get_session_snapshot`.
-4. Disconnected sessions remain preview-only until activation.
-5. Frontend calls `activate_session` to reconnect/spawn runtime for disconnected sessions.
-6. Frontend sends keyboard input via `write_input`.
-7. Reader thread emits `pty/output`; frontend applies ordered chunks by `seq`.
-8. On reader EOF/error, cleanup worker emits `pty/exited`, closes runtime, and sets status to disconnected.
-9. Window close event có thể được intercept để hide-to-tray thay vì thoát process, dựa trên lifecycle preferences.
-10. Runtime backend mode can be inspected at runtime; daemon health ping is exposed without switching default PTY execution path.
-11. Runtime owner currently fails closed to `in_process` when daemon is unavailable or cutover is not enabled.
-
-## Persistence Design
-SQLite tables:
-- `profiles`
-- `sessions`
-- `scrollback`
-- `app_state`
-- `session_explorer_state`
-
-State keys:
-- `active_profile_id`
-- `active_session_id:{profile_id}`
-- `keep_alive_on_close`
-- `start_in_tray`
-- legacy key migration: `active_session_id`
-
-History retention:
-- line cap: `max_lines_per_session`
-- TTL: `auto_delete_after_days`
-
-## Background Workers
-- `chatminal-cleanup`: finalizes exited sessions and disconnect state.
-- `chatminal-history-writer`: buffers and batches history writes (`50ms` interval, batch `128`).
-- `chatminal-cwd-sync`: polls process cwd every `500ms`, updates in-memory and DB state.
-- `chatminal-explorer-watch`: watches active explorer root and emits debounced fs-change events for realtime explorer refresh.
-
-## Runtime Controls and Limits
-- `MAX_INPUT_BYTES = 65_536`
-- `INPUT_QUEUE_SIZE = 128`
-- `MAX_SNAPSHOT_BYTES = 512 * 1024`
-- `HISTORY_FLUSH_INTERVAL = 50ms`
-- `HISTORY_BATCH_SIZE = 128`
-- `CWD_SYNC_INTERVAL = 500ms`
-- `MAX_EXPLORER_FILE_PREVIEW_BYTES = 512 * 1024` (frontend currently requests `256 * 1024`)
-- `MAX_EXPLORER_ENTRIES_PER_DIR = 2_000`
-- `EXPLORER_WATCH_DEBOUNCE = 180ms`
-- `EXPLORER_WATCH_MAX_CHANGED_PATHS = 128`
-
-## Security and Validation Controls
-- Shell path allow-list from `/etc/shells`.
-- Canonical path + executable-bit checks before spawn.
-- Input-size guard and bounded queues for write path.
-- Explorer path guards: reject absolute path and `..`, canonicalize root/target, block root escape.
-- Explorer preview is read-only and rejects binary content (zero-byte detection).
-- Fallback shell order: configured shell -> `$SHELL` -> `/bin/zsh` -> `/bin/bash` -> `/bin/sh`.
+## Data model
+- Tables: `profiles`, `sessions`, `scrollback`, `app_state`, `session_explorer_state`.
+- Active key: `active_profile_id`, `active_session_id:{profile_id}`.

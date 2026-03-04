@@ -1,0 +1,49 @@
+name: rewrite-quality-gates
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - dev
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust check (workspace)
+        run: cargo check --workspace
+
+      - name: Rust tests (daemon)
+        run: cargo test --manifest-path apps/chatminald/Cargo.toml
+
+      - name: Rust tests (native client scaffold)
+        run: cargo test --manifest-path apps/chatminal-app/Cargo.toml
+
+      - name: Rust tests (protocol)
+        run: cargo test --manifest-path crates/chatminal-protocol/Cargo.toml
+
+      - name: Rust tests (store)
+        run: cargo test --manifest-path crates/chatminal-store/Cargo.toml
+
+      - name: Docs validation (best effort)
+        run: |
+          if [ -f /home/runner/.claude/scripts/validate-docs.cjs ]; then
+            node /home/runner/.claude/scripts/validate-docs.cjs docs/
+          else
+            echo "skip external docs validator (not available on runner)"
+          fi

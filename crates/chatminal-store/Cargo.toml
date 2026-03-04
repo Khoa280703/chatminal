@@ -1,0 +1,11 @@
+[package]
+name = "chatminal-store"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.93"
+
+[dependencies]
+rusqlite = { version = "0.32.1", features = ["bundled"] }
+uuid = { version = "1.21.0", features = ["v4"] }
+dirs = "6.0.0"
+chatminal-protocol = { path = "../chatminal-protocol" }
