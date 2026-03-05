@@ -18,7 +18,9 @@ Chatminal hiện dùng kiến trúc native Rust theo hướng WezTerm-first.
 ## Yêu cầu
 - Rust stable (khuyến nghị >= 1.93)
 - Linux/macOS
-- WezTerm binary (`wezterm`) có trong `PATH` hoặc set `CHATMINAL_WEZTERM_BIN`
+- WezTerm runtime:
+  - Ưu tiên: có binary `wezterm` trong `PATH` hoặc set `CHATMINAL_WEZTERM_BIN`
+  - Dev fallback: nếu thiếu binary, app sẽ tự dùng source tại `third_party/wezterm` (auto init submodule khi cần)
 
 ## Chạy local
 Nhanh nhất (khuyến nghị):
