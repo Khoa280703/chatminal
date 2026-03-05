@@ -55,8 +55,6 @@ fn launch_with_wezterm_source_build(
         .canonicalize()
         .map_err(|err| format!("resolve workspace root failed: {err}"))?;
 
-    ensure_wezterm_source_checkout(&workspace_root)?;
-
     let wezterm_manifest = workspace_root
         .join("third_party")
         .join("wezterm")
@@ -143,39 +141,6 @@ fn resolve_wezterm_binary_from_inputs(
             .map(|entry| entry.join(binary_name()))
             .find(|path| is_launchable_path(path))
     })
-}
-
-fn ensure_wezterm_source_checkout(workspace_root: &Path) -> Result<(), String> {
-    let wezterm_manifest = workspace_root
-        .join("third_party")
-        .join("wezterm")
-        .join("wezterm")
-        .join("Cargo.toml");
-    if wezterm_manifest.exists() {
-        return Ok(());
-    }
-
-    let gitmodules = workspace_root.join(".gitmodules");
-    if !gitmodules.exists() {
-        return Ok(());
-    }
-
-    let status = Command::new("git")
-        .current_dir(workspace_root)
-        .arg("submodule")
-        .arg("update")
-        .arg("--init")
-        .arg("--recursive")
-        .arg("--")
-        .arg("third_party/wezterm")
-        .status()
-        .map_err(|err| format!("auto-init third_party/wezterm failed: {err}"))?;
-    if !status.success() {
-        return Err(format!(
-            "auto-init third_party/wezterm failed with status: {status}"
-        ));
-    }
-    Ok(())
 }
 
 fn resolve_wezterm_binary_from_platform_defaults() -> Option<PathBuf> {
