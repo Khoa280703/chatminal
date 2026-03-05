@@ -2,6 +2,7 @@
 members = [
   "apps/chatminald",
   "apps/chatminal-app",
+  "crates/chatminal-terminal-core",
   "crates/chatminal-protocol",
   "crates/chatminal-store",
 ]
@@ -9,6 +10,7 @@ exclude = ["third_party/wezterm"]
 default-members = [
   "apps/chatminald",
   "apps/chatminal-app",
+  "crates/chatminal-terminal-core",
   "crates/chatminal-protocol",
   "crates/chatminal-store",
 ]

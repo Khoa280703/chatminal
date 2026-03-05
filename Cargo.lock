@@ -483,12 +483,12 @@ name = "chatminal-app"
 version = "0.1.0"
 dependencies = [
  "chatminal-protocol",
+ "chatminal-terminal-core",
  "crossterm",
  "dirs",
  "eframe",
  "serde",
  "serde_json",
- "wezterm-term",
  "whoami",
  "windows-sys 0.61.2",
 ]
@@ -509,6 +509,13 @@ dependencies = [
  "dirs",
  "rusqlite",
  "uuid",
+]
+
+[[package]]
+name = "chatminal-terminal-core"
+version = "0.1.0"
+dependencies = [
+ "wezterm-term",
 ]
 
 [[package]]
