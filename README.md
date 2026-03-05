@@ -18,6 +18,7 @@ Chatminal hiện dùng kiến trúc native Rust theo hướng WezTerm-first.
 ## Yêu cầu
 - Rust stable (khuyến nghị >= 1.93)
 - Linux/macOS
+- WezTerm binary (`wezterm`) có trong `PATH` hoặc set `CHATMINAL_WEZTERM_BIN`
 
 ## Chạy local
 Nhanh nhất (khuyến nghị):
@@ -148,7 +149,7 @@ cargo run --manifest-path apps/chatminal-app/Cargo.toml -- activate-wezterm <ses
 - `CHATMINAL_HEALTH_INTERVAL_MS`
 - `CHATMINAL_INPUT_PIPELINE_MODE` (`wezterm` hoặc `legacy`)
 - `CHATMINAL_WINDOW_BACKEND` (`wezterm-gui` hoặc `legacy`)
-- `CHATMINAL_WEZTERM_BIN` (optional: path tới binary `wezterm` nếu không muốn fallback build từ `third_party/wezterm`)
+- `CHATMINAL_WEZTERM_BIN` (optional: path tới binary `wezterm` khi không có trong `PATH`)
 - `CHATMINAL_BENCH_ENFORCE_HARD_GATE` (script `bench-phase02`, mặc định `1`)
 - `CHATMINAL_BENCH_PROFILE` (script `bench-phase02`, `release` hoặc `dev`, mặc định `release`)
 - `CHATMINAL_BENCH_SHELL` (script `bench-phase02`, mặc định `/bin/sh` để đo RTT ổn định)

@@ -22,7 +22,7 @@ pub fn run_window_wezterm_gui(config: &AppConfig, args: &[String]) -> Result<(),
         return Ok(());
     }
 
-    launch_with_wezterm_source_build(&current_exe, &config.endpoint, session_id.as_deref())
+    Err("wezterm binary not found. Install WezTerm (macOS: `brew install --cask wezterm`) and ensure `wezterm` is in PATH or set `CHATMINAL_WEZTERM_BIN`.".to_string())
 }
 
 fn launch_with_wezterm_binary(
@@ -44,46 +44,11 @@ fn launch_with_wezterm_binary(
     Ok(())
 }
 
-fn launch_with_wezterm_source_build(
-    current_exe: &Path,
-    endpoint: &str,
-    session_id: Option<&str>,
-) -> Result<(), String> {
-    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .canonicalize()
-        .map_err(|err| format!("resolve workspace root failed: {err}"))?;
-    let wezterm_manifest = workspace_root
-        .join("third_party")
-        .join("wezterm")
-        .join("wezterm")
-        .join("Cargo.toml");
-    if !wezterm_manifest.exists() {
-        return Err(
-            "wezterm binary not found in PATH and third_party/wezterm source missing".to_string(),
-        );
-    }
-
-    let mut command = Command::new("cargo");
-    for arg in build_wezterm_source_run_args(&wezterm_manifest, current_exe, session_id) {
-        command.arg(arg);
-    }
-    command
-        .current_dir(&workspace_root)
-        .env("CHATMINAL_DAEMON_ENDPOINT", endpoint)
-        .env("CHATMINAL_INTERNAL_PROXY", "1");
-
-    command
-        .spawn()
-        .map_err(|err| format!("spawn wezterm from source failed: {err}"))?;
-    Ok(())
-}
-
 fn resolve_wezterm_binary() -> Option<PathBuf> {
     let override_value = std::env::var("CHATMINAL_WEZTERM_BIN").ok();
     let path_value = std::env::var_os("PATH");
     resolve_wezterm_binary_from_inputs(override_value.as_deref(), path_value.as_deref())
+        .or_else(resolve_wezterm_binary_from_platform_defaults)
 }
 
 fn binary_name() -> &'static str {
@@ -104,21 +69,6 @@ fn build_wezterm_start_args(current_exe: &Path, session_id: Option<&str>) -> Vec
     if let Some(value) = session_id {
         args.push(value.to_string());
     }
-    args
-}
-
-fn build_wezterm_source_run_args(
-    wezterm_manifest: &Path,
-    current_exe: &Path,
-    session_id: Option<&str>,
-) -> Vec<String> {
-    let mut args = vec![
-        "run".to_string(),
-        "--manifest-path".to_string(),
-        wezterm_manifest.to_string_lossy().to_string(),
-        "--".to_string(),
-    ];
-    args.extend(build_wezterm_start_args(current_exe, session_id));
     args
 }
 
@@ -143,6 +93,25 @@ fn resolve_wezterm_binary_from_inputs(
     })
 }
 
+fn resolve_wezterm_binary_from_platform_defaults() -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        let candidates = [
+            "/Applications/WezTerm.app/Contents/MacOS/wezterm",
+            "/System/Applications/WezTerm.app/Contents/MacOS/wezterm",
+        ];
+        return candidates
+            .iter()
+            .map(PathBuf::from)
+            .find(|path| is_launchable_path(path));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
+}
+
 fn is_launchable_path(path: &Path) -> bool {
     if !path.is_file() {
         return false;
@@ -164,8 +133,7 @@ fn is_launchable_path(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        binary_name, build_wezterm_source_run_args, build_wezterm_start_args,
-        resolve_wezterm_binary_from_inputs,
+        binary_name, build_wezterm_start_args, resolve_wezterm_binary_from_inputs,
     };
     use std::fs;
     use std::path::PathBuf;
@@ -258,23 +226,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn build_wezterm_source_run_args_embeds_manifest_and_proxy_payload() {
-        let manifest = PathBuf::from("/tmp/wezterm/Cargo.toml");
-        let current_exe = PathBuf::from("/tmp/chatminal-app");
-        let args = build_wezterm_source_run_args(&manifest, &current_exe, None);
-        assert_eq!(
-            args,
-            vec![
-                "run",
-                "--manifest-path",
-                "/tmp/wezterm/Cargo.toml",
-                "--",
-                "start",
-                "--",
-                "/tmp/chatminal-app",
-                "proxy-wezterm-session",
-            ]
-        );
-    }
 }
