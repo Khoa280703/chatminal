@@ -1,0 +1,48 @@
+{
+  "type": "phase05_soak_smoke",
+  "timestamp_utc": "2026-03-05T05:12:43Z",
+  "status": "passed",
+  "failed_step": "",
+  "failure_reason": "",
+  "started_utc": "2026-03-05T05:12:40Z",
+  "mode": "pr",
+  "elapsed_seconds": 3,
+  "configured_duration_seconds": 7200,
+  "warmup_iterations": 1,
+  "pr_iterations": 2,
+  "bench_profile": {
+    "samples": 40,
+    "warmup": 8,
+    "timeout_ms": 2000,
+    "shell": "/bin/sh",
+    "require_hard_gate": 0
+  },
+  "evaluated_iterations": 1,
+  "iteration_sleep_seconds": 5,
+  "iterations_total": 2,
+  "pass_count": 1,
+  "fail_count": 0,
+  "hard_gate_enforced": 0,
+  "pass_hard_gate": true,
+  "max_metrics": {
+    "p95_ms": 7.237,
+    "p99_ms": 7.733,
+    "daemon_peak_mb": 8.1,
+    "app_peak_mb": 6.8,
+    "total_peak_mb": 14.3
+  },
+  "iterations": [
+    {"index":1,"started_utc":"2026-03-05T05:12:40Z","duration_seconds":1,"bench_exit":0,"soft_fail_detected":false,"pass_hard_gate":true,"counts_for_gate":false,"metrics":{"p95_ms":6.064,"p99_ms":6.348,"daemon_peak_mb":8.1,"app_peak_mb":6.8,"total_peak_mb":14.3},"raw_log":"/tmp/chatminal-phase05-soak-log.2918223.1.2NKu4V"},
+    {"index":2,"started_utc":"2026-03-05T05:12:41Z","duration_seconds":1,"bench_exit":0,"soft_fail_detected":false,"pass_hard_gate":true,"counts_for_gate":true,"metrics":{"p95_ms":7.237,"p99_ms":7.733,"daemon_peak_mb":8.1,"app_peak_mb":6.8,"total_peak_mb":14.1},"raw_log":"/tmp/chatminal-phase05-soak-log.2918223.2.C2J08v"}
+  ],
+  "metrics": {
+    "p95_ms": 7.237,
+    "p99_ms": 7.733,
+    "daemon_peak_mb": 8.1,
+    "app_peak_mb": 6.8,
+    "total_peak_mb": 14.3
+  },
+  "artifacts": {
+    "report_path": "plans/260305-0812-wezterm-input-pipeline-daemon-first-parity/reports/soak-pr-20260305-v3.json"
+  }
+}

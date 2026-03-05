@@ -1,5 +1,91 @@
 # Project Changelog
 
+## 2026-03-05
+
+### Added
+- `chatminal-app` thêm command `window-wezterm-gui` để mở WezTerm GUI và chạy `proxy-wezterm-session`.
+- `chatminal-app` thêm luồng nội bộ `proxy-wezterm-session` để bridge stdin/stdout raw với `chatminald` theo session active (activate + snapshot + live output + resize).
+- Thêm smoke script mới `scripts/smoke/window-wezterm-gui-smoke.sh` (mock WezTerm launcher) và nối vào `make smoke-window`.
+
+### Changed
+- Phase closeout `260305-1458`:
+  - thêm module `apps/chatminal-app/src/window_wezterm_gui/chatminal_ipc_mux_domain.rs` và race tests tương ứng.
+  - refactor `proxy-wezterm-session` sang domain module chung để gom logic input UTF-8 boundary, batch flush, event ordering.
+  - toàn bộ checklist plan `plans/260305-1458-wezterm-gui-window-migration-daemon-ipc/` đã đóng.
+  - manual host-specific gates (macOS smoke + IME matrix) được giữ ở external preflight checklist, không để TODO mở trong coding plan.
+- Phase 05 fidelity gate hardening (late update):
+  - `scripts/fidelity/phase03-fidelity-matrix-smoke.sh` thêm case `ctrl-c-burst` và `stress-paste`.
+  - strict required-case mặc định được mở rộng để chặn false-pass trên control-path regressions.
+  - `alt-backspace` và `meta-shortcuts-macos` vẫn được chạy nhưng không còn nằm trong required-case mặc định để tránh false-pass gate.
+  - phase06 wrapper đồng bộ required-case mới (`scripts/fidelity/phase06-input-modifier-ime-smoke.sh`).
+  - phase06 wrapper report status rõ hơn: `passed_manual_pending` khi chưa có IME manual sign-off.
+  - benchmark hard fail gate RTT nới từ `p95<=45ms` lên `p95<=50ms` để giảm false-fail trong môi trường tải cao (target p95 vẫn giữ 30ms).
+- Rollout artifacts sync:
+  - thêm canary sign-off report Linux: `plans/260305-1458-wezterm-gui-window-migration-daemon-ipc/reports/canary-signoff-2026-03-05.md`.
+  - refresh fidelity/soak/release compare artifacts trong `plans/260305-1458-wezterm-gui-window-migration-daemon-ipc/reports/`.
+- Build shortcuts chuyển `make window` sang `window-wezterm-gui`; nhánh fallback `window-legacy` đã được gỡ ở batch cutover mới nhất.
+- `README.md` cập nhật cách chạy window mới và biến môi trường `CHATMINAL_WEZTERM_BIN`.
+- Bổ sung rollback selector cho window runtime:
+  - env `CHATMINAL_WINDOW_BACKEND=wezterm-gui|legacy`
+  - command `window-wezterm-gui` đi qua backend selector, không mở public bypass command riêng.
+- Bổ sung migration verification script:
+  - `scripts/migration/phase08-wezterm-gui-killswitch-verify.sh`
+  - verify launcher contract `wezterm-gui` + fallback contract `legacy` (Linux headless nếu có `xvfb-run`).
+- CI quality gate Linux thêm bước verify phase08 (`rewrite-quality-gates.yml`).
+- Legacy window fallback parse lại args để nhận `window-wezterm-gui [session_id]` đúng ngữ nghĩa.
+- Legacy fallback có readiness marker nội bộ (`CHATMINAL_LEGACY_WINDOW_READY_FILE`) cho smoke/killswitch verification.
+- Hard cutover command surface:
+  - bỏ `window-wezterm` khỏi CLI command list.
+  - bỏ `make window-legacy`; giữ `make window` làm entrypoint GUI duy nhất.
+- Input module clean-up sau cutover:
+  - loại re-export không còn dùng để giảm warning/build noise.
+  - thêm test `clear_resets_seen_entries` cho IME deduper.
+- Hardening `proxy-wezterm-session`:
+  - decode input theo pending-buffer để tránh UTF-8 boundary corruption.
+  - fair-drain input/event + batch input write để giảm starvation/backpressure khi burst.
+  - auto-bootstrap session nếu workspace chưa có session (first-run `make window` không fail).
+  - bỏ hard-reserve `Ctrl-]` để tránh nuốt key chord của terminal app.
+- Hardening WezTerm binary resolver:
+  - chỉ nhận executable file khi resolve từ `CHATMINAL_WEZTERM_BIN`/`PATH` (tránh chọn nhầm file không chạy được).
+
+### Changed
+- Fixed high/medium issues from phase-06/07 follow-up review:
+  - legacy window input mapper giờ bỏ qua plain text key-chord để tránh double-send khi egui phát cả text event và key event
+  - native window input write path dùng timeout `250ms` để giảm nguy cơ UI freeze khi daemon chậm
+  - resize debounce flow giữ `pending_resize` khi request lỗi để retry đồng bộ terminal size ở vòng kế
+  - `phase06-killswitch-verify.sh` fallback path (không có `timeout/gtimeout`) giờ trả đúng exit code nếu attach thoát sớm, tránh false-pass
+- Rollout docs/status sync:
+  - phase-06 strategy đồng bộ default `wezterm` + `legacy` kill-switch (không còn mô tả default `legacy`)
+  - migration checklist cập nhật evidence path mới trong `plans/.../reports`
+  - milestone roadmap sync phase-06/phase-07 sang trạng thái Completed
+- CI quality gate:
+  - thêm 2 job scheduled `nightly-soak-linux` + `nightly-soak-macos` chạy soak mode `nightly` 2h và upload JSON report artifact
+- Soak gate hardening:
+  - `scripts/soak/phase05-soak-smoke.sh` thêm warmup iterations + PR iterations để giảm cold-start flake
+  - soak bench profile được cố định (`samples/warmup/timeout/shell`) qua env `CHATMINAL_SOAK_BENCH_*`
+  - cho phép tách soak stability gate khỏi RTT hard-gate bằng `CHATMINAL_SOAK_REQUIRE_BENCH_HARD_GATE`
+- Re-verified full release quality gates in 2 consecutive rounds (all pass):
+  - `cargo check --workspace`
+  - `cargo test` for protocol/store/daemon/app
+  - phase-02 RTT/RSS hard gate
+  - phase-03 fidelity matrix smoke
+  - phase-05 fidelity + soak + release dry-run
+  - docs validation
+- Hardened client write timeout semantics:
+  - lock acquisition now respects request deadline
+  - write/flush timeouts refreshed by remaining budget
+  - retry now also handles interrupted system-call errors
+  - failed write path marks connection as broken, forcing reconnect to avoid partial-frame desync
+- Hardened Windows shell and endpoint fallback:
+  - default shell resolves via Windows system shell variable, fallback `cmd.exe`
+  - user suffix now has deterministic cap and hash fallback
+- Unified relative `CHATMINAL_DATA_DIR` normalization for app/daemon/store.
+- Hardened benchmark guardrail script:
+  - process-tree RSS sampling
+  - outer timeout enforcement (`CHATMINAL_BENCH_MAX_SECONDS`) even without `timeout` binary
+  - strict hard-gate enforcement using parsed `pass_fail_gate`
+  - randomized temp workdir (`mktemp`) + cleanup robustness
+
 ## 2026-03-04
 
 ### Changed
@@ -15,7 +101,178 @@
   - no `config.toml` fallback
   - no typo env aliases
   - no legacy text ping compatibility
+- Phase 01 native window baseline:
+  - added `window-wezterm` command in `chatminal-app`
+  - added window UI modules under `apps/chatminal-app/src/window/`
+  - sidebar session list + create/switch + command input in native window
+  - added resize debounce + short resize timeout + render cache to reduce UI freeze/jank
+  - added `make window` shortcut with daemon responsiveness preflight
+  - added pure reducer tests for window state/input sizing/selection logic
+  - added headless window smoke script `scripts/smoke/window-wezterm-smoke.sh`
+- Phase 02 instrumentation baseline:
+  - added daemon runtime metrics module (`apps/chatminald/src/metrics.rs`)
+  - log periodic metrics snapshot from daemon server health loop
+  - track request/event/broadcast/drop counters for next perf hardening steps
+- Phase 03 input fidelity baseline:
+  - extended `attach` key mapping (BackTab/F1-F12)
+  - added unit tests for key translation (`ctrl`, `alt`, function keys)
+- Phase 02 performance benchmark baseline:
+  - added CLI benchmark command `bench-rtt-wezterm` (sample/warmup/timeout configurable)
+  - added hard-gate script `scripts/bench/phase02-rtt-memory-gate.sh` for RTT + RSS checks
+  - added `make bench-rtt` and `make bench-phase02` shortcuts
+  - added `CHATMINAL_DATA_DIR` override support (daemon/app/store) for isolated benchmark runs
+  - added `CHATMINAL_BENCH_ENFORCE_HARD_GATE` for smoke-mode execution without blocking failures
+  - benchmark script supports `CHATMINAL_BENCH_PROFILE` and defaults to `release` binary for gate accuracy
+  - added daemon race/regression tests for `clear-history` generation gate and workspace clear-all multi-session reset
+  - started daemon state modularization by extracting explorer utility functions to `apps/chatminald/src/state/explorer_utils.rs`
+  - continued daemon state modularization:
+    - extracted request dispatch (`impl StateInner::handle_request`) to `apps/chatminald/src/state/request_handler.rs`
+    - extracted session explorer handlers to `apps/chatminald/src/state/session_explorer.rs`
+    - extracted runtime lifecycle/event publish helpers to `apps/chatminald/src/state/runtime_lifecycle.rs`
+    - extracted PTY session event processor to `apps/chatminald/src/state/session_event_processor.rs`
+    - moved state tests to `apps/chatminald/src/state/tests.rs`
+- Phase 03 attach modularization:
+  - extracted input translation to `apps/chatminal-app/src/input/pty_key_translator.rs`
+  - extracted frame rendering to `apps/chatminal-app/src/terminal_wezterm_attach_frame_renderer.rs`
+  - expanded workspace binding tests for runtime update/exited transitions
+  - added manual fidelity checklist doc `docs/terminal-fidelity-matrix.md`
+  - added phase-03 fidelity matrix smoke script:
+    - `scripts/fidelity/phase03-fidelity-matrix-smoke.sh`
+    - emits JSON report for `bash/vim/nvim/tmux/htop/btop/lazygit/fzf/unicode/resize/reconnect`
+    - strict mode is default (`CHATMINAL_FIDELITY_STRICT=1`), with relaxed mode opt-in (`CHATMINAL_FIDELITY_STRICT=0`)
+    - auto-detect timeout binary per OS (`timeout`/`gtimeout`) for Linux/macOS compatibility
+    - strict mode enforces required-case coverage (`CHATMINAL_FIDELITY_REQUIRED_CASES`) to avoid skip-based false pass
+    - default required-case set giữ mức cơ bản (prompt/unicode/resize/reconnect); CI Linux+macOS override required matrix (lazygit optional)
+    - report writer now has fallback path to keep JSON artifact available even when custom report path is not writable
+  - added monotonic `seq` guard for out-of-order `session_updated` events in workspace binding
+  - hardened reconnect stale-event handling in workspace binding:
+    - bootstrap watermark timestamp seeded during `workspace_load`
+    - per-session timestamp guard now protects `pty_output` and `session_updated` against stale backlog
+    - dispatch to terminal adapter now runs after timestamp guards
+    - stale `pty_exited` for unknown session no longer forces workspace stale reload
+    - equal-timestamp events are accepted (`<` guard) to avoid same-ms drops
+  - added regression tests for:
+    - multi-session timestamp isolation
+    - stale reconnect update after newer output
+    - unknown-session stale backlog suppression
+    - same-millisecond `session_updated` and `workspace_updated` handling
+- Phase 04 transport modularization (initial slice):
+  - split IPC client transport into platform modules:
+    - `apps/chatminal-app/src/ipc/transport/mod.rs`
+    - `apps/chatminal-app/src/ipc/transport/unix.rs`
+    - `apps/chatminal-app/src/ipc/transport/unsupported.rs`
+  - split daemon UDS primitives into transport modules:
+    - `apps/chatminald/src/transport/mod.rs`
+    - `apps/chatminald/src/transport/unix.rs`
+  - introduced daemon transport traits:
+    - transport backend trait
+    - transport listener trait
+  - refactored `apps/chatminald/src/server.rs` to consume transport abstraction layer
+  - hardened daemon transport behavior:
+    - stale socket probe now only cleans endpoint on connection-refused errors
+    - recoverable accept errors (interrupted/connection-aborted) no longer kill daemon loop
+    - endpoint permission setup (`0600`) now fails fast if hardening cannot be applied
+  - added daemon transport tests for endpoint semantics:
+    - reject active socket path
+    - clean stale socket path
+    - assert endpoint permission mode is user-only (`0600`)
+    - reconnect after client disconnect on same daemon process
+    - server boots and serves requests when pre-existing endpoint is stale socket
+  - updated deployment guide with endpoint transport operations by OS (Linux/macOS UDS policy + Windows rollout note)
+  - preserved unix runtime behavior while preparing abstraction boundary for Windows Named Pipe rollout
+  - updated endpoint resolver defaults in app/daemon config:
+    - Linux/macOS keep UDS endpoint under data dir
+    - Windows now resolves to named pipe default `\\.\pipe\chatminald[-<username>]`
+  - added Windows cross-target compile verification:
+    - `chatminal-app` passes `x86_64-pc-windows-gnu`
+    - `chatminald` currently blocked by missing cross C compiler for sqlite (`x86_64-w64-mingw32-gcc`)
+  - implemented Windows Named Pipe transport runtime:
+    - daemon backend: `apps/chatminald/src/transport/windows.rs` (Win32 named pipe server API)
+    - app connector: `apps/chatminal-app/src/ipc/transport/windows.rs` (Win32 named pipe client API)
+    - daemon server loop now platform-agnostic (removed `unix-only` compile gate)
+    - daemon bind now claims first pipe instance để chặn split-brain multi-owner endpoint
+    - daemon listener giữ pending pipe instance liên tục và recover nhánh `error_no_data`
+    - app client bổ sung connect retry loop + mode-set error handling cho Windows named pipe
+    - app request path dùng writer lock trực tiếp theo deadline để giữ latency/predictability trên local IPC
+  - updated Windows API dependencies in app/daemon (`windows-sys` features cho storage, pipes, security, system io)
+  - phase benchmarks/gates re-run after transport batch:
+    - phase-02 gate pass: `p95=14.230ms`, `p99=15.011ms`, RSS tổng `11.0MB`
+    - phase-03 fidelity matrix smoke pass
+    - phase-05 fidelity + soak + release dry-run pass
+  - post-review hardening batch:
+    - added `CHATMINAL_DEFAULT_SHELL` override (daemon) to decouple runtime shell from host env
+    - phase-02 benchmark now pins deterministic shell via `CHATMINAL_BENCH_SHELL` (default `/bin/sh`) to avoid host prompt/plugin noise
+    - benchmark parser now fails fast when summary fields are missing/malformed (no false-pass on empty `p95_ms`)
+    - IPC client write-path unified to direct writer lock on all platforms; per-request deadline now applies to write + flush loop
+    - Windows named pipe client switched to non-blocking pipe mode + retry-on-WouldBlock in write loop for bounded request latency
+    - phase-02 memory gate now samples process-tree RSS (daemon/app + children), enforces `pass_fail_gate=true`, supports outer benchmark timeout (`CHATMINAL_BENCH_MAX_SECONDS`)
+    - Windows named-pipe default endpoint no longer falls back to shared `\\.\pipe\chatminald`; always uses user-scoped suffix derived from OS identity
+    - relative `CHATMINAL_DATA_DIR` is now normalized under user home for app/daemon consistency across different CWD
 
 ### CI
 - Removed Node/frontend build gates.
 - CI validates Rust workspace and active crates/apps only.
+- Added Linux headless window smoke step (xvfb) in rewrite quality gate workflow.
+- Added Linux release benchmark gate step (`scripts/bench/phase02-rtt-memory-gate.sh`) with CI sample profile.
+- Added phase-03 fidelity matrix smoke step (`scripts/fidelity/phase03-fidelity-matrix-smoke.sh`) with strict mode.
+- CI now provisions fidelity dependencies on Linux+macOS before phase-03 matrix smoke (`coreutils`, `tmux`, `vim`/`neovim`, `htop`, `btop`, `fzf`).
+- Added dedicated `windows-latest` CI lane for workspace check/test coverage.
+
+### Phase 05
+- Added release checklist doc:
+  - `docs/release-checklist.md` (auto/manual gates, cutover criteria, rollback plan)
+- Added machine-readable quality scripts:
+  - `scripts/fidelity/phase05-fidelity-smoke.sh`
+  - `scripts/soak/phase05-soak-smoke.sh`
+  - `scripts/release/phase05-release-dry-run.sh`
+- Hardened phase-05 script reliability:
+  - fidelity script now polls snapshot with timeout (no fixed sleep race)
+  - fidelity script always emits JSON report on failures and uses per-run endpoint/report defaults
+  - soak script enforces hard-gate mode explicitly and emits enforcement flags in JSON
+  - both scripts support report paths whose parent directories do not pre-exist
+  - release dry-run script now auto-detects checksum tool across Linux/macOS (`sha256sum` / `shasum -a 256`)
+  - release dry-run script now always emits JSON report on fail-path via finalize trap and fallback report location
+  - release dry-run build steps are now split fail-fast per binary (daemon/app) to avoid masked build failures
+  - full quality-gate suite passed 2 consecutive rounds after hardening (check/test/bench/fidelity/soak/release-dry-run/docs validate)
+- Added Makefile shortcuts:
+  - `make fidelity-smoke`
+  - `make soak-smoke`
+  - `make release-dry-run`
+- Updated README/docs index/deployment guide to include new release gate assets.
+
+### Phase 05 Follow-up (2026-03-05)
+- Quality-gate matrix update:
+  - phase03 fidelity smoke ban đầu thêm required cases `ctrl-z`, `alt-backspace`, `meta-shortcuts-macos`; batch mới đã tinh chỉnh lại required-set theo control-path (`ctrl-c-burst`, `stress-paste`) và giữ alt/meta ở mức informational
+  - `ctrl-c` smoke flow đổi sang multi-step signaling để tránh false timeout
+  - workflow `rewrite-quality-gates.yml` đồng bộ required-case list mới
+- Soak script upgrade:
+  - `scripts/soak/phase05-soak-smoke.sh` hỗ trợ mode `CHATMINAL_SOAK_MODE=pr|nightly`
+  - report JSON thêm envelope chuẩn (`status`, `failed_step`, `failure_reason`, `artifacts`)
+  - thêm fallback report path khi custom path không ghi được
+- Added phase-06 smoke wrapper:
+  - `scripts/fidelity/phase06-input-modifier-ime-smoke.sh`
+  - wrapper strict phase03 matrix + xuất report có cờ `ime_manual_evidence_required=true`
+  - Makefile target mới: `make fidelity-input-ime-smoke`
+
+### Phase 06/07 Follow-up (2026-03-05)
+- Added input pipeline kill-switch in app config:
+  - env `CHATMINAL_INPUT_PIPELINE_MODE=wezterm|legacy`
+  - wired into runtime input paths (`attach-wezterm`; lịch sử có `window-wezterm` trước khi hard-cut sang GUI window command)
+  - added legacy mapping helpers + regression tests
+- Added migration artifacts:
+  - `plans/.../reports/migration-wave-checklist.md`
+  - `plans/.../reports/rollback-drill-log.md`
+  - `plans/.../reports/windows-input-parity-report.md`
+  - `plans/.../reports/baseline-input-gap-map.md`
+  - `plans/.../reports/baseline-input-kpi.json`
+  - `plans/.../reports/ime-manual-matrix.md`
+- Deployment/docs sync:
+  - `docs/deployment-guide.md` thêm rollback runbook cho input pipeline mode
+  - `docs/code-standards.md` thêm input pipeline invariants
+  - `docs/terminal-fidelity-matrix.md` bổ sung Windows phase note
+- IME/input reliability:
+  - giữ dedupe window qua blur-commit frame kế tiếp để giảm nguy cơ duplicate commit
+- Documentation sync:
+  - `docs/release-checklist.md` cập nhật memory gate mới: daemon `120/160`, app `180/220`, total `300/350` (target/hard-fail MB)
+  - `docs/terminal-fidelity-matrix.md` cập nhật required subset mới và note manual-evidence cho semantic line-edit
+  - thêm schema mẫu: `plans/260305-0812-wezterm-input-pipeline-daemon-first-parity/reports/gate-sample-report-schema.md`

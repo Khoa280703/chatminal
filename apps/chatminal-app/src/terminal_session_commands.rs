@@ -62,13 +62,31 @@ pub fn write_input_for_session(
     session_id: &str,
     data: &str,
 ) -> Result<(), String> {
+    write_input_for_session_with_timeout(
+        client,
+        registry,
+        adapter,
+        session_id,
+        data,
+        REQUEST_TIMEOUT,
+    )
+}
+
+pub fn write_input_for_session_with_timeout(
+    client: &ChatminalClient,
+    registry: &mut SessionPaneRegistry,
+    adapter: &mut dyn TerminalPaneAdapter,
+    session_id: &str,
+    data: &str,
+    timeout: Duration,
+) -> Result<(), String> {
     expect_empty(
         client.request(
             Request::SessionInputWrite {
                 session_id: session_id.to_string(),
                 data: data.to_string(),
             },
-            REQUEST_TIMEOUT,
+            timeout,
         )?,
         "session_input_write",
     )?;

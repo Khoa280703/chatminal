@@ -61,7 +61,8 @@ pub fn build_terminal_workspace_view_model(
                 profile_id: session.profile_id.clone(),
                 name: session.name.clone(),
                 status: format!("{:?}", session.status).to_lowercase(),
-                is_active: workspace.active_session_id.as_deref() == Some(session.session_id.as_str()),
+                is_active: workspace.active_session_id.as_deref()
+                    == Some(session.session_id.as_str()),
                 pane_id,
             }
         })
@@ -77,14 +78,8 @@ pub fn build_terminal_workspace_view_model(
         workspace.profiles.len(),
         workspace.sessions.len(),
         pane_snapshots.len(),
-        workspace
-            .active_profile_id
-            .as_deref()
-            .unwrap_or("none"),
-        workspace
-            .active_session_id
-            .as_deref()
-            .unwrap_or("none")
+        workspace.active_profile_id.as_deref().unwrap_or("none"),
+        workspace.active_session_id.as_deref().unwrap_or("none")
     );
 
     TerminalWorkspaceViewModel {

@@ -102,13 +102,51 @@ impl PaneTerminal {
         let total_rows = screen.scrollback_rows();
         let visible_start = total_rows.saturating_sub(rows);
         let lines = screen.lines_in_phys_range(visible_start..total_rows);
-
-        lines
+        let mut rendered = lines
             .iter()
-            .map(|line| line.as_str().trim_end_matches(' ').to_string())
-            .collect::<Vec<String>>()
-            .join("\n")
+            .map(|line| line.as_str().to_string())
+            .collect::<Vec<String>>();
+
+        if !rendered.is_empty() {
+            let cursor = self.terminal.cursor_pos();
+            let cursor_row = usize::try_from(cursor.y.max(0))
+                .unwrap_or(0)
+                .min(rendered.len().saturating_sub(1));
+            let cursor_col = cursor.x;
+            if let Some(line) = rendered.get_mut(cursor_row) {
+                overlay_cursor_glyph(line, cursor_col);
+            }
+        }
+
+        rendered.join("\n")
     }
+}
+
+fn overlay_cursor_glyph(line: &mut String, cursor_col: usize) {
+    const CURSOR_GLYPH: &str = "█";
+    let char_len = line.chars().count();
+    if cursor_col >= char_len {
+        if cursor_col > char_len {
+            line.push_str(&" ".repeat(cursor_col - char_len));
+        }
+        line.push_str(CURSOR_GLYPH);
+        return;
+    }
+
+    let start = nth_char_boundary(line, cursor_col);
+    let end = nth_char_boundary(line, cursor_col.saturating_add(1));
+    line.replace_range(start..end, CURSOR_GLYPH);
+}
+
+fn nth_char_boundary(value: &str, n: usize) -> usize {
+    if n == 0 {
+        return 0;
+    }
+    value
+        .char_indices()
+        .nth(n)
+        .map(|(idx, _)| idx)
+        .unwrap_or(value.len())
 }
 
 pub struct WeztermTerminalPaneAdapter {

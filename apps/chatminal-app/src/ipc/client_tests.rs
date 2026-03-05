@@ -61,6 +61,7 @@ fn concurrent_requests_receive_correct_response_variant() {
             &mut writer,
             ServerFrame::ok(first.id.clone(), first_response),
         );
+        thread::sleep(Duration::from_millis(20));
     });
 
     let c1 = Arc::clone(&client);
@@ -80,6 +81,40 @@ fn concurrent_requests_receive_correct_response_variant() {
 
     assert!(matches!(r1, Response::Workspace(_)));
     assert!(matches!(r2, Response::Sessions(_)));
+}
+
+#[cfg(unix)]
+#[test]
+fn recv_event_zero_timeout_still_polls_ready_frame() {
+    use std::os::unix::net::UnixStream;
+    use std::time::Instant;
+
+    let (client_stream, mut server_stream) = UnixStream::pair().expect("unix pair");
+    let client = ChatminalClient::from_stream(Box::new(client_stream)).expect("client");
+
+    write_server_frame(
+        &mut server_stream,
+        ServerFrame::event(Event::DaemonHealth(chatminal_protocol::DaemonHealthEvent {
+            connected_clients: 1,
+            session_count: 1,
+            running_sessions: 1,
+            ts: 1,
+        })),
+    );
+
+    let deadline = Instant::now() + Duration::from_millis(200);
+    while Instant::now() < deadline {
+        if let Some(Event::DaemonHealth(value)) = client
+            .recv_event(Duration::from_millis(0))
+            .expect("recv event")
+        {
+            assert_eq!(value.connected_clients, 1);
+            return;
+        }
+        thread::sleep(Duration::from_millis(2));
+    }
+
+    panic!("expected daemon health event within timeout");
 }
 
 #[cfg(unix)]

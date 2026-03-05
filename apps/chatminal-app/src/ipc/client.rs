@@ -1,8 +1,8 @@
 use std::collections::VecDeque;
 use std::io::Write;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::{Mutex, MutexGuard, TryLockError};
 use std::time::{Duration, Instant};
 
 use chatminal_protocol::{ClientFrame, Event, Request, Response, ServerBody, ServerFrame};
@@ -13,12 +13,16 @@ use super::transport::{ReadWriteStream, connect_local_stream};
 #[cfg(test)]
 pub(super) use super::client_runtime::MAX_BACKLOG_FRAMES;
 pub(super) use super::client_runtime::push_backlog_limited;
+
 pub struct ChatminalClient {
-    writer: Arc<Mutex<Box<dyn ReadWriteStream>>>,
+    writer: Mutex<Box<dyn ReadWriteStream>>,
     frames_rx: Mutex<Receiver<Incoming>>,
     backlog: Mutex<VecDeque<ServerFrame>>,
     next_id: AtomicU64,
+    broken: AtomicBool,
 }
+
+const READ_NEXT_INCOMING_LOCK_SLICE_MS: u64 = 20;
 
 impl ChatminalClient {
     pub fn connect(endpoint: &str) -> Result<Self, String> {
@@ -30,56 +34,36 @@ impl ChatminalClient {
         let reader = stream
             .try_clone_boxed()
             .map_err(|err| format!("clone stream failed: {err}"))?;
-        let (tx, rx) = mpsc::sync_channel::<Incoming>(MAX_FRAME_QUEUE);
+        let (frames_tx, frames_rx) = mpsc::sync_channel::<Incoming>(MAX_FRAME_QUEUE);
         std::thread::spawn(move || {
-            read_frames_loop(reader, tx);
+            read_frames_loop(reader, frames_tx);
         });
 
-        stream
-            .set_read_timeout(Some(Duration::from_millis(300)))
-            .map_err(|err| format!("set read timeout failed: {err}"))?;
-        stream
-            .set_write_timeout(Some(Duration::from_millis(700)))
-            .map_err(|err| format!("set write timeout failed: {err}"))?;
-
         Ok(Self {
-            writer: Arc::new(Mutex::new(stream)),
-            frames_rx: Mutex::new(rx),
+            writer: Mutex::new(stream),
+            frames_rx: Mutex::new(frames_rx),
             backlog: Mutex::new(VecDeque::new()),
             next_id: AtomicU64::new(1),
+            broken: AtomicBool::new(false),
         })
     }
 
     pub fn request(&self, request: Request, timeout: Duration) -> Result<Response, String> {
+        let deadline = Instant::now() + timeout;
         let id = format!("req-{}", self.next_id.fetch_add(1, Ordering::Relaxed));
         let frame = ClientFrame {
             id: id.clone(),
             request,
         };
-        let encoded =
+        let mut encoded =
             serde_json::to_string(&frame).map_err(|err| format!("encode request failed: {err}"))?;
-
-        {
-            let mut writer = self
-                .writer
-                .lock()
-                .map_err(|_| "writer lock poisoned".to_string())?;
-            writer
-                .write_all(encoded.as_bytes())
-                .map_err(|err| format!("write request failed: {err}"))?;
-            writer
-                .write_all(b"\n")
-                .map_err(|err| format!("write newline failed: {err}"))?;
-            writer
-                .flush()
-                .map_err(|err| format!("flush failed: {err}"))?;
-        }
+        encoded.push('\n');
+        self.write_request_direct(encoded.as_bytes(), &id, deadline)?;
 
         if let Some(frame) = self.take_matching_response_from_backlog(&id)? {
             return response_from_frame(frame, &id);
         }
 
-        let deadline = Instant::now() + timeout;
         loop {
             if Instant::now() >= deadline {
                 return Err(format!("request timeout for id '{id}'"));
@@ -95,6 +79,12 @@ impl ChatminalClient {
                 Ok(value) => value,
                 Err(err) => {
                     if let Some(frame) = self.take_matching_response_from_backlog(&id)? {
+                        return response_from_frame(frame, &id);
+                    }
+                    if err == "daemon stream disconnected"
+                        && let Some(frame) =
+                            self.wait_for_matching_response_until_deadline(&id, deadline)?
+                    {
                         return response_from_frame(frame, &id);
                     }
                     return Err(err);
@@ -155,15 +145,87 @@ impl ChatminalClient {
     }
 
     fn read_next_incoming(&self, timeout: Duration) -> Result<Option<Incoming>, String> {
-        let rx = self
-            .frames_rx
-            .lock()
-            .map_err(|_| "frames receiver lock poisoned".to_string())?;
-        match rx.recv_timeout(timeout) {
-            Ok(incoming) => Ok(Some(incoming)),
-            Err(mpsc::RecvTimeoutError::Timeout) => Ok(None),
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                Err("daemon stream disconnected".to_string())
+        if timeout.is_zero() {
+            let result = {
+                let rx = self
+                    .frames_rx
+                    .lock()
+                    .map_err(|_| "frames receiver lock poisoned".to_string())?;
+                rx.try_recv()
+            };
+            return match result {
+                Ok(incoming) => Ok(Some(incoming)),
+                Err(TryRecvError::Empty) => Ok(None),
+                Err(TryRecvError::Disconnected) => {
+                    self.broken.store(true, Ordering::Release);
+                    Err("daemon stream disconnected".to_string())
+                }
+            };
+        }
+
+        let deadline = Instant::now() + timeout;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Ok(None);
+            }
+            let chunk = remaining.min(Duration::from_millis(READ_NEXT_INCOMING_LOCK_SLICE_MS));
+            let result = {
+                let rx = self
+                    .frames_rx
+                    .lock()
+                    .map_err(|_| "frames receiver lock poisoned".to_string())?;
+                rx.recv_timeout(chunk)
+            };
+            match result {
+                Ok(incoming) => return Ok(Some(incoming)),
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    self.broken.store(true, Ordering::Release);
+                    return Err("daemon stream disconnected".to_string());
+                }
+            }
+        }
+    }
+
+    fn write_request_direct(
+        &self,
+        payload: &[u8],
+        request_id: &str,
+        deadline: Instant,
+    ) -> Result<(), String> {
+        if self.broken.load(Ordering::Acquire) {
+            return Err("daemon stream is in failed state; reconnect is required".to_string());
+        }
+        let mut writer = self.lock_writer_with_deadline(request_id, deadline)?;
+        match write_payload_with_deadline(&mut writer, payload, request_id, deadline) {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                self.broken.store(true, Ordering::Release);
+                Err(err)
+            }
+        }
+    }
+
+    fn lock_writer_with_deadline(
+        &self,
+        request_id: &str,
+        deadline: Instant,
+    ) -> Result<MutexGuard<'_, Box<dyn ReadWriteStream>>, String> {
+        loop {
+            if Instant::now() >= deadline {
+                return Err(format!(
+                    "request timeout while waiting writer lock for id '{request_id}'"
+                ));
+            }
+            match self.writer.try_lock() {
+                Ok(value) => return Ok(value),
+                Err(TryLockError::WouldBlock) => {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Err(TryLockError::Poisoned(_)) => {
+                    return Err("writer lock poisoned".to_string());
+                }
             }
         }
     }
@@ -192,6 +254,76 @@ impl ChatminalClient {
             ServerBody::Event { event } => Some(event),
             ServerBody::Response { .. } => None,
         }))
+    }
+
+    fn wait_for_matching_response_until_deadline(
+        &self,
+        id: &str,
+        deadline: Instant,
+    ) -> Result<Option<ServerFrame>, String> {
+        loop {
+            if let Some(frame) = self.take_matching_response_from_backlog(id)? {
+                return Ok(Some(frame));
+            }
+            if Instant::now() >= deadline {
+                return Ok(None);
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+}
+
+fn write_payload_with_deadline(
+    writer: &mut Box<dyn ReadWriteStream>,
+    payload: &[u8],
+    request_id: &str,
+    deadline: Instant,
+) -> Result<(), String> {
+    let mut offset = 0usize;
+    while offset < payload.len() {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(format!("request timeout while writing id '{request_id}'"));
+        }
+        writer
+            .set_write_timeout(Some(remaining))
+            .map_err(|err| format!("set write timeout failed: {err}"))?;
+
+        match writer.write(&payload[offset..]) {
+            Ok(0) => return Err("write request failed: wrote zero bytes".to_string()),
+            Ok(written) => {
+                offset = offset.saturating_add(written);
+            }
+            Err(err)
+                if err.kind() == std::io::ErrorKind::WouldBlock
+                    || err.kind() == std::io::ErrorKind::TimedOut
+                    || err.kind() == std::io::ErrorKind::Interrupted =>
+            {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            Err(err) => return Err(format!("write request failed: {err}")),
+        }
+    }
+
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(format!("request timeout while flushing id '{request_id}'"));
+        }
+        writer
+            .set_write_timeout(Some(remaining))
+            .map_err(|err| format!("set write timeout failed: {err}"))?;
+        match writer.flush() {
+            Ok(()) => return Ok(()),
+            Err(err)
+                if err.kind() == std::io::ErrorKind::WouldBlock
+                    || err.kind() == std::io::ErrorKind::TimedOut
+                    || err.kind() == std::io::ErrorKind::Interrupted =>
+            {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            Err(err) => return Err(format!("flush failed: {err}")),
+        }
     }
 }
 

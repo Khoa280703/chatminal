@@ -6,9 +6,9 @@ use serde_json::{Value, json};
 use crate::config::parse_usize;
 use crate::ipc::ChatminalClient;
 use crate::terminal_pane_adapter::{SessionPaneRegistry, pump_events_with_registry};
-use crate::terminal_workspace_ascii_renderer::render_terminal_workspace_ascii;
 use crate::terminal_session_commands::activate_session_with_snapshot;
 use crate::terminal_wezterm_core::WeztermTerminalPaneAdapter;
+use crate::terminal_workspace_ascii_renderer::render_terminal_workspace_ascii;
 use crate::terminal_workspace_binding_runtime::bootstrap_workspace_binding_state;
 use crate::terminal_workspace_view_model::build_terminal_workspace_view_model;
 
@@ -54,7 +54,7 @@ pub fn handle_events_wezterm(
             return Err(format!(
                 "unexpected response for workspace_load in events-wezterm: {:?}",
                 other
-            ))
+            ));
         }
     }
     let mut adapter = WeztermTerminalPaneAdapter::new(120, 32, 5_000);

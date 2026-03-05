@@ -1,0 +1,28 @@
+{
+  "type": "phase06_input_modifier_ime_smoke",
+  "timestamp_utc": "2026-03-05T11:57:11Z",
+  "status": "passed_manual_pending",
+  "failed_step": "",
+  "failure_reason": "manual IME sign-off pending",
+  "required_cases": "bash-prompt,ctrl-c,ctrl-c-burst,ctrl-z,unicode,stress-paste,resize,reconnect",
+  "matrix_report_path": "plans/260305-1458-wezterm-gui-window-migration-daemon-ipc/reports/fidelity-linux-phase03-fullscreen.json",
+  "manual_evidence_path": "plans/260305-1458-wezterm-gui-window-migration-daemon-ipc/reports/ime-manual-evidence.md",
+  "manual_signoff_status": "pending",
+  "manual_signoff_required": true,
+  "matrix": {
+    "exit_code": 0,
+    "status": "passed",
+    "fail_count": 0,
+    "skip_count": 1,
+    "required_skip_count": 0
+  },
+  "ime_manual_evidence_required": true,
+  "ime_manual_cases": [
+    "ime-vi",
+    "ime-ja",
+    "ime-zh"
+  ],
+  "artifacts": {
+    "report_path": "plans/260305-1458-wezterm-gui-window-migration-daemon-ipc/reports/fidelity-linux-phase06-input-ime.json"
+  }
+}

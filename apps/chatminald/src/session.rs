@@ -1,11 +1,44 @@
 use std::io::{Read, Write};
 use std::sync::mpsc as std_mpsc;
+use std::sync::mpsc::TrySendError;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+
+const INPUT_QUEUE_CAPACITY: usize = 256;
+const CONTROL_WRITE_RETRY_BUDGET: usize = 3;
+const CONTROL_WRITE_RETRY_TIMEOUT_MS: u64 = 2;
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct InputWriteStats {
+    pub queue_full_hits: u64,
+    pub retries: u64,
+    pub drops: u64,
+}
+
+#[derive(Debug, Clone)]
+pub enum WriteInputError {
+    Closing,
+    Disconnected,
+    QueueFullDropped(InputWriteStats),
+}
+
+impl std::fmt::Display for WriteInputError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Closing => write!(f, "session runtime is closing"),
+            Self::Disconnected => write!(f, "session runtime input channel disconnected"),
+            Self::QueueFullDropped(stats) => write!(
+                f,
+                "queue input dropped after backpressure (queue_full_hits={} retries={})",
+                stats.queue_full_hits, stats.retries
+            ),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum SessionEvent {
@@ -76,7 +109,7 @@ impl SessionRuntime {
             .take_writer()
             .map_err(|err| format!("take writer failed: {err}"))?;
 
-        let (input_tx, input_rx) = std_mpsc::sync_channel::<Vec<u8>>(256);
+        let (input_tx, input_rx) = std_mpsc::sync_channel::<Vec<u8>>(INPUT_QUEUE_CAPACITY);
 
         let reader_session = session_id.clone();
         let reader_events = events.clone();
@@ -157,12 +190,11 @@ impl SessionRuntime {
         })
     }
 
-    pub fn write_input(&self, data: &str) -> Result<(), String> {
+    pub fn write_input(&self, data: &str) -> Result<InputWriteStats, WriteInputError> {
         let Some(tx) = self.input_tx.as_ref() else {
-            return Err("session runtime is closing".to_string());
+            return Err(WriteInputError::Closing);
         };
-        tx.try_send(data.as_bytes().to_vec())
-            .map_err(|err| format!("queue input failed: {err}"))
+        write_payload_with_backpressure(tx, data.as_bytes().to_vec())
     }
 
     pub fn resize(&self, cols: usize, rows: usize) -> Result<(), String> {
@@ -198,4 +230,120 @@ fn now_millis() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|value| value.as_millis() as u64)
         .unwrap_or(0)
+}
+
+fn is_control_priority_payload(payload: &[u8]) -> bool {
+    if payload.len() != 1 {
+        return false;
+    }
+    let byte = payload[0];
+    byte < 0x20 || byte == 0x7f
+}
+
+fn write_payload_with_backpressure(
+    tx: &std_mpsc::SyncSender<Vec<u8>>,
+    mut payload: Vec<u8>,
+) -> Result<InputWriteStats, WriteInputError> {
+    let mut stats = InputWriteStats::default();
+    match tx.try_send(payload) {
+        Ok(()) => return Ok(stats),
+        Err(TrySendError::Disconnected(_)) => return Err(WriteInputError::Disconnected),
+        Err(TrySendError::Full(returned)) => {
+            stats.queue_full_hits += 1;
+            payload = returned;
+        }
+    }
+
+    if !is_control_priority_payload(&payload) {
+        stats.drops += 1;
+        return Err(WriteInputError::QueueFullDropped(stats));
+    }
+
+    for _ in 0..CONTROL_WRITE_RETRY_BUDGET {
+        stats.retries += 1;
+        thread::sleep(Duration::from_millis(CONTROL_WRITE_RETRY_TIMEOUT_MS));
+        match tx.try_send(payload) {
+            Ok(()) => return Ok(stats),
+            Err(TrySendError::Disconnected(_)) => return Err(WriteInputError::Disconnected),
+            Err(TrySendError::Full(returned)) => {
+                stats.queue_full_hits += 1;
+                payload = returned;
+            }
+        }
+    }
+
+    stats.drops += 1;
+    Err(WriteInputError::QueueFullDropped(stats))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        CONTROL_WRITE_RETRY_BUDGET, WriteInputError, is_control_priority_payload,
+        write_payload_with_backpressure,
+    };
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+
+    #[test]
+    fn non_control_payload_drops_immediately_when_queue_is_full() {
+        let (tx, _rx) = mpsc::sync_channel::<Vec<u8>>(1);
+        tx.try_send(vec![b'x']).expect("seed queue");
+
+        let err = write_payload_with_backpressure(&tx, b"echo".to_vec())
+            .expect_err("non-control payload should drop on full queue");
+        match err {
+            WriteInputError::QueueFullDropped(stats) => {
+                assert_eq!(stats.queue_full_hits, 1);
+                assert_eq!(stats.retries, 0);
+                assert_eq!(stats.drops, 1);
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn control_payload_retries_and_succeeds_when_queue_frees() {
+        let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(1);
+        tx.try_send(vec![b'x']).expect("seed queue");
+
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(1));
+            let _ = rx.recv();
+            let _ = rx.recv_timeout(Duration::from_millis(50));
+        });
+
+        let stats = write_payload_with_backpressure(&tx, vec![0x03])
+            .expect("control payload should be retried then delivered");
+        assert!(stats.queue_full_hits >= 1);
+        assert!(stats.retries >= 1);
+        assert_eq!(stats.drops, 0);
+    }
+
+    #[test]
+    fn control_payload_drops_after_retry_budget_if_queue_stays_full() {
+        let (tx, _rx) = mpsc::sync_channel::<Vec<u8>>(1);
+        tx.try_send(vec![b'x']).expect("seed queue");
+
+        let err = write_payload_with_backpressure(&tx, vec![0x03])
+            .expect_err("control payload should drop when queue remains full");
+        match err {
+            WriteInputError::QueueFullDropped(stats) => {
+                assert_eq!(stats.retries, CONTROL_WRITE_RETRY_BUDGET as u64);
+                assert_eq!(stats.drops, 1);
+                assert!(stats.queue_full_hits >= 1);
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn control_priority_payload_classifier_matches_terminal_controls() {
+        assert!(is_control_priority_payload(&[0x03]));
+        assert!(is_control_priority_payload(&[0x1a]));
+        assert!(is_control_priority_payload(&[0x7f]));
+        assert!(!is_control_priority_payload(b"ab"));
+        assert!(!is_control_priority_payload(&[b'a']));
+    }
 }

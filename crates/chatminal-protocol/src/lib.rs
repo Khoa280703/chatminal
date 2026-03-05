@@ -144,10 +144,19 @@ pub enum Request {
     },
     WorkspaceLoad,
     ProfileList,
-    ProfileCreate { name: Option<String> },
-    ProfileRename { profile_id: String, name: String },
-    ProfileDelete { profile_id: String },
-    ProfileSwitch { profile_id: String },
+    ProfileCreate {
+        name: Option<String>,
+    },
+    ProfileRename {
+        profile_id: String,
+        name: String,
+    },
+    ProfileDelete {
+        profile_id: String,
+    },
+    ProfileSwitch {
+        profile_id: String,
+    },
     SessionList,
     SessionCreate {
         name: Option<String>,
@@ -156,15 +165,31 @@ pub enum Request {
         cwd: Option<String>,
         persist_history: Option<bool>,
     },
-    SessionActivate { session_id: String, cols: usize, rows: usize },
-    SessionRename { session_id: String, name: String },
-    SessionClose { session_id: String },
+    SessionActivate {
+        session_id: String,
+        cols: usize,
+        rows: usize,
+    },
+    SessionRename {
+        session_id: String,
+        name: String,
+    },
+    SessionClose {
+        session_id: String,
+    },
     SessionSetPersist {
         session_id: String,
         persist_history: bool,
     },
-    SessionInputWrite { session_id: String, data: String },
-    SessionResize { session_id: String, cols: usize, rows: usize },
+    SessionInputWrite {
+        session_id: String,
+        data: String,
+    },
+    SessionResize {
+        session_id: String,
+        cols: usize,
+        rows: usize,
+    },
     SessionSnapshotGet {
         session_id: String,
         preview_lines: Option<usize>,
@@ -191,7 +216,9 @@ pub enum Request {
         relative_path: String,
         max_bytes: Option<usize>,
     },
-    SessionHistoryClear { session_id: String },
+    SessionHistoryClear {
+        session_id: String,
+    },
     WorkspaceHistoryClearAll,
     AppShutdown,
 }

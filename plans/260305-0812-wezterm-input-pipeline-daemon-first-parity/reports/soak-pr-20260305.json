@@ -1,0 +1,37 @@
+{
+  "type": "phase05_soak_smoke",
+  "timestamp_utc": "2026-03-05T04:29:22Z",
+  "status": "passed",
+  "failed_step": "",
+  "failure_reason": "",
+  "started_utc": "2026-03-05T04:29:21Z",
+  "mode": "pr",
+  "elapsed_seconds": 1,
+  "configured_duration_seconds": 7200,
+  "iteration_sleep_seconds": 5,
+  "iterations_total": 1,
+  "pass_count": 1,
+  "fail_count": 0,
+  "hard_gate_enforced": true,
+  "pass_hard_gate": true,
+  "max_metrics": {
+    "p95_ms": 8.734,
+    "p99_ms": 10.699,
+    "daemon_peak_mb": 8.1,
+    "app_peak_mb": 6.8,
+    "total_peak_mb": 14.9
+  },
+  "iterations": [
+    {"index":1,"started_utc":"2026-03-05T04:29:21Z","duration_seconds":1,"bench_exit":0,"soft_fail_detected":false,"pass_hard_gate":true,"metrics":{"p95_ms":8.734,"p99_ms":10.699,"daemon_peak_mb":8.1,"app_peak_mb":6.8,"total_peak_mb":14.9},"raw_log":"/tmp/chatminal-phase05-soak-log.2694487.1.SxYH4R"}
+  ],
+  "metrics": {
+    "p95_ms": 8.734,
+    "p99_ms": 10.699,
+    "daemon_peak_mb": 8.1,
+    "app_peak_mb": 6.8,
+    "total_peak_mb": 14.9
+  },
+  "artifacts": {
+    "report_path": "plans/260305-0812-wezterm-input-pipeline-daemon-first-parity/reports/soak-pr-20260305.json"
+  }
+}

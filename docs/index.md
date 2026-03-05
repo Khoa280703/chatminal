@@ -11,3 +11,5 @@ Tài liệu này phản ánh runtime hiện tại: `chatminald + chatminal-app (
 - [Project Roadmap](./project-roadmap.md)
 - [Development Roadmap](./development-roadmap.md)
 - [Project Changelog](./project-changelog.md)
+- [Terminal Fidelity Matrix](./terminal-fidelity-matrix.md)
+- [Release Checklist](./release-checklist.md)

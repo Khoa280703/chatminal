@@ -59,7 +59,9 @@ impl Store {
         &self.db_path
     }
 
-    pub fn load_workspace(&self) -> Result<(Vec<ProfileInfo>, String, Vec<SessionInfo>, Option<String>), String> {
+    pub fn load_workspace(
+        &self,
+    ) -> Result<(Vec<ProfileInfo>, String, Vec<SessionInfo>, Option<String>), String> {
         let conn = self.open_connection()?;
         let profiles = self.list_profiles_with_conn(&conn)?;
         let active_profile_id = self
@@ -180,8 +182,11 @@ impl Store {
             params![profile_id],
         )
         .map_err(|err| format!("delete profile history failed: {err}"))?;
-        tx.execute("DELETE FROM sessions WHERE profile_id = ?1", params![profile_id])
-            .map_err(|err| format!("delete profile sessions failed: {err}"))?;
+        tx.execute(
+            "DELETE FROM sessions WHERE profile_id = ?1",
+            params![profile_id],
+        )
+        .map_err(|err| format!("delete profile sessions failed: {err}"))?;
         tx.execute("DELETE FROM profiles WHERE id = ?1", params![profile_id])
             .map_err(|err| format!("delete profile failed: {err}"))?;
 
@@ -450,7 +455,11 @@ impl Store {
         Ok(())
     }
 
-    pub fn set_session_status(&self, session_id: &str, status: SessionStatus) -> Result<(), String> {
+    pub fn set_session_status(
+        &self,
+        session_id: &str,
+        status: SessionStatus,
+    ) -> Result<(), String> {
         let conn = self.open_connection()?;
         conn.execute(
             "UPDATE sessions SET status = ?1, updated_at = ?2 WHERE id = ?3",
@@ -479,11 +488,19 @@ impl Store {
         Ok(())
     }
 
-    pub fn set_session_persist(&self, session_id: &str, persist_history: bool) -> Result<(), String> {
+    pub fn set_session_persist(
+        &self,
+        session_id: &str,
+        persist_history: bool,
+    ) -> Result<(), String> {
         let conn = self.open_connection()?;
         conn.execute(
             "UPDATE sessions SET persist_history = ?1, updated_at = ?2 WHERE id = ?3",
-            params![if persist_history { 1 } else { 0 }, now_millis() as i64, session_id],
+            params![
+                if persist_history { 1 } else { 0 },
+                now_millis() as i64,
+                session_id
+            ],
         )
         .map_err(|err| format!("set session persist failed: {err}"))?;
         Ok(())
@@ -524,7 +541,11 @@ impl Store {
         Ok(())
     }
 
-    pub fn set_active_session(&self, profile_id: &str, session_id: Option<&str>) -> Result<(), String> {
+    pub fn set_active_session(
+        &self,
+        profile_id: &str,
+        session_id: Option<&str>,
+    ) -> Result<(), String> {
         let conn = self.open_connection()?;
         let key = format!("{ACTIVE_SESSION_PREFIX}{profile_id}");
         match session_id {
@@ -553,7 +574,13 @@ impl Store {
         Ok(())
     }
 
-    pub fn append_scrollback_chunk(&self, session_id: &str, seq: u64, chunk: &str, ts: u64) -> Result<(), String> {
+    pub fn append_scrollback_chunk(
+        &self,
+        session_id: &str,
+        seq: u64,
+        chunk: &str,
+        ts: u64,
+    ) -> Result<(), String> {
         let conn = self.open_connection()?;
         let line_count = if chunk.is_empty() {
             0
@@ -617,7 +644,11 @@ impl Store {
         Ok(())
     }
 
-    pub fn session_snapshot(&self, session_id: &str, preview_lines: usize) -> Result<SessionSnapshot, String> {
+    pub fn session_snapshot(
+        &self,
+        session_id: &str,
+        preview_lines: usize,
+    ) -> Result<SessionSnapshot, String> {
         let conn = self.open_connection()?;
         let mut stmt = conn
             .prepare(
@@ -745,7 +776,11 @@ impl Store {
         .map_err(|err| format!("load active profile failed: {err}"))
     }
 
-    fn active_session_with_conn(&self, conn: &Connection, profile_id: &str) -> Result<Option<String>, String> {
+    fn active_session_with_conn(
+        &self,
+        conn: &Connection,
+        profile_id: &str,
+    ) -> Result<Option<String>, String> {
         conn.query_row(
             "SELECT value FROM app_state WHERE key = ?1",
             params![format!("{ACTIVE_SESSION_PREFIX}{profile_id}")],
@@ -777,7 +812,11 @@ impl Store {
         Ok(profiles)
     }
 
-    fn list_sessions_by_profile_with_conn(&self, conn: &Connection, profile_id: &str) -> Result<Vec<SessionInfo>, String> {
+    fn list_sessions_by_profile_with_conn(
+        &self,
+        conn: &Connection,
+        profile_id: &str,
+    ) -> Result<Vec<SessionInfo>, String> {
         let mut stmt = conn
             .prepare(
                 "SELECT id, profile_id, name, cwd, status, persist_history, last_seq FROM sessions WHERE profile_id = ?1 ORDER BY updated_at DESC, created_at ASC",
@@ -824,6 +863,21 @@ fn status_from_db(value: &str) -> SessionStatus {
 }
 
 fn default_data_dir() -> Result<PathBuf, String> {
+    if let Ok(raw) = std::env::var("CHATMINAL_DATA_DIR") {
+        let trimmed = raw.trim();
+        if !trimmed.is_empty() {
+            let configured = PathBuf::from(trimmed);
+            if configured.is_absolute() {
+                return Ok(configured);
+            }
+            if let Some(home) = dirs::home_dir() {
+                return Ok(home.join(configured));
+            }
+            let cwd = std::env::current_dir()
+                .map_err(|err| format!("resolve current dir failed: {err}"))?;
+            return Ok(cwd.join(configured));
+        }
+    }
     let mut base = dirs::data_dir().ok_or_else(|| "resolve data directory failed".to_string())?;
     base.push("chatminal");
     Ok(base)

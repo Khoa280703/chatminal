@@ -1,5 +1,7 @@
 use crate::terminal_wezterm_core::PaneSnapshotSummary;
-use crate::terminal_workspace_ascii_renderer::render_terminal_workspace_ascii;
+use crate::terminal_workspace_ascii_renderer::{
+    fit_dashboard_for_terminal, render_terminal_workspace_ascii,
+};
 use crate::terminal_workspace_view_model::{
     SidebarProfileItem, SidebarSessionItem, TerminalWorkspaceViewModel,
 };
@@ -56,4 +58,24 @@ fn renders_none_when_active_pane_missing() {
     let rendered = render_terminal_workspace_ascii(&view_model, &[], 20);
     assert!(rendered.contains("Active Pane:"));
     assert!(rendered.contains("(none)"));
+}
+
+#[test]
+fn fit_dashboard_for_terminal_truncates_by_size() {
+    let input = "1234567890ABCDEFG\nline-2\nline-3";
+    let rendered = fit_dashboard_for_terminal(input, 10, 3);
+    let lines = rendered.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[0], "123456789…");
+    assert_eq!(lines[1], "line-2");
+}
+
+#[test]
+fn fit_dashboard_for_terminal_normalizes_carriage_returns() {
+    let input = "progress 10%\rprogress 40%\rprogress 100%\nready";
+    let rendered = fit_dashboard_for_terminal(input, 40, 10);
+    assert!(rendered.contains("progress 10%"));
+    assert!(rendered.contains("progress 40%"));
+    assert!(rendered.contains("progress 100%"));
+    assert!(rendered.contains("ready"));
 }

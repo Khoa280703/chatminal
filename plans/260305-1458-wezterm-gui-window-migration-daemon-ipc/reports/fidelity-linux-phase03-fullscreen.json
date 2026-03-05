@@ -1,0 +1,39 @@
+{
+  "type": "phase03_fidelity_matrix_smoke",
+  "timestamp_utc": "2026-03-05T11:57:11Z",
+  "status": "passed",
+  "failed_step": "",
+  "failure_reason": "",
+  "endpoint": "/tmp/chatminald-phase03-fidelity-581989.sock",
+  "data_dir": "/tmp/chatminal-phase03-fidelity-581989",
+	  "session_id": "a46cabcb-04ee-4d6b-9606-0f3578ced05c",
+	  "checks": [
+    {"id":"bash-prompt","status":"pass","pass":true,"note":"marker found: pass"},
+    {"id":"ctrl-c","status":"pass","pass":true,"note":"marker found: pass"},
+    {"id":"ctrl-c-burst","status":"pass","pass":true,"note":"marker found: pass"},
+    {"id":"ctrl-z","status":"pass","pass":true,"note":"marker found: pass"},
+    {"id":"alt-backspace","status":"pass","pass":true,"note":"marker found: pass"},
+    {"id":"meta-shortcuts-macos","status":"pass","pass":true,"note":"marker found: pass"},
+    {"id":"vim","status":"pass","pass":true,"note":"marker found: pass"},
+    {"id":"nvim","status":"pass","pass":true,"note":"marker found: pass"},
+    {"id":"tmux","status":"pass","pass":true,"note":"marker found: pass"},
+    {"id":"htop","status":"pass","pass":true,"note":"marker found: pass"},
+    {"id":"btop","status":"pass","pass":true,"note":"marker found: pass"},
+    {"id":"lazygit","status":"skip","pass":true,"note":"tool not installed on host"},
+    {"id":"fzf","status":"pass","pass":true,"note":"marker found: pass"},
+    {"id":"unicode","status":"pass","pass":true,"note":"marker found: pass"},
+    {"id":"resize","status":"pass","pass":true,"note":"marker found: pass"},
+    {"id":"reconnect","status":"pass","pass":true,"note":"marker found: pass"},
+    {"id":"stress-paste","status":"pass","pass":true,"note":"marker found: pass"}
+	  ],
+	  "fail_count": 0,
+	  "skip_count": 1,
+	  "required_skip_count": 0,
+	  "required_cases": "bash-prompt,ctrl-c,ctrl-c-burst,ctrl-z,unicode,stress-paste,resize,reconnect",
+	  "artifacts": {
+    "tmp_dir": "/tmp/chatminal-phase03-fidelity.581989.qakzWq",
+    "daemon_log": "/tmp/chatminal-phase03-fidelity.581989.qakzWq/daemon.log",
+    "create_json": "/tmp/chatminal-phase03-fidelity.581989.qakzWq/create.json",
+    "activate_json": "/tmp/chatminal-phase03-fidelity.581989.qakzWq/activate.json"
+  }
+}

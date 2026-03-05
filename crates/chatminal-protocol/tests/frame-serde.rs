@@ -228,7 +228,8 @@ fn explorer_read_file_request_and_file_response_roundtrip() {
             byte_len: 13,
         }),
     );
-    let encoded_response = serde_json::to_string(&response).expect("serialize explorer file response");
+    let encoded_response =
+        serde_json::to_string(&response).expect("serialize explorer file response");
     let decoded_response: ServerFrame =
         serde_json::from_str(&encoded_response).expect("deserialize explorer file response");
     match decoded_response.body {

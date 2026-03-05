@@ -1,0 +1,38 @@
+{
+  "type": "baseline_input_kpi",
+  "timestamp_utc": "2026-03-05T03:53:54Z",
+  "owner": "chatminal-core",
+  "environment": {
+    "os": "linux",
+    "benchmark_profile": "release",
+    "bench_shell": "/bin/sh"
+  },
+  "rtt_memory_gate": {
+    "p95_ms": 6.901,
+    "p99_ms": 8.969,
+    "daemon_peak_mb": 8.2,
+    "app_peak_mb": 6.8,
+    "total_peak_mb": 15.1,
+    "pass_targets": true,
+    "pass_hard_gate": true
+  },
+  "fidelity_subset": {
+    "required_cases": [
+      "bash-prompt",
+      "ctrl-c",
+      "ctrl-z",
+      "alt-backspace",
+      "meta-shortcuts-macos",
+      "unicode",
+      "resize",
+      "reconnect"
+    ],
+    "required_fail_count": 0,
+    "required_skip_count": 0,
+    "report_path": "/tmp/chatminal-phase03-fidelity-matrix-report-2506185.json"
+  },
+  "notes": [
+    "Tool-dependent cases (vim/nvim/tmux/htop/lazygit/fzf) may skip on hosts without packages.",
+    "IME full matrix remains manual evidence gate before release."
+  ]
+}

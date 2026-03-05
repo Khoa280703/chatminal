@@ -1,48 +1,18 @@
-#[cfg(unix)]
-use std::fs;
-#[cfg(unix)]
 use std::io::{Read, Write};
-#[cfg(unix)]
-use std::os::unix::fs::FileTypeExt;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
-#[cfg(unix)]
-use std::os::unix::net::{UnixListener, UnixStream};
-#[cfg(unix)]
 use std::sync::Arc;
-#[cfg(unix)]
 use std::sync::atomic::{AtomicU64, Ordering};
-#[cfg(unix)]
 use std::sync::mpsc as std_mpsc;
-#[cfg(unix)]
 use std::thread;
-#[cfg(unix)]
 use std::time::Duration;
 
-#[cfg(unix)]
 use chatminal_protocol::{ClientFrame, ServerFrame};
 
-#[cfg(unix)]
 use crate::state::DaemonState;
-#[cfg(unix)]
+use crate::transport::{ActiveTransport, LocalStream, TransportBackend, TransportListener};
 const MAX_REQUEST_LINE_BYTES: usize = 256 * 1024;
 
-#[cfg(unix)]
 pub fn run_server(endpoint: &str, state: DaemonState) -> Result<(), String> {
-    ensure_socket_path(endpoint)?;
-
-    if let Some(parent) = std::path::Path::new(endpoint).parent() {
-        fs::create_dir_all(parent)
-            .map_err(|err| format!("create socket directory failed: {err}"))?;
-    }
-
-    let listener = UnixListener::bind(endpoint)
-        .map_err(|err| format!("bind unix socket failed ('{endpoint}'): {err}"))?;
-    listener
-        .set_nonblocking(true)
-        .map_err(|err| format!("set nonblocking listener failed: {err}"))?;
-
-    let _ = fs::set_permissions(endpoint, fs::Permissions::from_mode(0o600));
+    let listener = ActiveTransport::bind(endpoint)?;
 
     log::info!("chatminald listening on {}", endpoint);
 
@@ -56,12 +26,13 @@ pub fn run_server(endpoint: &str, state: DaemonState) -> Result<(), String> {
                 break;
             }
             health_state.broadcast_daemon_health();
+            health_state.log_runtime_metrics();
         }
     });
 
     while !state.is_shutdown_requested() {
-        match listener.accept() {
-            Ok((stream, _)) => {
+        match listener.accept_stream()? {
+            Some(stream) => {
                 let client_id = next_client_id.fetch_add(1, Ordering::Relaxed);
                 let state_for_client = state.clone();
                 thread::spawn(move || {
@@ -70,20 +41,22 @@ pub fn run_server(endpoint: &str, state: DaemonState) -> Result<(), String> {
                     }
                 });
             }
-            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+            None => {
                 thread::sleep(Duration::from_millis(25));
             }
-            Err(err) => return Err(format!("accept client failed: {err}")),
         }
     }
 
-    let _ = fs::remove_file(endpoint);
+    ActiveTransport::cleanup(endpoint);
     log::info!("chatminald stopped");
     Ok(())
 }
 
-#[cfg(unix)]
-fn handle_client(client_id: u64, mut stream: UnixStream, state: DaemonState) -> Result<(), String> {
+fn handle_client(
+    client_id: u64,
+    mut stream: LocalStream,
+    state: DaemonState,
+) -> Result<(), String> {
     let writer_stream = stream
         .try_clone()
         .map_err(|err| format!("clone stream failed: {err}"))?;
@@ -189,38 +162,11 @@ fn handle_client(client_id: u64, mut stream: UnixStream, state: DaemonState) -> 
     Ok(())
 }
 
-#[cfg(unix)]
-fn ensure_socket_path(endpoint: &str) -> Result<(), String> {
-    let path = std::path::Path::new(endpoint);
-    if !path.exists() {
-        return Ok(());
-    }
-
-    let metadata = fs::symlink_metadata(path)
-        .map_err(|err| format!("read existing endpoint metadata failed ('{endpoint}'): {err}"))?;
-    if !metadata.file_type().is_socket() {
-        return Err(format!(
-            "daemon endpoint path exists but is not a unix socket ('{}')",
-            endpoint
-        ));
-    }
-
-    match UnixStream::connect(endpoint) {
-        Ok(_) => Err(format!("daemon endpoint already in use ('{}')", endpoint)),
-        Err(_) => fs::remove_file(endpoint)
-            .map_err(|err| format!("remove stale socket failed ('{endpoint}'): {err}")),
-    }
-}
-
-#[cfg(not(unix))]
-pub fn run_server(_endpoint: &str, _state: crate::state::DaemonState) -> Result<(), String> {
-    Err("chatminald currently supports unix platforms only".to_string())
-}
-
 #[cfg(all(test, unix))]
 mod tests {
     use std::io::{BufRead, BufReader, Write};
-    use std::os::unix::net::UnixStream;
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::net::{UnixListener, UnixStream};
     use std::path::PathBuf;
     use std::time::{Duration, Instant};
 
@@ -229,8 +175,9 @@ mod tests {
 
     use crate::config::DaemonConfig;
     use crate::state::DaemonState;
+    use crate::transport::ensure_socket_path;
 
-    use super::{MAX_REQUEST_LINE_BYTES, ensure_socket_path, run_server};
+    use super::{MAX_REQUEST_LINE_BYTES, run_server};
 
     struct TestServer {
         endpoint: String,
@@ -250,7 +197,10 @@ mod tests {
             );
             let endpoint = format!("/tmp/chatminald-test-{unique}.sock");
             let db_path = std::env::temp_dir().join(format!("chatminald-test-{unique}.db"));
+            Self::spawn_with_endpoint(endpoint, db_path)
+        }
 
+        fn spawn_with_endpoint(endpoint: String, db_path: PathBuf) -> Self {
             let store = Store::initialize(&db_path).expect("initialize test store");
             let config = DaemonConfig {
                 endpoint: endpoint.clone(),
@@ -403,6 +353,16 @@ mod tests {
         }
     }
 
+    fn assert_ping_response(frame: ServerFrame, expected_id: &str) {
+        let response = extract_response(frame, expected_id).expect("extract ping response");
+        match response {
+            Response::Ping(value) => {
+                assert_eq!(value.message, "pong chatminald/1");
+            }
+            other => panic!("expected ping response, got {other:?}"),
+        }
+    }
+
     fn send_shutdown(endpoint: &str) -> Result<(), String> {
         let mut stream = UnixStream::connect(endpoint)
             .map_err(|err| format!("connect shutdown stream failed: {err}"))?;
@@ -473,9 +433,7 @@ mod tests {
                 ..
             } => Ok(response),
             ServerBody::Response {
-                ok: false,
-                error,
-                ..
+                ok: false, error, ..
             } => Err(error.unwrap_or_else(|| "unknown request failure".to_string())),
             _ => Err("expected response frame".to_string()),
         }
@@ -498,6 +456,119 @@ mod tests {
         assert!(err.contains("not a unix socket"));
 
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn ensure_socket_path_rejects_active_socket() {
+        let path = std::env::temp_dir().join(format!(
+            "chatminald-active-socket-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|value| value.as_nanos())
+                .unwrap_or(0)
+        ));
+        let listener = UnixListener::bind(&path).expect("bind active test socket");
+
+        let err = ensure_socket_path(path.to_str().expect("path utf8"))
+            .expect_err("active socket must be rejected");
+        assert!(err.contains("already in use"));
+
+        drop(listener);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn ensure_socket_path_cleans_stale_socket() {
+        let path = std::env::temp_dir().join(format!(
+            "chatminald-stale-socket-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|value| value.as_nanos())
+                .unwrap_or(0)
+        ));
+        {
+            let listener = UnixListener::bind(&path).expect("bind stale test socket");
+            drop(listener);
+        }
+        assert!(path.exists(), "stale socket path must exist before cleanup");
+
+        ensure_socket_path(path.to_str().expect("path utf8")).expect("cleanup stale socket");
+        assert!(!path.exists(), "stale socket must be removed");
+    }
+
+    #[test]
+    fn listener_sets_socket_permissions_to_user_only() {
+        let mut server = TestServer::spawn();
+        let mode = std::fs::metadata(&server.endpoint)
+            .expect("socket metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
+        server.shutdown_assert_ok();
+    }
+
+    #[test]
+    fn client_can_reconnect_after_disconnect() {
+        let mut server = TestServer::spawn();
+
+        let mut stream = server.connect();
+        stream
+            .set_read_timeout(Some(Duration::from_millis(200)))
+            .expect("set read timeout");
+        let mut reader = BufReader::new(stream.try_clone().expect("clone first stream"));
+        write_client_frame(&mut stream, "ping-1", Request::Ping).expect("write first ping");
+        let frame = read_frame_by_id(&mut reader, "ping-1").expect("read first ping response");
+        assert_ping_response(frame, "ping-1");
+        drop(reader);
+        drop(stream);
+
+        let mut stream = server.connect();
+        stream
+            .set_read_timeout(Some(Duration::from_millis(200)))
+            .expect("set read timeout");
+        let mut reader = BufReader::new(stream.try_clone().expect("clone second stream"));
+        write_client_frame(&mut stream, "ping-2", Request::Ping).expect("write second ping");
+        let frame = read_frame_by_id(&mut reader, "ping-2").expect("read second ping response");
+        assert_ping_response(frame, "ping-2");
+
+        server.shutdown_assert_ok();
+    }
+
+    #[test]
+    fn server_boots_on_stale_socket_and_serves_requests() {
+        let unique = format!(
+            "{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|value| value.as_nanos())
+                .unwrap_or(0)
+        );
+        let endpoint = format!("/tmp/chatminald-stale-boot-{unique}.sock");
+        let db_path = std::env::temp_dir().join(format!("chatminald-stale-boot-{unique}.db"));
+        {
+            let listener = UnixListener::bind(&endpoint).expect("create stale socket");
+            drop(listener);
+        }
+        assert!(
+            std::path::Path::new(&endpoint).exists(),
+            "stale socket must exist before server boot"
+        );
+
+        let mut server = TestServer::spawn_with_endpoint(endpoint.clone(), db_path);
+        let mut stream = server.connect();
+        stream
+            .set_read_timeout(Some(Duration::from_millis(200)))
+            .expect("set read timeout");
+        let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+        write_client_frame(&mut stream, "ping-stale", Request::Ping).expect("write ping");
+        let frame =
+            read_frame_by_id(&mut reader, "ping-stale").expect("read ping response after stale");
+        assert_ping_response(frame, "ping-stale");
+        server.shutdown_assert_ok();
     }
 
     #[test]
@@ -612,13 +683,8 @@ mod tests {
                 "input",
             )
             .expect("parse input response");
-            read_output_until_contains(
-                &mut reader,
-                "retain-a",
-                "retain-b",
-                Duration::from_secs(5),
-            )
-            .expect("wait for output chunks");
+            read_output_until_contains(&mut reader, "retain-a", "retain-b", Duration::from_secs(5))
+                .expect("wait for output chunks");
 
             write_client_frame(&mut stream, "shutdown-1", Request::AppShutdown)
                 .expect("write shutdown request");

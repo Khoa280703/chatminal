@@ -5,14 +5,17 @@ use crossterm::cursor::MoveTo;
 use crossterm::event::{self, Event as CrosstermEvent, KeyCode};
 use crossterm::style::Print;
 use crossterm::terminal::{
-    Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+    Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
+    enable_raw_mode, size,
 };
 use crossterm::{execute, queue};
 
 use crate::config::parse_usize;
 use crate::ipc::ChatminalClient;
 use crate::terminal_pane_adapter::SessionPaneRegistry;
-use crate::terminal_workspace_ascii_renderer::render_terminal_workspace_ascii;
+use crate::terminal_workspace_ascii_renderer::{
+    fit_dashboard_for_terminal, render_terminal_workspace_ascii,
+};
 use crate::terminal_workspace_binding_runtime::{
     apply_event_to_workspace_binding_state, bootstrap_workspace_binding_state,
 };
@@ -59,7 +62,13 @@ pub fn run_dashboard_tui_wezterm(
 
     loop {
         if state.is_stale() {
-            state = bootstrap_workspace_binding_state(client, pane_registry, preview_lines, cols, rows)?;
+            state = bootstrap_workspace_binding_state(
+                client,
+                pane_registry,
+                preview_lines,
+                cols,
+                rows,
+            )?;
         }
 
         let now = Instant::now();
@@ -115,16 +124,18 @@ fn render_dashboard_frame(
     }
 
     dashboard.push_str("\n\nKeys: q/esc = quit | r = reload snapshot");
+    let (terminal_cols, terminal_rows) = size().unwrap_or((120, 32));
+    let fitted =
+        fit_dashboard_for_terminal(&dashboard, terminal_cols as usize, terminal_rows as usize);
+    let fitted = normalize_newlines_for_raw_mode(&fitted);
 
-    queue!(
-        out,
-        MoveTo(0, 0),
-        Clear(ClearType::All),
-        Print(dashboard),
-        Print("\n")
-    )
-    .map_err(|err| format!("render dashboard failed: {err}"))?;
+    queue!(out, MoveTo(0, 0), Clear(ClearType::All), Print(fitted))
+        .map_err(|err| format!("render dashboard failed: {err}"))?;
     out.flush()
         .map_err(|err| format!("flush dashboard failed: {err}"))?;
     Ok(())
+}
+
+fn normalize_newlines_for_raw_mode(input: &str) -> String {
+    input.replace('\n', "\r\n")
 }

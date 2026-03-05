@@ -20,7 +20,11 @@ impl SessionPaneRegistry {
     }
 
     pub fn ensure_pane_for_session(&mut self, session_id: &str) -> String {
-        if let Some(binding) = self.bindings.iter().find(|value| value.session_id == session_id) {
+        if let Some(binding) = self
+            .bindings
+            .iter()
+            .find(|value| value.session_id == session_id)
+        {
             return binding.pane_id.clone();
         }
 

@@ -7,6 +7,8 @@ on:
       - master
       - dev
   pull_request:
+  schedule:
+    - cron: "15 20 * * *"
   workflow_dispatch:
 
 jobs:
@@ -40,6 +42,54 @@ jobs:
       - name: Rust tests (store)
         run: cargo test --manifest-path crates/chatminal-store/Cargo.toml
 
+      - name: Install xvfb (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+
+      - name: Install fidelity dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y coreutils tmux vim neovim htop btop fzf
+
+      - name: Install fidelity dependencies (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew update
+          brew install coreutils tmux neovim htop btop fzf
+
+      - name: Window smoke (Linux, headless)
+        if: matrix.os == 'ubuntu-latest'
+        run: bash scripts/smoke/window-wezterm-gui-smoke.sh
+
+      - name: Phase 08 window backend killswitch verify (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          CHATMINAL_PHASE08_REQUIRE_LEGACY_HEADLESS: "1"
+        run: bash scripts/migration/phase08-wezterm-gui-killswitch-verify.sh
+
+      - name: Phase 02 benchmark gate (Linux, release)
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          CHATMINAL_BENCH_SAMPLES: "40"
+          CHATMINAL_BENCH_WARMUP: "8"
+          CHATMINAL_BENCH_TIMEOUT_MS: "2000"
+          CHATMINAL_BENCH_PROFILE: "release"
+          CHATMINAL_BENCH_ENFORCE_HARD_GATE: "1"
+        run: bash scripts/bench/phase02-rtt-memory-gate.sh
+
+      - name: Phase 03 fidelity matrix smoke
+        env:
+          CHATMINAL_FIDELITY_STRICT: "1"
+          CHATMINAL_FIDELITY_REQUIRED_CASES: "bash-prompt,ctrl-c,ctrl-c-burst,ctrl-z,stress-paste,vim,nvim,tmux,htop,btop,unicode,resize,reconnect,fzf"
+        run: |
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            export CHATMINAL_TIMEOUT_BIN=gtimeout
+          fi
+          bash scripts/fidelity/phase03-fidelity-matrix-smoke.sh
+
       - name: Docs validation (best effort)
         run: |
           if [ -f /home/runner/.claude/scripts/validate-docs.cjs ]; then
@@ -47,3 +97,92 @@ jobs:
           else
             echo "skip external docs validator (not available on runner)"
           fi
+
+  validate-windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust check (workspace)
+        run: cargo check --workspace
+
+      - name: Rust tests (protocol)
+        run: cargo test --manifest-path crates/chatminal-protocol/Cargo.toml
+
+      - name: Rust tests (store)
+        run: cargo test --manifest-path crates/chatminal-store/Cargo.toml
+
+      - name: Rust tests (daemon)
+        run: cargo test --manifest-path apps/chatminald/Cargo.toml
+
+      - name: Rust tests (native client scaffold)
+        run: cargo test --manifest-path apps/chatminal-app/Cargo.toml
+
+  nightly-soak-linux:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Nightly soak (2h stability gate)
+        env:
+          CHATMINAL_SOAK_MODE: "nightly"
+          CHATMINAL_SOAK_DURATION_SECONDS: "7200"
+          CHATMINAL_SOAK_REQUIRE_BENCH_HARD_GATE: "0"
+          CHATMINAL_SOAK_REPORT: "${{ runner.temp }}/chatminal-phase05-soak-nightly-report.json"
+        run: bash scripts/soak/phase05-soak-smoke.sh
+
+      - name: Upload nightly soak report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-soak-linux-report
+          path: ${{ runner.temp }}/chatminal-phase05-soak-nightly-report.json
+          if-no-files-found: warn
+
+  nightly-soak-macos:
+    if: github.event_name == 'schedule'
+    runs-on: macos-latest
+    timeout-minutes: 240
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install ripgrep (macOS)
+        run: |
+          if ! command -v rg >/dev/null 2>&1; then
+            brew update
+            brew install ripgrep
+          fi
+
+      - name: Nightly soak (2h stability gate)
+        env:
+          CHATMINAL_SOAK_MODE: "nightly"
+          CHATMINAL_SOAK_DURATION_SECONDS: "7200"
+          CHATMINAL_SOAK_REQUIRE_BENCH_HARD_GATE: "0"
+          CHATMINAL_SOAK_REPORT: "${{ runner.temp }}/chatminal-phase05-soak-nightly-report.json"
+        run: bash scripts/soak/phase05-soak-smoke.sh
+
+      - name: Upload nightly soak report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-soak-macos-report
+          path: ${{ runner.temp }}/chatminal-phase05-soak-nightly-report.json
+          if-no-files-found: warn

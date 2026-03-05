@@ -1,0 +1,37 @@
+{
+  "type": "phase03_fidelity_matrix_smoke",
+  "timestamp_utc": "2026-03-05T05:20:36Z",
+  "status": "passed",
+  "failed_step": "",
+  "failure_reason": "",
+  "endpoint": "/tmp/chatminald-phase03-fidelity-2955902.sock",
+  "data_dir": "/tmp/chatminal-phase03-fidelity-2955902",
+	  "session_id": "b0979fca-fc4d-4e65-8c43-076428748d61",
+	  "checks": [
+    {"id":"bash-prompt","status":"pass","pass":true,"note":"marker found: pass"},
+    {"id":"ctrl-c","status":"pass","pass":true,"note":"marker found: pass"},
+    {"id":"ctrl-z","status":"pass","pass":true,"note":"marker found: pass"},
+    {"id":"alt-backspace","status":"pass","pass":true,"note":"marker found: pass"},
+    {"id":"meta-shortcuts-macos","status":"pass","pass":true,"note":"marker found: pass"},
+    {"id":"vim","status":"skip","pass":true,"note":"tool not installed on host"},
+    {"id":"nvim","status":"skip","pass":true,"note":"tool not installed on host"},
+    {"id":"tmux","status":"skip","pass":true,"note":"tool not installed on host"},
+    {"id":"htop","status":"skip","pass":true,"note":"tool not installed on host"},
+    {"id":"btop","status":"pass","pass":true,"note":"marker found: pass"},
+    {"id":"lazygit","status":"skip","pass":true,"note":"tool not installed on host"},
+    {"id":"fzf","status":"skip","pass":true,"note":"tool not installed on host"},
+    {"id":"unicode","status":"pass","pass":true,"note":"marker found: pass"},
+    {"id":"resize","status":"pass","pass":true,"note":"marker found: pass"},
+    {"id":"reconnect","status":"pass","pass":true,"note":"marker found: pass"}
+	  ],
+	  "fail_count": 0,
+	  "skip_count": 6,
+	  "required_skip_count": 0,
+	  "required_cases": "bash-prompt,ctrl-c,ctrl-z,alt-backspace,meta-shortcuts-macos,unicode,resize,reconnect",
+	  "artifacts": {
+    "tmp_dir": "/tmp/chatminal-phase03-fidelity.2955902.jlGY7N",
+    "daemon_log": "/tmp/chatminal-phase03-fidelity.2955902.jlGY7N/daemon.log",
+    "create_json": "/tmp/chatminal-phase03-fidelity.2955902.jlGY7N/create.json",
+    "activate_json": "/tmp/chatminal-phase03-fidelity.2955902.jlGY7N/activate.json"
+  }
+}

@@ -1,10 +1,14 @@
 use std::io::{Write, stdout};
 use std::time::{Duration, Instant};
 
+use crossterm::terminal::size;
+
 use crate::config::parse_usize;
 use crate::ipc::ChatminalClient;
 use crate::terminal_pane_adapter::SessionPaneRegistry;
-use crate::terminal_workspace_ascii_renderer::render_terminal_workspace_ascii;
+use crate::terminal_workspace_ascii_renderer::{
+    fit_dashboard_for_terminal, render_terminal_workspace_ascii,
+};
 use crate::terminal_workspace_binding_runtime::{
     WorkspaceBindingState, apply_event_to_workspace_binding_state,
     bootstrap_workspace_binding_state,
@@ -23,13 +27,8 @@ pub fn run_dashboard_watch_wezterm(
     let rows = parse_usize(args.get(6), 32);
     let max_pane_preview_lines = parse_usize(args.get(7), 20);
 
-    let mut state = bootstrap_workspace_binding_state(
-        client,
-        pane_registry,
-        preview_lines,
-        cols,
-        rows,
-    )?;
+    let mut state =
+        bootstrap_workspace_binding_state(client, pane_registry, preview_lines, cols, rows)?;
     let deadline = Instant::now() + Duration::from_secs(seconds as u64);
     let tick = Duration::from_millis(refresh_ms as u64);
     let mut next_render = Instant::now();
@@ -49,7 +48,14 @@ pub fn run_dashboard_watch_wezterm(
         let now = Instant::now();
         if now >= next_render {
             let dashboard = render_watch_dashboard(&state, max_pane_preview_lines);
-            write!(out, "\x1b[2J\x1b[H{dashboard}\n")
+            let (terminal_cols, terminal_rows) = size().unwrap_or((120, 32));
+            let fitted = fit_dashboard_for_terminal(
+                &dashboard,
+                terminal_cols as usize,
+                terminal_rows as usize,
+            );
+            let fitted = normalize_newlines_for_raw_mode(&fitted);
+            write!(out, "\x1b[2J\x1b[H{fitted}")
                 .map_err(|err| format!("write dashboard failed: {err}"))?;
             out.flush()
                 .map_err(|err| format!("flush dashboard failed: {err}"))?;
@@ -81,4 +87,8 @@ fn render_watch_dashboard(state: &WorkspaceBindingState, max_pane_preview_lines:
         }
     }
     dashboard
+}
+
+fn normalize_newlines_for_raw_mode(input: &str) -> String {
+    input.replace('\n', "\r\n")
 }

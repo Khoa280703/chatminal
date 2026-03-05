@@ -1,0 +1,14 @@
+{
+  "type": "phase05_release_dry_run",
+  "timestamp_utc": "2026-03-05T05:20:45Z",
+  "status": "passed",
+  "failed_step": "",
+  "failure_reason": "",
+  "artifacts": {
+    "output_dir": "/tmp/chatminal-release-dry-run-2958918",
+    "daemon_binary": "/tmp/chatminal-release-dry-run-2958918/chatminald",
+    "app_binary": "/tmp/chatminal-release-dry-run-2958918/chatminal-app",
+    "checksums": "/tmp/chatminal-release-dry-run-2958918/SHA256SUMS",
+    "smoke_log": "/tmp/chatminal-release-dry-run-2958918/smoke.log"
+  }
+}

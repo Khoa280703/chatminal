@@ -1,6 +1,6 @@
 # Code Standards
 
-Last updated: 2026-03-04
+Last updated: 2026-03-05
 Scope: `apps/*` + `crates/*`.
 
 ## Principles
@@ -24,6 +24,14 @@ Scope: `apps/*` + `crates/*`.
 2. Daemon chỉ expose local IPC endpoint.
 3. Session reconnect thông qua daemon command path.
 4. History retention phải đi qua store policy (`max lines`).
+5. Input pipeline invariant:
+   - `attach` và `window` phải dùng cùng semantic key/text mapping contract.
+   - `CHATMINAL_INPUT_PIPELINE_MODE=legacy|wezterm` chỉ đổi client-side translation path, không được bypass daemon.
+   - IME commit dedupe phải giữ nguyên rule: không double-send giữa text-event và ime-commit-event tương ứng.
+6. Window backend invariant:
+   - command public luôn đi qua `window-wezterm-gui`.
+   - `CHATMINAL_WINDOW_BACKEND=wezterm-gui|legacy` chỉ đổi UI runtime path; không được bypass daemon ownership.
+   - fallback/rollback phải verify bằng script migration (`phase08`).
 
 ## Validation commands
 ```bash

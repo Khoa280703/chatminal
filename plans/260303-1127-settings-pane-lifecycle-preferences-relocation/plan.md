@@ -2,7 +2,7 @@
 title: "Settings Pane + Lifecycle Pref Relocation"
 description: "Thêm settings pane trong layout hiện có và chuyển 2 lifecycle preferences ra khỏi profile menu với thay đổi tối thiểu."
 status: pending
-priority: P2
+priority: P2®
 effort: 2h
 branch: main
 tags: [frontend, svelte, settings, lifecycle]

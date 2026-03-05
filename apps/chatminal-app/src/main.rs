@@ -1,36 +1,62 @@
 mod config;
+mod input;
 mod ipc;
 mod terminal_pane_adapter;
+mod terminal_quality_benchmark;
 mod terminal_session_commands;
+mod terminal_wezterm_attach_frame_renderer;
+mod terminal_wezterm_attach_tui;
 mod terminal_wezterm_commands;
 mod terminal_wezterm_core;
-mod terminal_wezterm_dashboard_watch;
 mod terminal_wezterm_dashboard_tui;
-mod terminal_workspace_binding_runtime;
+mod terminal_wezterm_dashboard_watch;
+mod terminal_wezterm_gui_launcher;
+mod terminal_wezterm_gui_proxy;
 mod terminal_workspace_ascii_renderer;
+mod terminal_workspace_binding_runtime;
 mod terminal_workspace_view_model;
+mod window;
+mod window_wezterm_gui;
 
 use std::time::Duration;
 
 use chatminal_protocol::Request;
-use config::{AppConfig, parse_usize, usage};
+use config::{AppConfig, WindowBackend, parse_usize, usage};
 use ipc::ChatminalClient;
 use terminal_pane_adapter::{SessionPaneRegistry, StdoutJsonTerminalPaneAdapter, pump_events};
+use terminal_quality_benchmark::{run_bench_rtt_wezterm, summary_line};
 use terminal_session_commands::{
     activate_session_with_snapshot, fetch_snapshot_for_session, resize_session,
     write_input_for_session,
 };
+use terminal_wezterm_attach_tui::run_attach_tui_wezterm;
 use terminal_wezterm_commands::{
     handle_activate_wezterm, handle_dashboard_wezterm, handle_events_wezterm,
     handle_workspace_wezterm,
 };
-use terminal_wezterm_dashboard_watch::run_dashboard_watch_wezterm;
 use terminal_wezterm_dashboard_tui::run_dashboard_tui_wezterm;
+use terminal_wezterm_dashboard_watch::run_dashboard_watch_wezterm;
+use terminal_wezterm_gui_launcher::run_window_wezterm_gui;
+use terminal_wezterm_gui_proxy::run_proxy_wezterm_session;
 
 const SUPPORTED_COMMANDS: &[&str] = &[
-    "workspace", "sessions", "create", "activate", "snapshot", "input", "resize", "events",
-    "workspace-wezterm", "activate-wezterm", "events-wezterm", "dashboard-wezterm",
-    "dashboard-watch-wezterm", "dashboard-tui-wezterm",
+    "workspace",
+    "sessions",
+    "create",
+    "activate",
+    "snapshot",
+    "input",
+    "resize",
+    "events",
+    "workspace-wezterm",
+    "activate-wezterm",
+    "events-wezterm",
+    "dashboard-wezterm",
+    "dashboard-watch-wezterm",
+    "dashboard-tui-wezterm",
+    "attach-wezterm",
+    "window-wezterm-gui",
+    "bench-rtt-wezterm",
 ];
 
 struct SilentTerminalPaneAdapter;
@@ -51,12 +77,20 @@ fn run() -> Result<(), String> {
     }
 
     let command = args[1].as_str();
-    if matches!(command, "--help" | "-h" | "help") || !SUPPORTED_COMMANDS.contains(&command) {
+    let is_internal_proxy_command = command == "proxy-wezterm-session";
+    let allow_internal_proxy = is_internal_proxy_allowed();
+    let is_supported = SUPPORTED_COMMANDS.contains(&command)
+        || (is_internal_proxy_command && allow_internal_proxy);
+    if matches!(command, "--help" | "-h" | "help") || !is_supported {
         println!("{}", usage());
         return Ok(());
     }
 
     let config = AppConfig::from_env()?;
+    if command == "window-wezterm-gui" {
+        return run_window_by_backend(&config, &args);
+    }
+
     let client = ChatminalClient::connect(&config.endpoint)?;
     let mut pane_registry = SessionPaneRegistry::new();
     let mut silent_adapter = SilentTerminalPaneAdapter;
@@ -182,9 +216,39 @@ fn run() -> Result<(), String> {
             let payload = handle_dashboard_wezterm(&client, &args, &mut pane_registry)?;
             print_pretty_json(&payload)
         }
-        "dashboard-watch-wezterm" => run_dashboard_watch_wezterm(&client, &args, &mut pane_registry),
+        "dashboard-watch-wezterm" => {
+            run_dashboard_watch_wezterm(&client, &args, &mut pane_registry)
+        }
         "dashboard-tui-wezterm" => run_dashboard_tui_wezterm(&client, &args, &mut pane_registry),
+        "attach-wezterm" => run_attach_tui_wezterm(
+            &client,
+            &args,
+            &mut pane_registry,
+            config.input_pipeline_mode,
+        ),
+        "proxy-wezterm-session" => run_proxy_wezterm_session(&client, &args),
+        "bench-rtt-wezterm" => {
+            let report = run_bench_rtt_wezterm(&client, &args)?;
+            println!("{}", summary_line(&report));
+            print_pretty_json(&report)
+        }
         _ => Ok(()),
+    }
+}
+
+fn is_internal_proxy_allowed() -> bool {
+    std::env::var("CHATMINAL_INTERNAL_PROXY")
+        .ok()
+        .map(|value| value.trim() == "1")
+        .unwrap_or(false)
+}
+
+fn run_window_by_backend(config: &AppConfig, args: &[String]) -> Result<(), String> {
+    match config.window_backend {
+        WindowBackend::WeztermGui => run_window_wezterm_gui(config, args),
+        WindowBackend::LegacyEgui => {
+            window::run_window_wezterm(&config.endpoint, args, config.input_pipeline_mode)
+        }
     }
 }
 

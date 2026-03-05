@@ -1,0 +1,25 @@
+{
+  "type": "phase06_input_modifier_ime_smoke",
+  "timestamp_utc": "2026-03-05T04:25:53Z",
+  "status": "passed",
+  "failed_step": "",
+  "failure_reason": "",
+  "required_cases": "bash-prompt,ctrl-c,ctrl-z,alt-backspace,meta-shortcuts-macos,unicode,resize,reconnect",
+  "matrix_report_path": "/tmp/chatminal-phase03-fidelity-matrix-report-2671121.json",
+  "matrix": {
+    "exit_code": 0,
+    "status": "passed",
+    "fail_count": 0,
+    "skip_count": 6,
+    "required_skip_count": 0
+  },
+  "ime_manual_evidence_required": true,
+  "ime_manual_cases": [
+    "ime-vi",
+    "ime-ja",
+    "ime-zh"
+  ],
+  "artifacts": {
+    "report_path": "/tmp/chatminal-phase06-input-modifier-ime-report-2671121.json"
+  }
+}

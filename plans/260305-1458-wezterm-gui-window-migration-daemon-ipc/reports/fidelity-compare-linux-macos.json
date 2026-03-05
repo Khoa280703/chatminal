@@ -1,0 +1,38 @@
+{
+  "type": "phase05_fidelity_compare",
+  "generated_at_utc": "2026-03-05T11:18:00Z",
+  "status": "partial_pass",
+  "linux": {
+    "phase03_matrix_report": "reports/fidelity-linux-phase03-fullscreen.json",
+    "phase03_matrix_status": "passed",
+    "phase03_required_skip_count": 0,
+    "phase06_input_ime_report": "reports/fidelity-linux-phase06-input-ime.json",
+    "phase06_input_ime_status": "passed_manual_pending",
+    "phase05_soak_report": "reports/fidelity-linux-phase05-soak.json",
+    "phase05_soak_status": "passed",
+    "phase05_release_dry_run_report": "reports/fidelity-linux-phase05-release-dry-run.json",
+    "phase05_release_dry_run_status": "passed",
+    "bench_phase02_status": "passed",
+    "bench_phase02": {
+      "samples": 80,
+      "warmup": 15,
+      "avg_ms": 5.86,
+      "p95_ms": 8.688,
+      "p99_ms": 13.225,
+      "daemon_peak_mb": 8.1,
+      "app_peak_mb": 6.9,
+      "total_peak_mb": 15.0
+    }
+  },
+  "macos": {
+    "phase03_matrix_report": "pending",
+    "phase06_input_ime_report": "pending",
+    "manual_smoke": "pending",
+    "notes": "Requires macOS host run with WezTerm binary + manual IME validation."
+  },
+  "notes": [
+    "Linux automated gates passed with updated strict required cases (including ctrl-c-burst and stress-paste).",
+    "IME automation is green but manual sign-off is still pending (status: passed_manual_pending).",
+    "macOS manual/host-specific checks remain open."
+  ]
+}
