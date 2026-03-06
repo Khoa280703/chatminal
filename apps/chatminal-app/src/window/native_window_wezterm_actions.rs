@@ -14,7 +14,7 @@ use super::input_mapper::{
     map_egui_key_event_to_pty_input, map_egui_key_event_to_pty_input_legacy,
 };
 use super::reducer::compute_terminal_grid;
-use super::{CHAR_HEIGHT_PX, CHAR_WIDTH_PX, ChatminalWindowApp};
+use super::{CHAR_HEIGHT_PX, CHAR_WIDTH_PX, ChatminalWindowApp, debug_native_window_log};
 
 const RESIZE_DEBOUNCE_MS: u64 = 120;
 const RESIZE_TIMEOUT_MS: u64 = 150;
@@ -22,6 +22,10 @@ const CREATE_SESSION_TIMEOUT_SECS: u64 = 20;
 
 impl ChatminalWindowApp {
     pub(super) fn activate_session(&mut self, session_id: &str) {
+        debug_native_window_log(&format!(
+            "activate_session start session_id={session_id} cols={} rows={} preview_lines={}",
+            self.pane_cols, self.pane_rows, self.preview_lines
+        ));
         match activate_session_with_snapshot(
             &self.client,
             &mut self.pane_registry,
@@ -41,8 +45,14 @@ impl ChatminalWindowApp {
                 }
                 self.render_dirty = true;
                 self.last_error = None;
+                debug_native_window_log(&format!("activate_session ok session_id={session_id}"));
             }
-            Err(err) => self.last_error = Some(format!("activate session failed: {err}")),
+            Err(err) => {
+                debug_native_window_log(&format!(
+                    "activate_session error session_id={session_id}: {err}"
+                ));
+                self.last_error = Some(format!("activate session failed: {err}"));
+            }
         }
     }
 
@@ -56,6 +66,10 @@ impl ChatminalWindowApp {
             self.last_error = Some("session name is required".to_string());
             return;
         }
+        debug_native_window_log(&format!(
+            "create_session queued name='{}' cols={} rows={}",
+            name, self.pane_cols, self.pane_rows
+        ));
 
         let endpoint = self.endpoint.clone();
         let cols = self.pane_cols;
@@ -69,7 +83,18 @@ impl ChatminalWindowApp {
         self.last_error = None;
 
         thread::spawn(move || {
+            debug_native_window_log(&format!(
+                "create_session worker start name='{}' cols={} rows={}",
+                request_name, cols, rows
+            ));
             let response = request_session_create(&endpoint, request_name, cols, rows);
+            match &response {
+                Ok(value) => debug_native_window_log(&format!(
+                    "create_session worker ok session_id={}",
+                    value.session_id
+                )),
+                Err(err) => debug_native_window_log(&format!("create_session worker error: {err}")),
+            }
             let _ = tx.send(response);
         });
     }
@@ -80,21 +105,32 @@ impl ChatminalWindowApp {
         };
         match pending.rx.try_recv() {
             Ok(Ok(value)) => {
+                debug_native_window_log(&format!(
+                    "poll_create_session_result ok session_id={}",
+                    value.session_id
+                ));
                 self.new_session_name.clear();
                 self.last_error = None;
                 self.reload_workspace();
                 if error_requires_main_client_reconnect(self.last_error.as_deref()) {
+                    debug_native_window_log(
+                        "reload_workspace indicated reconnect is required; reconnecting main client",
+                    );
                     let _ = self.reconnect_main_client();
                     self.reload_workspace();
                 }
                 self.activate_session(&value.session_id);
                 if error_requires_main_client_reconnect(self.last_error.as_deref()) {
+                    debug_native_window_log(
+                        "activate_session indicated reconnect is required; reconnecting main client",
+                    );
                     let _ = self.reconnect_main_client();
                     self.activate_session(&value.session_id);
                 }
                 true
             }
             Ok(Err(err)) => {
+                debug_native_window_log(&format!("poll_create_session_result error: {err}"));
                 self.last_error = Some(if is_create_request_timeout_error(&err) {
                     format!(
                         "create session timeout sau {}s (daemon đang bận); kiểm tra sidebar và bấm Reload trước khi tạo lại",
@@ -110,6 +146,7 @@ impl ChatminalWindowApp {
                 false
             }
             Err(TryRecvError::Disconnected) => {
+                debug_native_window_log("create_session worker disconnected");
                 self.last_error = Some("create session worker disconnected".to_string());
                 true
             }
@@ -478,11 +515,12 @@ impl ChatminalWindowApp {
     }
 
     fn reconnect_main_client(&mut self) -> Result<(), String> {
+        debug_native_window_log("reconnect_main_client start");
         let client = crate::ipc::ChatminalClient::connect(&self.endpoint)?;
         self.client = client;
+        debug_native_window_log("reconnect_main_client ok");
         Ok(())
     }
-
 }
 
 fn event_text_payload(event: TerminalInputEvent) -> Option<String> {

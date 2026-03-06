@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use chatminal_protocol::{PtyOutputEvent, SessionSnapshot};
 use chatminal_terminal_core::color::ColorPalette;
 use chatminal_terminal_core::{Terminal, TerminalConfiguration, TerminalSize};
-use chatminal_protocol::{PtyOutputEvent, SessionSnapshot};
 use serde::Serialize;
 
 use crate::terminal_pane_adapter::TerminalPaneAdapter;

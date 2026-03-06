@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc as std_mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chatminal_protocol::{ClientFrame, ServerFrame};
 
@@ -147,8 +147,9 @@ fn handle_client(
                 }
             };
 
+            let request_id = frame.id.clone();
             let response = state.handle_request(frame);
-            let _ = tx.try_send(response);
+            send_response_frame(&tx, response, client_id, &request_id)?;
 
             if state.is_shutdown_requested() {
                 break;
@@ -159,6 +160,28 @@ fn handle_client(
     state.unregister_client(client_id);
     drop(tx);
     let _ = writer.join();
+    Ok(())
+}
+
+fn send_response_frame(
+    tx: &std_mpsc::SyncSender<ServerFrame>,
+    response: ServerFrame,
+    client_id: u64,
+    request_id: &str,
+) -> Result<(), String> {
+    let started_at = Instant::now();
+    tx.send(response)
+        .map_err(|_| format!("client {client_id} response channel closed"))?;
+
+    let elapsed = started_at.elapsed();
+    if elapsed >= Duration::from_millis(50) {
+        log::warn!(
+            "client {} response send blocked for {}ms on request '{}'",
+            client_id,
+            elapsed.as_millis(),
+            request_id
+        );
+    }
     Ok(())
 }
 
@@ -177,7 +200,7 @@ mod tests {
     use crate::state::DaemonState;
     use crate::transport::ensure_socket_path;
 
-    use super::{MAX_REQUEST_LINE_BYTES, run_server};
+    use super::{MAX_REQUEST_LINE_BYTES, run_server, send_response_frame};
 
     struct TestServer {
         endpoint: String,
@@ -437,6 +460,46 @@ mod tests {
             } => Err(error.unwrap_or_else(|| "unknown request failure".to_string())),
             _ => Err("expected response frame".to_string()),
         }
+    }
+
+    #[test]
+    fn send_response_frame_waits_for_capacity_instead_of_dropping() {
+        let (tx, rx) = std::sync::mpsc::sync_channel::<ServerFrame>(1);
+        tx.send(ServerFrame::ok(
+            "prefill".to_string(),
+            Response::Ping(chatminal_protocol::PingResponse {
+                message: "prefill".to_string(),
+            }),
+        ))
+        .expect("prefill queue");
+
+        let reader = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(60));
+            let first = rx.recv().expect("drain prefilled frame");
+            let second = rx.recv().expect("receive response frame");
+            (first, second)
+        });
+
+        let started_at = Instant::now();
+        send_response_frame(
+            &tx,
+            ServerFrame::ok(
+                "req-1".to_string(),
+                Response::Ping(chatminal_protocol::PingResponse {
+                    message: "pong".to_string(),
+                }),
+            ),
+            7,
+            "req-1",
+        )
+        .expect("send response after capacity frees");
+
+        assert!(
+            started_at.elapsed() >= Duration::from_millis(40),
+            "response send should wait for queue capacity instead of dropping"
+        );
+        let (_first, second) = reader.join().expect("reader join");
+        assert_eq!(second.id.as_deref(), Some("req-1"));
     }
 
     #[test]

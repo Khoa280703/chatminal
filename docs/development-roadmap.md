@@ -1,6 +1,6 @@
 # Development Roadmap
 
-Last updated: 2026-03-05
+Last updated: 2026-03-06
 
 ## Hoan Tat
 1. Tách daemon/client/protocol/store thành các crate/app độc lập.
@@ -52,6 +52,13 @@ Last updated: 2026-03-05
    - refactor `proxy-wezterm-session` sang dùng mux-domain module (event/input ordering guard tập trung một chỗ)
    - re-run full gate suite (`check/test/smoke/fidelity/bench/soak/release-dry-run`) PASS
    - toàn bộ checklist plan `260305-1458` đã đóng; phần manual host-specific giữ ở external release preflight checklist
+16. Hard-cut WezTerm direct runtime dependency (2026-03-06):
+   - refactored terminal core boundary to use internal `chatminal-terminal-core` (vt100 parser)
+   - removed direct wezterm-window linkage from client
+   - established internal terminal state as single source of truth
+17. Non-blocking session creation in native UI (2026-03-06):
+   - fixed window creation timeout under daemon load
+   - improved create-session timeouts for better UX
 
 ## Active
 1. Theo dõi regression qua CI matrix Linux/macOS/Windows sau mỗi batch lớn.

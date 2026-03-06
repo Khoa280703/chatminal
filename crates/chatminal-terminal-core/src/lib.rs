@@ -101,7 +101,9 @@ impl Terminal {
     pub fn resize(&mut self, size: TerminalSize) {
         self.rows = size.rows.max(1);
         self.cols = size.cols.max(1);
-        self.parser.screen_mut().set_size(self.rows as u16, self.cols as u16);
+        self.parser
+            .screen_mut()
+            .set_size(self.rows as u16, self.cols as u16);
         self.rebuild_screen_cache();
     }
 

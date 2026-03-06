@@ -1,14 +1,14 @@
 # Codebase Summary
 
-Last updated: 2026-03-05
+Last updated: 2026-03-06
 
 ## Runtime baseline
 Chatminal hiện chỉ dùng runtime native Rust:
-- `apps/chatminald`
-- `apps/chatminal-app`
-- `crates/chatminal-terminal-core`
-- `crates/chatminal-protocol`
-- `crates/chatminal-store`
+- `apps/chatminald` (~1,704 LOC, 15 files)
+- `apps/chatminal-app` (~3,097+ LOC, 45+ files)
+- `crates/chatminal-terminal-core` (208 LOC, VT100 parser)
+- `crates/chatminal-protocol` (316 LOC)
+- `crates/chatminal-store` (891 LOC)
 
 ## High-signal files
 - `apps/chatminald/src/main.rs`: daemon entrypoint
@@ -28,6 +28,8 @@ Chatminal hiện chỉ dùng runtime native Rust:
 - `apps/chatminal-app/src/ipc/transport/unix.rs`: UDS client connector
 - `apps/chatminal-app/src/ipc/transport/windows.rs`: Named Pipe client connector
 - `apps/chatminal-app/src/input/pty_key_translator.rs`: key event -> PTY byte translation
+- `apps/chatminal-app/src/input/ime_commit_deduper.rs`: IME commit deduplication logic
+- `apps/chatminal-app/src/input/ime_composition_state.rs`: IME composition state tracking
 - `apps/chatminal-app/src/terminal_wezterm_attach_frame_renderer.rs`: attach TUI frame rendering utilities
 - `apps/chatminal-app/src/terminal_quality_benchmark/runner.rs`: RTT benchmark runner (`bench-rtt-wezterm`)
 - `apps/chatminal-app/src/terminal_quality_benchmark/stats.rs`: percentile/statistics + benchmark report
@@ -37,7 +39,9 @@ Chatminal hiện chỉ dùng runtime native Rust:
 - `apps/chatminal-app/src/window/native_window_wezterm.rs`: eframe window shell
 - `apps/chatminal-app/src/window/native_window_wezterm_controller.rs`: window state hydration/event sync
 - `apps/chatminal-app/src/window/native_window_wezterm_actions.rs`: window session actions/input/resize
+- `apps/chatminal-app/src/window/native_window_wezterm_input_worker.rs`: async input worker for window
 - `apps/chatminal-app/src/window/native_window_wezterm_reducer.rs`: pure reducer logic + unit tests cho window flow
+- `apps/chatminal-app/src/terminal_workspace_view_model.rs`: workspace TUI view model
 - `crates/chatminal-protocol/src/lib.rs`: protocol contracts
 - `crates/chatminal-store/src/lib.rs`: SQLite persistence API
 - `apps/chatminald/src/metrics.rs`: daemon runtime counters (request/event/broadcast/drop + input backpressure)

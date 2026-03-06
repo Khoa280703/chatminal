@@ -5,11 +5,14 @@ Last updated: 2026-03-05
 ## Topology
 ```text
 chatminal-app (native client)
+  -> internal terminal-core (chatminal-terminal-core crate, vt100 parser)
   -> local IPC (UDS / Named Pipe)
 chatminald (daemon)
   -> portable-pty sessions
   -> sqlite store (profiles/sessions/scrollback)
 ```
+
+**Note:** Direct WezTerm runtime dependency has been hard-cut. Internal terminal core is now the source of truth for terminal state parsing and management.
 
 ## Runtime flow
 1. Client connect daemon endpoint.

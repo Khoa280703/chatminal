@@ -7,9 +7,9 @@ use crate::terminal_workspace_binding_runtime::{
     apply_event_to_workspace_binding_state, bootstrap_workspace_binding_state,
 };
 
-use super::ChatminalWindowApp;
 use super::input_worker::TerminalInputWorker;
 use super::reducer::choose_selected_session_id;
+use super::{ChatminalWindowApp, debug_native_window_log};
 
 impl ChatminalWindowApp {
     pub(super) fn new(
@@ -78,6 +78,7 @@ impl ChatminalWindowApp {
                 }
                 Ok(None) => return changed,
                 Err(err) => {
+                    debug_native_window_log(&format!("poll_daemon_events error: {err}"));
                     self.last_error = Some(format!("event stream error: {err}"));
                     return changed;
                 }
@@ -87,6 +88,7 @@ impl ChatminalWindowApp {
     }
 
     pub(super) fn reload_workspace(&mut self) {
+        debug_native_window_log("reload_workspace start");
         match bootstrap_workspace_binding_state(
             &self.client,
             &mut self.pane_registry,
@@ -99,8 +101,12 @@ impl ChatminalWindowApp {
                 self.last_error = None;
                 self.render_dirty = true;
                 self.normalize_selection();
+                debug_native_window_log("reload_workspace ok");
             }
-            Err(err) => self.last_error = Some(format!("reload workspace failed: {err}")),
+            Err(err) => {
+                debug_native_window_log(&format!("reload_workspace error: {err}"));
+                self.last_error = Some(format!("reload workspace failed: {err}"));
+            }
         }
     }
 

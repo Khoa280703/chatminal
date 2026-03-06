@@ -1,9 +1,9 @@
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
+use chatminal_protocol::CreateSessionResponse;
 use eframe::{NativeOptions, egui};
 use egui::{RichText, TextStyle, ViewportBuilder};
-use chatminal_protocol::CreateSessionResponse;
 
 use crate::config::{InputPipelineMode, parse_usize};
 use crate::input::{ImeCommitDeduper, ImeCompositionState};
@@ -142,7 +142,10 @@ impl eframe::App for ChatminalWindowApp {
                             .hint_text("New session name"),
                     );
                     if ui
-                        .add_enabled(self.pending_session_create.is_none(), egui::Button::new("+"))
+                        .add_enabled(
+                            self.pending_session_create.is_none(),
+                            egui::Button::new("+"),
+                        )
                         .clicked()
                     {
                         self.create_session();
@@ -234,5 +237,21 @@ impl ChatminalWindowApp {
         if std::fs::write(path, "ready\n").is_ok() {
             self.legacy_ready_marker_written = true;
         }
+    }
+}
+
+pub(super) fn debug_native_window_enabled() -> bool {
+    std::env::var("CHATMINAL_DEBUG_NATIVE_WINDOW")
+        .ok()
+        .map(|value| {
+            let normalized = value.trim().to_ascii_lowercase();
+            matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
+        })
+        .unwrap_or(false)
+}
+
+pub(super) fn debug_native_window_log(message: &str) {
+    if debug_native_window_enabled() {
+        eprintln!("chatminal-app window-debug: {message}");
     }
 }

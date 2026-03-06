@@ -119,10 +119,14 @@ impl StateInner {
             .retain(|_, tx| match tx.try_send(frame.clone()) {
                 Ok(_) => true,
                 Err(std_mpsc::TrySendError::Full(_)) => {
+                    log::warn!("dropping daemon broadcast client because outbound queue is full");
                     metrics.inc_dropped_clients_full_total();
                     false
                 }
                 Err(std_mpsc::TrySendError::Disconnected(_)) => {
+                    log::warn!(
+                        "dropping daemon broadcast client because outbound queue is disconnected"
+                    );
                     metrics.inc_dropped_clients_disconnected_total();
                     false
                 }
