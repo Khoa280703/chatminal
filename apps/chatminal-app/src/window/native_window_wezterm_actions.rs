@@ -16,6 +16,7 @@ use super::{CHAR_HEIGHT_PX, CHAR_WIDTH_PX, ChatminalWindowApp};
 
 const RESIZE_DEBOUNCE_MS: u64 = 120;
 const RESIZE_TIMEOUT_MS: u64 = 150;
+const CREATE_SESSION_TIMEOUT_SECS: u64 = 20;
 
 impl ChatminalWindowApp {
     pub(super) fn activate_session(&mut self, session_id: &str) {
@@ -58,7 +59,7 @@ impl ChatminalWindowApp {
                 cwd: None,
                 persist_history: Some(false),
             },
-            Duration::from_secs(5),
+            Duration::from_secs(CREATE_SESSION_TIMEOUT_SECS),
         );
         match response {
             Ok(Response::SessionCreate(value)) => {
@@ -67,7 +68,16 @@ impl ChatminalWindowApp {
                 self.activate_session(&value.session_id);
             }
             Ok(other) => self.last_error = Some(format!("unexpected create response: {:?}", other)),
-            Err(err) => self.last_error = Some(format!("create session failed: {err}")),
+            Err(err) => {
+                self.last_error = Some(if err.contains("request timeout") {
+                    format!(
+                        "create session timeout sau {}s (daemon đang bận, thử lại)",
+                        CREATE_SESSION_TIMEOUT_SECS
+                    )
+                } else {
+                    format!("create session failed: {err}")
+                })
+            }
         }
     }
 
