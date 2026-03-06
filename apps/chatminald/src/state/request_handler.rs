@@ -214,6 +214,14 @@ impl StateInner {
                 Ok(Response::Empty)
             }
             Request::SessionInputWrite { session_id, data } => {
+                if debug_daemon_io_enabled() {
+                    log::info!(
+                        "daemon-io session_input_write session_id={} len={} text={:?}",
+                        session_id,
+                        data.len(),
+                        data
+                    );
+                }
                 if data.len() > MAX_INPUT_BYTES {
                     return Err(format!(
                         "input payload too large ({} bytes > {} bytes)",

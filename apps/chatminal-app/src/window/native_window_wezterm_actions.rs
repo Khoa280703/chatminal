@@ -511,10 +511,18 @@ impl ChatminalWindowApp {
         let mut changed = false;
         while let Some(result) = self.input_worker.try_recv() {
             if let Some(err) = result.error {
+                debug_native_window_log(&format!(
+                    "poll_input_worker_results error session_id={} bytes={}: {}",
+                    result.session_id, result.bytes, err
+                ));
                 self.last_error = Some(format!("send input failed: {err}"));
                 continue;
             }
 
+            debug_native_window_log(&format!(
+                "poll_input_worker_results ok session_id={} bytes={}",
+                result.session_id, result.bytes
+            ));
             let pane_id = self
                 .pane_registry
                 .ensure_pane_for_session(&result.session_id);
