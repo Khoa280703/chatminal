@@ -59,6 +59,9 @@ Last updated: 2026-03-06
 17. Non-blocking session creation in native UI (2026-03-06):
    - fixed window creation timeout under daemon load
    - improved create-session timeouts for better UX
+18. macOS native window input recovery (2026-03-06):
+   - giữ daemon IPC ổn định hơn trên Unix socket macOS khi client reconnect/create session
+   - tắt terminal IME sync trên macOS để ASCII typing không rơi vào preedit sau ký tự đầu tiên
 
 ## Active
 1. Theo dõi regression qua CI matrix Linux/macOS/Windows sau mỗi batch lớn.

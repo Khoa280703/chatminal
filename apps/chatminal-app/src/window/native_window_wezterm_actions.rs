@@ -436,6 +436,11 @@ impl ChatminalWindowApp {
     }
 
     pub(super) fn sync_terminal_ime(&self, ctx: &egui::Context, terminal_rect: Option<egui::Rect>) {
+        // On macOS, exposing the terminal as an IME target causes subsequent ASCII keystrokes
+        // to stay in preedit instead of reaching the PTY as direct text commits.
+        if cfg!(target_os = "macos") {
+            return;
+        }
         if !self.terminal_has_focus {
             return;
         }

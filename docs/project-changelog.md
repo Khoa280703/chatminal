@@ -3,6 +3,9 @@
 ## 2026-03-06
 
 ### Changed
+- Native window macOS:
+  - daemon không còn tự coi `WouldBlock` trên Unix socket là disconnect, giảm lỗi reconnect/freeze khi tạo session mới.
+  - tắt IME target sync cho terminal pane native để ký tự ASCII không bị kẹt ở `ime(preedit ...)` sau ký tự đầu tiên.
 - Hard-cut runtime/build link tới WezTerm:
   - bỏ dependency `wezterm-term` path từ app.
   - bỏ launcher/proxy runtime ngoài (`window-wezterm-gui`, `proxy-wezterm-session`).
