@@ -148,17 +148,12 @@ fn libpng() {
         cfg.file(libpng_dir.join(file));
     }
 
-    if let Ok(arch) = env::var("CARGO_CFG_TARGET_ARCH") {
-        match arch.as_str() {
-            "aarch64" | "arm" => {
-                cfg.file(libpng_dir.join("arm/arm_init.c"))
-                    .file(libpng_dir.join("arm/filter_neon.S"))
-                    .file(libpng_dir.join("arm/filter_neon_intrinsics.c"))
-                    .file(libpng_dir.join("arm/palette_neon_intrinsics.c"));
-            }
-            _ => {}
-        }
-    }
+    // This vendored build uses libpng's prebuilt configuration header, which
+    // disables target-specific acceleration paths (`PNG_TARGET_SPECIFIC_CODE=0`).
+    // Compiling the ARM NEON sources anyway breaks Apple Silicon builds because
+    // those translation units are intended to be included from arm_init.c under
+    // matching libpng feature defines, not built unconditionally as standalone
+    // files.
 
     cfg.include(&zlib_dir);
     cfg.include(&libpng_dir);
