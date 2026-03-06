@@ -3,7 +3,7 @@
 Last updated: 2026-03-04
 
 ## Product goal
-Xây terminal workspace local theo kiến trúc daemon-first, dùng wezterm-term để xử lý terminal state ổn định.
+Xây terminal workspace local theo kiến trúc daemon-first, dùng terminal core nội bộ để xử lý terminal state ổn định.
 
 ## Scope (current)
 - Multi-profile

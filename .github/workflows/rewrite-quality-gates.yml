@@ -60,14 +60,12 @@ jobs:
           brew update
           brew install coreutils tmux neovim htop btop fzf
 
-      - name: Window smoke (Linux, headless)
+      - name: Window smoke (Linux, headless native)
         if: matrix.os == 'ubuntu-latest'
-        run: bash scripts/smoke/window-wezterm-gui-smoke.sh
+        run: bash scripts/smoke/window-wezterm-smoke.sh
 
-      - name: Phase 08 window backend killswitch verify (Linux)
+      - name: Phase 08 native window startup verify (Linux)
         if: matrix.os == 'ubuntu-latest'
-        env:
-          CHATMINAL_PHASE08_REQUIRE_LEGACY_HEADLESS: "1"
         run: bash scripts/migration/phase08-wezterm-gui-killswitch-verify.sh
 
       - name: Phase 02 benchmark gate (Linux, release)

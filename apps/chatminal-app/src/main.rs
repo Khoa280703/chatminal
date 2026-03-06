@@ -10,18 +10,15 @@ mod terminal_wezterm_commands;
 mod terminal_wezterm_core;
 mod terminal_wezterm_dashboard_tui;
 mod terminal_wezterm_dashboard_watch;
-mod terminal_wezterm_gui_launcher;
-mod terminal_wezterm_gui_proxy;
 mod terminal_workspace_ascii_renderer;
 mod terminal_workspace_binding_runtime;
 mod terminal_workspace_view_model;
 mod window;
-mod window_wezterm_gui;
 
 use std::time::Duration;
 
 use chatminal_protocol::Request;
-use config::{AppConfig, WindowBackend, parse_usize, usage};
+use config::{AppConfig, parse_usize, usage};
 use ipc::ChatminalClient;
 use terminal_pane_adapter::{SessionPaneRegistry, StdoutJsonTerminalPaneAdapter, pump_events};
 use terminal_quality_benchmark::{run_bench_rtt_wezterm, summary_line};
@@ -36,8 +33,6 @@ use terminal_wezterm_commands::{
 };
 use terminal_wezterm_dashboard_tui::run_dashboard_tui_wezterm;
 use terminal_wezterm_dashboard_watch::run_dashboard_watch_wezterm;
-use terminal_wezterm_gui_launcher::run_window_wezterm_gui;
-use terminal_wezterm_gui_proxy::run_proxy_wezterm_session;
 
 const SUPPORTED_COMMANDS: &[&str] = &[
     "workspace",
@@ -55,7 +50,7 @@ const SUPPORTED_COMMANDS: &[&str] = &[
     "dashboard-watch-wezterm",
     "dashboard-tui-wezterm",
     "attach-wezterm",
-    "window-wezterm-gui",
+    "window",
     "bench-rtt-wezterm",
 ];
 
@@ -77,17 +72,18 @@ fn run() -> Result<(), String> {
     }
 
     let command = args[1].as_str();
-    let is_internal_proxy_command = command == "proxy-wezterm-session";
-    let allow_internal_proxy = is_internal_proxy_allowed();
-    let is_supported = SUPPORTED_COMMANDS.contains(&command)
-        || (is_internal_proxy_command && allow_internal_proxy);
-    if matches!(command, "--help" | "-h" | "help") || !is_supported {
+    let is_supported = SUPPORTED_COMMANDS.contains(&command);
+    if matches!(command, "--help" | "-h" | "help") {
         println!("{}", usage());
         return Ok(());
     }
+    if !is_supported {
+        println!("{}", usage());
+        return Err(format!("unsupported command: {command}"));
+    }
 
     let config = AppConfig::from_env()?;
-    if command == "window-wezterm-gui" {
+    if is_window_command(command) {
         return run_window_by_backend(&config, &args);
     }
 
@@ -226,7 +222,6 @@ fn run() -> Result<(), String> {
             &mut pane_registry,
             config.input_pipeline_mode,
         ),
-        "proxy-wezterm-session" => run_proxy_wezterm_session(&client, &args),
         "bench-rtt-wezterm" => {
             let report = run_bench_rtt_wezterm(&client, &args)?;
             println!("{}", summary_line(&report));
@@ -236,20 +231,12 @@ fn run() -> Result<(), String> {
     }
 }
 
-fn is_internal_proxy_allowed() -> bool {
-    std::env::var("CHATMINAL_INTERNAL_PROXY")
-        .ok()
-        .map(|value| value.trim() == "1")
-        .unwrap_or(false)
+fn is_window_command(command: &str) -> bool {
+    command == "window"
 }
 
 fn run_window_by_backend(config: &AppConfig, args: &[String]) -> Result<(), String> {
-    match config.window_backend {
-        WindowBackend::WeztermGui => run_window_wezterm_gui(config, args),
-        WindowBackend::LegacyEgui => {
-            window::run_window_wezterm(&config.endpoint, args, config.input_pipeline_mode)
-        }
-    }
+    window::run_window_wezterm(&config.endpoint, args, config.input_pipeline_mode)
 }
 
 fn print_pretty_json<T: serde::Serialize>(value: &T) -> Result<(), String> {

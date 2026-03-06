@@ -23,7 +23,7 @@ chatminald (daemon)
    - metrics ghi lại qua `input_queue_full_total`, `input_retry_total`, `input_drop_total`
 
 ## Main components
-- Client: command bridge + wezterm-term pane state + TUI/dashboard + window runtime `window-wezterm-gui` (launcher path; fallback `CHATMINAL_WINDOW_BACKEND=legacy`).
+- Client: command bridge + internal terminal core pane state + TUI/dashboard + native window runtime `window`.
 - Daemon: request parser, session lifecycle, persistence, health events + runtime metrics instrumentation.
 - Input backpressure runtime: request ghi input của session vẫn giữ daemon-first invariant, có ưu tiên control-key path và telemetry counters để phục vụ soak/incident analysis.
 - Transport layer:

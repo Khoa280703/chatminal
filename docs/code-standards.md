@@ -11,9 +11,10 @@ Scope: `apps/*` + `crates/*`.
 
 ## Boundaries
 - `apps/chatminald`: session manager, PTY runtime, IPC server, event publish.
-- `apps/chatminal-app`: native client commands, wezterm-term state adapter, dashboard/TUI.
+- `apps/chatminal-app`: native client commands, terminal state adapter, dashboard/TUI/window.
 - `crates/chatminal-protocol`: request/response/event models.
 - `crates/chatminal-store`: SQLite schema + CRUD store.
+- `crates/chatminal-terminal-core`: internal terminal parser/state core (không phụ thuộc WezTerm runtime).
 
 ## Naming
 - Rust: dùng `snake_case` cho function/field; tên type dùng kiểu CamelCase chuẩn của Rust.
@@ -28,10 +29,10 @@ Scope: `apps/*` + `crates/*`.
    - `attach` và `window` phải dùng cùng semantic key/text mapping contract.
    - `CHATMINAL_INPUT_PIPELINE_MODE=legacy|wezterm` chỉ đổi client-side translation path, không được bypass daemon.
    - IME commit dedupe phải giữ nguyên rule: không double-send giữa text-event và ime-commit-event tương ứng.
-6. Window backend invariant:
-   - command public luôn đi qua `window-wezterm-gui`.
-   - `CHATMINAL_WINDOW_BACKEND=wezterm-gui|legacy` chỉ đổi UI runtime path; không được bypass daemon ownership.
-   - fallback/rollback phải verify bằng script migration (`phase08`).
+6. Window startup invariant:
+   - command public luôn đi qua `window`.
+   - app window không spawn runtime bên ngoài; mọi session ownership vẫn thuộc daemon.
+   - startup verify bằng script migration (`phase08`).
 
 ## Validation commands
 ```bash

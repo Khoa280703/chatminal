@@ -19,7 +19,7 @@ help:
 	@echo "  make daemon                                 # Run daemon"
 	@echo "  make daemon-reset                           # Kill old daemon, clean socket, run daemon"
 	@echo "  make dashboard                              # Run TUI dashboard"
-	@echo "  make window                                 # Run WezTerm GUI window (default runtime)"
+	@echo "  make window                                 # Run native Chatminal window"
 	@echo "  make attach [SESSION_ID=<id>]               # Attach interactive terminal (F10 to quit)"
 	@echo "  make workspace                              # Print workspace snapshot"
 	@echo "  make sessions                               # Print sessions list"
@@ -27,7 +27,7 @@ help:
 	@echo "  make activate SESSION_ID='<id>'             # Activate wezterm session"
 	@echo "  make check                                  # cargo check --workspace"
 	@echo "  make test                                   # Run core test suites"
-	@echo "  make smoke-window                           # Run wezterm-gui launcher smoke (mock wezterm)"
+	@echo "  make smoke-window                           # Run native window smoke (xvfb)"
 	@echo "  make bench-rtt                              # Run quick RTT benchmark command"
 	@echo "  make bench-phase02                          # Run phase-02 RTT+RSS hard gate script"
 	@echo "  make fidelity-smoke                         # Run phase-05 fidelity smoke (JSON report)"
@@ -35,7 +35,7 @@ help:
 	@echo "  make fidelity-matrix-smoke-relaxed          # Run phase-03 fidelity matrix smoke non-strict"
 	@echo "  make fidelity-input-ime-smoke               # Run phase-06 modifier/input smoke + IME manual gate report"
 	@echo "  make phase06-killswitch-verify              # Verify runtime input pipeline rollback path (wezterm/legacy)"
-	@echo "  make phase08-killswitch-verify              # Verify window backend rollback path (wezterm-gui/legacy)"
+	@echo "  make phase08-killswitch-verify              # Verify native window startup gate"
 	@echo "  make soak-smoke                             # Run phase-05 soak smoke (JSON report)"
 	@echo "  make release-dry-run                        # Build release artifacts + checksum + smoke"
 	@echo ""
@@ -62,7 +62,7 @@ dashboard:
 window:
 	@if [ ! -S "$(SOCKET)" ]; then echo "Daemon chưa sẵn sàng tại $(SOCKET). Hãy chạy: make daemon"; exit 1; fi
 	@$(DAEMON_ENDPOINT) cargo run --quiet --manifest-path $(APP_MANIFEST) -- workspace >/dev/null || { echo "Daemon không phản hồi. Hãy chạy lại: make daemon-reset"; exit 1; }
-	$(DAEMON_ENDPOINT) cargo run --manifest-path $(APP_MANIFEST) -- window-wezterm-gui
+	$(DAEMON_ENDPOINT) cargo run --manifest-path $(APP_MANIFEST) -- window
 
 attach:
 	@if [ ! -S "$(SOCKET)" ]; then echo "Daemon chưa sẵn sàng tại $(SOCKET). Hãy chạy: make daemon"; exit 1; fi
@@ -96,7 +96,7 @@ test:
 	cargo test --manifest-path apps/chatminal-app/Cargo.toml
 
 smoke-window:
-	bash scripts/smoke/window-wezterm-gui-smoke.sh
+	bash scripts/smoke/window-wezterm-smoke.sh
 
 bench-rtt:
 	@if [ ! -S "$(SOCKET)" ]; then echo "Daemon chưa sẵn sàng tại $(SOCKET). Hãy chạy: make daemon"; exit 1; fi

@@ -1,16 +1,18 @@
 # Chatminal
 
-Chatminal hiện dùng kiến trúc native Rust theo hướng WezTerm-first.
+Chatminal hiện dùng kiến trúc native Rust với terminal core nội bộ.
 
 ## Runtime hiện tại
-- Native client: `apps/chatminal-app` (dùng `wezterm-term` để giữ terminal state)
+- Native client: `apps/chatminal-app` (dùng `chatminal-terminal-core` để giữ terminal state)
 - Daemon: `apps/chatminald` (quản lý session/profile/PTY/history)
+- Terminal core: `crates/chatminal-terminal-core`
 - Shared contracts: `crates/chatminal-protocol`
 - Shared persistence: `crates/chatminal-store` (SQLite)
 
 ## Cấu trúc repo
-- `apps/chatminal-app/`: native client CLI/TUI cho runtime WezTerm
+- `apps/chatminal-app/`: native client CLI/TUI/window
 - `apps/chatminald/`: daemon local IPC + PTY runtime
+- `crates/chatminal-terminal-core/`: terminal parser/state nội bộ
 - `crates/chatminal-protocol/`: request/response/event types
 - `crates/chatminal-store/`: SQLite store (profiles/sessions/scrollback)
 - `docs/`: tài liệu kiến trúc, roadmap, changelog
@@ -18,9 +20,7 @@ Chatminal hiện dùng kiến trúc native Rust theo hướng WezTerm-first.
 ## Yêu cầu
 - Rust stable (khuyến nghị >= 1.93)
 - Linux/macOS
-- WezTerm runtime:
-  - Ưu tiên: có binary `wezterm` trong `PATH` hoặc set `CHATMINAL_WEZTERM_BIN`
-  - Dev fallback: nếu thiếu binary, app sẽ build từ source đã vendored sẵn tại `third_party/wezterm`
+- Không yêu cầu cài WezTerm runtime.
 
 ## Chạy local
 Nhanh nhất (khuyến nghị):
@@ -44,9 +44,9 @@ Thoát attach bằng `F10`.
 make window
 ```
 
-`make window` mở **WezTerm GUI** runtime mặc định.
+`make window` mở native window của Chatminal.
 
-Smoke cho `window-wezterm-gui` (mock WezTerm launcher, không cần GUI thật):
+Smoke cho native window (headless với xvfb):
 ```bash
 make smoke-window
 ```
@@ -150,8 +150,7 @@ cargo run --manifest-path apps/chatminal-app/Cargo.toml -- activate-wezterm <ses
 - `CHATMINAL_DEFAULT_ROWS`
 - `CHATMINAL_HEALTH_INTERVAL_MS`
 - `CHATMINAL_INPUT_PIPELINE_MODE` (`wezterm` hoặc `legacy`)
-- `CHATMINAL_WINDOW_BACKEND` (`wezterm-gui` hoặc `legacy`)
-- `CHATMINAL_WEZTERM_BIN` (optional: path tới binary `wezterm` khi không có trong `PATH`)
+- `CHATMINAL_WINDOW_BACKEND` (`legacy`)
 - `CHATMINAL_BENCH_ENFORCE_HARD_GATE` (script `bench-phase02`, mặc định `1`)
 - `CHATMINAL_BENCH_PROFILE` (script `bench-phase02`, `release` hoặc `dev`, mặc định `release`)
 - `CHATMINAL_BENCH_SHELL` (script `bench-phase02`, mặc định `/bin/sh` để đo RTT ổn định)

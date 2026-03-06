@@ -7,7 +7,7 @@ Last updated: 2026-03-05
 | --- | --- |
 | Workspace chuyển sang native runtime-only | Completed |
 | Daemon runtime (`chatminald`) | Completed |
-| Native client + wezterm-term integration | Completed |
+| Native client + internal terminal-core integration | Completed |
 | Full native window UX parity | Planned |
 | Cross-platform transport hardening (UDS + Named Pipe) | Completed |
 | Input pipeline rollout/rollback (Phase 06) | Completed |

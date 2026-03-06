@@ -6,6 +6,7 @@ Last updated: 2026-03-05
 Chatminal hiện chỉ dùng runtime native Rust:
 - `apps/chatminald`
 - `apps/chatminal-app`
+- `crates/chatminal-terminal-core`
 - `crates/chatminal-protocol`
 - `crates/chatminal-store`
 
@@ -30,7 +31,8 @@ Chatminal hiện chỉ dùng runtime native Rust:
 - `apps/chatminal-app/src/terminal_wezterm_attach_frame_renderer.rs`: attach TUI frame rendering utilities
 - `apps/chatminal-app/src/terminal_quality_benchmark/runner.rs`: RTT benchmark runner (`bench-rtt-wezterm`)
 - `apps/chatminal-app/src/terminal_quality_benchmark/stats.rs`: percentile/statistics + benchmark report
-- `apps/chatminal-app/src/terminal_wezterm_core.rs`: wezterm-term adapter
+- `apps/chatminal-app/src/terminal_wezterm_core.rs`: terminal pane adapter (dùng terminal core nội bộ)
+- `crates/chatminal-terminal-core/src/lib.rs`: internal terminal parser/state wrapper
 - `apps/chatminal-app/src/terminal_wezterm_dashboard_tui.rs`: interactive TUI dashboard
 - `apps/chatminal-app/src/window/native_window_wezterm.rs`: eframe window shell
 - `apps/chatminal-app/src/window/native_window_wezterm_controller.rs`: window state hydration/event sync

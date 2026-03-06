@@ -101,7 +101,7 @@ impl eframe::App for ChatminalWindowApp {
         egui::TopBottomPanel::top("top_toolbar").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.label(
-                    RichText::new("Chatminal Native (WezTerm Core)")
+                    RichText::new("Chatminal Native Terminal")
                         .text_style(TextStyle::Monospace)
                         .strong(),
                 );

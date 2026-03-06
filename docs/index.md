@@ -1,6 +1,6 @@
 # Docs Index
 
-Tài liệu này phản ánh runtime hiện tại: `chatminald + chatminal-app (wezterm-term)`.
+Tài liệu này phản ánh runtime hiện tại: `chatminald + chatminal-app + chatminal-terminal-core`.
 
 - [Project Overview and PDR](./project-overview-pdr.md)
 - [System Architecture](./system-architecture.md)

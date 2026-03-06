@@ -1,5 +1,17 @@
 # Project Changelog
 
+## 2026-03-06
+
+### Changed
+- Hard-cut runtime/build link tới WezTerm:
+  - bỏ dependency `wezterm-term` path từ app.
+  - bỏ launcher/proxy runtime ngoài (`window-wezterm-gui`, `proxy-wezterm-session`).
+  - window entrypoint thống nhất: `chatminal-app window` (native).
+- `crates/chatminal-terminal-core` chuyển sang parser `vt100` (independent crate) để giữ ANSI behavior tốt hơn parser tự viết thô.
+- `Makefile` và CI workflow chuyển smoke window sang native path (`scripts/smoke/window-wezterm-smoke.sh`).
+- `phase08` migration script refactor thành native startup verify; thêm cleanup guard an toàn cho `DATA_DIR`.
+- `README` + docs core (`index`, `code-standards`, `codebase-summary`, `system-architecture`, `project-overview-pdr`, `project-roadmap`) cập nhật theo runtime mới.
+
 ## 2026-03-05
 
 ### Added
