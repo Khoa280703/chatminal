@@ -12,6 +12,7 @@ use crate::terminal_session_commands::activate_session_with_snapshot;
 
 use super::input_mapper::{
     map_egui_key_event_to_pty_input, map_egui_key_event_to_pty_input_legacy,
+    map_egui_printable_key_event_to_text_input,
 };
 use super::reducer::compute_terminal_grid;
 use super::{CHAR_HEIGHT_PX, CHAR_WIDTH_PX, ChatminalWindowApp, debug_native_window_log};
@@ -166,6 +167,16 @@ impl ChatminalWindowApp {
                 EguiEvent::Ime(egui::ImeEvent::Commit(text)) if !text.is_empty()
             )
         });
+        let has_ime_activity = events
+            .iter()
+            .any(|event| matches!(event, EguiEvent::Ime(_)));
+        let has_text_event = events.iter().any(|event| match event {
+            EguiEvent::Text(text) | EguiEvent::Paste(text) => !text.is_empty(),
+            EguiEvent::Ime(egui::ImeEvent::Commit(text)) => !text.is_empty(),
+            _ => false,
+        });
+        let allow_macos_printable_key_fallback =
+            cfg!(target_os = "macos") && !has_text_event && !has_ime_activity;
         let widget_has_focus = ctx.memory(|memory| memory.focused().is_some());
         let allow_blur_ime_commit = !self.terminal_has_focus
             && self.ime_blur_flush_armed
@@ -262,6 +273,14 @@ impl ChatminalWindowApp {
                         continue;
                     }
                     if let Some(data) = map_egui_key_event_to_pty_input(key, modifiers, repeat) {
+                        buffered_payload.push_str(&data);
+                    } else if allow_macos_printable_key_fallback
+                        && let Some(data) =
+                            map_egui_printable_key_event_to_text_input(key, modifiers, repeat)
+                    {
+                        debug_native_window_log(&format!(
+                            "macos printable key fallback key={key:?} modifiers={modifiers:?}"
+                        ));
                         buffered_payload.push_str(&data);
                     }
                 }
