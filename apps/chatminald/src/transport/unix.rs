@@ -17,7 +17,12 @@ impl TransportListener for LocalListener {
 
     fn accept_stream(&self) -> Result<Option<Self::Stream>, String> {
         match self.listener.accept() {
-            Ok((stream, _)) => Ok(Some(stream)),
+            Ok((stream, _)) => {
+                stream
+                    .set_nonblocking(false)
+                    .map_err(|err| format!("set accepted unix stream blocking failed: {err}"))?;
+                Ok(Some(stream))
+            }
             Err(err)
                 if matches!(
                     err.kind(),

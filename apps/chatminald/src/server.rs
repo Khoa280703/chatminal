@@ -88,9 +88,21 @@ fn handle_client(
     let mut pending = Vec::<u8>::new();
 
     loop {
-        let read = stream
-            .read(&mut read_buf)
-            .map_err(|err| format!("read client bytes failed: {err}"))?;
+        let read = match stream.read(&mut read_buf) {
+            Ok(value) => value,
+            Err(err)
+                if matches!(
+                    err.kind(),
+                    std::io::ErrorKind::WouldBlock
+                        | std::io::ErrorKind::TimedOut
+                        | std::io::ErrorKind::Interrupted
+                ) =>
+            {
+                thread::sleep(Duration::from_millis(10));
+                continue;
+            }
+            Err(err) => return Err(format!("read client bytes failed: {err}")),
+        };
         if read == 0 {
             break;
         }
