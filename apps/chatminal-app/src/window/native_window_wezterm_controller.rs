@@ -37,6 +37,7 @@ impl ChatminalWindowApp {
         });
 
         Ok(Self {
+            endpoint: endpoint.to_string(),
             client,
             pane_registry,
             state,
@@ -45,6 +46,7 @@ impl ChatminalWindowApp {
             pane_cols: cols,
             pane_rows: rows,
             new_session_name: String::new(),
+            pending_session_create: None,
             last_error: None,
             input_worker: TerminalInputWorker::spawn(endpoint),
             cached_terminal_text: String::new(),

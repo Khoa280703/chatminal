@@ -1,7 +1,9 @@
+use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use eframe::{NativeOptions, egui};
 use egui::{RichText, TextStyle, ViewportBuilder};
+use chatminal_protocol::CreateSessionResponse;
 
 use crate::config::{InputPipelineMode, parse_usize};
 use crate::input::{ImeCommitDeduper, ImeCompositionState};
@@ -27,6 +29,11 @@ pub(super) const CHAR_WIDTH_PX: f32 = 8.0;
 pub(super) const CHAR_HEIGHT_PX: f32 = 18.0;
 pub(super) const UI_ACTIVE_REPAINT_MS: u64 = 16;
 pub(super) const UI_IDLE_REPAINT_MS: u64 = 33;
+
+pub(super) struct PendingSessionCreate {
+    pub(super) started_at: Instant,
+    pub(super) rx: Receiver<Result<CreateSessionResponse, String>>,
+}
 
 pub fn run_window_wezterm(
     endpoint: &str,
@@ -60,6 +67,7 @@ pub fn run_window_wezterm(
 }
 
 pub(super) struct ChatminalWindowApp {
+    pub(super) endpoint: String,
     pub(super) client: ChatminalClient,
     pub(super) pane_registry: SessionPaneRegistry,
     pub(super) state: WorkspaceBindingState,
@@ -68,6 +76,7 @@ pub(super) struct ChatminalWindowApp {
     pub(super) pane_cols: usize,
     pub(super) pane_rows: usize,
     pub(super) new_session_name: String,
+    pub(super) pending_session_create: Option<PendingSessionCreate>,
     pub(super) last_error: Option<String>,
     pub(super) input_worker: TerminalInputWorker,
     pub(super) cached_terminal_text: String,
@@ -86,6 +95,9 @@ impl eframe::App for ChatminalWindowApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.write_legacy_ready_marker_once();
         let mut should_repaint = self.poll_daemon_events();
+        if self.poll_create_session_result() {
+            should_repaint = true;
+        }
         if should_repaint {
             self.render_dirty = true;
         }
@@ -129,10 +141,19 @@ impl eframe::App for ChatminalWindowApp {
                         egui::TextEdit::singleline(&mut self.new_session_name)
                             .hint_text("New session name"),
                     );
-                    if ui.button("+").clicked() {
+                    if ui
+                        .add_enabled(self.pending_session_create.is_none(), egui::Button::new("+"))
+                        .clicked()
+                    {
                         self.create_session();
                     }
                 });
+                if let Some(pending) = &self.pending_session_create {
+                    ui.label(format!(
+                        "Creating session... {}s",
+                        pending.started_at.elapsed().as_secs()
+                    ));
+                }
                 ui.separator();
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     for session in &self.state.workspace.sessions {

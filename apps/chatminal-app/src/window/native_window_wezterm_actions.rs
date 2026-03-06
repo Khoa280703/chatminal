@@ -1,6 +1,8 @@
-use std::time::Duration;
+use std::sync::mpsc::{self, TryRecvError};
+use std::thread;
+use std::time::{Duration, Instant};
 
-use chatminal_protocol::{Request, Response, SessionStatus};
+use chatminal_protocol::{CreateSessionResponse, Request, Response, SessionStatus};
 use eframe::egui::{self, Event as EguiEvent};
 use egui::output::IMEOutput;
 
@@ -45,38 +47,71 @@ impl ChatminalWindowApp {
     }
 
     pub(super) fn create_session(&mut self) {
+        if self.pending_session_create.is_some() {
+            self.last_error = Some("create session đang chạy".to_string());
+            return;
+        }
         let name = self.new_session_name.trim().to_string();
         if name.is_empty() {
             self.last_error = Some("session name is required".to_string());
             return;
         }
 
-        let response = self.client.request(
-            Request::SessionCreate {
-                name: Some(name),
-                cols: self.pane_cols,
-                rows: self.pane_rows,
-                cwd: None,
-                persist_history: Some(false),
-            },
-            Duration::from_secs(CREATE_SESSION_TIMEOUT_SECS),
-        );
-        match response {
-            Ok(Response::SessionCreate(value)) => {
+        let endpoint = self.endpoint.clone();
+        let cols = self.pane_cols;
+        let rows = self.pane_rows;
+        let request_name = name.clone();
+        let (tx, rx) = mpsc::sync_channel::<Result<CreateSessionResponse, String>>(1);
+        self.pending_session_create = Some(super::PendingSessionCreate {
+            started_at: Instant::now(),
+            rx,
+        });
+        self.last_error = None;
+
+        thread::spawn(move || {
+            let response = request_session_create(&endpoint, request_name, cols, rows);
+            let _ = tx.send(response);
+        });
+    }
+
+    pub(super) fn poll_create_session_result(&mut self) -> bool {
+        let Some(pending) = self.pending_session_create.take() else {
+            return false;
+        };
+        match pending.rx.try_recv() {
+            Ok(Ok(value)) => {
                 self.new_session_name.clear();
+                self.last_error = None;
                 self.reload_workspace();
+                if error_requires_main_client_reconnect(self.last_error.as_deref()) {
+                    let _ = self.reconnect_main_client();
+                    self.reload_workspace();
+                }
                 self.activate_session(&value.session_id);
+                if error_requires_main_client_reconnect(self.last_error.as_deref()) {
+                    let _ = self.reconnect_main_client();
+                    self.activate_session(&value.session_id);
+                }
+                true
             }
-            Ok(other) => self.last_error = Some(format!("unexpected create response: {:?}", other)),
-            Err(err) => {
-                self.last_error = Some(if err.contains("request timeout") {
+            Ok(Err(err)) => {
+                self.last_error = Some(if is_create_request_timeout_error(&err) {
                     format!(
-                        "create session timeout sau {}s (daemon đang bận, thử lại)",
+                        "create session timeout sau {}s (daemon đang bận); kiểm tra sidebar và bấm Reload trước khi tạo lại",
                         CREATE_SESSION_TIMEOUT_SECS
                     )
                 } else {
                     format!("create session failed: {err}")
-                })
+                });
+                true
+            }
+            Err(TryRecvError::Empty) => {
+                self.pending_session_create = Some(pending);
+                false
+            }
+            Err(TryRecvError::Disconnected) => {
+                self.last_error = Some("create session worker disconnected".to_string());
+                true
             }
         }
     }
@@ -441,6 +476,13 @@ impl ChatminalWindowApp {
             }
         }
     }
+
+    fn reconnect_main_client(&mut self) -> Result<(), String> {
+        let client = crate::ipc::ChatminalClient::connect(&self.endpoint)?;
+        self.client = client;
+        Ok(())
+    }
+
 }
 
 fn event_text_payload(event: TerminalInputEvent) -> Option<String> {
@@ -456,6 +498,46 @@ fn event_text_payload(event: TerminalInputEvent) -> Option<String> {
         }
         TerminalInputEvent::KeyChord(_) => None,
     }
+}
+
+fn request_session_create(
+    endpoint: &str,
+    name: String,
+    cols: usize,
+    rows: usize,
+) -> Result<CreateSessionResponse, String> {
+    let client = crate::ipc::ChatminalClient::connect(endpoint)?;
+    let response = client.request(
+        Request::SessionCreate {
+            name: Some(name),
+            cols,
+            rows,
+            cwd: None,
+            persist_history: Some(false),
+        },
+        Duration::from_secs(CREATE_SESSION_TIMEOUT_SECS),
+    );
+    match response {
+        Ok(Response::SessionCreate(value)) => Ok(value),
+        Ok(other) => Err(format!("unexpected create response: {:?}", other)),
+        Err(err) => Err(err),
+    }
+}
+
+fn is_create_request_timeout_error(err: &str) -> bool {
+    err.starts_with("request timeout for id '")
+        || err.starts_with("request timeout while waiting writer lock for id '")
+        || err.starts_with("request timeout while writing id '")
+        || err.starts_with("request timeout while flushing id '")
+}
+
+fn error_requires_main_client_reconnect(error: Option<&str>) -> bool {
+    let Some(error) = error else {
+        return false;
+    };
+    error.contains("reconnect is required")
+        || error.contains("daemon stream disconnected")
+        || error.contains("writer lock poisoned")
 }
 
 fn is_legacy_plain_text_key_payload(modifiers: egui::Modifiers, data: &str) -> bool {
