@@ -200,15 +200,5 @@ fn trim_live_output(buffer: &mut String, max_bytes: usize) {
     buffer.drain(..cut.min(buffer.len()));
 }
 
-pub(super) fn debug_daemon_io_enabled() -> bool {
-    std::env::var("CHATMINAL_DEBUG_DAEMON_IO")
-        .ok()
-        .map(|value| {
-            let normalized = value.trim().to_ascii_lowercase();
-            matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
-        })
-        .unwrap_or(false)
-}
-
 #[cfg(test)]
 mod tests;

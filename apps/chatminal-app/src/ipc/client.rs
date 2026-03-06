@@ -26,7 +26,6 @@ const READ_NEXT_INCOMING_LOCK_SLICE_MS: u64 = 20;
 
 impl ChatminalClient {
     pub fn connect(endpoint: &str) -> Result<Self, String> {
-        ipc_debug_log(&format!("connect endpoint={endpoint}"));
         let stream = connect_local_stream(endpoint)?;
         Self::from_stream(stream)
     }
@@ -158,7 +157,6 @@ impl ChatminalClient {
                 Ok(incoming) => Ok(Some(incoming)),
                 Err(TryRecvError::Empty) => Ok(None),
                 Err(TryRecvError::Disconnected) => {
-                    ipc_debug_log("read_next_incoming zero-timeout: daemon stream disconnected");
                     self.broken.store(true, Ordering::Release);
                     Err("daemon stream disconnected".to_string())
                 }
@@ -183,7 +181,6 @@ impl ChatminalClient {
                 Ok(incoming) => return Ok(Some(incoming)),
                 Err(mpsc::RecvTimeoutError::Timeout) => continue,
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    ipc_debug_log("read_next_incoming timed wait: daemon stream disconnected");
                     self.broken.store(true, Ordering::Release);
                     return Err("daemon stream disconnected".to_string());
                 }
@@ -198,18 +195,12 @@ impl ChatminalClient {
         deadline: Instant,
     ) -> Result<(), String> {
         if self.broken.load(Ordering::Acquire) {
-            ipc_debug_log(&format!(
-                "reject request write because client is already broken request_id={request_id}"
-            ));
             return Err("daemon stream is in failed state; reconnect is required".to_string());
         }
         let mut writer = self.lock_writer_with_deadline(request_id, deadline)?;
         match write_payload_with_deadline(&mut writer, payload, request_id, deadline) {
             Ok(()) => Ok(()),
             Err(err) => {
-                ipc_debug_log(&format!(
-                    "mark client broken after write error request_id={request_id}: {err}"
-                ));
                 self.broken.store(true, Ordering::Release);
                 Err(err)
             }
@@ -339,19 +330,3 @@ fn write_payload_with_deadline(
 #[cfg(test)]
 #[path = "client_tests.rs"]
 mod client_tests;
-
-fn ipc_debug_enabled() -> bool {
-    std::env::var("CHATMINAL_DEBUG_IPC")
-        .ok()
-        .map(|value| {
-            let normalized = value.trim().to_ascii_lowercase();
-            matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
-        })
-        .unwrap_or(false)
-}
-
-fn ipc_debug_log(message: &str) {
-    if ipc_debug_enabled() {
-        eprintln!("chatminal-app ipc-debug: {message}");
-    }
-}

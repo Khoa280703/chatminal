@@ -1,6 +1,6 @@
 use chatminal_protocol::{Event, ServerFrame, SessionStatus};
 
-use super::{DaemonState, debug_daemon_io_enabled, trim_live_output};
+use super::{DaemonState, trim_live_output};
 use crate::session::SessionEvent;
 
 impl DaemonState {
@@ -18,14 +18,6 @@ impl DaemonState {
                 chunk,
                 ts,
             } => {
-                if debug_daemon_io_enabled() {
-                    log::info!(
-                        "daemon-io session_output session_id={} len={} text={:?}",
-                        session_id,
-                        chunk.len(),
-                        chunk
-                    );
-                }
                 let mut frame = None;
                 let mut seq_after = None;
                 let mut persist_history = false;

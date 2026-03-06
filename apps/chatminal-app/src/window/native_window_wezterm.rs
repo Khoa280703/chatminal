@@ -239,19 +239,3 @@ impl ChatminalWindowApp {
         }
     }
 }
-
-pub(super) fn debug_native_window_enabled() -> bool {
-    std::env::var("CHATMINAL_DEBUG_NATIVE_WINDOW")
-        .ok()
-        .map(|value| {
-            let normalized = value.trim().to_ascii_lowercase();
-            matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
-        })
-        .unwrap_or(false)
-}
-
-pub(super) fn debug_native_window_log(message: &str) {
-    if debug_native_window_enabled() {
-        eprintln!("chatminal-app window-debug: {message}");
-    }
-}

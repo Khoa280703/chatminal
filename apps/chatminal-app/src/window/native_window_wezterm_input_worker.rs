@@ -68,12 +68,6 @@ fn worker_loop(
 ) {
     let mut client = ChatminalClient::connect(&endpoint).ok();
     while let Ok(job) = work_rx.recv() {
-        debug_input_worker_log(&format!(
-            "worker recv session_id={} len={} text={:?}",
-            job.session_id,
-            job.data.len(),
-            job.data
-        ));
         let mut attempts = 0usize;
         let result = loop {
             if client.is_none() {
@@ -95,12 +89,6 @@ fn worker_loop(
             let Some(active_client) = client.as_ref() else {
                 continue;
             };
-            debug_input_worker_log(&format!(
-                "worker request session_input_write session_id={} attempt={} len={}",
-                job.session_id,
-                attempts + 1,
-                job.data.len()
-            ));
             match active_client.request(
                 Request::SessionInputWrite {
                     session_id: job.session_id.clone(),
@@ -109,11 +97,6 @@ fn worker_loop(
                 Duration::from_millis(INPUT_WORKER_TIMEOUT_MS),
             ) {
                 Ok(Response::Empty) => {
-                    debug_input_worker_log(&format!(
-                        "worker request ok session_id={} len={}",
-                        job.session_id,
-                        job.data.len()
-                    ));
                     break InputWorkerResult {
                         session_id: job.session_id.clone(),
                         bytes: job.data.len(),
@@ -121,10 +104,6 @@ fn worker_loop(
                     };
                 }
                 Ok(other) => {
-                    debug_input_worker_log(&format!(
-                        "worker request unexpected response session_id={}: {:?}",
-                        job.session_id, other
-                    ));
                     client = None;
                     attempts = attempts.saturating_add(1);
                     if attempts > INPUT_WORKER_RETRY_LIMIT {
@@ -139,10 +118,6 @@ fn worker_loop(
                     }
                 }
                 Err(err) => {
-                    debug_input_worker_log(&format!(
-                        "worker request error session_id={}: {err}",
-                        job.session_id
-                    ));
                     client = None;
                     attempts = attempts.saturating_add(1);
                     if attempts > INPUT_WORKER_RETRY_LIMIT {
@@ -158,21 +133,5 @@ fn worker_loop(
         if result_tx.send(result).is_err() {
             return;
         }
-    }
-}
-
-fn debug_input_worker_enabled() -> bool {
-    std::env::var("CHATMINAL_DEBUG_NATIVE_WINDOW")
-        .ok()
-        .map(|value| {
-            let normalized = value.trim().to_ascii_lowercase();
-            matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
-        })
-        .unwrap_or(false)
-}
-
-fn debug_input_worker_log(message: &str) {
-    if debug_input_worker_enabled() {
-        eprintln!("chatminal-app input-worker-debug: {message}");
     }
 }
