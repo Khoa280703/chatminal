@@ -160,6 +160,19 @@ impl ChatminalWindowApp {
         }
 
         let events = ctx.input(|input| input.events.clone());
+        if super::debug_native_window_enabled() && !events.is_empty() {
+            let summary = events
+                .iter()
+                .map(describe_egui_event_for_debug)
+                .collect::<Vec<_>>()
+                .join(", ");
+            debug_native_window_log(&format!(
+                "input frame terminal_has_focus={} event_count={} events=[{}]",
+                self.terminal_has_focus,
+                events.len(),
+                summary
+            ));
+        }
         self.ime_commit_deduper.start_frame();
         let has_ime_commit_event = events.iter().any(|event| {
             matches!(
@@ -289,6 +302,11 @@ impl ChatminalWindowApp {
         }
         if !buffered_payload.is_empty() {
             let payload = std::mem::take(&mut buffered_payload);
+            debug_native_window_log(&format!(
+                "input payload prepared len={} text={:?}",
+                payload.len(),
+                payload
+            ));
             if self.send_terminal_payload(&payload) {
                 for (kind, text) in deduper_marks.drain(..) {
                     self.ime_commit_deduper.mark_sent(kind, &text);
@@ -313,6 +331,19 @@ impl ChatminalWindowApp {
         let mut changed = false;
         let mut saw_text_like_event = false;
         let mut buffered_payload = String::new();
+        if super::debug_native_window_enabled() && !events.is_empty() {
+            let summary = events
+                .iter()
+                .map(describe_egui_event_for_debug)
+                .collect::<Vec<_>>()
+                .join(", ");
+            debug_native_window_log(&format!(
+                "legacy input frame terminal_has_focus={} event_count={} events=[{}]",
+                self.terminal_has_focus,
+                events.len(),
+                summary
+            ));
+        }
         for event in events {
             match event {
                 EguiEvent::Text(text) | EguiEvent::Paste(text) => {
@@ -364,6 +395,13 @@ impl ChatminalWindowApp {
                 _ => {}
             }
         }
+        if !buffered_payload.is_empty() {
+            debug_native_window_log(&format!(
+                "legacy input payload prepared len={} text={:?}",
+                buffered_payload.len(),
+                buffered_payload
+            ));
+        }
         if !buffered_payload.is_empty() && self.send_terminal_payload(&buffered_payload) {
             changed = true;
         }
@@ -383,6 +421,10 @@ impl ChatminalWindowApp {
         if let (Some(rect), Some(pos)) = (terminal_rect, pointer_pos) {
             let had_focus = self.terminal_has_focus;
             self.terminal_has_focus = rect.contains(pos);
+            debug_native_window_log(&format!(
+                "update_terminal_focus had_focus={} now_focus={} pointer=({}, {})",
+                had_focus, self.terminal_has_focus, pos.x, pos.y
+            ));
             if had_focus && !self.terminal_has_focus {
                 self.ime_composition_state.on_focus_lost();
                 self.ime_blur_flush_armed = true;
@@ -495,6 +537,12 @@ impl ChatminalWindowApp {
             self.last_error = Some("no session selected".to_string());
             return false;
         };
+        debug_native_window_log(&format!(
+            "send_terminal_payload session_id={} len={} text={:?}",
+            session_id,
+            data.len(),
+            data
+        ));
 
         let disconnected = self
             .state
@@ -522,11 +570,19 @@ impl ChatminalWindowApp {
             .enqueue(session_id.clone(), data.to_string())
         {
             Ok(()) => {
+                debug_native_window_log(&format!(
+                    "send_terminal_payload enqueued session_id={} len={}",
+                    session_id,
+                    data.len()
+                ));
                 self.last_error = None;
                 self.render_dirty = true;
                 true
             }
             Err(err) => {
+                debug_native_window_log(&format!(
+                    "send_terminal_payload enqueue error session_id={session_id}: {err}"
+                ));
                 self.last_error = Some(format!("queue input failed: {err}"));
                 false
             }
@@ -622,6 +678,41 @@ impl SessionStatusLabel for SessionStatus {
             SessionStatus::Running => "running",
             SessionStatus::Disconnected => "disconnected",
         }
+    }
+}
+
+fn describe_egui_event_for_debug(event: &EguiEvent) -> String {
+    match event {
+        EguiEvent::Text(text) => format!("text({text:?})"),
+        EguiEvent::Paste(text) => format!("paste(len={})", text.len()),
+        EguiEvent::Copy => "copy".to_string(),
+        EguiEvent::Cut => "cut".to_string(),
+        EguiEvent::Ime(egui::ImeEvent::Enabled) => "ime(enabled)".to_string(),
+        EguiEvent::Ime(egui::ImeEvent::Disabled) => "ime(disabled)".to_string(),
+        EguiEvent::Ime(egui::ImeEvent::Preedit(text)) => {
+            format!("ime(preedit len={})", text.len())
+        }
+        EguiEvent::Ime(egui::ImeEvent::Commit(text)) => {
+            format!("ime(commit {:?})", text)
+        }
+        EguiEvent::Key {
+            key,
+            pressed,
+            repeat,
+            modifiers,
+            ..
+        } => format!("key({key:?} pressed={pressed} repeat={repeat} modifiers={modifiers:?})"),
+        EguiEvent::PointerMoved(pos) => format!("pointer_moved({}, {})", pos.x, pos.y),
+        EguiEvent::PointerButton {
+            pos,
+            button,
+            pressed,
+            ..
+        } => format!(
+            "pointer_button({button:?} pressed={pressed} at={}, {})",
+            pos.x, pos.y
+        ),
+        other => format!("{other:?}"),
     }
 }
 
