@@ -1,9 +1,14 @@
 # Chatminal
 
-Chatminal hiện dùng kiến trúc native Rust với terminal core nội bộ.
+Chatminal hiện dùng `chatminald` cho session/profile/history và một package WezTerm GUI thuộc chính workspace Chatminal làm terminal window mặc định.
 
 ## Runtime hiện tại
-- Native client: `apps/chatminal-app` (dùng `chatminal-terminal-core` để giữ terminal state)
+- Window client mặc định: `apps/chatminal-app` launcher + `apps/chatminal-wezterm-gui`
+- GUI source entry hiện tại: `apps/chatminal-wezterm-gui/src`
+- WezTerm reference pool còn lại: `third_party/wezterm` (reference-only; active build/runtime/workspace của Chatminal không còn phụ thuộc trực tiếp vào subtree này)
+- Native vendored deps hiện tại: `vendor/wezterm-deps`
+- `third_party/wezterm` hiện không còn là workspace standalone được hỗ trợ trong repo này; nó chỉ còn vai trò reference source/history
+- Legacy native window fallback: `apps/chatminal-app` (`eframe/egui`, bật qua `CHATMINAL_WINDOW_BACKEND=legacy`)
 - Daemon: `apps/chatminald` (quản lý session/profile/PTY/history)
 - Terminal core: `crates/chatminal-terminal-core`
 - Shared contracts: `crates/chatminal-protocol`
@@ -11,6 +16,7 @@ Chatminal hiện dùng kiến trúc native Rust với terminal core nội bộ.
 
 ## Cấu trúc repo
 - `apps/chatminal-app/`: native client CLI/TUI/window
+- `apps/chatminal-wezterm-gui/`: package GUI first-party bọc source WezTerm vendored
 - `apps/chatminald/`: daemon local IPC + PTY runtime
 - `crates/chatminal-terminal-core/`: terminal parser/state nội bộ
 - `crates/chatminal-protocol/`: request/response/event types
@@ -20,7 +26,9 @@ Chatminal hiện dùng kiến trúc native Rust với terminal core nội bộ.
 ## Yêu cầu
 - Rust stable (khuyến nghị >= 1.93)
 - Linux/macOS
-- Không yêu cầu cài WezTerm runtime.
+- Không yêu cầu cài WezTerm ngoài máy nếu repo đã có source/vendor hiện tại
+- Lần build GUI đầu tiên sẽ hydrate các C deps vendored còn thiếu vào `vendor/wezterm-deps/` qua `scripts/bootstrap-wezterm-vendor-deps.sh`
+- Linux cần native GUI deps của WezTerm/Wayland/X11 như thường lệ, nhưng trên host dev hiện tại `cargo check -p chatminal-wezterm-gui` đã pass sau khi dọn graph first-party và asset path
 
 ## Chạy local
 Nhanh nhất (khuyến nghị):
@@ -39,14 +47,25 @@ make attach
 ```
 Thoát attach bằng `F10`.
 
-Để mở app cửa sổ native (phase 01):
+Để mở cửa sổ terminal mặc định:
 ```bash
 make window
 ```
 
-`make window` mở native window của Chatminal.
+`make window` cần chạy trong phiên đồ họa có `DISPLAY` hoặc `WAYLAND_DISPLAY`.
 
-Smoke cho native window (headless với xvfb):
+`make window` sẽ mở WezTerm GUI từ package first-party trong workspace. Có thể ép fallback native `egui` bằng:
+```bash
+CHATMINAL_WINDOW_BACKEND=legacy make window
+```
+
+Nếu muốn hydrate vendored C deps trước:
+```bash
+make bootstrap-wezterm-deps
+make verify-third-party-reference-only
+```
+
+Smoke cho WezTerm GUI launcher:
 ```bash
 make smoke-window
 ```
@@ -150,7 +169,8 @@ cargo run --manifest-path apps/chatminal-app/Cargo.toml -- activate-wezterm <ses
 - `CHATMINAL_DEFAULT_ROWS`
 - `CHATMINAL_HEALTH_INTERVAL_MS`
 - `CHATMINAL_INPUT_PIPELINE_MODE` (`wezterm` hoặc `legacy`)
-- `CHATMINAL_WINDOW_BACKEND` (`legacy`)
+- `CHATMINAL_WINDOW_BACKEND` (`wezterm-gui` hoặc `legacy`)
+- `CHATMINAL_WEZTERM_BIN` (override binary WezTerm ngoài; nếu không set launcher sẽ build/chạy `chatminal-wezterm-gui` trong workspace)
 - `CHATMINAL_BENCH_ENFORCE_HARD_GATE` (script `bench-phase02`, mặc định `1`)
 - `CHATMINAL_BENCH_PROFILE` (script `bench-phase02`, `release` hoặc `dev`, mặc định `release`)
 - `CHATMINAL_BENCH_SHELL` (script `bench-phase02`, mặc định `/bin/sh` để đo RTT ổn định)
@@ -167,6 +187,8 @@ cargo run --manifest-path apps/chatminal-app/Cargo.toml -- activate-wezterm <ses
 ## Validate
 ```bash
 cargo check --workspace
+make verify-third-party-reference-only
+cargo check -p chatminal-wezterm-gui
 cargo test --manifest-path crates/chatminal-protocol/Cargo.toml
 cargo test --manifest-path crates/chatminal-store/Cargo.toml
 cargo test --manifest-path apps/chatminald/Cargo.toml

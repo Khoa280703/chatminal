@@ -2,26 +2,36 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-SOCKET="/tmp/chatminald-smoke-$$.sock"
-DAEMON_LOG="/tmp/chatminald-smoke-$$.log"
+RUN_ID="$$"
+SOCKET="/tmp/chatminald-wezterm-gui-smoke-${RUN_ID}.sock"
+DAEMON_LOG="/tmp/chatminald-wezterm-gui-smoke-${RUN_ID}.log"
+WEZTERM_MOCK_LOG="/tmp/chatminal-wezterm-mock-${RUN_ID}.log"
+WEZTERM_MOCK_BIN="/tmp/chatminal-wezterm-mock-${RUN_ID}.sh"
 
 cleanup() {
-  pkill -P $$ || true
-  rm -f "$SOCKET" "$DAEMON_LOG"
+  pkill -P $$ >/dev/null 2>&1 || true
+  rm -f "$SOCKET" "$DAEMON_LOG" "$WEZTERM_MOCK_LOG" "$WEZTERM_MOCK_BIN"
 }
 trap cleanup EXIT
 
-if ! command -v xvfb-run >/dev/null 2>&1; then
-  echo "skip window smoke: xvfb-run is not installed"
-  exit 0
-fi
+cat >"$WEZTERM_MOCK_BIN" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+{
+  echo "argv:\$*"
+  echo "endpoint:\${CHATMINAL_DAEMON_ENDPOINT:-}"
+  echo "internal_proxy:\${CHATMINAL_INTERNAL_PROXY:-}"
+} >"$WEZTERM_MOCK_LOG"
+EOF
+chmod +x "$WEZTERM_MOCK_BIN"
 
 cd "$ROOT_DIR"
 
-CHATMINAL_DAEMON_ENDPOINT="$SOCKET" cargo run --manifest-path apps/chatminald/Cargo.toml >"$DAEMON_LOG" 2>&1 &
+CHATMINAL_DAEMON_ENDPOINT="$SOCKET" \
+  cargo run --manifest-path apps/chatminald/Cargo.toml >"$DAEMON_LOG" 2>&1 &
 DAEMON_PID=$!
 
-for _ in $(seq 1 80); do
+for _ in $(seq 1 120); do
   if [[ -S "$SOCKET" ]]; then
     break
   fi
@@ -34,22 +44,94 @@ if [[ ! -S "$SOCKET" ]]; then
   exit 1
 fi
 
-CHATMINAL_DAEMON_ENDPOINT="$SOCKET" cargo run --manifest-path apps/chatminal-app/Cargo.toml -- workspace >/dev/null
+CHATMINAL_DAEMON_ENDPOINT="$SOCKET" \
+  cargo run --manifest-path apps/chatminal-app/Cargo.toml -- workspace >/dev/null
 
-set +e
-timeout 6s xvfb-run -a \
-  env CHATMINAL_DAEMON_ENDPOINT="$SOCKET" \
-  cargo run --manifest-path apps/chatminal-app/Cargo.toml -- window 200 120 32 >/tmp/chatminal-window-smoke.log 2>&1
-WINDOW_EXIT=$?
-set -e
+create_json="$(
+  CHATMINAL_DAEMON_ENDPOINT="$SOCKET" \
+    cargo run --quiet --manifest-path apps/chatminal-app/Cargo.toml -- create "wezterm-gui-smoke"
+)"
+session_id="$(printf '%s\n' "$create_json" | sed -n 's/.*"session_id":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
 
-if [[ "$WINDOW_EXIT" -ne 0 && "$WINDOW_EXIT" -ne 124 ]]; then
-  echo "window smoke failed with exit code: $WINDOW_EXIT"
-  tail -n 80 /tmp/chatminal-window-smoke.log || true
+if [[ -z "$session_id" ]]; then
+  echo "failed to parse session_id from create response"
+  printf '%s\n' "$create_json"
   exit 1
 fi
 
-kill "$DAEMON_PID" 2>/dev/null || true
-wait "$DAEMON_PID" 2>/dev/null || true
+run_launcher_with_timeout() {
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 20s "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout 20s "$@"
+  else
+    "$@" &
+    local cmd_pid=$!
+    (
+      sleep 20
+      if kill -0 "$cmd_pid" >/dev/null 2>&1; then
+        kill "$cmd_pid" >/dev/null 2>&1 || true
+      fi
+    ) &
+    local guard_pid=$!
+    wait "$cmd_pid"
+    local status=$?
+    kill "$guard_pid" >/dev/null 2>&1 || true
+    wait "$guard_pid" >/dev/null 2>&1 || true
+    return "$status"
+  fi
+}
 
-echo "window smoke passed"
+CHATMINAL_DAEMON_ENDPOINT="$SOCKET" \
+CHATMINAL_WEZTERM_BIN="$WEZTERM_MOCK_BIN" \
+CHATMINAL_SKIP_GUI_DISPLAY_CHECK=1 \
+CHATMINAL_WINDOW_BACKEND=wezterm-gui \
+  run_launcher_with_timeout \
+  cargo run --quiet --manifest-path apps/chatminal-app/Cargo.toml -- window-wezterm-gui "$session_id"
+
+for _ in $(seq 1 30); do
+  [[ -f "$WEZTERM_MOCK_LOG" ]] && break
+  sleep 0.1
+done
+
+if [[ ! -f "$WEZTERM_MOCK_LOG" ]]; then
+  echo "wezterm mock log missing"
+  exit 1
+fi
+
+mock_payload="$(cat "$WEZTERM_MOCK_LOG")"
+
+if ! grep -q "argv:start -- " <<<"$mock_payload"; then
+  echo "wezterm start args missing"
+  printf '%s\n' "$mock_payload"
+  exit 1
+fi
+
+if ! grep -q "proxy-wezterm-session" <<<"$mock_payload"; then
+  echo "proxy command missing in wezterm args"
+  printf '%s\n' "$mock_payload"
+  exit 1
+fi
+
+if ! grep -q "$session_id" <<<"$mock_payload"; then
+  echo "session id not forwarded to wezterm launcher"
+  printf '%s\n' "$mock_payload"
+  exit 1
+fi
+
+if ! grep -q "endpoint:${SOCKET}" <<<"$mock_payload"; then
+  echo "daemon endpoint env missing in wezterm launcher"
+  printf '%s\n' "$mock_payload"
+  exit 1
+fi
+
+if ! grep -q "internal_proxy:1" <<<"$mock_payload"; then
+  echo "internal proxy env missing in wezterm launcher"
+  printf '%s\n' "$mock_payload"
+  exit 1
+fi
+
+kill "$DAEMON_PID" >/dev/null 2>&1 || true
+wait "$DAEMON_PID" >/dev/null 2>&1 || true
+
+echo "window-wezterm-gui smoke passed"

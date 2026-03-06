@@ -1,12 +1,43 @@
 use std::env;
 use std::path::{Path, PathBuf};
 
+fn repo_root() -> PathBuf {
+    PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap())
+        .join("..")
+        .join("..")
+        .join("..")
+        .join("..")
+        .canonicalize()
+        .unwrap()
+}
+
+fn resolve_harfbuzz_dir() -> PathBuf {
+    let local = PathBuf::from("harfbuzz");
+    if local.join("src/harfbuzz.cc").is_file() {
+        return local;
+    }
+
+    let external = repo_root().join("vendor").join("wezterm-deps").join("harfbuzz/harfbuzz");
+    if external.join("src/harfbuzz.cc").is_file() {
+        return external;
+    }
+
+    ensure_vendor_deps_ready();
+
+    if external.join("src/harfbuzz.cc").is_file() {
+        return external;
+    }
+    if local.join("src/harfbuzz.cc").is_file() {
+        return local;
+    }
+
+    panic!("missing vendored harfbuzz sources");
+}
+
 fn harfbuzz() {
     use std::fs;
 
-    if !Path::new("harfbuzz/.git").exists() {
-        git_submodule_update();
-    }
+    let harfbuzz_dir = resolve_harfbuzz_dir();
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
@@ -26,7 +57,7 @@ fn harfbuzz() {
 
     let target = env::var("TARGET").unwrap();
 
-    cfg.file("harfbuzz/src/harfbuzz.cc");
+    cfg.file(harfbuzz_dir.join("src/harfbuzz.cc"));
     cfg.define("HB_NO_MT", None);
 
     if !target.contains("windows") {
@@ -62,6 +93,27 @@ fn git_submodule_update() {
     let _ = std::process::Command::new("git")
         .args(&["submodule", "update", "--init"])
         .status();
+}
+
+fn ensure_vendor_deps_ready() {
+    if Path::new("harfbuzz/src/harfbuzz.cc").is_file()
+        || repo_root()
+            .join("vendor")
+            .join("wezterm-deps")
+            .join("harfbuzz/harfbuzz/src/harfbuzz.cc")
+            .is_file()
+    {
+        return;
+    }
+
+    let script = repo_root().join("scripts").join("bootstrap-wezterm-vendor-deps.sh");
+    let status = std::process::Command::new("bash")
+        .arg(script)
+        .arg("--quiet")
+        .status();
+    if !status.map(|value| value.success()).unwrap_or(false) {
+        git_submodule_update();
+    }
 }
 
 fn main() {

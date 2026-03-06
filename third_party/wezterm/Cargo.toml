@@ -1,3 +1,8 @@
+# REFERENCE ONLY:
+# Chatminal build/runtime không được phụ thuộc trực tiếp vào manifest này nữa.
+# Các package first-party chuẩn nằm ở root workspace (`crates/chatminal-*`,
+# `apps/chatminal-wezterm-gui`, `apps/chatminal-app`, `apps/chatminald`).
+
 [workspace]
 members = [
   "bidi",
@@ -41,13 +46,13 @@ async-executor = "1.11"
 async-io = "2.3"
 async-task = "4.7"
 async-trait = "0.1"
-async_ossl = { path = "async_ossl" }
+async_ossl = { package = "chatminal-async-ossl", path = "../../crates/chatminal-async-ossl" }
 backtrace = "0.3"
 base64 = {version="0.22", default-features=false }
-base91 = { path = "base91" }
-battery = { path = "lua-api-crates/battery" }
+base91 = { package = "chatminal-base91", path = "../../crates/chatminal-base91" }
+battery = { package = "chatminal-battery", path = "../../crates/chatminal-battery" }
 benchmarking = "0.4"
-bintree = { path = "bintree" }
+bintree = { package = "chatminal-bintree", path = "../../crates/chatminal-bintree" }
 bitflags = "1.3"
 block2 = "0.6"
 bstr = "1.0"
@@ -64,10 +69,10 @@ clap_complete = "4.4"
 clap_complete_fig = "4.0"
 clipboard-win = "2.2"
 cocoa = "=0.25.0"
-codec = { path = "codec" }
-color-funcs = { path = "lua-api-crates/color-funcs" }
+codec = { package = "chatminal-codec", path = "../../crates/chatminal-codec" }
+color-funcs = { package = "chatminal-color-funcs", path = "../../crates/chatminal-color-funcs" }
 colorgrad = "0.6"
-config = { path = "config" }
+config = { package = "chatminal-config", path = "../../crates/chatminal-config" }
 core-foundation = "=0.10.0"
 core-graphics = "=0.24.0"
 core-text = "=21.0.0"
@@ -84,22 +89,22 @@ embed-resource = "1.7"
 emojis = "0.6"
 encoding_rs = "0.8"
 enum-display-derive = "0.1"
-env-bootstrap = { path = "env-bootstrap" }
+env-bootstrap = { package = "chatminal-env-bootstrap", path = "../../crates/chatminal-env-bootstrap" }
 env_logger = "0.11"
 euclid = {version="0.22", default-features=false}
 fancy-regex = {version="0.14", default-features=false, features=[]}
 fastrand = "2.0"
-filedescriptor = { version="0.8.3", path = "filedescriptor" }
+filedescriptor = { version="0.8.3", package = "chatminal-filedescriptor", path = "../../crates/chatminal-filedescriptor" }
 filenamegen = "0.2.6"
-filesystem = { path = "lua-api-crates/filesystem" }
+filesystem = { package = "chatminal-filesystem", path = "../../crates/chatminal-filesystem" }
 finl_unicode = { version = "1.3",  git="https://github.com/wez/finl_unicode.git", branch="no_std" , default-features=false, features=["categories", "grapheme_clusters"]}
 fixed = "1.23"
 fixedbitset = {version="0.4", default-features=false}
 flume = "0.11"
 fnv = "1.0"
-fontconfig = { path = "deps/fontconfig" }
-frecency = { path = "frecency" }
-freetype = { path = "deps/freetype" }
+fontconfig = { path = "../../vendor/wezterm-deps/fontconfig" }
+frecency = { package = "chatminal-frecency", path = "../../crates/chatminal-frecency" }
+freetype = { path = "../../vendor/wezterm-deps/freetype" }
 futures = "0.3"
 futures-lite = "2.3"
 futures-util = "0.3"
@@ -110,7 +115,7 @@ gl_generator = "0.14"
 glium = { version = "0.35", default-features = false }
 governor = {version="0.5", default-features=false, features=["std"]}
 guillotiere = "0.6"
-harfbuzz = { path = "deps/harfbuzz" }
+harfbuzz = { path = "../../vendor/wezterm-deps/harfbuzz" }
 heapless = "0.8"
 hdrhistogram = "7.1"
 hex = {version="0.4", default-features=false}
@@ -124,16 +129,16 @@ intrusive-collections = "0.9"
 k9 = "0.12.0"
 lazy_static = "1.4"
 leb128 = "0.2"
-lfucache = { path = "lfucache" }
+lfucache = { package = "chatminal-lfucache", path = "../../crates/chatminal-lfucache" }
 libc = "0.2"
 libflate = "2"
 libloading = "0.8"
 libssh-rs = "0.3.6"
 line_drawing = "0.8"
 log = "0.4"
-logging = { path = "lua-api-crates/logging" }
+logging = { package = "chatminal-logging", path = "../../crates/chatminal-logging" }
 lru = "0.16"
-luahelper = { path = "luahelper" }
+luahelper = { package = "chatminal-luahelper", path = "../../crates/chatminal-luahelper" }
 maplit = "1.0"
 memmap2 = "0.9"
 memmem = "0.1"
@@ -141,8 +146,8 @@ metrics = "0.23"
 miniz_oxide = "0.7"
 mio = "0.8"
 mlua = "0.9"
-mux = { path = "mux" }
-mux-lua = { path = "lua-api-crates/mux" }
+mux = { package = "chatminal-mux", path = "../../crates/chatminal-mux" }
+mux-lua = { package = "chatminal-mux-lua", path = "../../crates/chatminal-mux-lua" }
 names = { version = "0.12", default-features = false }
 nix = "0.29"
 notify = "5.0.0"
@@ -167,16 +172,16 @@ phf = {version="0.11", default-features=false}
 phf_codegen = "0.10"
 pkg-config = "0.3"
 plist = "1.7"
-plugin = { path = "lua-api-crates/plugin" }
-portable-pty = { path = "pty" }
+plugin = { package = "chatminal-plugin", path = "../../crates/chatminal-plugin" }
+portable-pty = { package = "chatminal-portable-pty", path = "../../crates/chatminal-portable-pty" }
 predicates = "3.0"
 proc-macro2 = "1.0"
-procinfo = { path = "procinfo" }
-procinfo-funcs = { path = "lua-api-crates/procinfo-funcs" }
-promise = { path = "promise" }
+procinfo = { package = "chatminal-procinfo", path = "../../crates/chatminal-procinfo" }
+procinfo-funcs = { package = "chatminal-procinfo-funcs", path = "../../crates/chatminal-procinfo-funcs" }
+promise = { package = "chatminal-promise", path = "../../crates/chatminal-promise" }
 quote = "1.0.2"
-rangeset = { path = "rangeset" }
-ratelim= { path = "ratelim" }
+rangeset = { package = "chatminal-rangeset", path = "../../crates/chatminal-rangeset" }
+ratelim= { package = "chatminal-ratelim", path = "../../crates/chatminal-ratelim" }
 raw-window-handle = "0.6"
 rayon = "1.10"
 rcgen = "0.12"
@@ -186,13 +191,13 @@ resize = "0.5"
 rstest = "0.21"
 rusqlite = "0.32"
 serde = {version="1.0", default-features=false, features = ["derive"]}
-serde-funcs = { path = "lua-api-crates/serde-funcs" }
+serde-funcs = { package = "chatminal-serde-funcs", path = "../../crates/chatminal-serde-funcs" }
 serde_json = "1.0"
 serde_with = {version="2.0", features = ["chrono_0_4"]}
 serde_yaml = "0.9"
 serial2 = "0.2"
 sha2 = "0.10"
-share-data = { path = "lua-api-crates/share-data" }
+share-data = { package = "chatminal-share-data", path = "../../crates/chatminal-share-data" }
 shared_library = "0.1"
 shell-words = "1.1"
 shlex = "1.1"
@@ -202,69 +207,69 @@ smithay-client-toolkit = {version = "0.19", default-features=false}
 smol = "2.0"
 socket2 = "0.5"
 spa = "0.3.1"
-spawn-funcs = { path = "lua-api-crates/spawn-funcs" }
+spawn-funcs = { package = "chatminal-spawn-funcs", path = "../../crates/chatminal-spawn-funcs" }
 sqlite-cache = "0.1.4"
-ssh-funcs = { path = "lua-api-crates/ssh-funcs" }
+ssh-funcs = { package = "chatminal-ssh-funcs", path = "../../crates/chatminal-ssh-funcs" }
 ssh2 = "0.9.3"
 starship-battery = "0.10"
 strsim = "0.11"
 syn = "1.0"
-tabout = { path = "tabout" }
+tabout = { package = "chatminal-tabout", path = "../../crates/chatminal-tabout" }
 tar = "0.4"
 tempfile = "3.20"
 terminfo = "0.9"
 termios = "0.3"
-termwiz = { version="0.24.0", path = "termwiz" }
-termwiz-funcs = { path = "lua-api-crates/termwiz-funcs" }
+termwiz = { package = "chatminal-termwiz", version="0.24.0", path = "../../crates/chatminal-termwiz" }
+termwiz-funcs = { package = "chatminal-termwiz-funcs", path = "../../crates/chatminal-termwiz-funcs" }
 textwrap = "0.16"
 thiserror = "1.0"
-time-funcs = { path = "lua-api-crates/time-funcs" }
+time-funcs = { package = "chatminal-time-funcs", path = "../../crates/chatminal-time-funcs" }
 tiny-skia = "0.11"
 tokio = "1.43"
 toml = "0.8"
 ucd-trie = {version="0.1", default-features=false}
 uds_windows = "1.1"
-umask = { path = "umask" }
+umask = { package = "chatminal-umask", path = "../../crates/chatminal-umask" }
 unicode-normalization = "0.1.24"
 unicode-segmentation = "1.12"
 url = "2"
-url-funcs = { path = "lua-api-crates/url-funcs" }
+url-funcs = { package = "chatminal-url-funcs", path = "../../crates/chatminal-url-funcs" }
 utf8parse = "0.2"
 uuid = "1.13"
 varbincode = "0.1"
-vtparse = { version="0.7", path="vtparse", default-features=false }
+vtparse = { package = "chatminal-vtparse", version="0.7", path="../../crates/chatminal-vtparse", default-features=false }
 walkdir = "2"
 wayland-backend = "0.3.5"
 wayland-client = "0.31"
 wayland-egl = "0.32"
 wayland-protocols = "0.32"
 wayland-protocols-plasma = { version="0.3.6", features=["client"] }
-wezterm-bidi = { version="0.2.3", path = "bidi", default-features=false}
-wezterm-blob-leases = { version="0.1.1", path = "wezterm-blob-leases"}
-wezterm-cell = { path = "wezterm-cell"}
-wezterm-char-props = { path = "wezterm-char-props", default-features=false }
-wezterm-client = { path = "wezterm-client" }
-wezterm-color-types = { version="0.3", path = "color-types", default-features=false }
-wezterm-config-derive = { version="0.1", path="config/derive" }
-wezterm-dynamic = { version = "0.2.1", path = "wezterm-dynamic", default-features=false }
-wezterm-dynamic-derive = { version="0.1.1", path="wezterm-dynamic/derive" }
-wezterm-escape-parser = { version="0.1.0", path="wezterm-escape-parser" }
-wezterm-font = { path = "wezterm-font" }
-wezterm-gui-subcommands = { path = "wezterm-gui-subcommands" }
-wezterm-input-types = { version="0.1", path = "wezterm-input-types", default-features=false }
-wezterm-mux-server-impl = { path = "wezterm-mux-server-impl" }
-wezterm-open-url = { path = "wezterm-open-url" }
-wezterm-ssh = { path = "wezterm-ssh" }
-wezterm-surface = { path = "wezterm-surface" }
-wezterm-term = { path = "term" }
-wezterm-toast-notification = { path = "wezterm-toast-notification" }
-wezterm-uds = { path = "wezterm-uds" }
-wezterm-version = { path = "wezterm-version" }
+wezterm-bidi = { package = "chatminal-wezterm-bidi", version="0.2.3", path = "../../crates/chatminal-wezterm-bidi", default-features=false}
+wezterm-blob-leases = { version="0.1.1", package = "chatminal-wezterm-blob-leases", path = "../../crates/chatminal-wezterm-blob-leases"}
+wezterm-cell = { package = "chatminal-wezterm-cell", path = "../../crates/chatminal-wezterm-cell"}
+wezterm-char-props = { package = "chatminal-wezterm-char-props", path = "../../crates/chatminal-wezterm-char-props", default-features=false }
+wezterm-client = { package = "chatminal-wezterm-client", path = "../../crates/chatminal-wezterm-client" }
+wezterm-color-types = { package = "chatminal-wezterm-color-types", version="0.3", path = "../../crates/chatminal-wezterm-color-types", default-features=false }
+wezterm-config-derive = { package = "chatminal-wezterm-config-derive", version="0.1", path="../../crates/chatminal-wezterm-config-derive" }
+wezterm-dynamic = { package = "chatminal-wezterm-dynamic", version = "0.2.1", path = "../../crates/chatminal-wezterm-dynamic", default-features=false }
+wezterm-dynamic-derive = { package = "chatminal-wezterm-dynamic-derive", version="0.1.1", path="../../crates/chatminal-wezterm-dynamic-derive" }
+wezterm-escape-parser = { package = "chatminal-wezterm-escape-parser", version="0.1.0", path="../../crates/chatminal-wezterm-escape-parser" }
+wezterm-font = { package = "chatminal-wezterm-font", path = "../../crates/chatminal-wezterm-font" }
+wezterm-gui-subcommands = { package = "chatminal-wezterm-gui-subcommands", path = "../../crates/chatminal-wezterm-gui-subcommands" }
+wezterm-input-types = { package = "chatminal-wezterm-input-types", version="0.1", path = "../../crates/chatminal-wezterm-input-types", default-features=false }
+wezterm-mux-server-impl = { package = "chatminal-wezterm-mux-server-impl", path = "../../crates/chatminal-wezterm-mux-server-impl" }
+wezterm-open-url = { package = "chatminal-wezterm-open-url", path = "../../crates/chatminal-wezterm-open-url" }
+wezterm-ssh = { package = "chatminal-wezterm-ssh", path = "../../crates/chatminal-wezterm-ssh" }
+wezterm-surface = { package = "chatminal-wezterm-surface", path = "../../crates/chatminal-wezterm-surface" }
+wezterm-term = { package = "chatminal-wezterm-term", path = "../../crates/chatminal-wezterm-term" }
+wezterm-toast-notification = { package = "chatminal-wezterm-toast-notification", path = "../../crates/chatminal-wezterm-toast-notification" }
+wezterm-uds = { package = "chatminal-wezterm-uds", path = "../../crates/chatminal-wezterm-uds" }
+wezterm-version = { package = "chatminal-wezterm-version", path = "../../crates/chatminal-wezterm-version" }
 wgpu = "25.0.2"
 whoami = "1.5"
 winapi = "0.3.9"
-window = {path="window"}
-window-funcs = { path = "lua-api-crates/window-funcs" }
+window = { package = "chatminal-window", path = "../../crates/chatminal-window" }
+window-funcs = { package = "chatminal-window-funcs", path = "../../crates/chatminal-window-funcs" }
 windows = "0.33.0"
 winreg = "0.10"
 x11 = "2.21"
@@ -279,4 +284,4 @@ zvariant = "4.0"
 [patch.crates-io]
 # We use our own vendored cairo, which has minimal deps and should just
 # build via cargo.
-cairo-sys-rs = {path="deps/cairo", version="0.18.0"}
+cairo-sys-rs = {path="../../vendor/wezterm-deps/cairo", version="0.18.0"}

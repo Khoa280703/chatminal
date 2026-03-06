@@ -12,22 +12,25 @@ SIDEBAR_WIDTH ?= 20
 PREVIEW_LINES ?= 120
 PREVIEW_CHARS ?= 200
 
-.PHONY: help clean-socket daemon daemon-reset dashboard window attach workspace sessions create activate check test smoke-window bench-rtt bench-phase02 fidelity-smoke fidelity-matrix-smoke fidelity-matrix-smoke-relaxed fidelity-input-ime-smoke phase06-killswitch-verify phase08-killswitch-verify soak-smoke release-dry-run
+.PHONY: help clean-socket daemon daemon-reset dashboard window attach workspace sessions create activate bootstrap-wezterm-deps verify-third-party-reference-only check check-wezterm-gui test smoke-window bench-rtt bench-phase02 fidelity-smoke fidelity-matrix-smoke fidelity-matrix-smoke-relaxed fidelity-input-ime-smoke phase06-killswitch-verify phase08-killswitch-verify soak-smoke release-dry-run
 
 help:
 	@echo "Chatminal shortcuts:"
 	@echo "  make daemon                                 # Run daemon"
 	@echo "  make daemon-reset                           # Kill old daemon, clean socket, run daemon"
 	@echo "  make dashboard                              # Run TUI dashboard"
-	@echo "  make window                                 # Run native Chatminal window"
+	@echo "  make window                                 # Run WezTerm GUI window (default runtime)"
 	@echo "  make attach [SESSION_ID=<id>]               # Attach interactive terminal (F10 to quit)"
 	@echo "  make workspace                              # Print workspace snapshot"
 	@echo "  make sessions                               # Print sessions list"
 	@echo "  make create NAME='Dev'                      # Create a session"
 	@echo "  make activate SESSION_ID='<id>'             # Activate wezterm session"
+	@echo "  make bootstrap-wezterm-deps                 # Hydrate vendored C deps for WezTerm GUI"
+	@echo "  make verify-third-party-reference-only      # Assert active build/runtime no longer depends on third_party/wezterm"
 	@echo "  make check                                  # cargo check --workspace"
+	@echo "  make check-wezterm-gui                      # Check first-party WezTerm GUI package (requires native GUI dev deps)"
 	@echo "  make test                                   # Run core test suites"
-	@echo "  make smoke-window                           # Run native window smoke (xvfb)"
+	@echo "  make smoke-window                           # Run WezTerm GUI launcher smoke"
 	@echo "  make bench-rtt                              # Run quick RTT benchmark command"
 	@echo "  make bench-phase02                          # Run phase-02 RTT+RSS hard gate script"
 	@echo "  make fidelity-smoke                         # Run phase-05 fidelity smoke (JSON report)"
@@ -35,7 +38,7 @@ help:
 	@echo "  make fidelity-matrix-smoke-relaxed          # Run phase-03 fidelity matrix smoke non-strict"
 	@echo "  make fidelity-input-ime-smoke               # Run phase-06 modifier/input smoke + IME manual gate report"
 	@echo "  make phase06-killswitch-verify              # Verify runtime input pipeline rollback path (wezterm/legacy)"
-	@echo "  make phase08-killswitch-verify              # Verify native window startup gate"
+	@echo "  make phase08-killswitch-verify              # Verify WezTerm GUI / legacy window backend gate"
 	@echo "  make soak-smoke                             # Run phase-05 soak smoke (JSON report)"
 	@echo "  make release-dry-run                        # Build release artifacts + checksum + smoke"
 	@echo ""
@@ -86,8 +89,19 @@ activate:
 	@if [ -z "$(SESSION_ID)" ]; then echo "Missing SESSION_ID. Example: make activate SESSION_ID='<id>'"; exit 1; fi
 	$(DAEMON_ENDPOINT) cargo run --manifest-path $(APP_MANIFEST) -- activate-wezterm "$(SESSION_ID)" $(WIDTH) $(HEIGHT) $(PREVIEW_CHARS)
 
+bootstrap-wezterm-deps:
+	bash scripts/bootstrap-wezterm-vendor-deps.sh
+
+verify-third-party-reference-only:
+	bash scripts/verify-third-party-wezterm-reference-only.sh
+
 check:
+	bash scripts/verify-third-party-wezterm-reference-only.sh
 	cargo check --workspace
+
+check-wezterm-gui:
+	bash scripts/verify-third-party-wezterm-reference-only.sh
+	cargo check -p chatminal-wezterm-gui
 
 test:
 	cargo test --manifest-path crates/chatminal-protocol/Cargo.toml

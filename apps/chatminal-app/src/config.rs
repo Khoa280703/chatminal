@@ -6,10 +6,17 @@ pub enum InputPipelineMode {
     Legacy,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowBackend {
+    WeztermGui,
+    LegacyEgui,
+}
+
 #[derive(Debug, Clone)]
 pub struct AppConfig {
     pub endpoint: String,
     pub input_pipeline_mode: InputPipelineMode,
+    pub window_backend: WindowBackend,
 }
 
 impl AppConfig {
@@ -17,6 +24,7 @@ impl AppConfig {
         Ok(Self {
             endpoint: resolve_endpoint()?,
             input_pipeline_mode: resolve_input_pipeline_mode(),
+            window_backend: resolve_window_backend(),
         })
     }
 }
@@ -137,6 +145,13 @@ fn resolve_input_pipeline_mode() -> InputPipelineMode {
     resolve_input_pipeline_mode_from_raw(&raw)
 }
 
+fn resolve_window_backend() -> WindowBackend {
+    let raw = std::env::var("CHATMINAL_WINDOW_BACKEND")
+        .ok()
+        .unwrap_or_else(|| "wezterm-gui".to_string());
+    resolve_window_backend_from_raw(&raw)
+}
+
 fn resolve_input_pipeline_mode_from_raw(raw: &str) -> InputPipelineMode {
     match parse_input_pipeline_mode(&raw) {
         Some(value) => value,
@@ -144,10 +159,25 @@ fn resolve_input_pipeline_mode_from_raw(raw: &str) -> InputPipelineMode {
     }
 }
 
+fn resolve_window_backend_from_raw(raw: &str) -> WindowBackend {
+    match parse_window_backend(raw) {
+        Some(value) => value,
+        None => WindowBackend::WeztermGui,
+    }
+}
+
 fn parse_input_pipeline_mode(raw: &str) -> Option<InputPipelineMode> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "wezterm" => Some(InputPipelineMode::Wezterm),
         "legacy" => Some(InputPipelineMode::Legacy),
+        _ => None,
+    }
+}
+
+fn parse_window_backend(raw: &str) -> Option<WindowBackend> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "wezterm-gui" | "wezterm_gui" | "wezterm" | "proxy" => Some(WindowBackend::WeztermGui),
+        "legacy" | "egui" | "window-wezterm" => Some(WindowBackend::LegacyEgui),
         _ => None,
     }
 }
@@ -170,10 +200,12 @@ pub fn usage() -> &'static str {
   chatminal-app dashboard-tui-wezterm [refresh_ms] [preview_lines] [cols] [rows] [max_pane_preview_lines]
   chatminal-app attach-wezterm [session_id] [cols] [rows] [preview_lines]
   chatminal-app window [session_id] [preview_lines] [cols] [rows]
+  chatminal-app window-wezterm-gui [session_id]
   chatminal-app bench-rtt-wezterm [samples] [warmup] [timeout_ms] [cols] [rows]
 
 Environment:
   CHATMINAL_INPUT_PIPELINE_MODE=wezterm|legacy
+  CHATMINAL_WINDOW_BACKEND=wezterm-gui|legacy
 "
 }
 
@@ -230,6 +262,35 @@ mod tests {
         assert_eq!(
             resolve_input_pipeline_mode_from_raw("legacy"),
             InputPipelineMode::Legacy
+        );
+    }
+
+    #[test]
+    fn parse_window_backend_accepts_expected_values() {
+        assert_eq!(
+            parse_window_backend("wezterm-gui"),
+            Some(WindowBackend::WeztermGui)
+        );
+        assert_eq!(
+            parse_window_backend("proxy"),
+            Some(WindowBackend::WeztermGui)
+        );
+        assert_eq!(
+            parse_window_backend("window-wezterm"),
+            Some(WindowBackend::LegacyEgui)
+        );
+        assert_eq!(parse_window_backend("unknown"), None);
+    }
+
+    #[test]
+    fn resolve_window_backend_falls_back_to_wezterm_gui_on_invalid_value() {
+        assert_eq!(
+            resolve_window_backend_from_raw("invalid"),
+            WindowBackend::WeztermGui
+        );
+        assert_eq!(
+            resolve_window_backend_from_raw("legacy"),
+            WindowBackend::LegacyEgui
         );
     }
 }

@@ -3,6 +3,110 @@
 ## 2026-03-06
 
 ### Changed
+- Linux linker fallback cho WezTerm GUI first-party:
+  - `apps/chatminal-wezterm-gui/build.rs` tự dò runtime X11 libs và tạo local shim `libxcb-image.so` / `libxkbcommon-x11.so` khi host chỉ có versioned `.so.*` mà thiếu `-dev` symlink.
+  - fix này gỡ blocker `rust-lld: unable to find library -lxcb-image` và `-lxkbcommon-x11` trên host Ubuntu dev hiện tại mà không cần `sudo apt install`.
+  - verify mới nhất:
+    - `cargo build -p chatminal-wezterm-gui` pass.
+    - `bash scripts/smoke/window-wezterm-smoke.sh` pass.
+    - `make window` không còn fail ở bước compile/link; trong shell CI/headless hiện tại nó dừng đúng với lỗi desktop display thiếu (`DISPLAY`/`WAYLAND_DISPLAY`), tức blocker còn lại là môi trường đồ họa chứ không phải linker.
+- Final cleanup để `third_party/wezterm` thành reference-only thật với active workspace:
+  - bỏ `xcb-imdkit` khỏi root workspace và `chatminal-window`; build mặc định không còn giữ dependency dormant này trong manifest/lockfile active.
+  - đơn giản hóa `chatminal-window/src/os/x11/ime.rs` về no-op IME path ổn định cho build mặc định của Chatminal.
+  - sửa note path cũ trong `chatminal-config/src/font.rs` để không còn trỏ sang layout `deps/freetype/...` của upstream.
+  - refresh `Cargo.lock`; lockfile active không còn `xcb-imdkit`.
+- Verify sau refresh lockfile:
+  - `bash scripts/verify-third-party-wezterm-reference-only.sh` pass.
+  - `cargo check -p chatminal-wezterm-gui` pass.
+  - `bash scripts/smoke/window-wezterm-smoke.sh` pass.
+  - `cargo test --manifest-path apps/chatminal-app/Cargo.toml` pass (81 tests).
+  - `cargo test --manifest-path apps/chatminald/Cargo.toml` pass (41 tests).
+- Follow-up cleanup sau wave `window`/`termwiz` first-party:
+  - sửa wrapper IME X11 trong `chatminal-window` để khớp API hiện tại (`commit/preedit/forward-event`) và downstream GUI compile lại sạch.
+  - chuyển `terminal.png` sang `apps/chatminal-wezterm-gui/assets/icon/terminal.png`; GUI không còn `include_bytes!` theo layout tài sản cũ của `third_party/wezterm`.
+  - tăng độ chặt guard `scripts/verify-third-party-wezterm-reference-only.sh` để bắt cả path dep tương đối trỏ vào `third_party/wezterm`.
+  - `scripts/smoke/window-wezterm-smoke.sh` giờ ép `CHATMINAL_WINDOW_BACKEND=wezterm-gui` để smoke đúng đường chạy thực tế.
+  - `make check-wezterm-gui` giờ chạy guard reference-only trước khi `cargo check -p chatminal-wezterm-gui`.
+- Verify follow-up mới nhất:
+  - `cargo check -p chatminal-window` pass.
+  - `cargo check -p chatminal-wezterm-gui` pass.
+  - `cargo check -p chatminal-wezterm-font` pass.
+  - `cargo test -p chatminal-wezterm-font` pass (2 tests).
+- WezTerm extraction tiếp tục theo hướng first-party:
+  - `apps/chatminal-wezterm-gui/src/*` và assets runtime cần dùng đã nằm trong package first-party của Chatminal.
+  - bóc thêm các crate nhẹ sang workspace: `chatminal-filedescriptor`, `chatminal-lfucache`, `chatminal-ratelim`, `chatminal-wezterm-gui-subcommands`.
+  - bóc tiếp nhóm helper/API crates: `chatminal-luahelper`, `chatminal-tabout`, `chatminal-termwiz-funcs`, `chatminal-url-funcs`, `chatminal-window-funcs`.
+  - bóc thêm nhóm lua-api crates quanh `env-bootstrap`: `chatminal-battery`, `chatminal-color-funcs`, `chatminal-filesystem`, `chatminal-logging`, `chatminal-plugin`, `chatminal-procinfo-funcs`, `chatminal-serde-funcs`, `chatminal-share-data`, `chatminal-spawn-funcs`, `chatminal-ssh-funcs`, `chatminal-time-funcs`.
+  - bóc tiếp wave bootstrap/version/codec: `chatminal-base91`, `chatminal-procinfo`, `chatminal-wezterm-version`, `chatminal-mux-lua`, `chatminal-codec`, `chatminal-env-bootstrap`.
+  - bóc thêm foundation crates ít rủi ro: `chatminal-async-ossl`, `chatminal-wezterm-config-derive`, `chatminal-wezterm-dynamic-derive`.
+  - bóc thêm parser/layout foundation crates: `chatminal-bintree`, `chatminal-vtparse`, `chatminal-wezterm-bidi`.
+  - bóc thêm color/char/input foundation crates: `chatminal-wezterm-color-types`, `chatminal-wezterm-char-props`, `chatminal-wezterm-input-types`.
+  - bóc thêm terminal data-path crates: `chatminal-wezterm-escape-parser`, `chatminal-wezterm-cell`.
+  - bóc thêm runtime utility crates: `chatminal-wezterm-uds`, `chatminal-wezterm-toast-notification`, `chatminal-wezterm-dynamic`.
+  - bóc thêm PTY/surface/ssh/term/config/mux crates: `chatminal-portable-pty`, `chatminal-wezterm-surface`, `chatminal-wezterm-ssh`, `chatminal-wezterm-term`, `chatminal-config`, `chatminal-mux`.
+  - bóc thêm `chatminal-termwiz` sang workspace first-party và remap root + `third_party/wezterm/Cargo.toml` sang package mới này.
+  - bóc thêm `chatminal-wezterm-mux-server-impl` và `chatminal-window`; root workspace không còn path dep trực tiếp nào trỏ `third_party/wezterm`.
+  - `apps/chatminal-wezterm-gui/Cargo.toml` đổi nhóm direct path deps này sang `workspace = true`.
+  - `third_party/wezterm/Cargo.toml` remap dần các workspace deps tương ứng sang `../../crates/chatminal-*`; subtree này không còn được coi là workspace standalone được hỗ trợ.
+  - dọn toàn bộ shadow manifests/subtree copies còn sót trong `crates/` để Cargo/IDE không mở nhầm crate cũ:
+    - `chatminal-mux/mux`
+    - `chatminal-config/derive`
+    - `chatminal-filedescriptor/filedescriptor`
+    - `chatminal-ratelim/ratelim`
+    - `chatminal-wezterm-client/wezterm-client`
+    - `chatminal-wezterm-gui-subcommands/wezterm-gui-subcommands`
+  - `chatminal-termwiz-funcs` mang theo `data/xterm-256color` của riêng crate để bỏ `include_bytes!` relative path theo layout `third_party/wezterm` cũ.
+  - `chatminal-wezterm-term` mang theo `data/wezterm` của riêng crate để bỏ `include_bytes!` relative path theo layout `third_party/wezterm/termwiz` cũ.
+  - `chatminal-mux` bật `chrono/clock` cục bộ để giữ `Utc::now()` hoạt động dưới root workspace feature set hiện tại.
+  - các crate đổi `package.name` nhưng giữ `lib.name` tương thích (`config`, `mux`, `bintree`, `vtparse`, `wezterm_bidi`, `wezterm_color_types`, `wezterm_char_props`, `wezterm_input_types`, `wezterm_escape_parser`, `wezterm_cell`, `portable_pty`, `wezterm_ssh`, `wezterm_surface`, `wezterm_term`, `wezterm_uds`, `wezterm_toast_notification`, `wezterm_dynamic`) để tests/examples và downstream import không gãy.
+  - `apps/chatminald/Cargo.toml` chuyển `portable-pty` sang `workspace = true` để daemon cũng đi qua crate PTY first-party.
+  - `chatminal-wezterm-cell` được sửa feature propagation `use_serde` để kéo thêm `wezterm-escape-parser/use_serde`; nếu không, serde path của `Hyperlink`/`Intensity`/`Underline`/`Blink` sẽ gãy dù runtime graph vẫn compile.
+  - `chatminal-wezterm-surface` được làm sạch test gate:
+    - test ảnh chỉ compile khi bật `use_image`
+    - thêm verify lanes riêng cho `std` và `std,use_image`
+- Native vendored deps:
+  - chuyển build/bootstrap path chính từ `third_party/wezterm/deps/*` sang `vendor/wezterm-deps/*`.
+  - `scripts/bootstrap-wezterm-vendor-deps.sh` giờ hydrate `zlib/libpng/freetype2/harfbuzz` vào `vendor/wezterm-deps`.
+  - root workspace và `third_party/wezterm` đều trỏ `fontconfig/freetype/harfbuzz/cairo-sys-rs` sang vendor path mới.
+- Reference-only guard:
+  - thêm `scripts/verify-third-party-wezterm-reference-only.sh` để fail nhanh nếu active build/runtime quay lại dùng `third_party/wezterm` trực tiếp.
+  - thêm shortcut `make verify-third-party-reference-only`.
+  - đưa guard này vào `make check` để biến reference-only thành hard gate thay vì kiểm tra thủ công.
+- Verify sau migration:
+  - `cargo fmt --all` pass.
+  - `cargo test -p chatminal-bintree` pass (2 tests).
+  - `cargo test -p chatminal-vtparse` pass (23 tests).
+  - `cargo test -p chatminal-wezterm-bidi` pass (6 tests tổng hợp unit + conformance).
+  - `cargo test -p chatminal-wezterm-char-props` pass (1 test).
+  - `cargo test -p chatminal-wezterm-input-types` pass (12 tests).
+  - `cargo test -p chatminal-wezterm-color-types --features std,use_serde` pass (7 tests). Ghi chú: crate này không bật `std` theo default, nên `cargo test` trần không phản ánh đúng cấu hình các API `contrast_ratio`.
+  - `cargo test -p chatminal-wezterm-escape-parser --features std,use_serde` pass (54 tests).
+  - `cargo test -p chatminal-wezterm-cell --features std,use_serde` pass (8 tests).
+  - `cargo test -p chatminal-portable-pty` pass (2 tests + 1 doc test).
+  - `cargo check -p chatminal-wezterm-surface --features std` pass.
+  - `cargo test -p chatminal-wezterm-surface --features std` pass (38 tests).
+  - `cargo test -p chatminal-wezterm-surface --features std,use_image` pass (39 tests).
+  - `cargo test -p chatminal-wezterm-ssh` pass (11 unit + 39 integration/e2e tests).
+  - `cargo check -p chatminal-wezterm-term` pass.
+  - `cargo test -p chatminal-wezterm-term` pass (49 tests).
+  - `cargo check -p chatminal-config` pass.
+  - `cargo test -p chatminal-config` pass (8 tests).
+  - `cargo check -p chatminal-mux` pass.
+  - `cargo test -p chatminal-mux` pass (4 tests).
+  - `cargo check -p chatminal-termwiz` pass.
+  - `cargo test -p chatminal-termwiz` pass (44 tests + 3 doc tests).
+  - `cargo check -p chatminal-wezterm-mux-server-impl` pass.
+  - `cargo test -p chatminal-wezterm-mux-server-impl` pass (0 tests).
+  - `cargo test -p chatminal-wezterm-uds` pass.
+  - `cargo test -p chatminal-wezterm-toast-notification` pass.
+  - `cargo test -p chatminal-wezterm-dynamic --features std` pass (20 tests tổng hợp).
+  - `cargo test --manifest-path apps/chatminal-app/Cargo.toml` pass (81 tests).
+  - `cargo test --manifest-path apps/chatminald/Cargo.toml` pass (41 tests).
+  - `cargo check -p chatminal-wezterm-gui` đã đi qua các crate first-party/vendor mới, gồm cả `chatminal-async-ossl`, `chatminal-config`, `chatminal-mux`, `chatminal-portable-pty`, `chatminal-termwiz`, `chatminal-window`, `chatminal-wezterm-config-derive`, `chatminal-wezterm-dynamic-derive`, `chatminal-bintree`, `chatminal-vtparse`, `chatminal-wezterm-bidi`, `chatminal-wezterm-color-types`, `chatminal-wezterm-char-props`, `chatminal-wezterm-input-types`, `chatminal-wezterm-escape-parser`, `chatminal-wezterm-cell`, `chatminal-wezterm-ssh`, `chatminal-wezterm-surface`, `chatminal-wezterm-term`, `chatminal-wezterm-uds`, `chatminal-wezterm-toast-notification`, `chatminal-wezterm-dynamic`, và hiện pass trên host Linux dev hiện tại.
+  - `cargo check -p chatminal-wezterm-font` và `cargo test -p chatminal-wezterm-font` đều pass sau khi bổ sung `pngsimd.c` vào bootstrap libpng vendored.
+- Window runtime:
+  - khôi phục `window-wezterm-gui` + `proxy-wezterm-session` và đưa `make window` quay lại WezTerm GUI vendored mặc định.
+  - giữ `CHATMINAL_WINDOW_BACKEND=legacy` làm fallback sang native `egui` khi cần debug hoặc rollback.
 - Native window macOS:
   - daemon không còn tự coi `WouldBlock` trên Unix socket là disconnect, giảm lỗi reconnect/freeze khi tạo session mới.
   - tắt IME target sync cho terminal pane native để ký tự ASCII không bị kẹt ở `ime(preedit ...)` sau ký tự đầu tiên.
@@ -291,3 +395,18 @@
   - `docs/release-checklist.md` cập nhật memory gate mới: daemon `120/160`, app `180/220`, total `300/350` (target/hard-fail MB)
   - `docs/terminal-fidelity-matrix.md` cập nhật required subset mới và note manual-evidence cho semantic line-edit
   - thêm schema mẫu: `plans/260305-0812-wezterm-input-pipeline-daemon-first-parity/reports/gate-sample-report-schema.md`
+
+### Phase 08 Follow-up (2026-03-06)
+- WezTerm GUI ownership inversion:
+  - thêm package first-party `apps/chatminal-wezterm-gui` vào root workspace
+  - launcher `apps/chatminal-app` giờ build/chạy binary `chatminal-wezterm-gui` trong `target/` của Chatminal, không còn `cargo run --manifest-path third_party/wezterm/...`
+  - thêm root `[workspace.dependencies]` + `[patch.crates-io]` để resolve được graph crate vendored dưới ownership của Chatminal
+- Vendor bootstrap:
+  - thêm `scripts/bootstrap-wezterm-vendor-deps.sh` để hydrate `zlib/libpng/freetype2/harfbuzz`; trạng thái cũ hydrate vào `third_party/wezterm`, batch mới đã dời sang `vendor/wezterm-deps`
+  - thêm Makefile target `make bootstrap-wezterm-deps`
+- Verification:
+  - `cargo test --manifest-path apps/chatminal-app/Cargo.toml` PASS (81 tests)
+  - `cargo test --manifest-path apps/chatminald/Cargo.toml` PASS (41 tests)
+  - `bash scripts/smoke/window-wezterm-smoke.sh` PASS
+  - `bash scripts/migration/phase08-wezterm-gui-killswitch-verify.sh` PASS
+  - `cargo check -p chatminal-wezterm-gui` từng bị chặn ở `x11-xcb.pc`; sau batch remap mới, blocker host hiện tại đã tiến tới `xcb-util.pc`
