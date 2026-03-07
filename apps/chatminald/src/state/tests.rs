@@ -336,6 +336,31 @@ fn workspace_load_auto_connects_active_session_runtime() {
 }
 
 #[test]
+fn workspace_load_passive_keeps_active_session_disconnected() {
+    let (state, session_id, _db) = create_state_with_session();
+
+    let response = request_ok(&state, Request::WorkspaceLoadPassive);
+    let workspace = match response {
+        Response::Workspace(value) => value,
+        other => panic!("unexpected response: {other:?}"),
+    };
+    assert_eq!(
+        workspace.active_session_id.as_deref(),
+        Some(session_id.as_str())
+    );
+
+    {
+        let inner = state.inner.lock().expect("lock state");
+        let entry = inner
+            .sessions
+            .get(&session_id)
+            .expect("session entry exists");
+        assert!(entry.runtime.is_none());
+        assert_eq!(entry.session.status, SessionStatus::Disconnected);
+    }
+}
+
+#[test]
 fn session_activate_increments_generation_on_each_spawn() {
     let (state, session_id, _db) = create_state_with_session();
     let generation_before = {
@@ -388,6 +413,53 @@ fn session_activate_increments_generation_on_each_spawn() {
             .generation
     };
     assert!(generation_after_second > generation_after_first);
+
+    let _ = request_ok(&state, Request::AppShutdown);
+}
+
+#[test]
+fn session_activate_resizes_existing_runtime() {
+    let (state, session_id, _db) = create_state_with_session();
+
+    let _ = request_ok(
+        &state,
+        Request::SessionActivate {
+            session_id: session_id.clone(),
+            cols: 80,
+            rows: 24,
+        },
+    );
+
+    let initial_size = {
+        let inner = state.inner.lock().expect("lock state");
+        let entry = inner
+            .sessions
+            .get(&session_id)
+            .expect("session entry exists");
+        let runtime = entry.runtime.as_ref().expect("runtime should exist");
+        runtime.size().expect("read initial pty size")
+    };
+    assert_eq!(initial_size, (80, 24));
+
+    let _ = request_ok(
+        &state,
+        Request::SessionActivate {
+            session_id: session_id.clone(),
+            cols: 132,
+            rows: 43,
+        },
+    );
+
+    let resized_size = {
+        let inner = state.inner.lock().expect("lock state");
+        let entry = inner
+            .sessions
+            .get(&session_id)
+            .expect("session entry exists");
+        let runtime = entry.runtime.as_ref().expect("runtime should exist");
+        runtime.size().expect("read resized pty size")
+    };
+    assert_eq!(resized_size, (132, 43));
 
     let _ = request_ok(&state, Request::AppShutdown);
 }
@@ -644,9 +716,10 @@ fn resolve_explorer_target_handles_symlink_alias_and_blocks_escape() {
     symlink(&nested, root.join("alias")).expect("create alias symlink inside root");
     symlink(&outside, root.join("escape")).expect("create escape symlink");
 
+    let canonical_root = std::fs::canonicalize(&root).expect("canonicalize root");
     let resolved_alias = resolve_explorer_target(&root, "alias/inside.txt")
         .expect("alias path inside root should resolve");
-    assert!(resolved_alias.starts_with(&root));
+    assert!(resolved_alias.starts_with(&canonical_root));
 
     let escape_err =
         resolve_explorer_target(&root, "escape").expect_err("symlink escape must be rejected");

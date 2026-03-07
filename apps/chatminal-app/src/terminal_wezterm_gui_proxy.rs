@@ -131,8 +131,8 @@ fn resolve_target_session_id(
         }
     }
 
-    let workspace = client.request(Request::WorkspaceLoad, REQUEST_TIMEOUT)?;
-    let workspace = expect_workspace(workspace, "workspace_load")?;
+    let workspace = client.request(Request::WorkspaceLoadPassive, REQUEST_TIMEOUT)?;
+    let workspace = expect_workspace(workspace, "workspace_load_passive")?;
     workspace
         .active_session_id
         .or_else(|| {

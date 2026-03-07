@@ -69,16 +69,18 @@ pub(super) fn resolve_explorer_root_path(raw: &str) -> Result<PathBuf, String> {
 }
 
 pub(super) fn resolve_explorer_target(root: &Path, relative: &str) -> Result<PathBuf, String> {
+    let canonical_root = std::fs::canonicalize(root)
+        .map_err(|err| format!("invalid explorer root '{}': {err}", root.display()))?;
     let normalized = normalize_relative_path(relative)?;
     let joined = if normalized.is_empty() {
-        root.to_path_buf()
+        canonical_root.clone()
     } else {
-        root.join(normalized)
+        canonical_root.join(normalized)
     };
 
     let canonical = std::fs::canonicalize(&joined)
         .map_err(|err| format!("invalid explorer path '{}': {err}", joined.display()))?;
-    if !canonical.starts_with(root) {
+    if !canonical.starts_with(&canonical_root) {
         return Err("explorer path escapes selected root".to_string());
     }
     Ok(canonical)

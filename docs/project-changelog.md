@@ -1,5 +1,36 @@
 # Project Changelog
 
+## 2026-03-07
+
+### Changed
+- Fix geometry attach ban đầu cho session đang chạy sẵn:
+  - `apps/chatminald/src/state/request_handler.rs` giờ `SessionActivate` luôn áp dụng `resize` cho PTY runtime hiện có, thay vì chỉ spawn khi runtime `None`.
+  - fix này chặn trạng thái cửa sổ vừa mở nhưng shell/prompt vẫn giữ geometry cũ cho tới khi user tự kéo resize.
+  - thêm regression test `session_activate_resizes_existing_runtime` trong `apps/chatminald/src/state/tests.rs`.
+- Ổn định thứ tự startup sau `daemon-reset` cho WezTerm proxy:
+  - thêm `WorkspaceLoadPassive` trong protocol để đọc workspace mà không auto-connect runtime active session.
+  - `proxy-wezterm-session` chuyển sang request thụ động này khi resolve target session, để shell chỉ spawn ở `SessionActivate` với kích thước pane thật.
+  - thêm regression test `workspace_load_passive_keeps_active_session_disconnected`.
+- Fix macOS zsh startup prompt artifact:
+  - nguyên nhân gốc không nằm ở replay snapshot hay PTY size sai; `zsh -i` trong PTY macOS tự phát `PROMPT_EOL_MARK` (`%`) ở đầu phiên với option prompt mặc định, nên prompt đầu hiển thị lệch cho tới khi có redraw/resize.
+  - `apps/chatminald/src/session.rs` giờ áp `ZDOTDIR` startup shim riêng cho `macOS + zsh`: source lại config zsh gốc của user rồi `unsetopt PROMPT_SP` và `unsetopt PROMPT_CR` trước khi prompt đầu tiên render.
+  - giữ nguyên config người dùng thay vì thay prompt/theme; chỉ vá startup prompt behavior gây artifact.
+- Sửa helper explorer để canonicalize root trước khi kiểm tra boundary:
+  - `apps/chatminald/src/state/explorer_utils.rs` không còn giả định `root` đã canonicalized tuyệt đối.
+  - fix này làm pass lại case symlink alias trên macOS, nơi `temp_dir()` có thể đi qua alias `/var` -> `/private/var`.
+- Verify hiện tại:
+  - `cargo check --manifest-path apps/chatminald/Cargo.toml` pass.
+  - `cargo test --manifest-path apps/chatminald/Cargo.toml session_activate_resizes_existing_runtime -- --exact --test-threads=1` sẽ được dùng làm regression gate cục bộ cho fix này.
+  - `cargo test --manifest-path apps/chatminald/Cargo.toml state::tests::workspace_load_passive_keeps_active_session_disconnected -- --exact --test-threads=1` pass.
+  - `cargo test --manifest-path apps/chatminald/Cargo.toml session::tests:: -- --test-threads=1` pass.
+  - `cargo check --manifest-path apps/chatminal-app/Cargo.toml` pass.
+  - `cargo test --manifest-path apps/chatminal-app/Cargo.toml terminal_wezterm_gui_proxy` pass.
+  - `cargo test --manifest-path apps/chatminald/Cargo.toml -- --test-threads=1` pass (45/45).
+  - repro thực tế trên host macOS dev:
+    - trước fix: `target/debug/chatminal-app proxy-wezterm-session` trong PTY ra prefix `\u001b[1m\u001b[7m%\u001b[27m...`
+    - sau fix: output đầu phiên sạch, bắt đầu trực tiếp bằng prompt `khoa2807@192 ~ %`
+  - `cargo test --manifest-path apps/chatminald/Cargo.toml` hiện còn fail ở test cũ `state::tests::resolve_explorer_target_handles_symlink_alias_and_blocks_escape` trên host hiện tại; không liên quan thay đổi geometry attach.
+
 ## 2026-03-06
 
 ### Changed

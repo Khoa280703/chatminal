@@ -143,6 +143,7 @@ pub enum Request {
         start_in_tray: Option<bool>,
     },
     WorkspaceLoad,
+    WorkspaceLoadPassive,
     ProfileList,
     ProfileCreate {
         name: Option<String>,

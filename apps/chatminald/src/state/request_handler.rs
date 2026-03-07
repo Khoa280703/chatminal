@@ -24,6 +24,7 @@ impl StateInner {
                 self.ensure_active_session_runtime(events.clone())?;
                 Ok(Response::Workspace(self.load_workspace()?))
             }
+            Request::WorkspaceLoadPassive => Ok(Response::Workspace(self.load_workspace()?)),
             Request::ProfileList => Ok(Response::Profiles(self.store.list_profiles()?)),
             Request::ProfileCreate { name } => {
                 let created = self.store.create_profile(name)?;
@@ -143,6 +144,8 @@ impl StateInner {
                     entry.session.status = SessionStatus::Running;
                     self.store
                         .set_session_status(&entry.session.session_id, SessionStatus::Running)?;
+                } else if let Some(runtime) = entry.runtime.as_ref() {
+                    runtime.resize(cols, rows)?;
                 }
                 self.store
                     .set_active_session(&profile_id, Some(&session_id))?;
