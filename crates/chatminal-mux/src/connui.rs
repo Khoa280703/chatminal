@@ -1,6 +1,7 @@
 use crate::termwiztermtab;
 use anyhow::{anyhow, bail, Context as _};
 use crossbeam::channel::{unbounded, Receiver, Sender};
+use engine_term::TerminalSize;
 use finl_unicode::grapheme_clusters::Graphemes;
 use promise::spawn::block_on;
 use promise::Promise;
@@ -10,7 +11,6 @@ use termwiz::cell::{unicode_column_width, CellAttributes};
 use termwiz::lineedit::*;
 use termwiz::surface::{Change, Position};
 use termwiz::terminal::*;
-use wezterm_term::TerminalSize;
 
 #[derive(Default)]
 struct PasswordPromptHost {
@@ -436,7 +436,7 @@ fn get_error_window() -> ConnectionUI {
     }
 
     let ui = ConnectionUI::new_with_no_close_delay();
-    ui.title("wezterm Configuration Error");
+    ui.title("Chatminal Configuration Error");
     err.replace(ui.clone());
     ui
 }

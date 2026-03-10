@@ -3,7 +3,6 @@ name = "chatminal-window"
 version = "0.1.0"
 authors = ["Wez Furlong"]
 edition = "2018"
-repository = "https://github.com/wezterm/wezterm"
 description = "Cross platform window setup and render"
 license = "MIT"
 build = "build.rs"
@@ -46,10 +45,10 @@ serde = {workspace=true, features = ["rc", "derive"]}
 tiny-skia.workspace = true
 glium.workspace = true
 url.workspace = true
-wezterm-bidi.workspace = true
-wezterm-color-types.workspace = true
-wezterm-font.workspace = true
-wezterm-input-types.workspace = true
+engine-bidi.workspace = true
+engine-color-types.workspace = true
+engine-font.workspace = true
+engine-input-types.workspace = true
 
 [target."cfg(windows)".dependencies]
 clipboard-win.workspace = true

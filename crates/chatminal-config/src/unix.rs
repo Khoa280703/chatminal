@@ -1,7 +1,7 @@
 use crate::config::validate_domain_name;
 use crate::*;
+use engine_dynamic::{FromDynamic, ToDynamic};
 use std::path::PathBuf;
-use wezterm_dynamic::{FromDynamic, ToDynamic};
 
 /// Configures an instance of a multiplexer that can be communicated
 /// with via a unix domain socket
@@ -27,9 +27,9 @@ pub struct UnixDomain {
 
     /// If we decide that we need to start the server, the command to run
     /// to set that up.  The default is to spawn:
-    /// `wezterm-mux-server --daemonize`
+    /// `chatminal-mux --daemonize`
     /// but it can be useful to set this to eg:
-    /// `wsl -e wezterm-mux-server --daemonize` to start up
+    /// `wsl -e chatminal-mux --daemonize` to start up
     /// a unix domain inside a wsl container.
     pub serve_command: Option<Vec<String>>,
 
@@ -58,7 +58,7 @@ pub struct UnixDomain {
 
     /// Show time since last response when waiting for a response.
     /// It is recommended to use
-    /// <https://wezterm.org/config/lua/pane/get_metadata.html#since_last_response_ms>
+    /// <https://github.com/Khoa280703/chatminalconfig/lua/pane/get_metadata.html#since_last_response_ms>
     /// instead.
     #[dynamic(default)]
     pub overlay_lag_indicator: bool,
@@ -119,13 +119,40 @@ impl UnixDomain {
             None => Ok(vec![
                 std::env::current_exe()?
                     .with_file_name(if cfg!(windows) {
-                        "wezterm-mux-server.exe"
+                        "chatminal-mux.exe"
                     } else {
-                        "wezterm-mux-server"
+                        "chatminal-mux"
                     })
                     .into_os_string(),
                 OsString::from("--daemonize"),
             ]),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::UnixDomain;
+
+    #[test]
+    fn default_serve_command_uses_chatminal_mux_binary() {
+        let command = UnixDomain::default().serve_command().unwrap();
+        let binary = command
+            .first()
+            .and_then(|value| std::path::Path::new(value).file_name())
+            .and_then(|value| value.to_str())
+            .unwrap();
+
+        let expected = if cfg!(windows) {
+            "chatminal-mux.exe"
+        } else {
+            "chatminal-mux"
+        };
+
+        assert_eq!(binary, expected);
+        assert_eq!(
+            command.get(1).and_then(|value| value.to_str()),
+            Some("--daemonize")
+        );
     }
 }

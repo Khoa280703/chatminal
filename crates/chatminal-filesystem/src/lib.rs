@@ -4,9 +4,9 @@ use config::lua::mlua::{self, Lua};
 use smol::prelude::*;
 
 pub fn register(lua: &Lua) -> anyhow::Result<()> {
-    let wezterm_mod = get_or_create_module(lua, "wezterm")?;
-    wezterm_mod.set("read_dir", lua.create_async_function(read_dir)?)?;
-    wezterm_mod.set("glob", lua.create_async_function(glob)?)?;
+    let api_mod = get_or_create_module(lua, "chatminal")?;
+    api_mod.set("read_dir", lua.create_async_function(read_dir)?)?;
+    api_mod.set("glob", lua.create_async_function(glob)?)?;
     Ok(())
 }
 

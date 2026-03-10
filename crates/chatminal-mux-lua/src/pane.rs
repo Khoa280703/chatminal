@@ -1,4 +1,5 @@
 use super::*;
+use engine_term::{SemanticZone, StableRowIndex};
 use luahelper::mlua::LuaSerdeExt;
 use luahelper::{dynamic_to_lua_value, from_lua, to_lua};
 use mlua::Value;
@@ -8,7 +9,6 @@ use std::sync::Arc;
 use termwiz::cell::SemanticType;
 use termwiz_funcs::lines_to_escapes;
 use url_funcs::Url;
-use wezterm_term::{SemanticZone, StableRowIndex};
 
 #[derive(Clone, Copy, Debug)]
 pub struct MuxPane(pub PaneId);

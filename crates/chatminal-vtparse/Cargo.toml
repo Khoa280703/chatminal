@@ -3,7 +3,6 @@ authors = ["Wez Furlong <wez@wezfurlong.org>"]
 name = "chatminal-vtparse"
 version = "0.7.0"
 edition = "2018"
-repository = "https://github.com/wezterm/wezterm"
 description = "Low level escape sequence parser"
 license = "MIT"
 documentation = "https://docs.rs/vtparse"

@@ -1,5 +1,6 @@
 use config::lua::get_or_create_module;
 use config::lua::mlua::{self, IntoLua, Lua};
+use engine_dynamic::{FromDynamic, ToDynamic};
 use finl_unicode::grapheme_clusters::Graphemes;
 use luahelper::impl_lua_conversion_dynamic;
 use std::str::FromStr;
@@ -9,40 +10,39 @@ use termwiz::color::{AnsiColor, ColorAttribute, ColorSpec, SrgbaTuple};
 use termwiz::render::terminfo::TerminfoRenderer;
 use termwiz::surface::change::Change;
 use termwiz::surface::Line;
-use wezterm_dynamic::{FromDynamic, ToDynamic};
 
 pub fn register(lua: &Lua) -> anyhow::Result<()> {
-    let wezterm_mod = get_or_create_module(lua, "wezterm")?;
-    wezterm_mod.set("nerdfonts", NerdFonts {})?;
-    wezterm_mod.set("format", lua.create_function(format)?)?;
-    wezterm_mod.set(
+    let api_mod = get_or_create_module(lua, "chatminal")?;
+    api_mod.set("nerdfonts", NerdFonts {})?;
+    api_mod.set("format", lua.create_function(format)?)?;
+    api_mod.set(
         "column_width",
         lua.create_function(|_, s: String| Ok(unicode_column_width(&s, None)))?,
     )?;
 
-    wezterm_mod.set(
+    api_mod.set(
         "pad_right",
         lua.create_function(|_, (s, width): (String, usize)| Ok(pad_right(s, width)))?,
     )?;
 
-    wezterm_mod.set(
+    api_mod.set(
         "pad_left",
         lua.create_function(|_, (s, width): (String, usize)| Ok(pad_left(s, width)))?,
     )?;
 
-    wezterm_mod.set(
+    api_mod.set(
         "truncate_right",
         lua.create_function(|_, (s, max_width): (String, usize)| {
             Ok(truncate_right(&s, max_width))
         })?,
     )?;
 
-    wezterm_mod.set(
+    api_mod.set(
         "truncate_left",
         lua.create_function(|_, (s, max_width): (String, usize)| Ok(truncate_left(&s, max_width)))?,
     )?;
-    wezterm_mod.set("permute_any_mods", lua.create_function(permute_any_mods)?)?;
-    wezterm_mod.set(
+    api_mod.set("permute_any_mods", lua.create_function(permute_any_mods)?)?;
+    api_mod.set(
         "permute_any_or_no_mods",
         lua.create_function(permute_any_or_no_mods)?,
     )?;
@@ -137,7 +137,7 @@ impl termwiz::render::RenderTty for FormatTarget {
 pub fn format_as_escapes(items: Vec<FormatItem>) -> anyhow::Result<String> {
     let mut changes: Vec<Change> = items.into_iter().map(Into::into).collect();
     changes.push(Change::AllAttributes(CellAttributes::default()).into());
-    let mut renderer = new_wezterm_terminfo_renderer();
+    let mut renderer = new_chatminal_terminfo_renderer();
     let mut target = FormatTarget { target: vec![] };
     renderer.render_to(&changes, &mut target)?;
     Ok(String::from_utf8(target.target)?)
@@ -203,7 +203,7 @@ fn permute_mods<'lua>(
     item: mlua::Table,
     allow_none: bool,
 ) -> mlua::Result<Vec<mlua::Value<'lua>>> {
-    use wezterm_input_types::Modifiers;
+    use engine_input_types::Modifiers;
 
     let mut result = vec![];
     for ctrl in &[Modifiers::NONE, Modifiers::CTRL] {
@@ -254,14 +254,14 @@ lazy_static::lazy_static! {
                 .color_level(Some(ColorLevel::TrueColor))
                 .colorterm(None)
                 .colorterm_bce(None)
-                .term_program(Some("WezTerm".into()))
-                .term_program_version(Some(config::wezterm_version().into())),
+                .term_program(Some("Chatminal".into()))
+                .term_program_version(Some(config::engine_version().into())),
         )
         .expect("cannot fail to make internal Capabilities")
     };
 }
 
-pub fn new_wezterm_terminfo_renderer() -> TerminfoRenderer {
+pub fn new_chatminal_terminfo_renderer() -> TerminfoRenderer {
     TerminfoRenderer::new(CAPS.clone())
 }
 
@@ -276,7 +276,7 @@ pub fn lines_to_escapes(lines: Vec<Line>) -> anyhow::Result<String> {
         }
     }
     changes.push(Change::AllAttributes(CellAttributes::blank()));
-    let mut renderer = new_wezterm_terminfo_renderer();
+    let mut renderer = new_chatminal_terminfo_renderer();
 
     struct Target {
         target: Vec<u8>,

@@ -15,6 +15,11 @@ use anyhow::{anyhow, bail};
 use async_io::Timer;
 use async_trait::async_trait;
 use config::ConfigHandle;
+use engine_font::FontConfiguration;
+use engine_input_types::{
+    KeyboardLedStatus, Modifiers, MouseButtons, MouseEvent, MouseEventKind, MousePress,
+    ScreenPoint, WindowDecorations,
+};
 use promise::{Future, Promise};
 use raw_window_handle::{
     DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, RawWindowHandle,
@@ -44,11 +49,6 @@ use wayland_client::{Connection as WConnection, Dispatch, Proxy, QueueHandle};
 use wayland_egl::{is_available as egl_is_available, WlEglSurface};
 use wayland_protocols_plasma::blur::client::org_kde_kwin_blur::OrgKdeKwinBlur;
 use wayland_protocols_plasma::blur::client::org_kde_kwin_blur_manager::OrgKdeKwinBlurManager;
-use wezterm_font::FontConfiguration;
-use wezterm_input_types::{
-    KeyboardLedStatus, Modifiers, MouseButtons, MouseEvent, MouseEventKind, MousePress,
-    ScreenPoint, WindowDecorations,
-};
 
 use crate::wayland::WaylandConnection;
 use crate::x11::KeyboardWithFallback;
@@ -615,7 +615,7 @@ impl WaylandWindowInner {
         // correctly.
         // Therefore, when frame_callback is set to some, we need to send the NeedRepaint
         // event again to ensure the window is displayed.
-        // Fix: https://github.com/wezterm/wezterm/issues/5103
+        // Fix: upstream issue #5103
         if self.frame_callback.is_some() {
             self.events.dispatch(WindowEvent::NeedRepaint);
         }
@@ -1104,8 +1104,8 @@ impl WaylandWindowInner {
         // which is necessary for the frame callback to get triggered.
         // Ordering the repaint after requesting the callback ensures that
         // we will get woken at the appropriate time.
-        // <https://github.com/wezterm/wezterm/issues/3468>
-        // <https://github.com/wezterm/wezterm/issues/3126>
+        // upstream issue #3468
+        // upstream issue #3126
         self.events.dispatch(WindowEvent::NeedRepaint);
 
         Ok(())

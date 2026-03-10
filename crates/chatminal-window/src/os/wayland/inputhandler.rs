@@ -3,6 +3,7 @@ use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+use engine_input_types::{KeyCode, KeyEvent, KeyboardLedStatus, Modifiers};
 use smithay_client_toolkit::globals::GlobalData;
 use wayland_client::backend::ObjectId;
 use wayland_client::globals::{BindError, GlobalList};
@@ -14,7 +15,6 @@ use wayland_protocols::wp::text_input::zv3::client::zwp_text_input_manager_v3::Z
 use wayland_protocols::wp::text_input::zv3::client::zwp_text_input_v3::{
     Event as TextInputEvent, ZwpTextInputV3,
 };
-use wezterm_input_types::{KeyCode, KeyEvent, KeyboardLedStatus, Modifiers};
 
 use crate::{DeadKeyStatus, WindowEvent};
 

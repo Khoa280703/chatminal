@@ -1,0 +1,40 @@
+[package]
+authors = ["Wez Furlong"]
+name = "chatminal-engine-surface"
+version = "0.1.0"
+edition = "2018"
+description = "Surface and Line types for terminals"
+license = "MIT"
+documentation = "https://docs.rs/engine-surface"
+keywords = ["terminal", "surface", "line"]
+
+[lib]
+name = "engine_surface"
+
+[dependencies]
+bitflags = "2.0"
+fancy-regex.workspace = true
+finl_unicode.workspace = true
+fixedbitset.workspace = true
+ordered-float.workspace = true
+serde = {workspace=true, optional=true}
+siphasher.workspace = true
+unicode-segmentation.workspace = true
+engine-bidi.workspace = true
+engine-blob-leases = {workspace=true, optional=true}
+engine-cell = {workspace = true}
+engine-char-props.workspace = true
+engine-color-types = {workspace = true}
+engine-dynamic = {workspace = true}
+engine-escape-parser = {workspace = true}
+engine-input-types.workspace = true
+
+[features]
+default = []
+std = ["fancy-regex/std", "engine-cell/std", "engine-dynamic/std", "engine-escape-parser/std", "fixedbitset/std", "fancy-regex/perf", "fancy-regex/unicode"]
+appdata = ["std"]
+use_serde = ["serde"] #, "engine-color-types/use_serde", "engine-blob-leases/serde", "bitflags/serde", "engine-input-types/serde", "engine-escape-parser/use_serde", "engine-cell/use_serde"]
+use_image = ["engine-cell/use_image"] # "image", "dep:image", "engine-escape-parser/use_image", "engine-escape-parser/kitty-shm", "engine-cell/use_image"]
+
+[dev-dependencies]
+k9.workspace = true

@@ -41,28 +41,28 @@
 //! * `use_serde` - makes a number of structs serde serializable
 
 pub mod caps;
-pub use wezterm_cell as cell;
-pub use wezterm_cell::color;
-pub use wezterm_surface::cellcluster;
+pub use engine_cell as cell;
+pub use engine_cell::color;
+pub use engine_surface::cellcluster;
 pub mod error;
 #[cfg(feature = "use_image")]
-pub use wezterm_cell::image;
-pub use wezterm_surface::hyperlink;
+pub use engine_cell::image;
+pub use engine_surface::hyperlink;
 pub mod input;
 pub mod istty;
 pub mod keymap;
 pub mod lineedit;
 mod macros;
-pub use wezterm_char_props::nerdfonts;
+pub use engine_char_props::nerdfonts;
 mod readbuf;
 pub mod render;
-pub use wezterm_surface as surface;
+pub use engine_surface as surface;
 pub mod terminal;
 #[cfg(feature = "tmux_cc")]
-pub use wezterm_escape_parser::tmux_cc;
+pub use engine_escape_parser::tmux_cc;
 #[cfg(feature = "widgets")]
 pub mod widgets;
 
 pub use error::{Context, Error, Result};
 
-pub use wezterm_escape_parser as escape;
+pub use engine_escape_parser as escape;

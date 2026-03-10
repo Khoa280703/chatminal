@@ -5,6 +5,7 @@ use crate::{Mux, MuxNotification, WindowId};
 use bintree::PathBranch;
 use config::configuration;
 use config::keyassignment::PaneDirection;
+use engine_term::{StableRowIndex, TerminalSize};
 use parking_lot::Mutex;
 use rangeset::intersects_range;
 use serde::{Deserialize, Serialize};
@@ -12,7 +13,6 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::sync::Arc;
 use url::Url;
-use wezterm_term::{StableRowIndex, TerminalSize};
 
 pub type Tree = bintree::Tree<Arc<dyn Pane>, SplitDirectionAndSize>;
 pub type Cursor = bintree::Cursor<Arc<dyn Pane>, SplitDirectionAndSize>;
@@ -1565,7 +1565,7 @@ impl TabInner {
                     // If the pane is no longer known to the mux, then its liveness
                     // state isn't guaranteed to be monitored or updated, so let's
                     // consider the pane effectively dead if it isn't in the mux.
-                    // <https://github.com/wezterm/wezterm/issues/4030>
+                    // upstream issue #4030
                     let in_mux = mux.get_pane(pane.pane_id()).is_some();
                     let dead = pane.is_dead();
                     log::trace!(
@@ -1923,7 +1923,7 @@ impl TabInner {
         }
 
         // Ensure that we're not zoomed, otherwise we'll end up in
-        // a bogus split state (https://github.com/wezterm/wezterm/issues/723)
+        // a bogus split state (upstream issue #723)
         self.set_zoomed(false);
 
         self.iter_panes().iter().nth(pane_index).map(|pos| {
@@ -2199,13 +2199,13 @@ impl Into<String> for SerdeUrl {
 mod test {
     use super::*;
     use crate::renderable::*;
+    use engine_term::color::ColorPalette;
+    use engine_term::{KeyCode, KeyModifiers, Line, MouseEvent, StableRowIndex};
     use parking_lot::{MappedMutexGuard, Mutex};
     use rangeset::RangeSet;
     use std::ops::Range;
     use termwiz::surface::SequenceNo;
     use url::Url;
-    use wezterm_term::color::ColorPalette;
-    use wezterm_term::{KeyCode, KeyModifiers, Line, MouseEvent, StableRowIndex};
 
     struct FakePane {
         id: PaneId,

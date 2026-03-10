@@ -3,7 +3,6 @@ authors = ["Wez Furlong"]
 name = "chatminal-termwiz"
 version = "0.24.0"
 edition = "2018"
-repository = "https://github.com/wezterm/wezterm"
 description = "Terminal Wizardry for Unix and Windows"
 license = "MIT"
 documentation = "https://docs.rs/termwiz"
@@ -41,23 +40,23 @@ thiserror.workspace = true
 ucd-trie.workspace = true
 unicode-segmentation.workspace = true
 vtparse.workspace = true
-wezterm-bidi.workspace = true
-wezterm-blob-leases = {workspace=true, optional=true}
-wezterm-cell = {workspace = true, features=["std"]}
-wezterm-char-props.workspace = true
-wezterm-color-types = {workspace = true, features=["std"]}
-wezterm-dynamic = {workspace = true, features=["std"]}
-wezterm-escape-parser = {workspace = true, features=["std"]}
-wezterm-input-types.workspace = true
-wezterm-surface = {workspace = true, features=["std", "appdata"]}
+engine-bidi.workspace = true
+engine-blob-leases = {workspace=true, optional=true}
+engine-cell = {workspace = true, features=["std"]}
+engine-char-props.workspace = true
+engine-color-types = {workspace = true, features=["std"]}
+engine-dynamic = {workspace = true, features=["std"]}
+engine-escape-parser = {workspace = true, features=["std"]}
+engine-input-types.workspace = true
+engine-surface = {workspace = true, features=["std", "appdata"]}
 
 [features]
 default = ["image", "tmux_cc"]
 widgets = ["cassowary", "fnv"]
-use_serde = ["serde", "wezterm-color-types/use_serde", "wezterm-blob-leases/serde", "bitflags/serde", "wezterm-input-types/serde", "wezterm-escape-parser/use_serde", "wezterm-cell/use_serde", "wezterm-surface/use_serde"]
-use_image = ["image", "dep:image", "wezterm-escape-parser/use_image", "wezterm-escape-parser/kitty-shm", "wezterm-cell/use_image", "wezterm-surface/use_image"]
-image = ["sha2", "wezterm-blob-leases", "wezterm-escape-parser/image"]
-tmux_cc = ["pest", "pest_derive", "wezterm-escape-parser/tmux_cc"]
+use_serde = ["serde", "engine-color-types/use_serde", "engine-blob-leases/serde", "bitflags/serde", "engine-input-types/serde", "engine-escape-parser/use_serde", "engine-cell/use_serde", "engine-surface/use_serde"]
+use_image = ["image", "dep:image", "engine-escape-parser/use_image", "engine-escape-parser/kitty-shm", "engine-cell/use_image", "engine-surface/use_image"]
+image = ["sha2", "engine-blob-leases", "engine-escape-parser/image"]
+tmux_cc = ["pest", "pest_derive", "engine-escape-parser/tmux_cc"]
 docs = ["widgets", "use_serde", "image", "tmux_cc"]
 
 [dev-dependencies]

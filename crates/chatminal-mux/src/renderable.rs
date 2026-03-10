@@ -1,11 +1,11 @@
 use crate::pane::{ForEachPaneLogicalLine, WithPaneLines};
+use engine_dynamic::{FromDynamic, ToDynamic};
+use engine_term::{Line, StableRowIndex, Terminal};
 use luahelper::impl_lua_conversion_dynamic;
 use rangeset::RangeSet;
 use serde::{Deserialize, Serialize};
 use std::ops::Range;
 use termwiz::surface::SequenceNo;
-use wezterm_dynamic::{FromDynamic, ToDynamic};
-use wezterm_term::{Line, StableRowIndex, Terminal};
 
 /// Describes the location of the cursor
 #[derive(

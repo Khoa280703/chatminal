@@ -14,13 +14,13 @@ use crate::{
 };
 use async_trait::async_trait;
 use config::ConfigHandle;
+use engine_font::FontConfiguration;
 use promise::*;
 use raw_window_handle::{
     DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, WindowHandle,
 };
 use std::any::Any;
 use std::rc::Rc;
-use wezterm_font::FontConfiguration;
 
 pub enum Connection {
     X11(Rc<XConnection>),

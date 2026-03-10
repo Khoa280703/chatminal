@@ -1,3 +1,5 @@
+#![allow(unexpected_cfgs)] // objc macro expansion still emits cargo-clippy cfg checks upstream
+
 use async_trait::async_trait;
 use bitflags::bitflags;
 use config::window::WindowLevel;
@@ -9,7 +11,7 @@ use std::rc::Rc;
 use thiserror::Error;
 use url::Url;
 pub mod bitmaps;
-pub use wezterm_color_types as color;
+pub use engine_color_types as color;
 mod configuration;
 pub mod connection;
 pub mod os;
@@ -34,9 +36,9 @@ mod egl;
 
 pub use bitmaps::{BitmapImage, Image};
 pub use connection::*;
+pub use engine_input_types::*;
 pub use glium;
 pub use os::*;
-pub use wezterm_input_types::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Clipboard {

@@ -1,11 +1,11 @@
 use crate::{dynamic_to_lua_value, lua_value_to_dynamic};
-use mlua::{IntoLua, Lua, MetaMethod, UserData, UserDataMethods, Value};
-use std::collections::BTreeMap;
-use std::marker::PhantomData;
-use wezterm_dynamic::{
+use engine_dynamic::{
     Error as DynError, FromDynamic, FromDynamicOptions, ToDynamic, UnknownFieldAction,
     Value as DynValue,
 };
+use mlua::{IntoLua, Lua, MetaMethod, UserData, UserDataMethods, Value};
+use std::collections::BTreeMap;
+use std::marker::PhantomData;
 
 struct EnumVariant<T> {
     phantom: PhantomData<T>,
@@ -64,19 +64,19 @@ where
 }
 
 /// This type is used as an enum constructor for type `T`.
-/// The primary usage is to enable `wezterm.action` to have the following
+/// The primary usage is to enable `chatminal.action` to have the following
 /// behaviors for KeyAssignment:
 ///
-/// `wezterm.action{QuickSelectArgs={}}` -> compatibility with prior versions;
+/// `chatminal.action{QuickSelectArgs={}}` -> compatibility with prior versions;
 /// the table is passed through and from_dynamic -> lua conversion is attempted.
 ///
-/// `wezterm.action.QuickSelectArgs` -> since the `QuickSelectArgs` variant
+/// `chatminal.action.QuickSelectArgs` -> since the `QuickSelectArgs` variant
 /// has a payload that impl Default, this is equivalent to the call above.
 ///
-/// `wezterm.action.QuickSelectArgs{}` -> equivalent to the call above, but
+/// `chatminal.action.QuickSelectArgs{}` -> equivalent to the call above, but
 /// explicitly calls the constructor with no parameters.
 ///
-/// `wezterm.action.QuickSelectArgs{alphabet="abc"}` -> configures the alphabet.
+/// `chatminal.action.QuickSelectArgs{alphabet="abc"}` -> configures the alphabet.
 ///
 /// This dynamic behavior is implemented using metatables.
 ///

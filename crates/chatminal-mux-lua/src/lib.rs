@@ -1,6 +1,8 @@
 use config::keyassignment::SpawnTabDomain;
 use config::lua::mlua::{self, Lua, UserData, UserDataMethods, Value as LuaValue};
 use config::lua::{get_or_create_module, get_or_create_sub_module};
+use engine_dynamic::{FromDynamic, ToDynamic};
+use engine_term::TerminalSize;
 use luahelper::impl_lua_conversion_dynamic;
 use mlua::UserDataRef;
 use mux::domain::{DomainId, SplitSource};
@@ -11,8 +13,6 @@ use mux::Mux;
 use portable_pty::CommandBuilder;
 use std::collections::HashMap;
 use std::sync::Arc;
-use wezterm_dynamic::{FromDynamic, ToDynamic};
-use wezterm_term::TerminalSize;
 
 mod domain;
 mod pane;

@@ -33,6 +33,8 @@ use core_foundation::bundle::{CFBundleGetBundleWithIdentifier, CFBundleGetFuncti
 use core_foundation::data::{CFData, CFDataGetBytePtr, CFDataRef};
 use core_foundation::string::{CFString, CFStringRef, UniChar};
 use core_foundation::{declare_TCFType, impl_TCFType};
+use engine_font::FontConfiguration;
+use engine_input_types::{is_ascii_control, IntegratedTitleButtonStyle, KeyboardLedStatus};
 use objc::declare::ClassDecl;
 use objc::rc::{StrongPtr, WeakPtr};
 use objc::runtime::{Class, Object, Protocol, Sel};
@@ -50,8 +52,6 @@ use std::ptr::NonNull;
 use std::rc::Rc;
 use std::str::FromStr;
 use std::time::Instant;
-use wezterm_font::FontConfiguration;
-use wezterm_input_types::{is_ascii_control, IntegratedTitleButtonStyle, KeyboardLedStatus};
 
 #[allow(non_upper_case_globals)]
 const NSViewLayerContentsPlacementTopLeft: NSInteger = 11;
@@ -1088,9 +1088,9 @@ impl WindowInner {
             // when transparent, also turn off the window shadow,
             // because having the shadow enabled seems to correlate
             // with ghostly remnants see:
-            // https://github.com/wezterm/wezterm/issues/310.
+            // upstream issue #310.
             // But allow overriding the shadows independent of opacity as well:
-            // <https://github.com/wezterm/wezterm/issues/2669>
+            // upstream issue #2669
             let shadow = if self
                 .config
                 .window_decorations
@@ -1818,8 +1818,8 @@ impl Inner {
     }
 }
 
-const VIEW_CLS_NAME: &str = "WezTermWindowView";
-const WINDOW_CLS_NAME: &str = "WezTermWindow";
+const VIEW_CLS_NAME: &str = "ChatminalWindowView";
+const WINDOW_CLS_NAME: &str = "ChatminalWindow";
 const TITLEBAR_VIEW_NAME: &str = "NSTitlebarContainerView";
 
 struct WindowView {
@@ -2276,15 +2276,15 @@ impl WindowView {
         NO
     }
 
-    extern "C" fn wezterm_perform_key_assignment(
+    extern "C" fn chatminal_perform_key_assignment(
         this: &mut Object,
         _sel: Sel,
         menu_item: *mut Object,
     ) {
         let menu_item = MenuItem::with_menu_item(menu_item);
-        // Safe because weztermPerformKeyAssignment: is only used with KeyAssignment
+        // Safe because chatminalPerformKeyAssignment: is only used with KeyAssignment
         let action = menu_item.get_represented_item();
-        log::debug!("wezterm_perform_key_assignment {action:?}",);
+        log::debug!("chatminal_perform_key_assignment {action:?}",);
         match action {
             Some(RepresentedItem::KeyAssignment(action)) => {
                 if let Some(this) = Self::get_this(this) {
@@ -2503,7 +2503,7 @@ impl WindowView {
             } else if virtual_key == kVK_Delete {
                 (true, "\x08")
             } else if virtual_key == kVK_ANSI_KeypadEnter {
-                // https://github.com/wezterm/wezterm/issues/739
+                // upstream issue #739
                 // Keypad enter sends ctrl-c for some reason; explicitly
                 // treat that as enter here.
                 (true, "\r")
@@ -2513,7 +2513,7 @@ impl WindowView {
 
         // Shift-Tab on macOS produces \x19 for some reason.
         // Rewrite it to something we understand.
-        // <https://github.com/wezterm/wezterm/issues/1902>
+        // upstream issue #1902
         let chars = if virtual_key == kVK_Tab && modifiers.contains(Modifiers::SHIFT) {
             "\t"
         } else {
@@ -2733,14 +2733,14 @@ impl WindowView {
         // which isn't particularly helpful. eg: ALT+SHIFT+` produces chars='`' and unmod='~'
         // In this case, we take the key from unmod.
         // We leave `raw` set to None as we want to preserve the value of modifiers.
-        // <https://github.com/wezterm/wezterm/issues/1706>.
+        // upstream issue #1706.
         // We can't do this for every ALT+SHIFT combo, as the weird behavior doesn't
         // apply to eg: ALT+SHIFT+789 for Norwegian layouts
-        // <https://github.com/wezterm/wezterm/issues/760>
+        // upstream issue #760
         let swap_unmod_and_chars = (modifiers.contains(Modifiers::SHIFT | Modifiers::ALT)
             && virtual_key == kVK_ANSI_Grave)
             ||
-            // <https://github.com/wezterm/wezterm/issues/1907>
+            // upstream issue #1907
             (modifiers.contains(Modifiers::SHIFT | Modifiers::CTRL)
                 && virtual_key == kVK_ANSI_Slash);
 
@@ -2779,7 +2779,7 @@ impl WindowView {
                     // But take care: on German layouts CTRL-Backslash has unmod="/"
                     // but chars="\x1c"; we only want to do this transformation when
                     // chars and unmod have that base ASCII relationship.
-                    // <https://github.com/wezterm/wezterm/issues/1891>
+                    // upstream issue #1891
                     (KeyCode::Char(c), Some(KeyCode::Char(raw)))
                         if is_ascii_control(*c) == Some(raw.to_ascii_lowercase()) =>
                     {
@@ -2844,7 +2844,7 @@ impl WindowView {
         {
             // Synthesize a key down event for this, because macOS will
             // not do that, even though we tell it that we handled this event.
-            // <https://github.com/wezterm/wezterm/issues/1867>
+            // upstream issue #1867
             Self::key_common(this, nsevent, true);
 
             // Prevent macOS from calling doCommandBySelector(cancel:)
@@ -2940,8 +2940,8 @@ impl WindowView {
             // Note: isZoomed can falsely return YES in situations such as
             // the current screen changing. We cannot detect that case here.
             // There is some logic to compensate for this in
-            // wezterm-gui/src/termwindow/resize.rs.
-            // <https://github.com/wezterm/wezterm/issues/3503>
+            // chatminal-desktop/src/termwindow/resize.rs.
+            // upstream issue #3503
             let is_zoomed = !is_full_screen
                 && inner.window.as_ref().map_or(false, |window| {
                     let window = window.load();
@@ -3193,8 +3193,8 @@ impl WindowView {
             );
 
             cls.add_method(
-                sel!(weztermPerformKeyAssignment:),
-                Self::wezterm_perform_key_assignment
+                sel!(chatminalPerformKeyAssignment:),
+                Self::chatminal_perform_key_assignment
                     as extern "C" fn(&mut Object, Sel, *mut Object),
             );
 

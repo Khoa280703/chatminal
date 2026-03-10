@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use engine_input_types::MousePress;
 use smithay_client_toolkit::compositor::SurfaceData;
 use smithay_client_toolkit::reexports::csd_frame::{DecorationsFrame, FrameClick};
 use smithay_client_toolkit::seat::pointer::{
@@ -11,7 +12,6 @@ use wayland_client::backend::ObjectId;
 use wayland_client::protocol::wl_pointer::{ButtonState, WlPointer};
 use wayland_client::protocol::wl_seat::WlSeat;
 use wayland_client::{Connection, Proxy, QueueHandle};
-use wezterm_input_types::MousePress;
 
 use crate::wayland::SurfaceUserData;
 

@@ -1,4 +1,4 @@
-//! This is used to generate a table in the wezterm docs
+//! This is used to generate a table in the Chatminal docs
 
 fn main() {
     println!("| | |");
