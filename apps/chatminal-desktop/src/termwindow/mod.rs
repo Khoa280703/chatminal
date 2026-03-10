@@ -111,22 +111,26 @@ fn pane_chatminal_session_id(pane: &Arc<dyn Pane>) -> Option<String> {
 
 fn focus_chatminal_session_tab(window_id: MuxWindowId, session_id: &str) -> bool {
     let mux = Mux::get();
-    let Some(window) = mux.get_window(window_id) else {
-        return false;
-    };
+    let found = {
+        let Some(window) = mux.get_window(window_id) else {
+            return false;
+        };
 
-    let mut found = None;
-    for tab in window.iter() {
-        for positioned in tab.iter_panes() {
-            if pane_chatminal_session_id(&positioned.pane).as_deref() == Some(session_id) {
-                found = Some((tab.tab_id(), positioned.pane));
+        let mut found = None;
+        for tab in window.iter() {
+            for positioned in tab.iter_panes() {
+                if pane_chatminal_session_id(&positioned.pane).as_deref() == Some(session_id) {
+                    found = Some((tab.tab_id(), positioned.pane));
+                    break;
+                }
+            }
+            if found.is_some() {
                 break;
             }
         }
-        if found.is_some() {
-            break;
-        }
-    }
+
+        found
+    };
 
     let Some((tab_id, pane)) = found else {
         return false;
