@@ -133,10 +133,10 @@ fi
 
 if [[ -n "$TIMEOUT_BIN" ]]; then
   "$TIMEOUT_BIN" "${BENCH_MAX_SECONDS}s" env CHATMINAL_DAEMON_ENDPOINT="$SOCKET" CHATMINAL_DATA_DIR="$DATA_DIR" \
-    "$APP_BIN" bench-rtt-wezterm "$SAMPLES" "$WARMUP" "$TIMEOUT_MS" "$COLS" "$ROWS" >"$APP_LOG" 2>&1 &
+    "$APP_BIN" bench-rtt "$SAMPLES" "$WARMUP" "$TIMEOUT_MS" "$COLS" "$ROWS" >"$APP_LOG" 2>&1 &
 else
   CHATMINAL_DAEMON_ENDPOINT="$SOCKET" CHATMINAL_DATA_DIR="$DATA_DIR" \
-    "$APP_BIN" bench-rtt-wezterm "$SAMPLES" "$WARMUP" "$TIMEOUT_MS" "$COLS" "$ROWS" >"$APP_LOG" 2>&1 &
+    "$APP_BIN" bench-rtt "$SAMPLES" "$WARMUP" "$TIMEOUT_MS" "$COLS" "$ROWS" >"$APP_LOG" 2>&1 &
 fi
 APP_PID=$!
 

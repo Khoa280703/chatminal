@@ -6,7 +6,7 @@ RUN_ID="${RUN_ID:-$$}"
 REPORT_PATH="${CHATMINAL_PHASE06_INPUT_IME_REPORT:-/tmp/chatminal-phase06-input-modifier-ime-report-${RUN_ID}.json}"
 MATRIX_REPORT_PATH="${CHATMINAL_FIDELITY_MATRIX_REPORT:-/tmp/chatminal-phase03-fidelity-matrix-report-${RUN_ID}.json}"
 REQUIRED_CASES="${CHATMINAL_PHASE06_REQUIRED_CASES:-bash-prompt,ctrl-c,ctrl-c-burst,ctrl-z,unicode,stress-paste,resize,reconnect}"
-MANUAL_EVIDENCE_PATH="${CHATMINAL_IME_MANUAL_EVIDENCE_PATH:-plans/260305-1458-wezterm-gui-window-migration-daemon-ipc/reports/ime-manual-evidence.md}"
+MANUAL_EVIDENCE_PATH="${CHATMINAL_IME_MANUAL_EVIDENCE_PATH:-plans/260305-1458-chatminal-desktop-window-migration-daemon-ipc/reports/ime-manual-evidence.md}"
 REQUIRE_MANUAL_SIGNOFF="${CHATMINAL_PHASE06_REQUIRE_MANUAL_IME_SIGNOFF:-0}"
 
 status="failed"

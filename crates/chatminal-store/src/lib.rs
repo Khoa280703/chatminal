@@ -3,13 +3,49 @@ mod schema;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use chatminal_protocol::{ProfileInfo, SessionInfo, SessionSnapshot, SessionStatus};
 use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;
 
 const DEFAULT_PROFILE_NAME: &str = "Default";
 const ACTIVE_PROFILE_KEY: &str = "active_profile_id";
 const ACTIVE_SESSION_PREFIX: &str = "active_session_id:";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StoredSessionStatus {
+    Running,
+    Disconnected,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoredProfile {
+    pub profile_id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoredSessionSummary {
+    pub session_id: String,
+    pub profile_id: String,
+    pub name: String,
+    pub cwd: String,
+    pub status: StoredSessionStatus,
+    pub persist_history: bool,
+    pub seq: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoredWorkspace {
+    pub profiles: Vec<StoredProfile>,
+    pub active_profile_id: String,
+    pub sessions: Vec<StoredSessionSummary>,
+    pub active_session_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoredSessionSnapshot {
+    pub content: String,
+    pub seq: u64,
+}
 
 #[derive(Debug, Clone)]
 pub struct StoredSession {
@@ -18,7 +54,7 @@ pub struct StoredSession {
     pub name: String,
     pub cwd: String,
     pub shell: String,
-    pub status: SessionStatus,
+    pub status: StoredSessionStatus,
     pub persist_history: bool,
     pub seq: u64,
 }
@@ -59,9 +95,7 @@ impl Store {
         &self.db_path
     }
 
-    pub fn load_workspace(
-        &self,
-    ) -> Result<(Vec<ProfileInfo>, String, Vec<SessionInfo>, Option<String>), String> {
+    pub fn load_workspace(&self) -> Result<StoredWorkspace, String> {
         let conn = self.open_connection()?;
         let profiles = self.list_profiles_with_conn(&conn)?;
         let active_profile_id = self
@@ -71,15 +105,20 @@ impl Store {
 
         let sessions = self.list_sessions_by_profile_with_conn(&conn, &active_profile_id)?;
         let active_session_id = self.active_session_with_conn(&conn, &active_profile_id)?;
-        Ok((profiles, active_profile_id, sessions, active_session_id))
+        Ok(StoredWorkspace {
+            profiles,
+            active_profile_id,
+            sessions,
+            active_session_id,
+        })
     }
 
-    pub fn list_profiles(&self) -> Result<Vec<ProfileInfo>, String> {
+    pub fn list_profiles(&self) -> Result<Vec<StoredProfile>, String> {
         let conn = self.open_connection()?;
         self.list_profiles_with_conn(&conn)
     }
 
-    pub fn create_profile(&self, raw_name: Option<String>) -> Result<ProfileInfo, String> {
+    pub fn create_profile(&self, raw_name: Option<String>) -> Result<StoredProfile, String> {
         let conn = self.open_connection()?;
         let name = match raw_name {
             Some(value) => {
@@ -93,7 +132,7 @@ impl Store {
             None => format!("Profile {}", self.list_profiles_with_conn(&conn)?.len() + 1),
         };
 
-        let profile = ProfileInfo {
+        let profile = StoredProfile {
             profile_id: Uuid::new_v4().to_string(),
             name,
         };
@@ -106,7 +145,7 @@ impl Store {
         Ok(profile)
     }
 
-    pub fn rename_profile(&self, profile_id: &str, name: &str) -> Result<ProfileInfo, String> {
+    pub fn rename_profile(&self, profile_id: &str, name: &str) -> Result<StoredProfile, String> {
         let trimmed = name.trim();
         if trimmed.is_empty() {
             return Err("profile name cannot be empty".to_string());
@@ -124,7 +163,7 @@ impl Store {
             return Err("profile not found".to_string());
         }
 
-        Ok(ProfileInfo {
+        Ok(StoredProfile {
             profile_id: profile_id.to_string(),
             name: trimmed.to_string(),
         })
@@ -363,7 +402,10 @@ impl Store {
             .ok_or_else(|| "session explorer state disappeared".to_string())
     }
 
-    pub fn list_sessions_by_profile(&self, profile_id: &str) -> Result<Vec<SessionInfo>, String> {
+    pub fn list_sessions_by_profile(
+        &self,
+        profile_id: &str,
+    ) -> Result<Vec<StoredSessionSummary>, String> {
         let conn = self.open_connection()?;
         self.list_sessions_by_profile_with_conn(&conn, profile_id)
     }
@@ -390,7 +432,7 @@ impl Store {
             name: trimmed_name,
             cwd,
             shell,
-            status: SessionStatus::Disconnected,
+            status: StoredSessionStatus::Disconnected,
             persist_history,
             seq: 0,
         };
@@ -458,7 +500,7 @@ impl Store {
     pub fn set_session_status(
         &self,
         session_id: &str,
-        status: SessionStatus,
+        status: StoredSessionStatus,
     ) -> Result<(), String> {
         let conn = self.open_connection()?;
         conn.execute(
@@ -648,7 +690,7 @@ impl Store {
         &self,
         session_id: &str,
         preview_lines: usize,
-    ) -> Result<SessionSnapshot, String> {
+    ) -> Result<StoredSessionSnapshot, String> {
         let conn = self.open_connection()?;
         let mut stmt = conn
             .prepare(
@@ -673,7 +715,7 @@ impl Store {
         }
 
         if items.is_empty() {
-            return Ok(SessionSnapshot {
+            return Ok(StoredSessionSnapshot {
                 content: String::new(),
                 seq: 0,
             });
@@ -692,7 +734,7 @@ impl Store {
         }
 
         selected.reverse();
-        Ok(SessionSnapshot {
+        Ok(StoredSessionSnapshot {
             content: selected.join(""),
             seq: max_seq,
         })
@@ -790,7 +832,7 @@ impl Store {
         .map_err(|err| format!("load active session failed: {err}"))
     }
 
-    fn list_profiles_with_conn(&self, conn: &Connection) -> Result<Vec<ProfileInfo>, String> {
+    fn list_profiles_with_conn(&self, conn: &Connection) -> Result<Vec<StoredProfile>, String> {
         let mut stmt = conn
             .prepare("SELECT id, name FROM profiles ORDER BY updated_at DESC, created_at ASC")
             .map_err(|err| format!("prepare list profiles failed: {err}"))?;
@@ -803,7 +845,7 @@ impl Store {
             .next()
             .map_err(|err| format!("read profile row failed: {err}"))?
         {
-            profiles.push(ProfileInfo {
+            profiles.push(StoredProfile {
                 profile_id: row.get(0).unwrap_or_default(),
                 name: row.get(1).unwrap_or_default(),
             });
@@ -816,7 +858,7 @@ impl Store {
         &self,
         conn: &Connection,
         profile_id: &str,
-    ) -> Result<Vec<SessionInfo>, String> {
+    ) -> Result<Vec<StoredSessionSummary>, String> {
         let mut stmt = conn
             .prepare(
                 "SELECT id, profile_id, name, cwd, status, persist_history, last_seq FROM sessions WHERE profile_id = ?1 ORDER BY updated_at DESC, created_at ASC",
@@ -832,7 +874,7 @@ impl Store {
             .next()
             .map_err(|err| format!("read session row failed: {err}"))?
         {
-            sessions.push(SessionInfo {
+            sessions.push(StoredSessionSummary {
                 session_id: row.get(0).unwrap_or_default(),
                 profile_id: row.get(1).unwrap_or_default(),
                 name: row.get(2).unwrap_or_default(),
@@ -847,18 +889,18 @@ impl Store {
     }
 }
 
-fn status_to_db(status: &SessionStatus) -> &'static str {
+fn status_to_db(status: &StoredSessionStatus) -> &'static str {
     match status {
-        SessionStatus::Running => "running",
-        SessionStatus::Disconnected => "disconnected",
+        StoredSessionStatus::Running => "running",
+        StoredSessionStatus::Disconnected => "disconnected",
     }
 }
 
-fn status_from_db(value: &str) -> SessionStatus {
+fn status_from_db(value: &str) -> StoredSessionStatus {
     if value.eq_ignore_ascii_case("running") {
-        SessionStatus::Running
+        StoredSessionStatus::Running
     } else {
-        SessionStatus::Disconnected
+        StoredSessionStatus::Disconnected
     }
 }
 

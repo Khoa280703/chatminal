@@ -79,9 +79,7 @@ fn map_function_key(index: u8) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::terminal_input_event::{
-        TerminalInputSource, TerminalKey, TerminalKeyChord, TerminalModifiers,
-    };
+    use super::super::terminal_input_event::{TerminalKey, TerminalKeyChord, TerminalModifiers};
     use super::encode_key_chord_to_pty_input;
 
     fn chord(key: TerminalKey, modifiers: TerminalModifiers) -> TerminalKeyChord {
@@ -89,7 +87,6 @@ mod tests {
             key,
             modifiers,
             repeat: false,
-            source: TerminalInputSource::Crossterm,
         }
     }
 

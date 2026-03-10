@@ -1,0 +1,126 @@
+[package]
+name = "chatminal-desktop"
+version = "0.1.0"
+edition = "2018"
+publish = false
+build = "build.rs"
+
+[[bin]]
+name = "chatminal-desktop"
+path = "src/main.rs"
+
+[[bin]]
+name = "chatminal-mux"
+path = "src/bin/chatminal-mux/main.rs"
+
+[features]
+default = ["vendored-fonts", "wayland"]
+wayland = ["window/wayland"]
+distro-defaults = ["config/distro-defaults"]
+vendor-nerd-font-symbols-font = ["engine-font/vendor-nerd-font-symbols"]
+vendor-jetbrains-font = ["engine-font/vendor-jetbrains"]
+vendor-roboto-font = ["engine-font/vendor-roboto"]
+vendor-noto-emoji-font = ["engine-font/vendor-noto-emoji"]
+vendored-fonts = [
+  "vendor-nerd-font-symbols-font",
+  "vendor-jetbrains-font",
+  "vendor-roboto-font",
+  "vendor-noto-emoji-font",
+]
+dhat-heap = ["dhat"]
+dhat-ad-hoc = ["dhat"]
+
+[build-dependencies]
+anyhow = { version = "1.0" }
+
+[dependencies]
+anyhow = { version = "1.0" }
+async_ossl = { workspace = true }
+async-trait = "0.1"
+bitflags = { version = "1.3" }
+bytemuck = { version = "1.4", features = ["derive"] }
+chatminal-runtime = { path = "../../crates/chatminal-runtime" }
+chrono = { version = "0.4", default-features = false, features = ["unstable-locales", "serde"] }
+clap = { version = "4.0", features = ["derive"] }
+codec = { workspace = true }
+colorgrad = { version = "0.6" }
+config = { workspace = true }
+dhat = { version = "0.3", optional = true }
+dirs-next = { version = "2.0" }
+downcast-rs = { version = "1.0" }
+emojis = { version = "0.6" }
+env-bootstrap = { workspace = true }
+euclid = { version = "0.22", default-features = false }
+fastrand = { version = "2.0" }
+filedescriptor = { workspace = true }
+finl_unicode = { version = "1.3", git = "https://github.com/wez/finl_unicode.git", branch = "no_std", default-features = false, features = ["categories", "grapheme_clusters"] }
+frecency = { workspace = true }
+futures = { version = "0.3" }
+hdrhistogram = { version = "7.1" }
+http_req = { version = "0.11" }
+image = { version = "0.25" }
+lazy_static = { version = "1.4" }
+lfucache = { workspace = true }
+libc = { version = "0.2" }
+log = { version = "0.4" }
+luahelper = { workspace = true }
+metrics = { version = "0.23" }
+mlua = { version = "0.9", features = ["send", "serialize"] }
+mux-lua = { workspace = true }
+mux = { workspace = true }
+nucleo-matcher = { version = "0.3" }
+ordered-float = { version = "4.1", default-features = false }
+openssl = { workspace = true }
+parking_lot = { version = "0.12" }
+portable-pty = { workspace = true, features = ["serde_support"] }
+promise = { workspace = true }
+rangeset = { workspace = true }
+ratelim = { workspace = true }
+rayon = { version = "1.10" }
+regex = { version = "1" }
+serde = { version = "1.0", default-features = false, features = ["rc", "derive"] }
+serde_json = { version = "1.0" }
+shlex = { version = "1.1" }
+smol = { version = "2.0" }
+tabout = { workspace = true }
+tempfile = { version = "3.20" }
+terminfo = { version = "0.9" }
+termwiz-funcs = { workspace = true }
+termwiz = { workspace = true }
+textwrap = { version = "0.16" }
+thiserror = { version = "1.0" }
+tiny-skia = { version = "0.11" }
+umask = { workspace = true }
+unicode-normalization = { version = "0.1.24" }
+unicode-segmentation = { version = "1.12" }
+url-funcs = { workspace = true }
+url = { version = "2" }
+walkdir = { version = "2" }
+engine-bidi = { workspace = true, default-features = false }
+engine-blob-leases = { workspace = true, features = ["simple_tempdir"] }
+engine-client = { workspace = true }
+engine-dynamic = { workspace = true, default-features = false }
+engine-font = { workspace = true }
+engine-gui-subcommands = { workspace = true }
+engine-mux-server-impl = { workspace = true }
+engine-open-url = { workspace = true }
+engine-ssh = { workspace = true }
+engine-term = { workspace = true }
+engine-toast-notification = { workspace = true }
+wgpu = { version = "25.0.2" }
+window-funcs = { workspace = true }
+window = { workspace = true }
+
+[target.'cfg(windows)'.build-dependencies]
+cc = { version = "1.0", features = ["parallel"] }
+embed-resource = { version = "1.7" }
+
+[target.'cfg(windows)'.dependencies]
+shared_library = { version = "0.1" }
+winapi = { version = "0.3.9", features = ["winuser", "consoleapi", "handleapi", "fileapi", "namedpipeapi", "synchapi", "winsock2"] }
+windows = { version = "0.33.0", features = ["Win32_UI_Shell"] }
+
+[dev-dependencies]
+benchmarking = { version = "0.4" }
+env_logger = { version = "0.11" }
+k9 = { version = "0.12.0" }

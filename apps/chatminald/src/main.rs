@@ -1,13 +1,6 @@
-mod config;
-mod metrics;
-mod server;
-mod session;
-mod state;
-mod transport;
-
+use chatminal_runtime::server::run_server;
+use chatminal_runtime::{DaemonConfig, DaemonState};
 use chatminal_store::Store;
-use config::DaemonConfig;
-use state::DaemonState;
 
 fn main() {
     let _ = env_logger::try_init();
@@ -24,5 +17,5 @@ fn run() -> Result<(), String> {
 
     log::info!("chatminald database: {}", store.db_path().display());
     let state = DaemonState::new(config.clone(), store)?;
-    server::run_server(&config.endpoint, state)
+    run_server(&config.endpoint, state)
 }

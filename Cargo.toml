@@ -2,7 +2,8 @@
 members = [
   "apps/chatminald",
   "apps/chatminal-app",
-  "apps/chatminal-wezterm-gui",
+  "apps/chatminal-desktop",
+  "crates/chatminal-runtime",
   "crates/chatminal-async-ossl",
   "crates/chatminal-base91",
   "crates/chatminal-battery",
@@ -38,36 +39,36 @@ members = [
   "crates/chatminal-umask",
   "crates/chatminal-url-funcs",
   "crates/chatminal-vtparse",
-  "crates/chatminal-wezterm-config-derive",
-  "crates/chatminal-wezterm-bidi",
-  "crates/chatminal-wezterm-blob-leases",
-  "crates/chatminal-wezterm-cell",
-  "crates/chatminal-wezterm-char-props",
-  "crates/chatminal-wezterm-client",
-  "crates/chatminal-wezterm-color-types",
-  "crates/chatminal-wezterm-dynamic",
-  "crates/chatminal-wezterm-dynamic-derive",
-  "crates/chatminal-wezterm-escape-parser",
-  "crates/chatminal-wezterm-font",
-  "crates/chatminal-wezterm-gui-subcommands",
-  "crates/chatminal-wezterm-input-types",
-  "crates/chatminal-wezterm-mux-server-impl",
-  "crates/chatminal-wezterm-open-url",
-  "crates/chatminal-wezterm-ssh",
-  "crates/chatminal-wezterm-surface",
-  "crates/chatminal-wezterm-term",
-  "crates/chatminal-wezterm-toast-notification",
-  "crates/chatminal-wezterm-uds",
+  "crates/chatminal-engine-config-derive",
+  "crates/chatminal-engine-bidi",
+  "crates/chatminal-engine-blob-leases",
+  "crates/chatminal-engine-cell",
+  "crates/chatminal-engine-char-props",
+  "crates/chatminal-engine-client",
+  "crates/chatminal-engine-color-types",
+  "crates/chatminal-engine-dynamic",
+  "crates/chatminal-engine-dynamic-derive",
+  "crates/chatminal-engine-escape-parser",
+  "crates/chatminal-engine-font",
+  "crates/chatminal-engine-gui-subcommands",
+  "crates/chatminal-engine-input-types",
+  "crates/chatminal-engine-mux-server-impl",
+  "crates/chatminal-engine-open-url",
+  "crates/chatminal-engine-ssh",
+  "crates/chatminal-engine-surface",
+  "crates/chatminal-engine-term",
+  "crates/chatminal-engine-toast-notification",
+  "crates/chatminal-engine-uds",
   "crates/chatminal-protocol",
   "crates/chatminal-store",
   "crates/chatminal-window",
   "crates/chatminal-window-funcs",
-  "vendor/wezterm-deps/cairo",
-  "vendor/wezterm-deps/fontconfig",
-  "vendor/wezterm-deps/freetype",
-  "vendor/wezterm-deps/harfbuzz",
+  "vendor/terminal-deps/cairo",
+  "vendor/terminal-deps/fontconfig",
+  "vendor/terminal-deps/freetype",
+  "vendor/terminal-deps/harfbuzz",
 ]
-exclude = ["third_party/wezterm"]
+exclude = ["third_party/terminal-engine-reference"]
 default-members = [
   "apps/chatminald",
   "apps/chatminal-app",
@@ -147,9 +148,9 @@ fixed = "1.23"
 fixedbitset = { version = "0.4", default-features = false }
 flume = "0.11"
 fnv = "1.0"
-fontconfig = { path = "vendor/wezterm-deps/fontconfig" }
+fontconfig = { path = "vendor/terminal-deps/fontconfig" }
 frecency = { package = "chatminal-frecency", path = "crates/chatminal-frecency" }
-freetype = { path = "vendor/wezterm-deps/freetype" }
+freetype = { path = "vendor/terminal-deps/freetype" }
 futures = "0.3"
 futures-lite = "2.3"
 futures-util = "0.3"
@@ -160,7 +161,7 @@ gl_generator = "0.14"
 glium = { version = "0.35", default-features = false }
 governor = { version = "0.5", default-features = false, features = ["std"] }
 guillotiere = "0.6"
-harfbuzz = { path = "vendor/wezterm-deps/harfbuzz" }
+harfbuzz = { path = "vendor/terminal-deps/harfbuzz" }
 heapless = "0.8"
 hdrhistogram = "7.1"
 hex = { version = "0.4", default-features = false }
@@ -289,27 +290,27 @@ wayland-client = "0.31"
 wayland-egl = "0.32"
 wayland-protocols = "0.32"
 wayland-protocols-plasma = { version = "0.3.6", features = ["client"] }
-wezterm-bidi = { package = "chatminal-wezterm-bidi", path = "crates/chatminal-wezterm-bidi", version = "0.2.3", default-features = false }
-wezterm-blob-leases = { package = "chatminal-wezterm-blob-leases", path = "crates/chatminal-wezterm-blob-leases", version = "0.1.1" }
-wezterm-cell = { package = "chatminal-wezterm-cell", path = "crates/chatminal-wezterm-cell" }
-wezterm-char-props = { package = "chatminal-wezterm-char-props", path = "crates/chatminal-wezterm-char-props", default-features = false }
-wezterm-client = { package = "chatminal-wezterm-client", path = "crates/chatminal-wezterm-client" }
-wezterm-color-types = { package = "chatminal-wezterm-color-types", path = "crates/chatminal-wezterm-color-types", version = "0.3", default-features = false }
-wezterm-config-derive = { package = "chatminal-wezterm-config-derive", path = "crates/chatminal-wezterm-config-derive", version = "0.1" }
-wezterm-dynamic = { package = "chatminal-wezterm-dynamic", path = "crates/chatminal-wezterm-dynamic", version = "0.2.1", default-features = false }
-wezterm-dynamic-derive = { package = "chatminal-wezterm-dynamic-derive", path = "crates/chatminal-wezterm-dynamic-derive", version = "0.1.1" }
-wezterm-escape-parser = { package = "chatminal-wezterm-escape-parser", path = "crates/chatminal-wezterm-escape-parser", version = "0.1.0" }
-wezterm-font = { package = "chatminal-wezterm-font", path = "crates/chatminal-wezterm-font" }
-wezterm-gui-subcommands = { package = "chatminal-wezterm-gui-subcommands", path = "crates/chatminal-wezterm-gui-subcommands" }
-wezterm-input-types = { package = "chatminal-wezterm-input-types", path = "crates/chatminal-wezterm-input-types", version = "0.1", default-features = false }
-wezterm-mux-server-impl = { package = "chatminal-wezterm-mux-server-impl", path = "crates/chatminal-wezterm-mux-server-impl" }
-wezterm-open-url = { package = "chatminal-wezterm-open-url", path = "crates/chatminal-wezterm-open-url" }
-wezterm-ssh = { package = "chatminal-wezterm-ssh", path = "crates/chatminal-wezterm-ssh" }
-wezterm-surface = { package = "chatminal-wezterm-surface", path = "crates/chatminal-wezterm-surface" }
-wezterm-term = { package = "chatminal-wezterm-term", path = "crates/chatminal-wezterm-term" }
-wezterm-toast-notification = { package = "chatminal-wezterm-toast-notification", path = "crates/chatminal-wezterm-toast-notification" }
-wezterm-uds = { package = "chatminal-wezterm-uds", path = "crates/chatminal-wezterm-uds" }
-wezterm-version = { package = "chatminal-wezterm-version", path = "crates/chatminal-wezterm-version" }
+engine-bidi = { package = "chatminal-engine-bidi", path = "crates/chatminal-engine-bidi", version = "0.2.3", default-features = false }
+engine-blob-leases = { package = "chatminal-engine-blob-leases", path = "crates/chatminal-engine-blob-leases", version = "0.1.1" }
+engine-cell = { package = "chatminal-engine-cell", path = "crates/chatminal-engine-cell" }
+engine-char-props = { package = "chatminal-engine-char-props", path = "crates/chatminal-engine-char-props", default-features = false }
+engine-client = { package = "chatminal-engine-client", path = "crates/chatminal-engine-client" }
+engine-color-types = { package = "chatminal-engine-color-types", path = "crates/chatminal-engine-color-types", version = "0.3", default-features = false }
+engine-config-derive = { package = "chatminal-engine-config-derive", path = "crates/chatminal-engine-config-derive", version = "0.1" }
+engine-dynamic = { package = "chatminal-engine-dynamic", path = "crates/chatminal-engine-dynamic", version = "0.2.1", default-features = false }
+engine-dynamic-derive = { package = "chatminal-engine-dynamic-derive", path = "crates/chatminal-engine-dynamic-derive", version = "0.1.1" }
+engine-escape-parser = { package = "chatminal-engine-escape-parser", path = "crates/chatminal-engine-escape-parser", version = "0.1.0" }
+engine-font = { package = "chatminal-engine-font", path = "crates/chatminal-engine-font" }
+engine-gui-subcommands = { package = "chatminal-engine-gui-subcommands", path = "crates/chatminal-engine-gui-subcommands" }
+engine-input-types = { package = "chatminal-engine-input-types", path = "crates/chatminal-engine-input-types", version = "0.1", default-features = false }
+engine-mux-server-impl = { package = "chatminal-engine-mux-server-impl", path = "crates/chatminal-engine-mux-server-impl" }
+engine-open-url = { package = "chatminal-engine-open-url", path = "crates/chatminal-engine-open-url" }
+engine-ssh = { package = "chatminal-engine-ssh", path = "crates/chatminal-engine-ssh" }
+engine-surface = { package = "chatminal-engine-surface", path = "crates/chatminal-engine-surface" }
+engine-term = { package = "chatminal-engine-term", path = "crates/chatminal-engine-term" }
+engine-toast-notification = { package = "chatminal-engine-toast-notification", path = "crates/chatminal-engine-toast-notification" }
+engine-uds = { package = "chatminal-engine-uds", path = "crates/chatminal-engine-uds" }
+engine-version = { package = "chatminal-engine-version", path = "crates/chatminal-engine-version" }
 wgpu = "25.0.2"
 whoami = "1.5"
 winapi = "0.3.9"
@@ -331,4 +332,4 @@ lto = true
 codegen-units = 1
 
 [patch.crates-io]
-cairo-sys-rs = { path = "vendor/wezterm-deps/cairo", version = "0.18.0" }
+cairo-sys-rs = { path = "vendor/terminal-deps/cairo", version = "0.18.0" }

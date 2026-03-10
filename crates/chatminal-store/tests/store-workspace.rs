@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
-use chatminal_protocol::SessionStatus;
-use chatminal_store::Store;
+use chatminal_store::{Store, StoredSessionStatus};
 use uuid::Uuid;
 
 struct TempDb {
@@ -26,21 +25,26 @@ fn initialize_creates_default_profile() {
     let temp = TempDb::new();
     let store = Store::initialize(&temp.path).expect("initialize store");
 
-    let (profiles, active_profile_id, sessions, active_session_id) =
-        store.load_workspace().expect("load workspace");
+    let workspace = store.load_workspace().expect("load workspace");
 
-    assert_eq!(profiles.len(), 1);
-    assert_eq!(profiles[0].name, "Default");
-    assert_eq!(active_profile_id, profiles[0].profile_id);
-    assert!(sessions.is_empty());
-    assert!(active_session_id.is_none());
+    assert_eq!(workspace.profiles.len(), 1);
+    assert_eq!(workspace.profiles[0].name, "Default");
+    assert_eq!(
+        workspace.active_profile_id,
+        workspace.profiles[0].profile_id
+    );
+    assert!(workspace.sessions.is_empty());
+    assert!(workspace.active_session_id.is_none());
 }
 
 #[test]
 fn session_history_roundtrip_and_clear() {
     let temp = TempDb::new();
     let store = Store::initialize(&temp.path).expect("initialize store");
-    let (_, active_profile_id, _, _) = store.load_workspace().expect("load workspace");
+    let active_profile_id = store
+        .load_workspace()
+        .expect("load workspace")
+        .active_profile_id;
 
     let session = store
         .create_session(
@@ -56,7 +60,7 @@ fn session_history_roundtrip_and_clear() {
         .set_active_session(&active_profile_id, Some(&session.session_id))
         .expect("set active session");
     store
-        .set_session_status(&session.session_id, SessionStatus::Running)
+        .set_session_status(&session.session_id, StoredSessionStatus::Running)
         .expect("set running status");
 
     store
@@ -95,7 +99,10 @@ fn session_history_roundtrip_and_clear() {
 fn session_history_retention_keeps_newest_chunks_by_line_budget() {
     let temp = TempDb::new();
     let store = Store::initialize(&temp.path).expect("initialize store");
-    let (_, active_profile_id, _, _) = store.load_workspace().expect("load workspace");
+    let active_profile_id = store
+        .load_workspace()
+        .expect("load workspace")
+        .active_profile_id;
 
     let session = store
         .create_session(
@@ -132,7 +139,10 @@ fn session_history_retention_keeps_newest_chunks_by_line_budget() {
 fn session_history_retention_counts_non_newline_chunks() {
     let temp = TempDb::new();
     let store = Store::initialize(&temp.path).expect("initialize store");
-    let (_, active_profile_id, _, _) = store.load_workspace().expect("load workspace");
+    let active_profile_id = store
+        .load_workspace()
+        .expect("load workspace")
+        .active_profile_id;
     let session = store
         .create_session(
             &active_profile_id,
@@ -165,7 +175,10 @@ fn session_history_retention_counts_non_newline_chunks() {
 fn delete_profile_cascades_sessions_and_history() {
     let temp = TempDb::new();
     let store = Store::initialize(&temp.path).expect("initialize store");
-    let (_, default_profile_id, _, _) = store.load_workspace().expect("load workspace");
+    let default_profile_id = store
+        .load_workspace()
+        .expect("load workspace")
+        .active_profile_id;
 
     let profile = store
         .create_profile(Some("Work".to_string()))
@@ -194,11 +207,13 @@ fn delete_profile_cascades_sessions_and_history() {
         .delete_profile(&profile.profile_id)
         .expect("delete profile");
 
-    let (profiles_after_delete, active_profile_after_delete, _, _) =
-        store.load_workspace().expect("load workspace after delete");
-    assert_eq!(profiles_after_delete.len(), 1);
-    assert_eq!(profiles_after_delete[0].profile_id, default_profile_id);
-    assert_eq!(active_profile_after_delete, default_profile_id);
+    let workspace_after_delete = store.load_workspace().expect("load workspace after delete");
+    assert_eq!(workspace_after_delete.profiles.len(), 1);
+    assert_eq!(
+        workspace_after_delete.profiles[0].profile_id,
+        default_profile_id
+    );
+    assert_eq!(workspace_after_delete.active_profile_id, default_profile_id);
     assert!(
         store
             .get_session(&session.session_id)
@@ -250,7 +265,10 @@ fn bool_state_roundtrip_with_default() {
 fn session_explorer_state_roundtrip_and_session_delete_cleanup() {
     let temp = TempDb::new();
     let store = Store::initialize(&temp.path).expect("initialize store");
-    let (_, active_profile_id, _, _) = store.load_workspace().expect("load workspace");
+    let active_profile_id = store
+        .load_workspace()
+        .expect("load workspace")
+        .active_profile_id;
     let session = store
         .create_session(
             &active_profile_id,

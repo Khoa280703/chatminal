@@ -12,33 +12,33 @@ SIDEBAR_WIDTH ?= 20
 PREVIEW_LINES ?= 120
 PREVIEW_CHARS ?= 200
 
-.PHONY: help clean-socket daemon daemon-reset dashboard window attach workspace sessions create activate bootstrap-wezterm-deps verify-third-party-reference-only check check-wezterm-gui test smoke-window bench-rtt bench-phase02 fidelity-smoke fidelity-matrix-smoke fidelity-matrix-smoke-relaxed fidelity-input-ime-smoke phase06-killswitch-verify phase08-killswitch-verify soak-smoke release-dry-run
+.PHONY: help clean-socket daemon daemon-reset dashboard window attach workspace sessions create activate bootstrap-terminal-deps verify-third-party-reference-only check check-desktop test smoke-window bench-rtt bench-phase02 fidelity-smoke fidelity-matrix-smoke fidelity-matrix-smoke-relaxed fidelity-input-ime-smoke phase06-killswitch-verify phase08-killswitch-verify soak-smoke release-dry-run
 
 help:
 	@echo "Chatminal shortcuts:"
 	@echo "  make daemon                                 # Run daemon"
 	@echo "  make daemon-reset                           # Kill old daemon, clean socket, run daemon"
 	@echo "  make dashboard                              # Run TUI dashboard"
-	@echo "  make window                                 # Run WezTerm GUI window (default runtime)"
+	@echo "  make window                                 # Run Chatminal Desktop window with session sidebar (default runtime)"
 	@echo "  make attach [SESSION_ID=<id>]               # Attach interactive terminal (F10 to quit)"
 	@echo "  make workspace                              # Print workspace snapshot"
 	@echo "  make sessions                               # Print sessions list"
 	@echo "  make create NAME='Dev'                      # Create a session"
-	@echo "  make activate SESSION_ID='<id>'             # Activate wezterm session"
-	@echo "  make bootstrap-wezterm-deps                 # Hydrate vendored C deps for WezTerm GUI"
-	@echo "  make verify-third-party-reference-only      # Assert active build/runtime no longer depends on third_party/wezterm"
+	@echo "  make activate SESSION_ID='<id>'             # Activate desktop session"
+	@echo "  make bootstrap-terminal-deps                # Hydrate vendored C deps for desktop runtime"
+	@echo "  make verify-third-party-reference-only      # Assert active build/runtime no longer depends on third_party/terminal-engine-reference"
 	@echo "  make check                                  # cargo check --workspace"
-	@echo "  make check-wezterm-gui                      # Check first-party WezTerm GUI package (requires native GUI dev deps)"
+	@echo "  make check-desktop                      # Check first-party Chatminal Desktop package (requires native GUI dev deps)"
 	@echo "  make test                                   # Run core test suites"
-	@echo "  make smoke-window                           # Run WezTerm GUI launcher smoke"
+	@echo "  make smoke-window                           # Run desktop launcher smoke"
 	@echo "  make bench-rtt                              # Run quick RTT benchmark command"
 	@echo "  make bench-phase02                          # Run phase-02 RTT+RSS hard gate script"
 	@echo "  make fidelity-smoke                         # Run phase-05 fidelity smoke (JSON report)"
 	@echo "  make fidelity-matrix-smoke                  # Run phase-03 fidelity matrix smoke strict mode (JSON report)"
 	@echo "  make fidelity-matrix-smoke-relaxed          # Run phase-03 fidelity matrix smoke non-strict"
 	@echo "  make fidelity-input-ime-smoke               # Run phase-06 modifier/input smoke + IME manual gate report"
-	@echo "  make phase06-killswitch-verify              # Verify runtime input pipeline rollback path (wezterm/legacy)"
-	@echo "  make phase08-killswitch-verify              # Verify WezTerm GUI / legacy window backend gate"
+	@echo "  make phase06-killswitch-verify              # Verify runtime input pipeline rollback path (desktop/legacy)"
+	@echo "  make phase08-killswitch-verify              # Verify desktop launcher/runtime gate"
 	@echo "  make soak-smoke                             # Run phase-05 soak smoke (JSON report)"
 	@echo "  make release-dry-run                        # Build release artifacts + checksum + smoke"
 	@echo ""
@@ -60,19 +60,17 @@ daemon-reset:
 
 dashboard:
 	@if [ ! -S "$(SOCKET)" ]; then echo "Daemon chưa sẵn sàng tại $(SOCKET). Hãy chạy: make daemon"; exit 1; fi
-	$(DAEMON_ENDPOINT) cargo run --manifest-path $(APP_MANIFEST) -- dashboard-tui-wezterm $(PREVIEW_LINES) $(PREVIEW_CHARS) $(WIDTH) $(HEIGHT) $(SIDEBAR_WIDTH)
+	$(DAEMON_ENDPOINT) cargo run --manifest-path $(APP_MANIFEST) -- dashboard-tui $(PREVIEW_LINES) $(PREVIEW_CHARS) $(WIDTH) $(HEIGHT) $(SIDEBAR_WIDTH)
 
 window:
-	@if [ ! -S "$(SOCKET)" ]; then echo "Daemon chưa sẵn sàng tại $(SOCKET). Hãy chạy: make daemon"; exit 1; fi
-	@$(DAEMON_ENDPOINT) cargo run --quiet --manifest-path $(APP_MANIFEST) -- workspace >/dev/null || { echo "Daemon không phản hồi. Hãy chạy lại: make daemon-reset"; exit 1; }
-	$(DAEMON_ENDPOINT) cargo run --manifest-path $(APP_MANIFEST) -- window
+	cargo run --manifest-path $(APP_MANIFEST) -- window
 
 attach:
 	@if [ ! -S "$(SOCKET)" ]; then echo "Daemon chưa sẵn sàng tại $(SOCKET). Hãy chạy: make daemon"; exit 1; fi
 	@if [ -n "$(SESSION_ID)" ]; then \
-		$(DAEMON_ENDPOINT) cargo run --manifest-path $(APP_MANIFEST) -- attach-wezterm "$(SESSION_ID)" $(WIDTH) $(HEIGHT) $(PREVIEW_LINES); \
+		$(DAEMON_ENDPOINT) cargo run --manifest-path $(APP_MANIFEST) -- attach "$(SESSION_ID)" $(WIDTH) $(HEIGHT) $(PREVIEW_LINES); \
 	else \
-		$(DAEMON_ENDPOINT) cargo run --manifest-path $(APP_MANIFEST) -- attach-wezterm $(WIDTH) $(HEIGHT) $(PREVIEW_LINES); \
+		$(DAEMON_ENDPOINT) cargo run --manifest-path $(APP_MANIFEST) -- attach $(WIDTH) $(HEIGHT) $(PREVIEW_LINES); \
 	fi
 
 workspace:
@@ -87,21 +85,21 @@ create:
 
 activate:
 	@if [ -z "$(SESSION_ID)" ]; then echo "Missing SESSION_ID. Example: make activate SESSION_ID='<id>'"; exit 1; fi
-	$(DAEMON_ENDPOINT) cargo run --manifest-path $(APP_MANIFEST) -- activate-wezterm "$(SESSION_ID)" $(WIDTH) $(HEIGHT) $(PREVIEW_CHARS)
+	$(DAEMON_ENDPOINT) cargo run --manifest-path $(APP_MANIFEST) -- activate "$(SESSION_ID)" $(WIDTH) $(HEIGHT) $(PREVIEW_CHARS)
 
-bootstrap-wezterm-deps:
-	bash scripts/bootstrap-wezterm-vendor-deps.sh
+bootstrap-terminal-deps:
+	bash scripts/bootstrap-terminal-vendor-deps.sh
 
 verify-third-party-reference-only:
-	bash scripts/verify-third-party-wezterm-reference-only.sh
+	bash scripts/verify-third-party-terminal-reference-only.sh
 
 check:
-	bash scripts/verify-third-party-wezterm-reference-only.sh
+	bash scripts/verify-third-party-terminal-reference-only.sh
 	cargo check --workspace
 
-check-wezterm-gui:
-	bash scripts/verify-third-party-wezterm-reference-only.sh
-	cargo check -p chatminal-wezterm-gui
+check-desktop:
+	bash scripts/verify-third-party-terminal-reference-only.sh
+	cargo check -p chatminal-desktop
 
 test:
 	cargo test --manifest-path crates/chatminal-protocol/Cargo.toml
@@ -110,11 +108,11 @@ test:
 	cargo test --manifest-path apps/chatminal-app/Cargo.toml
 
 smoke-window:
-	bash scripts/smoke/window-wezterm-smoke.sh
+	bash scripts/smoke/window-desktop-smoke.sh
 
 bench-rtt:
 	@if [ ! -S "$(SOCKET)" ]; then echo "Daemon chưa sẵn sàng tại $(SOCKET). Hãy chạy: make daemon"; exit 1; fi
-	$(DAEMON_ENDPOINT) cargo run --manifest-path $(APP_MANIFEST) -- bench-rtt-wezterm 80 15 2000 $(WIDTH) $(HEIGHT)
+	$(DAEMON_ENDPOINT) cargo run --manifest-path $(APP_MANIFEST) -- bench-rtt 80 15 2000 $(WIDTH) $(HEIGHT)
 
 bench-phase02:
 	bash scripts/bench/phase02-rtt-memory-gate.sh
@@ -135,7 +133,7 @@ phase06-killswitch-verify:
 	bash scripts/migration/phase06-killswitch-verify.sh
 
 phase08-killswitch-verify:
-	bash scripts/migration/phase08-wezterm-gui-killswitch-verify.sh
+	bash scripts/migration/phase08-desktop-killswitch-verify.sh
 
 soak-smoke:
 	bash scripts/soak/phase05-soak-smoke.sh

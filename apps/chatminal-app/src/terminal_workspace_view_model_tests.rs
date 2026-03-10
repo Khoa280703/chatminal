@@ -1,6 +1,6 @@
 use chatminal_protocol::{ProfileInfo, SessionInfo, SessionStatus, WorkspaceState};
 
-use crate::terminal_wezterm_core::PaneSnapshotSummary;
+use crate::terminal_pane_emulator::PaneSnapshotSummary;
 use crate::terminal_workspace_view_model::build_terminal_workspace_view_model;
 
 #[test]

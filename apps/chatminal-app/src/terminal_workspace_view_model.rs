@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use chatminal_protocol::WorkspaceState;
 use serde::Serialize;
 
-use crate::terminal_wezterm_core::PaneSnapshotSummary;
+use crate::terminal_pane_emulator::PaneSnapshotSummary;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct SidebarProfileItem {

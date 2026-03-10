@@ -2,21 +2,14 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputPipelineMode {
-    Wezterm,
+    Desktop,
     Legacy,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WindowBackend {
-    WeztermGui,
-    LegacyEgui,
 }
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {
     pub endpoint: String,
     pub input_pipeline_mode: InputPipelineMode,
-    pub window_backend: WindowBackend,
 }
 
 impl AppConfig {
@@ -24,7 +17,6 @@ impl AppConfig {
         Ok(Self {
             endpoint: resolve_endpoint()?,
             input_pipeline_mode: resolve_input_pipeline_mode(),
-            window_backend: resolve_window_backend(),
         })
     }
 }
@@ -141,43 +133,21 @@ fn resolve_data_dir() -> Result<PathBuf, String> {
 fn resolve_input_pipeline_mode() -> InputPipelineMode {
     let raw = std::env::var("CHATMINAL_INPUT_PIPELINE_MODE")
         .ok()
-        .unwrap_or_else(|| "wezterm".to_string());
+        .unwrap_or_else(|| "desktop".to_string());
     resolve_input_pipeline_mode_from_raw(&raw)
-}
-
-fn resolve_window_backend() -> WindowBackend {
-    let raw = std::env::var("CHATMINAL_WINDOW_BACKEND")
-        .ok()
-        .unwrap_or_else(|| "wezterm-gui".to_string());
-    resolve_window_backend_from_raw(&raw)
 }
 
 fn resolve_input_pipeline_mode_from_raw(raw: &str) -> InputPipelineMode {
     match parse_input_pipeline_mode(&raw) {
         Some(value) => value,
-        None => InputPipelineMode::Wezterm,
-    }
-}
-
-fn resolve_window_backend_from_raw(raw: &str) -> WindowBackend {
-    match parse_window_backend(raw) {
-        Some(value) => value,
-        None => WindowBackend::WeztermGui,
+        None => InputPipelineMode::Desktop,
     }
 }
 
 fn parse_input_pipeline_mode(raw: &str) -> Option<InputPipelineMode> {
     match raw.trim().to_ascii_lowercase().as_str() {
-        "wezterm" => Some(InputPipelineMode::Wezterm),
+        "desktop" => Some(InputPipelineMode::Desktop),
         "legacy" => Some(InputPipelineMode::Legacy),
-        _ => None,
-    }
-}
-
-fn parse_window_backend(raw: &str) -> Option<WindowBackend> {
-    match raw.trim().to_ascii_lowercase().as_str() {
-        "wezterm-gui" | "wezterm_gui" | "wezterm" | "proxy" => Some(WindowBackend::WeztermGui),
-        "legacy" | "egui" | "window-wezterm" => Some(WindowBackend::LegacyEgui),
         _ => None,
     }
 }
@@ -188,24 +158,23 @@ pub fn usage() -> &'static str {
   chatminal-app sessions
   chatminal-app create <name>
   chatminal-app activate <session_id> [cols] [rows] [preview_lines]
-  chatminal-app activate-wezterm <session_id> [cols] [rows] [preview_lines]
   chatminal-app snapshot <session_id> [preview_lines]
   chatminal-app input <session_id> <data>
   chatminal-app resize <session_id> [cols] [rows]
   chatminal-app events [seconds]
-  chatminal-app workspace-wezterm [preview_lines] [cols] [rows]
-  chatminal-app events-wezterm [seconds]
-  chatminal-app dashboard-wezterm [preview_lines] [cols] [rows] [max_pane_preview_lines]
-  chatminal-app dashboard-watch-wezterm [seconds] [refresh_ms] [preview_lines] [cols] [rows] [max_pane_preview_lines]
-  chatminal-app dashboard-tui-wezterm [refresh_ms] [preview_lines] [cols] [rows] [max_pane_preview_lines]
-  chatminal-app attach-wezterm [session_id] [cols] [rows] [preview_lines]
+  chatminal-app workspace-terminal [preview_lines] [cols] [rows]
+  chatminal-app activate-terminal <session_id> [cols] [rows] [preview_lines]
+  chatminal-app events-terminal [seconds]
+  chatminal-app dashboard [preview_lines] [cols] [rows] [max_pane_preview_lines]
+  chatminal-app dashboard-watch [seconds] [refresh_ms] [preview_lines] [cols] [rows] [max_pane_preview_lines]
+  chatminal-app dashboard-tui [refresh_ms] [preview_lines] [cols] [rows] [max_pane_preview_lines]
+  chatminal-app attach [session_id] [cols] [rows] [preview_lines]
   chatminal-app window [session_id] [preview_lines] [cols] [rows]
-  chatminal-app window-wezterm-gui [session_id]
-  chatminal-app bench-rtt-wezterm [samples] [warmup] [timeout_ms] [cols] [rows]
+  chatminal-app window-desktop [session_id]
+  chatminal-app bench-rtt [samples] [warmup] [timeout_ms] [cols] [rows]
 
 Environment:
-  CHATMINAL_INPUT_PIPELINE_MODE=wezterm|legacy
-  CHATMINAL_WINDOW_BACKEND=wezterm-gui|legacy
+  CHATMINAL_INPUT_PIPELINE_MODE=desktop|legacy
 "
 }
 
@@ -239,8 +208,8 @@ mod tests {
     #[test]
     fn parse_input_pipeline_mode_accepts_expected_values() {
         assert_eq!(
-            parse_input_pipeline_mode("wezterm"),
-            Some(InputPipelineMode::Wezterm)
+            parse_input_pipeline_mode("desktop"),
+            Some(InputPipelineMode::Desktop)
         );
         assert_eq!(
             parse_input_pipeline_mode("legacy"),
@@ -254,43 +223,14 @@ mod tests {
     }
 
     #[test]
-    fn resolve_input_pipeline_mode_falls_back_to_wezterm_on_invalid_value() {
+    fn resolve_input_pipeline_mode_falls_back_to_desktop_on_invalid_value() {
         assert_eq!(
             resolve_input_pipeline_mode_from_raw("invalid"),
-            InputPipelineMode::Wezterm
+            InputPipelineMode::Desktop
         );
         assert_eq!(
             resolve_input_pipeline_mode_from_raw("legacy"),
             InputPipelineMode::Legacy
-        );
-    }
-
-    #[test]
-    fn parse_window_backend_accepts_expected_values() {
-        assert_eq!(
-            parse_window_backend("wezterm-gui"),
-            Some(WindowBackend::WeztermGui)
-        );
-        assert_eq!(
-            parse_window_backend("proxy"),
-            Some(WindowBackend::WeztermGui)
-        );
-        assert_eq!(
-            parse_window_backend("window-wezterm"),
-            Some(WindowBackend::LegacyEgui)
-        );
-        assert_eq!(parse_window_backend("unknown"), None);
-    }
-
-    #[test]
-    fn resolve_window_backend_falls_back_to_wezterm_gui_on_invalid_value() {
-        assert_eq!(
-            resolve_window_backend_from_raw("invalid"),
-            WindowBackend::WeztermGui
-        );
-        assert_eq!(
-            resolve_window_backend_from_raw("legacy"),
-            WindowBackend::LegacyEgui
         );
     }
 }

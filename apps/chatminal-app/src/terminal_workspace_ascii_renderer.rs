@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::terminal_wezterm_core::PaneSnapshotSummary;
+use crate::terminal_pane_emulator::PaneSnapshotSummary;
 use crate::terminal_workspace_view_model::TerminalWorkspaceViewModel;
 
 pub fn render_terminal_workspace_ascii(

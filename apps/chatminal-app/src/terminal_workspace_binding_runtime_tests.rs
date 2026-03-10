@@ -4,7 +4,7 @@ use chatminal_protocol::{
 };
 
 use crate::terminal_pane_adapter::SessionPaneRegistry;
-use crate::terminal_wezterm_core::WeztermTerminalPaneAdapter;
+use crate::terminal_pane_emulator::TerminalPaneEmulator;
 use crate::terminal_workspace_binding_runtime::{
     WorkspaceBindingState, apply_event_to_workspace_binding_state,
 };
@@ -28,7 +28,7 @@ fn sample_state() -> WorkspaceBindingState {
             }],
             active_session_id: Some("s1".to_string()),
         },
-        adapter: WeztermTerminalPaneAdapter::new(120, 32, 5_000),
+        adapter: TerminalPaneEmulator::new(120, 32, 5_000),
         hydrate_errors: Vec::new(),
         stale: false,
         event_watermark_ts: 0,
@@ -67,7 +67,7 @@ fn sample_state_with_two_sessions() -> WorkspaceBindingState {
             ],
             active_session_id: Some("s1".to_string()),
         },
-        adapter: WeztermTerminalPaneAdapter::new(120, 32, 5_000),
+        adapter: TerminalPaneEmulator::new(120, 32, 5_000),
         hydrate_errors: Vec::new(),
         stale: false,
         event_watermark_ts: 0,

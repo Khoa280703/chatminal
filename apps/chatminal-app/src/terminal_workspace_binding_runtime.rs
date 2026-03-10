@@ -7,12 +7,12 @@ use crate::ipc::ChatminalClient;
 use crate::terminal_pane_adapter::{
     SessionPaneRegistry, TerminalPaneAdapter, dispatch_event_with_registry,
 };
+use crate::terminal_pane_emulator::{PaneSnapshotSummary, TerminalPaneEmulator};
 use crate::terminal_session_commands::fetch_snapshot_for_session;
-use crate::terminal_wezterm_core::{PaneSnapshotSummary, WeztermTerminalPaneAdapter};
 
 pub struct WorkspaceBindingState {
     pub workspace: WorkspaceState,
-    pub adapter: WeztermTerminalPaneAdapter,
+    pub adapter: TerminalPaneEmulator,
     pub hydrate_errors: Vec<String>,
     stale: bool,
     event_watermark_ts: u64,
@@ -50,7 +50,7 @@ pub fn bootstrap_workspace_binding_state(
         .collect::<Vec<_>>();
     pane_registry.prune_to_sessions(&session_ids);
 
-    let mut adapter = WeztermTerminalPaneAdapter::new(cols, rows, 5_000);
+    let mut adapter = TerminalPaneEmulator::new(cols, rows, 5_000);
     let mut hydrate_errors = Vec::new();
     let active_session_id = workspace.active_session_id.as_deref();
     let mut session_last_event_ts = HashMap::new();

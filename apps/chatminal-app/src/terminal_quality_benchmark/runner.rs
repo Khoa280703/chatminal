@@ -7,7 +7,7 @@ use crate::ipc::ChatminalClient;
 
 use super::stats::{RttBenchmarkReport, build_report};
 
-pub fn run_bench_rtt_wezterm(
+pub fn run_bench_rtt(
     client: &ChatminalClient,
     args: &[String],
 ) -> Result<RttBenchmarkReport, String> {

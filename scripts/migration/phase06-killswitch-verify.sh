@@ -17,15 +17,20 @@ resolve_timeout_bin() {
     echo "gtimeout"
     return
   fi
+  if command -v perl >/dev/null 2>&1; then
+    echo "perl"
+    return
+  fi
   echo ""
 }
 
 TIMEOUT_BIN="$(resolve_timeout_bin)"
-SETSID_BIN="$(command -v setsid || true)"
-declare -A ATTACH_TRANSCRIPTS=()
+DESKTOP_TRANSCRIPT=""
+LEGACY_TRANSCRIPT=""
 
 cleanup() {
   pkill -P $$ >/dev/null 2>&1 || true
+  wait >/dev/null 2>&1 || true
   rm -f "$SOCKET" "$DAEMON_LOG"
   rm -rf "$DATA_DIR"
   rm -f "/tmp/chatminal-phase06-script-${RUN_ID}-"*.log
@@ -37,8 +42,15 @@ run_attach_with_pty() {
   local mode="$1"
   local session_id="$2"
   local transcript="/tmp/chatminal-phase06-attach-${RUN_ID}-${mode}.log"
-  ATTACH_TRANSCRIPTS["$mode"]="$transcript"
-  local cmd="CHATMINAL_INPUT_PIPELINE_MODE=${mode} CHATMINAL_DAEMON_ENDPOINT=${SOCKET} ${APP_BIN} attach-wezterm ${session_id} 120 32 200"
+  case "$mode" in
+    desktop)
+      DESKTOP_TRANSCRIPT="$transcript"
+      ;;
+    legacy)
+      LEGACY_TRANSCRIPT="$transcript"
+      ;;
+  esac
+  local cmd="CHATMINAL_INPUT_PIPELINE_MODE=${mode} CHATMINAL_DAEMON_ENDPOINT=${SOCKET} ${APP_BIN} attach ${session_id} 120 32 200"
   local exit_code=0
   local ret_code=0
   local had_errexit=0
@@ -48,35 +60,45 @@ run_attach_with_pty() {
 
   set +e
   if [[ -n "$TIMEOUT_BIN" ]]; then
-    if script -h 2>&1 | rg -q -- "-c"; then
-      "$TIMEOUT_BIN" "${ATTACH_TIMEOUT_SECONDS}s" script -qfec "$cmd" "$transcript" >/dev/null 2>&1
-    else
-      "$TIMEOUT_BIN" "${ATTACH_TIMEOUT_SECONDS}s" script -q "$transcript" bash -lc "$cmd" >/dev/null 2>&1
-    fi
-    exit_code=$?
+    case "$TIMEOUT_BIN" in
+      timeout|gtimeout)
+        if script -h 2>&1 | rg -q -- "-c"; then
+          "$TIMEOUT_BIN" "${ATTACH_TIMEOUT_SECONDS}s" script -qfec "$cmd" "$transcript" >/dev/null 2>&1
+        else
+          "$TIMEOUT_BIN" "${ATTACH_TIMEOUT_SECONDS}s" script -qF "$transcript" bash -lc "$cmd" >/dev/null 2>&1
+        fi
+        exit_code=$?
+        ;;
+      perl)
+        if script -h 2>&1 | rg -q -- "-c"; then
+          {
+            perl -e 'alarm shift; exec @ARGV' \
+              "$ATTACH_TIMEOUT_SECONDS" \
+              script -qfec "$cmd" "$transcript" >/dev/null 2>&1
+          } 2>/dev/null
+        else
+          {
+            perl -e 'alarm shift; exec @ARGV' \
+              "$ATTACH_TIMEOUT_SECONDS" \
+              script -qF "$transcript" bash -lc "$cmd" >/dev/null 2>&1
+          } 2>/dev/null
+        fi
+        exit_code=$?
+        if [[ "$exit_code" -eq 142 ]]; then
+          exit_code=124
+        fi
+        ;;
+    esac
   else
-    if [[ -z "$SETSID_BIN" ]]; then
-      echo "phase06 killswitch verify requires 'setsid' when timeout/gtimeout is unavailable" >&2
-      ret_code=127
-      if [[ "$had_errexit" -eq 1 ]]; then
-        set -e
-      fi
-      return "$ret_code"
-    fi
-
-    if script -h 2>&1 | rg -q -- "-c"; then
-      "$SETSID_BIN" script -qfec "$cmd" "$transcript" >/dev/null 2>&1 &
-    else
-      "$SETSID_BIN" script -q "$transcript" bash -lc "$cmd" >/dev/null 2>&1 &
-    fi
+    script -qF "$transcript" bash -lc "$cmd" >/dev/null 2>&1 &
     local pid=$!
     local deadline=$(( $(date +%s) + ATTACH_TIMEOUT_SECONDS ))
 
     while kill -0 "$pid" >/dev/null 2>&1; do
       if (( $(date +%s) >= deadline )); then
-        kill -TERM -- "-$pid" >/dev/null 2>&1 || true
+        kill "$pid" >/dev/null 2>&1 || true
         sleep 0.2
-        kill -KILL -- "-$pid" >/dev/null 2>&1 || true
+        kill -KILL "$pid" >/dev/null 2>&1 || true
         wait "$pid" >/dev/null 2>&1 || true
         exit_code=124
         break
@@ -90,11 +112,7 @@ run_attach_with_pty() {
     fi
   fi
 
-  if [[ "$exit_code" -eq 124 && ! -s "$transcript" ]]; then
-    ret_code=125
-  else
-    ret_code="$exit_code"
-  fi
+  ret_code="$exit_code"
 
   if [[ "$had_errexit" -eq 1 ]]; then
     set -e
@@ -107,7 +125,15 @@ transcript_has_attach_ready_banner() {
   if [[ -z "$transcript" || ! -f "$transcript" ]]; then
     return 1
   fi
-  tr -d '\r' <"$transcript" | rg -q "Attached "
+  for _ in $(seq 1 10); do
+    [[ -s "$transcript" ]] && break
+    sleep 0.1
+  done
+  if [[ ! -s "$transcript" ]]; then
+    return 1
+  fi
+  tr -d '\r' <"$transcript" | rg -q "Attached " && return 0
+  return 1
 }
 
 assert_workspace_alive() {
@@ -145,16 +171,16 @@ if [[ -z "$session_id" ]]; then
 fi
 
 set +e
-run_attach_with_pty "wezterm" "$session_id"
-wezterm_exit=$?
-assert_workspace_alive || wezterm_exit=126
+run_attach_with_pty "desktop" "$session_id"
+desktop_exit=$?
+assert_workspace_alive || desktop_exit=126
 run_attach_with_pty "legacy" "$session_id"
 legacy_exit=$?
 assert_workspace_alive || legacy_exit=126
 set -e
 
-if [[ "$wezterm_exit" -ne 0 && "$wezterm_exit" -ne 124 ]]; then
-  echo "wezterm mode attach startup failed: exit=$wezterm_exit"
+if [[ "$desktop_exit" -ne 0 && "$desktop_exit" -ne 124 ]]; then
+  echo "desktop mode attach startup failed: exit=$desktop_exit"
   exit 1
 fi
 if [[ "$legacy_exit" -ne 0 && "$legacy_exit" -ne 124 ]]; then
@@ -162,17 +188,15 @@ if [[ "$legacy_exit" -ne 0 && "$legacy_exit" -ne 124 ]]; then
   exit 1
 fi
 
-wezterm_transcript="${ATTACH_TRANSCRIPTS[wezterm]:-}"
-legacy_transcript="${ATTACH_TRANSCRIPTS[legacy]:-}"
-if ! transcript_has_attach_ready_banner "$wezterm_transcript"; then
-  echo "wezterm mode attach did not reach ready banner"
-  [[ -n "$wezterm_transcript" ]] && tail -n 120 "$wezterm_transcript" || true
+if ! transcript_has_attach_ready_banner "$DESKTOP_TRANSCRIPT"; then
+  echo "desktop mode attach did not reach ready banner"
+  [[ -n "$DESKTOP_TRANSCRIPT" ]] && tail -n 120 "$DESKTOP_TRANSCRIPT" || true
   exit 1
 fi
-if ! transcript_has_attach_ready_banner "$legacy_transcript"; then
+if ! transcript_has_attach_ready_banner "$LEGACY_TRANSCRIPT"; then
   echo "legacy mode attach did not reach ready banner"
-  [[ -n "$legacy_transcript" ]] && tail -n 120 "$legacy_transcript" || true
+  [[ -n "$LEGACY_TRANSCRIPT" ]] && tail -n 120 "$LEGACY_TRANSCRIPT" || true
   exit 1
 fi
 
-echo "phase06 killswitch verify passed: session_id=$session_id wezterm_exit=$wezterm_exit legacy_exit=$legacy_exit"
+echo "phase06 killswitch verify passed: session_id=$session_id desktop_exit=$desktop_exit legacy_exit=$legacy_exit"
