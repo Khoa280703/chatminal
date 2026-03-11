@@ -11,12 +11,14 @@ use crate::api::{
 };
 use crate::config::{DaemonConfig, resolve_session_cwd};
 use crate::metrics::{RuntimeMetrics, RuntimeMetricsSnapshot};
-use crate::session::{SessionEvent, SessionRuntime, WriteInputError};
+use crate::session::{SessionEvent, WriteInputError};
+use crate::state::runtime_bridge::RuntimeHandle;
 
 mod explorer_utils;
 mod native_api;
 mod protocol_adapter;
 mod protocol_clients;
+mod runtime_bridge;
 mod runtime_lifecycle;
 mod session_event_processor;
 mod session_explorer;
@@ -32,9 +34,8 @@ struct SessionEntry {
     runtime: Option<RuntimeHandle>,
     live_output: String,
     generation: u64,
+    prepend_run_boundary_on_next_output: bool,
 }
-
-type RuntimeHandle = Arc<Mutex<SessionRuntime>>;
 
 struct SessionSpawnPlan {
     session_id: String,
@@ -61,9 +62,13 @@ struct StateInner {
 
 #[derive(Clone)]
 pub struct DaemonState {
+    // Direction B boundary freeze:
+    // `DaemonState` remains the owner of business/workspace state. Live session
+    // surface/layout state will be delegated to `chatminal-session-runtime`.
     inner: Arc<Mutex<StateInner>>,
     events: std_mpsc::SyncSender<SessionEvent>,
     metrics: RuntimeMetrics,
+    execution: Arc<runtime_bridge::RuntimeExecutionBridge>,
 }
 
 pub struct RuntimeSubscription {
@@ -109,6 +114,7 @@ impl DaemonState {
     pub fn new(config: DaemonConfig, store: Store) -> Result<Self, String> {
         let (events_tx, events_rx) = std_mpsc::sync_channel::<SessionEvent>(4096);
         let metrics = RuntimeMetrics::new();
+        let execution = Arc::new(runtime_bridge::RuntimeExecutionBridge::new(events_tx.clone()));
         let mut sessions = HashMap::new();
         let workspace = store.load_workspace()?;
 
@@ -128,6 +134,7 @@ impl DaemonState {
                         runtime: None,
                         live_output: String::new(),
                         generation: 0,
+                        prepend_run_boundary_on_next_output: false,
                     },
                 );
             }
@@ -151,6 +158,7 @@ impl DaemonState {
             })),
             events: events_tx.clone(),
             metrics,
+            execution,
         };
 
         let cloned = state.clone();
@@ -319,16 +327,13 @@ impl DaemonState {
             default_shell,
             persist_history.unwrap_or(false),
         )?;
-        store.set_active_session(&active_profile_id, Some(&created.session_id))?;
-
-        let runtime = match spawn_runtime_handle(
+        let runtime = match self.spawn_runtime_handle(
             &created.session_id,
             0,
             &created.shell,
             &created.cwd,
             cols,
             rows,
-            self.events.clone(),
         ) {
             Ok(runtime) => runtime,
             Err(err) => {
@@ -337,25 +342,12 @@ impl DaemonState {
             }
         };
 
-        let mut entry = SessionEntry {
-            session: created.clone(),
-            runtime: Some(runtime),
-            live_output: String::new(),
-            generation: 0,
-        };
-        entry.session.status = StoredSessionStatus::Running;
-
         {
             let mut inner = self
                 .inner
                 .lock()
                 .map_err(|_| "state lock poisoned".to_string())?;
-            inner
-                .store
-                .set_session_status(&created.session_id, StoredSessionStatus::Running)?;
-            inner.sessions.insert(created.session_id.clone(), entry);
-            inner.publish_session_updated_for(&created.session_id);
-            inner.publish_workspace_updated();
+            inner.insert_running_session_and_publish(created.clone(), runtime)?;
         }
 
         Ok(RuntimeCreatedSession {
@@ -414,11 +406,7 @@ impl DaemonState {
                 if !inner.sessions.contains_key(session_id) {
                     return Err("session not found".to_string());
                 }
-                inner
-                    .store
-                    .set_active_session(&profile_id, Some(session_id))?;
-                inner.publish_session_updated_for(session_id);
-                inner.publish_workspace_updated();
+                inner.set_active_session_and_publish(&profile_id, session_id)?;
                 Ok(())
             }
             Activation::Spawn(plan) => self.commit_spawned_session(plan),
@@ -481,7 +469,7 @@ impl DaemonState {
                 .ok_or_else(|| "session is not running".to_string())?
         };
 
-        let runtime = runtime
+        let mut runtime = runtime
             .lock()
             .map_err(|_| "session runtime lock poisoned".to_string())?;
         runtime.resize(cols, rows)
@@ -538,13 +526,7 @@ impl DaemonState {
                 .inner
                 .lock()
                 .map_err(|_| "state lock poisoned".to_string())?;
-            inner.store.delete_session(session_id)?;
-            let runtime = inner
-                .sessions
-                .remove(session_id)
-                .and_then(|mut entry| entry.runtime.take());
-            inner.publish_workspace_updated();
-            runtime
+            inner.remove_session_and_publish_workspace(session_id)?
         };
 
         kill_runtime_handle(runtime);
@@ -557,21 +539,7 @@ impl DaemonState {
                 .inner
                 .lock()
                 .map_err(|_| "state lock poisoned".to_string())?;
-            inner.store.clear_session_history(session_id)?;
-            let mut runtime = None;
-            if let Some(entry) = inner.sessions.get_mut(session_id) {
-                entry.generation = entry.generation.saturating_add(1);
-                entry.session.seq = 0;
-                entry.live_output.clear();
-                runtime = entry.runtime.take();
-                entry.session.status = StoredSessionStatus::Disconnected;
-                inner
-                    .store
-                    .set_session_status(session_id, StoredSessionStatus::Disconnected)?;
-            }
-            inner.publish_session_updated_for(session_id);
-            inner.publish_workspace_updated();
-            runtime
+            inner.clear_session_history_and_publish(session_id)?
         };
 
         kill_runtime_handle(runtime);
@@ -585,30 +553,10 @@ impl DaemonState {
                 .lock()
                 .map_err(|_| "state lock poisoned".to_string())?;
             inner.store.clear_all_history()?;
-            let mut updated_ids = Vec::new();
-            let mut status_ids = Vec::new();
-            let mut runtimes = Vec::new();
-            for entry in inner.sessions.values_mut() {
-                entry.generation = entry.generation.saturating_add(1);
-                entry.session.seq = 0;
-                entry.live_output.clear();
-                if let Some(runtime) = entry.runtime.take() {
-                    runtimes.push(runtime);
-                }
-                entry.session.status = StoredSessionStatus::Disconnected;
-                status_ids.push(entry.session.session_id.clone());
-                updated_ids.push(entry.session.session_id.clone());
-            }
-            for session_id in &status_ids {
-                let _ = inner
-                    .store
-                    .set_session_status(session_id, StoredSessionStatus::Disconnected);
-            }
-            for session_id in updated_ids {
-                inner.publish_session_updated_for(&session_id);
-            }
-            inner.publish_workspace_updated();
-            runtimes
+            inner.disconnect_all_sessions_and_publish(runtime_lifecycle::DisconnectOptions {
+                reset_history: true,
+                bump_generation: true,
+            })
         };
 
         kill_runtime_handles(runtimes);
@@ -622,27 +570,10 @@ impl DaemonState {
                 Err(_) => return,
             };
             inner.shutdown_requested = true;
-            let mut updated_ids = Vec::new();
-            let mut status_ids = Vec::new();
-            let mut runtimes = Vec::new();
-            for entry in inner.sessions.values_mut() {
-                if let Some(runtime) = entry.runtime.take() {
-                    runtimes.push(runtime);
-                }
-                entry.session.status = StoredSessionStatus::Disconnected;
-                status_ids.push(entry.session.session_id.clone());
-                updated_ids.push(entry.session.session_id.clone());
-            }
-            for session_id in &status_ids {
-                let _ = inner
-                    .store
-                    .set_session_status(session_id, StoredSessionStatus::Disconnected);
-            }
-            for session_id in updated_ids {
-                inner.publish_session_updated_for(&session_id);
-            }
-            inner.publish_workspace_updated();
-            runtimes
+            inner.disconnect_all_sessions_and_publish(runtime_lifecycle::DisconnectOptions {
+                reset_history: false,
+                bump_generation: false,
+            })
         };
 
         kill_runtime_handles(runtimes);
@@ -669,25 +600,17 @@ fn trim_live_output(buffer: &mut String, max_bytes: usize) {
     buffer.drain(..cut.min(buffer.len()));
 }
 
-fn spawn_runtime_handle(
-    session_id: &str,
-    generation: u64,
-    shell: &str,
-    cwd: &str,
-    cols: usize,
-    rows: usize,
-    events: std_mpsc::SyncSender<SessionEvent>,
-) -> Result<RuntimeHandle, String> {
-    let runtime = SessionRuntime::spawn(
-        session_id.to_string(),
-        generation,
-        shell.to_string(),
-        cwd.to_string(),
-        cols,
-        rows,
-        events,
-    )?;
-    Ok(Arc::new(Mutex::new(runtime)))
+fn snapshot_requires_run_boundary(snapshot: &StoredSessionSnapshot) -> bool {
+    !snapshot.content.is_empty()
+        && !snapshot.content.ends_with('\n')
+        && !snapshot.content.ends_with('\r')
+}
+
+fn prepend_run_boundary(chunk: &str) -> String {
+    if chunk.is_empty() || chunk.starts_with('\n') || chunk.starts_with('\r') {
+        return chunk.to_string();
+    }
+    format!("\r\n{chunk}")
 }
 
 fn kill_runtime_handle(runtime: Option<RuntimeHandle>) {

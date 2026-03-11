@@ -1,6 +1,6 @@
 use chatminal_store::StoredSessionStatus;
 
-use super::{DaemonState, trim_live_output};
+use super::{DaemonState, prepend_run_boundary, trim_live_output};
 use crate::api::{
     RuntimeEvent, RuntimePtyErrorEvent, RuntimePtyExitedEvent, RuntimePtyOutputEvent,
 };
@@ -24,22 +24,27 @@ impl DaemonState {
                 let mut event = None;
                 let mut seq_after = None;
                 let mut persist_history = false;
+                let mut output_chunk = chunk;
                 if let Some(entry) = inner.sessions.get_mut(&session_id) {
                     if entry.generation != generation {
                         return;
+                    }
+                    if entry.prepend_run_boundary_on_next_output && !output_chunk.is_empty() {
+                        output_chunk = prepend_run_boundary(&output_chunk);
+                        entry.prepend_run_boundary_on_next_output = false;
                     }
                     entry.session.seq += 1;
                     entry.session.status = StoredSessionStatus::Running;
                     seq_after = Some(entry.session.seq);
                     persist_history = entry.session.persist_history;
                     if !persist_history {
-                        entry.live_output.push_str(&chunk);
+                        entry.live_output.push_str(&output_chunk);
                         trim_live_output(&mut entry.live_output, 1024 * 1024);
                     }
 
                     event = Some(RuntimeEvent::PtyOutput(RuntimePtyOutputEvent {
                         session_id: session_id.clone(),
-                        chunk: chunk.clone(),
+                        chunk: output_chunk.clone(),
                         seq: entry.session.seq,
                         ts,
                     }));
@@ -65,7 +70,7 @@ impl DaemonState {
                         if let Err(err) =
                             inner
                                 .store
-                                .append_scrollback_chunk(&session_id, seq, &chunk, ts)
+                                .append_scrollback_chunk(&session_id, seq, &output_chunk, ts)
                         {
                             inner.broadcast_event(RuntimeEvent::PtyError(RuntimePtyErrorEvent {
                                 session_id: session_id.clone(),
@@ -93,18 +98,7 @@ impl DaemonState {
                 exit_code,
                 reason,
             } => {
-                let mut updated = false;
-                if let Some(entry) = inner.sessions.get_mut(&session_id) {
-                    if entry.generation != generation {
-                        return;
-                    }
-                    entry.runtime = None;
-                    entry.session.status = StoredSessionStatus::Disconnected;
-                    let _ = inner
-                        .store
-                        .set_session_status(&session_id, StoredSessionStatus::Disconnected);
-                    updated = true;
-                }
+                let updated = inner.mark_session_exited(&session_id, generation);
 
                 inner.broadcast_event(RuntimeEvent::PtyExited(RuntimePtyExitedEvent {
                     session_id: session_id.clone(),
@@ -112,8 +106,7 @@ impl DaemonState {
                     reason,
                 }));
                 if updated {
-                    inner.publish_session_updated_for(&session_id);
-                    inner.publish_workspace_updated();
+                    inner.publish_session_and_workspace_updated(&session_id);
                 }
             }
             SessionEvent::Error {

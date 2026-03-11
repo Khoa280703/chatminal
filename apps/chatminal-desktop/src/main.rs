@@ -6,22 +6,22 @@ use crate::customglyph::BlockKey;
 use crate::glyphcache::GlyphCache;
 use crate::utilsprites::RenderMetrics;
 use ::window::*;
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use clap::builder::ValueParser;
 use clap::{Parser, ValueHint};
 use config::keyassignment::{SpawnCommand, SpawnTabDomain};
 use config::{ConfigHandle, SerialDomain, SshDomain, SshMultiplexing};
 use engine_bidi::Direction;
 use engine_client::domain::ClientDomain;
-use engine_font::shaper::PresentationWidth;
 use engine_font::FontConfiguration;
+use engine_font::shaper::PresentationWidth;
 use engine_gui_subcommands::*;
 use engine_mux_server_impl::update_mux_domains;
 use engine_toast_notification::*;
+use mux::Mux;
 use mux::activity::Activity;
 use mux::domain::{Domain, LocalDomain};
-use mux::Mux;
-use mux_lua::MuxDomain;
+use chatminal_lua_bridge::DomainRef;
 use portable_pty::cmdbuilder::CommandBuilder;
 use promise::spawn::block_on;
 use std::borrow::Cow;
@@ -36,6 +36,7 @@ use termwiz::surface::{Line, SEQ_ZERO};
 use unicode_normalization::UnicodeNormalization;
 
 mod chatminal_runtime;
+mod chatminal_session_surface;
 mod chatminal_sidebar;
 mod colorease;
 mod commands;
@@ -54,6 +55,7 @@ mod selection;
 mod shapecache;
 mod spawn;
 mod stats;
+mod system_metrics;
 mod tabbar;
 mod termwindow;
 mod unicode_names;
@@ -66,7 +68,7 @@ mod utilsprites;
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
 pub use selection::SelectionMode;
-pub use termwindow::{set_window_class, set_window_position, TermWindow, ICON_DATA};
+pub use termwindow::{ICON_DATA, TermWindow, set_window_class, set_window_position};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -319,7 +321,7 @@ async fn spawn_tab_in_domain_if_mux_is_empty(
     domain.attach(Some(window_id)).await?;
 
     if have_panes_in_domain_and_ws(&domain, &workspace) {
-        trigger_and_log_gui_attached(MuxDomain(domain.domain_id())).await;
+        trigger_and_log_gui_attached(DomainRef(domain.domain_id())).await;
         return Ok(());
     }
 
@@ -342,7 +344,7 @@ async fn spawn_tab_in_domain_if_mux_is_empty(
             window_id,
         )
         .await?;
-    trigger_and_log_gui_attached(MuxDomain(domain.domain_id())).await;
+    trigger_and_log_gui_attached(DomainRef(domain.domain_id())).await;
     Ok(())
 }
 
@@ -381,7 +383,7 @@ async fn trigger_and_log_gui_startup(spawn_command: Option<SpawnCommand>) {
     }
 }
 
-async fn trigger_gui_attached(lua: Option<Rc<mlua::Lua>>, domain: MuxDomain) -> anyhow::Result<()> {
+async fn trigger_gui_attached(lua: Option<Rc<mlua::Lua>>, domain: DomainRef) -> anyhow::Result<()> {
     if let Some(lua) = lua {
         let args = lua.pack_multi(domain)?;
         config::lua::emit_event(&lua, ("gui-attached".to_string(), args)).await?;
@@ -389,7 +391,7 @@ async fn trigger_gui_attached(lua: Option<Rc<mlua::Lua>>, domain: MuxDomain) -> 
     Ok(())
 }
 
-async fn trigger_and_log_gui_attached(domain: MuxDomain) {
+async fn trigger_and_log_gui_attached(domain: DomainRef) {
     if let Err(err) =
         config::with_lua_config_on_main_thread(move |lua| trigger_gui_attached(lua, domain)).await
     {
@@ -494,7 +496,7 @@ async fn async_run_terminal_gui(
             if let Some(tab_idx) = window.idx_by_id(tab.tab_id()) {
                 window.set_active_without_saving(tab_idx);
             }
-            trigger_and_log_gui_attached(MuxDomain(domain.domain_id())).await;
+            trigger_and_log_gui_attached(DomainRef(domain.domain_id())).await;
         }
     }
     spawn_tab_in_domain_if_mux_is_empty(cmd, is_connecting, domain, opts.workspace).await
@@ -1215,9 +1217,19 @@ fn run() -> anyhow::Result<()> {
     stats::Stats::init()?;
     let _saver = umask::UmaskSaver::new();
 
+    let mut config_overrides = opts.config_override.clone();
+    if crate::chatminal_sidebar::sidebar_enabled_from_env() {
+        if !config_overrides
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("show_tab_index_in_tab_bar"))
+        {
+            config_overrides.push(("show_tab_index_in_tab_bar".to_string(), "false".to_string()));
+        }
+    }
+
     config::common_init(
         opts.config_file.as_ref(),
-        &opts.config_override,
+        &config_overrides,
         opts.skip_config,
     )?;
     let config = config::configuration();

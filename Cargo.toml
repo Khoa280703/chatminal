@@ -4,6 +4,7 @@ members = [
   "apps/chatminal-app",
   "apps/chatminal-desktop",
   "crates/chatminal-runtime",
+  "crates/chatminal-session-runtime",
   "crates/chatminal-async-ossl",
   "crates/chatminal-base91",
   "crates/chatminal-battery",
@@ -19,7 +20,7 @@ members = [
   "crates/chatminal-luahelper",
   "crates/chatminal-logging",
   "crates/chatminal-mux",
-  "crates/chatminal-mux-lua",
+  "crates/chatminal-lua-bridge",
   "crates/chatminal-promise",
   "crates/chatminal-plugin",
   "crates/chatminal-portable-pty",
@@ -193,7 +194,7 @@ miniz_oxide = "0.7"
 mio = "0.8"
 mlua = "0.9"
 mux = { package = "chatminal-mux", path = "crates/chatminal-mux" }
-mux-lua = { package = "chatminal-mux-lua", path = "crates/chatminal-mux-lua" }
+chatminal-lua-bridge = { package = "chatminal-lua-bridge", path = "crates/chatminal-lua-bridge" }
 names = { version = "0.12", default-features = false }
 nix = "0.29"
 notify = "5.0.0"

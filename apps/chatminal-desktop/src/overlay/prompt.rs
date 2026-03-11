@@ -1,7 +1,6 @@
 use crate::scripting::guiwin::GuiWin;
 use config::keyassignment::{KeyAssignment, PromptInputLine};
 use mux::termwiztermtab::TermWizTerminal;
-use mux_lua::MuxPane;
 use std::rc::Rc;
 use termwiz::input::{InputEvent, KeyCode, KeyEvent};
 use termwiz::lineedit::*;
@@ -51,7 +50,7 @@ pub fn show_line_prompt_overlay(
     mut term: TermWizTerminal,
     args: PromptInputLine,
     window: GuiWin,
-    pane: MuxPane,
+    pane_id: u64,
 ) -> anyhow::Result<()> {
     let name = match *args.action {
         KeyAssignment::EmitEvent(id) => id,
@@ -72,7 +71,7 @@ pub fn show_line_prompt_overlay(
         editor.read_line_with_optional_initial_value(&mut host, args.initial_value.as_deref())?;
 
     promise::spawn::spawn_into_main_thread(async move {
-        trampoline(name, window, pane, line);
+        trampoline(name, window, pane_id, line);
         anyhow::Result::<()>::Ok(())
     })
     .detach();
@@ -80,10 +79,12 @@ pub fn show_line_prompt_overlay(
     Ok(())
 }
 
-fn trampoline(name: String, window: GuiWin, pane: MuxPane, line: Option<String>) {
+fn trampoline(name: String, window: GuiWin, pane_id: u64, line: Option<String>) {
     promise::spawn::spawn(async move {
-        config::with_lua_config_on_main_thread(move |lua| do_event(lua, name, window, pane, line))
-            .await
+        config::with_lua_config_on_main_thread(move |lua| {
+            do_event(lua, name, window, pane_id, line)
+        })
+        .await
     })
     .detach();
 }
@@ -92,11 +93,11 @@ async fn do_event(
     lua: Option<Rc<mlua::Lua>>,
     name: String,
     window: GuiWin,
-    pane: MuxPane,
+    pane_id: u64,
     line: Option<String>,
 ) -> anyhow::Result<()> {
     if let Some(lua) = lua {
-        let args = lua.pack_multi((window, pane, line))?;
+        let args = lua.pack_multi((window, pane_id, line))?;
 
         if let Err(err) = config::lua::emit_event(&lua, (name.clone(), args)).await {
             log::error!("while processing {} event: {:#}", name, err);

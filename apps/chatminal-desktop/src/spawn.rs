@@ -1,13 +1,15 @@
-use anyhow::{anyhow, bail, Context};
-use config::keyassignment::SpawnCommand;
+use anyhow::{Context, anyhow, bail};
+use crate::scripting::guiwin::DesktopWindowId;
 use config::TermConfig;
+use config::keyassignment::SpawnCommand;
 use engine_term::TerminalSize;
+use mux::Mux;
 use mux::activity::Activity;
 use mux::domain::SplitSource;
 use mux::tab::SplitRequest;
-use mux::window::WindowId as MuxWindowId;
-use mux::Mux;
+use mux::window::WindowId as EngineWindowId;
 use portable_pty::CommandBuilder;
+use std::convert::TryFrom;
 use std::sync::Arc;
 
 #[derive(Copy, Debug, Clone, Eq, PartialEq)]
@@ -21,7 +23,7 @@ pub fn spawn_command_impl(
     spawn: &SpawnCommand,
     spawn_where: SpawnWhere,
     size: TerminalSize,
-    src_window_id: Option<MuxWindowId>,
+    src_window_id: Option<DesktopWindowId>,
     term_config: Arc<TermConfig>,
 ) {
     let spawn = spawn.clone();
@@ -40,20 +42,28 @@ pub async fn spawn_command_internal(
     spawn: SpawnCommand,
     spawn_where: SpawnWhere,
     size: TerminalSize,
-    src_window_id: Option<MuxWindowId>,
+    src_window_id: Option<DesktopWindowId>,
     term_config: Arc<TermConfig>,
 ) -> anyhow::Result<()> {
     let mux = Mux::get();
     let activity = Activity::new();
+    let engine_src_window_id = src_window_id
+        .map(EngineWindowId::try_from)
+        .transpose()
+        .map_err(|_| anyhow!("invalid desktop window id"))?;
 
-    let current_pane_id = match src_window_id {
-        Some(window_id) => {
-            if let Some(tab) = mux.get_active_tab_for_window(window_id) {
-                tab.get_active_pane().map(|p| p.pane_id())
-            } else {
-                None
-            }
-        }
+    let current_pane_id = match engine_src_window_id {
+        Some(window_id) => mux.get_active_tab_for_window(window_id).and_then(|tab| {
+            crate::chatminal_session_surface::active_session_id(window_id as DesktopWindowId)
+                .and_then(|session_id| {
+                    crate::chatminal_session_surface::active_leaf_id(
+                        window_id as DesktopWindowId,
+                        &session_id,
+                    )
+                })
+                .and_then(|leaf_id| usize::try_from(leaf_id.as_u64()).ok())
+                .or_else(|| tab.get_active_pane().map(|p| p.pane_id()))
+        }),
         None => None,
     };
 
@@ -94,20 +104,15 @@ pub async fn spawn_command_internal(
 
     match spawn_where {
         SpawnWhere::SplitPane(direction) => {
-            let src_window_id = match src_window_id {
+            let _src_window_id = match engine_src_window_id {
                 Some(id) => id,
                 None => anyhow::bail!("no src window when splitting a pane?"),
             };
-            if let Some(tab) = mux.get_active_tab_for_window(src_window_id) {
-                let pane = tab
-                    .get_active_pane()
-                    .ok_or_else(|| anyhow!("tab to have a pane"))?;
-
+            if let Some(pane_id) = current_pane_id {
                 log::trace!("doing split_pane");
                 let (pane, _size) = mux
                     .split_pane(
-                        // tab.tab_id(),
-                        pane.pane_id(),
+                        pane_id,
                         direction,
                         SplitSource::Spawn {
                             command: cmd_builder,
@@ -119,7 +124,7 @@ pub async fn spawn_command_internal(
                     .context("split_pane")?;
                 pane.set_config(term_config);
             } else {
-                bail!("there is no active tab while splitting pane!?");
+                bail!("there is no active pane while splitting pane!?");
             }
         }
         _ => {
@@ -127,7 +132,7 @@ pub async fn spawn_command_internal(
                 .spawn_tab_or_window(
                     match spawn_where {
                         SpawnWhere::NewWindow => None,
-                        _ => src_window_id,
+                        _ => engine_src_window_id,
                     },
                     spawn.domain,
                     cmd_builder,
@@ -143,7 +148,7 @@ pub async fn spawn_command_internal(
             // If it was created in this window, it copies our handlers.
             // Otherwise, we'll pick them up when we later respond to
             // the new window being created.
-            if Some(window_id) == src_window_id {
+            if Some(window_id) == engine_src_window_id {
                 pane.set_config(term_config);
             }
         }

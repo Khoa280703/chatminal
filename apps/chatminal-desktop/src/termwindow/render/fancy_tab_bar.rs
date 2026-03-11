@@ -57,6 +57,10 @@ impl crate::TermWindow {
 
     pub fn build_fancy_tab_bar(&self, palette: &ColorPalette) -> anyhow::Result<ComputedElement> {
         let tab_bar_height = self.tab_bar_pixel_height()?;
+        let tab_bar_x = self.terminal_tab_bar_left();
+        let tab_bar_width = self.terminal_tab_bar_width();
+        let reserve_integrated_title_button_space =
+            !crate::chatminal_sidebar::sidebar_enabled_from_env();
         let font = self.fonts.title_font()?;
         let metrics = RenderMetrics::with_font_metrics(&font.metrics());
         let items = self.tab_bar.items();
@@ -165,52 +169,56 @@ impl crate::TermWindow {
                     bg: new_tab_hover.bg_color.to_linear().into(),
                     text: new_tab_hover.fg_color.to_linear().into(),
                 })),
-                TabBarItem::Tab { active, .. } if active => element
-                    .vertical_align(VerticalAlign::Bottom)
-                    .item_type(UIItemType::TabBar(item.item.clone()))
-                    .margin(BoxDimension {
-                        left: Dimension::Cells(0.),
-                        right: Dimension::Cells(0.),
-                        top: Dimension::Cells(0.2),
-                        bottom: Dimension::Cells(0.),
-                    })
-                    .padding(BoxDimension {
-                        left: Dimension::Cells(0.5),
-                        right: Dimension::Cells(0.5),
-                        top: Dimension::Cells(0.2),
-                        bottom: Dimension::Cells(0.25),
-                    })
-                    .border(BoxDimension::new(Dimension::Pixels(1.)))
-                    .border_corners(Some(Corners {
-                        top_left: SizedPoly {
-                            width: Dimension::Cells(0.5),
-                            height: Dimension::Cells(0.5),
-                            poly: TOP_LEFT_ROUNDED_CORNER,
-                        },
-                        top_right: SizedPoly {
-                            width: Dimension::Cells(0.5),
-                            height: Dimension::Cells(0.5),
-                            poly: TOP_RIGHT_ROUNDED_CORNER,
-                        },
-                        bottom_left: SizedPoly::none(),
-                        bottom_right: SizedPoly::none(),
-                    }))
-                    .colors(ElementColors {
-                        border: BorderColor::new(
-                            bg_color
+                TabBarItem::HostSurface { active, .. } | TabBarItem::Session { active, .. }
+                    if active =>
+                {
+                    element
+                        .vertical_align(VerticalAlign::Bottom)
+                        .item_type(UIItemType::TabBar(item.item.clone()))
+                        .margin(BoxDimension {
+                            left: Dimension::Cells(0.),
+                            right: Dimension::Cells(0.),
+                            top: Dimension::Cells(0.2),
+                            bottom: Dimension::Cells(0.),
+                        })
+                        .padding(BoxDimension {
+                            left: Dimension::Cells(0.5),
+                            right: Dimension::Cells(0.5),
+                            top: Dimension::Cells(0.2),
+                            bottom: Dimension::Cells(0.25),
+                        })
+                        .border(BoxDimension::new(Dimension::Pixels(1.)))
+                        .border_corners(Some(Corners {
+                            top_left: SizedPoly {
+                                width: Dimension::Cells(0.5),
+                                height: Dimension::Cells(0.5),
+                                poly: TOP_LEFT_ROUNDED_CORNER,
+                            },
+                            top_right: SizedPoly {
+                                width: Dimension::Cells(0.5),
+                                height: Dimension::Cells(0.5),
+                                poly: TOP_RIGHT_ROUNDED_CORNER,
+                            },
+                            bottom_left: SizedPoly::none(),
+                            bottom_right: SizedPoly::none(),
+                        }))
+                        .colors(ElementColors {
+                            border: BorderColor::new(
+                                bg_color
+                                    .unwrap_or_else(|| active_tab.bg_color.into())
+                                    .to_linear(),
+                            ),
+                            bg: bg_color
                                 .unwrap_or_else(|| active_tab.bg_color.into())
-                                .to_linear(),
-                        ),
-                        bg: bg_color
-                            .unwrap_or_else(|| active_tab.bg_color.into())
-                            .to_linear()
-                            .into(),
-                        text: fg_color
-                            .unwrap_or_else(|| active_tab.fg_color.into())
-                            .to_linear()
-                            .into(),
-                    }),
-                TabBarItem::Tab { .. } => element
+                                .to_linear()
+                                .into(),
+                            text: fg_color
+                                .unwrap_or_else(|| active_tab.fg_color.into())
+                                .to_linear()
+                                .into(),
+                        })
+                }
+                TabBarItem::HostSurface { .. } | TabBarItem::Session { .. } => element
                     .vertical_align(VerticalAlign::Bottom)
                     .item_type(UIItemType::TabBar(item.item.clone()))
                     .margin(BoxDimension {
@@ -299,19 +307,44 @@ impl crate::TermWindow {
         let num_tabs: f32 = items
             .iter()
             .map(|item| match item.item {
-                TabBarItem::NewTabButton | TabBarItem::Tab { .. } => 1.,
+                TabBarItem::NewTabButton
+                | TabBarItem::HostSurface { .. }
+                | TabBarItem::Session { .. } => {
+                    1.
+                }
                 _ => 0.,
             })
             .sum();
-        let max_tab_width = ((self.dimensions.pixel_width as f32 / num_tabs)
-            - (1.5 * metrics.cell_size.width as f32))
-            .max(0.);
+        let session_item_count: f32 = items
+            .iter()
+            .map(|item| match item.item {
+                TabBarItem::HostSurface { .. } | TabBarItem::Session { .. } => 1.,
+                _ => 0.,
+            })
+            .sum();
+        let show_new_button = items
+            .iter()
+            .any(|item| matches!(item.item, TabBarItem::NewTabButton));
+        let max_tab_width =
+            if crate::chatminal_sidebar::sidebar_enabled_from_env() && session_item_count > 0.0 {
+                let left_padding = 0.5 * metrics.cell_size.width as f32;
+                let new_button_width = if show_new_button {
+                    2.5 * metrics.cell_size.width as f32
+                } else {
+                    0.0
+                };
+                ((tab_bar_width - left_padding - new_button_width).max(0.0) / session_item_count)
+                    .max(0.0)
+            } else {
+                ((tab_bar_width / num_tabs) - (1.5 * metrics.cell_size.width as f32)).max(0.)
+            };
 
         // Reserve space for the native titlebar buttons
-        if self
-            .config
-            .window_decorations
-            .contains(::window::WindowDecorations::INTEGRATED_BUTTONS)
+        if reserve_integrated_title_button_space
+            && self
+                .config
+                .window_decorations
+                .contains(::window::WindowDecorations::INTEGRATED_BUTTONS)
             && self.config.integrated_title_button_style == IntegratedTitleButtonStyle::MacOsNative
             && !self.window_state.contains(window::WindowState::FULL_SCREEN)
         {
@@ -338,15 +371,47 @@ impl crate::TermWindow {
                         right_eles.push(item_to_elem(item))
                     }
                 }
-                TabBarItem::Tab { tab_idx, active } => {
+                TabBarItem::HostSurface {
+                    host_surface_idx,
+                    active,
+                } => {
                     let mut elem = item_to_elem(item);
                     elem.max_width = Some(Dimension::Pixels(max_tab_width));
+                    elem.min_width = Some(Dimension::Pixels(max_tab_width));
                     elem.content = match elem.content {
                         ElementContent::Text(_) => unreachable!(),
                         ElementContent::Poly { .. } => unreachable!(),
                         ElementContent::Children(mut kids) => {
                             if self.config.show_close_tab_button_in_tabs {
-                                kids.push(make_x_button(&font, &metrics, &colors, tab_idx, active));
+                                kids.push(make_x_button(
+                                    &font,
+                                    &metrics,
+                                    &colors,
+                                    host_surface_idx,
+                                    active,
+                                ));
+                            }
+                            ElementContent::Children(kids)
+                        }
+                    };
+                    left_eles.push(elem);
+                }
+                TabBarItem::Session {
+                    ref session_id,
+                    active,
+                    ..
+                } => {
+                    let mut elem = item_to_elem(item);
+                    elem.max_width = Some(Dimension::Pixels(max_tab_width));
+                    elem.min_width = Some(Dimension::Pixels(max_tab_width));
+                    elem.content = match elem.content {
+                        ElementContent::Text(_) => unreachable!(),
+                        ElementContent::Poly { .. } => unreachable!(),
+                        ElementContent::Children(mut kids) => {
+                            if self.config.show_close_tab_button_in_tabs {
+                                kids.push(make_session_x_button(
+                                    &font, &metrics, &colors, session_id, active,
+                                ));
                             }
                             ElementContent::Children(kids)
                         }
@@ -366,10 +431,11 @@ impl crate::TermWindow {
             );
         }
 
-        let window_buttons_at_left = self
-            .config
-            .window_decorations
-            .contains(window::WindowDecorations::INTEGRATED_BUTTONS)
+        let window_buttons_at_left = reserve_integrated_title_button_space
+            && self
+                .config
+                .window_decorations
+                .contains(window::WindowDecorations::INTEGRATED_BUTTONS)
             && (self.config.integrated_title_button_alignment
                 == IntegratedTitleButtonAlignment::Left
                 || self.config.integrated_title_button_style
@@ -413,7 +479,7 @@ impl crate::TermWindow {
         let tabs = Element::new(&font, content)
             .display(DisplayType::Block)
             .item_type(UIItemType::TabBar(TabBarItem::None))
-            .min_width(Some(Dimension::Pixels(self.dimensions.pixel_width as f32)))
+            .min_width(Some(Dimension::Pixels(tab_bar_width)))
             .min_height(Some(Dimension::Pixels(tab_bar_height)))
             .vertical_align(VerticalAlign::Bottom)
             .colors(bar_colors);
@@ -432,12 +498,7 @@ impl crate::TermWindow {
                     pixel_max: self.dimensions.pixel_width as f32,
                     pixel_cell: metrics.cell_size.width as f32,
                 },
-                bounds: euclid::rect(
-                    border.left.get() as f32,
-                    0.,
-                    self.dimensions.pixel_width as f32 - (border.left + border.right).get() as f32,
-                    tab_bar_height,
-                ),
+                bounds: euclid::rect(tab_bar_x, 0., tab_bar_width, tab_bar_height),
                 metrics: &metrics,
                 gl_state: self.render_state.as_ref().unwrap(),
                 zindex: 10,
@@ -528,5 +589,51 @@ fn make_x_button(
         right: Dimension::Cells(0.),
         top: Dimension::Cells(0.),
         bottom: Dimension::Cells(0.),
+    })
+}
+
+fn make_session_x_button(
+    font: &Rc<LoadedFont>,
+    metrics: &RenderMetrics,
+    colors: &TabBarColors,
+    session_id: &str,
+    active: bool,
+) -> Element {
+    Element::new(
+        &font,
+        ElementContent::Poly {
+            line_width: metrics.underline_height.max(2),
+            poly: SizedPoly {
+                poly: X_BUTTON,
+                width: Dimension::Pixels(metrics.cell_size.height as f32 / 2.),
+                height: Dimension::Pixels(metrics.cell_size.height as f32 / 2.),
+            },
+        },
+    )
+    .zindex(1)
+    .vertical_align(VerticalAlign::Middle)
+    .float(Float::Right)
+    .item_type(UIItemType::CloseSession(session_id.to_string()))
+    .hover_colors({
+        let inactive_tab_hover = colors.inactive_tab_hover();
+        let active_tab = colors.active_tab();
+
+        Some(ElementColors {
+            border: BorderColor::default(),
+            bg: (if active {
+                inactive_tab_hover.bg_color
+            } else {
+                active_tab.bg_color
+            })
+            .to_linear()
+            .into(),
+            text: (if active {
+                inactive_tab_hover.fg_color
+            } else {
+                active_tab.fg_color
+            })
+            .to_linear()
+            .into(),
+        })
     })
 }

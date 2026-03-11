@@ -6,27 +6,25 @@ use config::keyassignment::{ClipboardCopyDestination, KeyAssignment};
 use engine_dynamic::{FromDynamic, ToDynamic};
 use engine_toast_notification::ToastNotification;
 use luahelper::*;
-use mlua::{UserData, UserDataMethods, UserDataRef};
-use mux::pane::PaneId;
-use mux::window::WindowId as MuxWindowId;
-use mux::Mux;
-use mux_lua::MuxPane;
-use termwiz_funcs::lines_to_escapes;
+use mlua::{UserData, UserDataMethods};
 use window::{Connection, ConnectionOps, DeadKeyStatus, WindowOps, WindowState};
+
+pub type DesktopWindowId = u64;
 
 #[derive(Clone)]
 pub struct GuiWin {
-    pub mux_window_id: MuxWindowId,
+    pub window_id: DesktopWindowId,
+    pub active_workspace: String,
     pub window: ::window::Window,
 }
 
 impl GuiWin {
     pub fn new(term_window: &TermWindow) -> Self {
         let window = term_window.window.clone().unwrap();
-        let mux_window_id = term_window.mux_window_id;
         Self {
             window,
-            mux_window_id,
+            window_id: term_window.window_id as DesktopWindowId,
+            active_workspace: term_window.active_workspace_name(),
         }
     }
 }
@@ -35,23 +33,13 @@ impl UserData for GuiWin {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
         methods.add_meta_method(mlua::MetaMethod::ToString, |_, this, _: ()| {
             Ok(format!(
-                "GuiWin(mux_window_id:{}, pid:{})",
-                this.mux_window_id,
+                "GuiWin(window_id:{}, pid:{})",
+                this.window_id,
                 unsafe { libc::getpid() }
             ))
         });
 
-        methods.add_method("window_id", |_, this, _: ()| Ok(this.mux_window_id));
-        methods.add_method("mux_window", |_, this, _: ()| {
-            Ok(mux_lua::MuxWindow(this.mux_window_id))
-        });
-        methods.add_method("active_tab", |_, this, _: ()| {
-            let mux = Mux::try_get().ok_or_else(|| mlua::Error::external("cannot get Mux!?"))?;
-            let window = mux.get_window(this.mux_window_id).ok_or_else(|| {
-                mlua::Error::external(format!("invalid window {}", this.mux_window_id))
-            })?;
-            Ok(window.get_active().map(|tab| mux_lua::MuxTab(tab.tab_id())))
-        });
+        methods.add_method("window_id", |_, this, _: ()| Ok(this.window_id));
 
         methods.add_method(
             "set_inner_size",
@@ -132,11 +120,11 @@ impl UserData for GuiWin {
             Ok(dims)
         });
         methods.add_async_method(
-            "get_selection_text_for_pane",
-            |_, this, pane: UserDataRef<MuxPane>| async move {
+            "get_selection_text_for_leaf_id",
+            |_, this, leaf_id: u64| async move {
                 let (tx, rx) = smol::channel::bounded(1);
-                this.window.notify(TermWindowNotif::GetSelectionForPane {
-                    pane_id: pane.0,
+                this.window.notify(TermWindowNotif::GetSelectionForLeafId {
+                    leaf_id,
                     tx,
                 });
                 let text = rx
@@ -157,15 +145,86 @@ impl UserData for GuiWin {
             let result = rx.recv().await.map_err(mlua::Error::external)?;
             luahelper::dynamic_to_lua_value(lua, result)
         });
+        methods.add_async_method("active_session_id", |_, this, _: ()| async move {
+            let (tx, rx) = smol::channel::bounded(1);
+            this.window
+                .notify(TermWindowNotif::Apply(Box::new(move |term_window| {
+                    tx.try_send(term_window.active_session_id()).ok();
+                })));
+            let result = rx
+                .recv()
+                .await
+                .map_err(|e| anyhow::anyhow!("{:#}", e))
+                .map_err(luaerr)?;
+
+            Ok(result)
+        });
+        methods.add_async_method("active_surface_id", |_, this, _: ()| async move {
+            let (tx, rx) = smol::channel::bounded(1);
+            this.window
+                .notify(TermWindowNotif::Apply(Box::new(move |term_window| {
+                    tx.try_send(term_window.active_surface_id().map(|id| id.as_u64()))
+                        .ok();
+                })));
+            let result = rx
+                .recv()
+                .await
+                .map_err(|e| anyhow::anyhow!("{:#}", e))
+                .map_err(luaerr)?;
+
+            Ok(result)
+        });
+        methods.add_async_method("active_leaf_id", |_, this, _: ()| async move {
+            let (tx, rx) = smol::channel::bounded(1);
+            this.window
+                .notify(TermWindowNotif::Apply(Box::new(move |term_window| {
+                    tx.try_send(term_window.active_leaf_id().map(|id| id.as_u64()))
+                        .ok();
+                })));
+            let result = rx
+                .recv()
+                .await
+                .map_err(|e| anyhow::anyhow!("{:#}", e))
+                .map_err(luaerr)?;
+
+            Ok(result)
+        });
         methods.add_async_method(
-            "perform_action",
-            |_, this, (assignment, pane): (KeyAssignment, UserDataRef<MuxPane>)| async move {
+            "perform_action_for_leaf_id",
+            |_, this, (assignment, leaf_id): (KeyAssignment, u64)| async move {
                 let (tx, rx) = smol::channel::bounded(1);
-                this.window.notify(TermWindowNotif::PerformAssignment {
-                    pane_id: pane.0,
-                    assignment,
-                    tx: Some(tx),
-                });
+                this.window
+                    .notify(TermWindowNotif::PerformAssignmentForLeafId {
+                        leaf_id,
+                        assignment,
+                        tx: Some(tx),
+                    });
+                let result = rx.recv().await.map_err(mlua::Error::external)?;
+                result.map_err(mlua::Error::external)
+            },
+        );
+        methods.add_async_method(
+            "perform_action_on_active_leaf",
+            |_, this, assignment: KeyAssignment| async move {
+                let (tx, rx) = smol::channel::bounded(1);
+                this.window
+                    .notify(TermWindowNotif::Apply(Box::new(move |term_window| {
+                        let result = term_window
+                            .active_leaf_id()
+                            .map(|id| id.as_u64())
+                            .ok_or_else(|| anyhow::anyhow!("no active leaf"));
+                        tx.try_send(result.map_err(|err| err.to_string())).ok();
+                    })));
+                let leaf_id = rx.recv().await.map_err(mlua::Error::external)?;
+                let leaf_id = leaf_id.map_err(mlua::Error::external)?;
+
+                let (tx, rx) = smol::channel::bounded(1);
+                this.window
+                    .notify(TermWindowNotif::PerformAssignmentForLeafId {
+                        leaf_id,
+                        assignment,
+                        tx: Some(tx),
+                    });
                 let result = rx.recv().await.map_err(mlua::Error::external)?;
                 result.map_err(mlua::Error::external)
             },
@@ -273,30 +332,8 @@ impl UserData for GuiWin {
 
             Ok((mods.to_string(), leds.to_string()))
         });
-        methods.add_async_method("active_pane", |_, this, _: ()| async move {
-            let (tx, rx) = smol::channel::bounded(1);
-            this.window
-                .notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                    tx.try_send(
-                        term_window
-                            .get_active_pane_or_overlay()
-                            .map(|pane| MuxPane(pane.pane_id())),
-                    )
-                    .ok();
-                })));
-            let result = rx
-                .recv()
-                .await
-                .map_err(|e| anyhow::anyhow!("{:#}", e))
-                .map_err(luaerr)?;
-
-            Ok(result)
-        });
-        methods.add_method("active_workspace", |_, _, _: ()| {
-            let mux = Mux::try_get()
-                .ok_or_else(|| anyhow::anyhow!("no mux?"))
-                .map_err(luaerr)?;
-            Ok(mux.active_workspace().to_string())
+        methods.add_method("active_workspace", |_, this, _: ()| {
+            Ok(this.active_workspace.clone())
         });
         methods.add_method(
             "copy_to_clipboard",
@@ -310,29 +347,16 @@ impl UserData for GuiWin {
             },
         );
         methods.add_async_method(
-            "get_selection_escapes_for_pane",
-            |_, this, pane: UserDataRef<MuxPane>| async move {
+            "get_selection_escapes_for_leaf_id",
+            |_, this, leaf_id: u64| async move {
                 let (tx, rx) = smol::channel::bounded(1);
-                let pane_id = pane.0;
                 this.window
-                    .notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                        fn do_it(
-                            pane_id: PaneId,
-                            term_window: &mut TermWindow,
-                        ) -> anyhow::Result<String> {
-                            let mux = Mux::try_get().ok_or_else(|| anyhow::anyhow!("no mux"))?;
-                            let pane = mux
-                                .get_pane(pane_id)
-                                .ok_or_else(|| anyhow::anyhow!("invalid pane {pane_id}"))?;
-                            let lines = term_window.selection_lines(&pane);
-                            lines_to_escapes(lines)
-                        }
-                        tx.try_send(do_it(pane_id, term_window).map_err(|err| format!("{err:#}")))
-                            .ok();
-                    })));
+                    .notify(TermWindowNotif::GetSelectionEscapesForLeafId {
+                        leaf_id,
+                        tx,
+                    });
                 let result = rx.recv().await.map_err(mlua::Error::external)?;
-
-                Ok(result)
+                result.map_err(mlua::Error::external)
             },
         );
     }

@@ -1,16 +1,28 @@
+#[cfg(test)]
 use std::io::{Read, Write};
+#[cfg(test)]
 use std::path::Path;
+#[cfg(test)]
 use std::sync::mpsc as std_mpsc;
+#[cfg(test)]
 use std::sync::mpsc::TrySendError;
+#[cfg(test)]
 use std::sync::{Arc, Mutex};
+#[cfg(test)]
 use std::thread;
+#[cfg(test)]
 use std::time::Duration;
+#[cfg(test)]
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(test)]
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 
+#[cfg(test)]
 const INPUT_QUEUE_CAPACITY: usize = 256;
+#[cfg(test)]
 const CONTROL_WRITE_RETRY_BUDGET: usize = 3;
+#[cfg(test)]
 const CONTROL_WRITE_RETRY_TIMEOUT_MS: u64 = 2;
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -62,6 +74,7 @@ pub enum SessionEvent {
     },
 }
 
+#[cfg(test)]
 pub struct SessionRuntime {
     master: Box<dyn portable_pty::MasterPty + Send>,
     child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>,
@@ -71,6 +84,7 @@ pub struct SessionRuntime {
     waiter_handle: Option<thread::JoinHandle<()>>,
 }
 
+#[cfg(test)]
 impl SessionRuntime {
     pub fn spawn(
         session_id: String,
@@ -234,12 +248,14 @@ impl SessionRuntime {
     }
 }
 
+#[cfg(test)]
 impl Drop for SessionRuntime {
     fn drop(&mut self) {
         self.kill();
     }
 }
 
+#[cfg(test)]
 fn now_millis() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -247,6 +263,7 @@ fn now_millis() -> u64 {
         .unwrap_or(0)
 }
 
+#[cfg(test)]
 fn is_control_priority_payload(payload: &[u8]) -> bool {
     if payload.len() != 1 {
         return false;
@@ -255,6 +272,7 @@ fn is_control_priority_payload(payload: &[u8]) -> bool {
     byte < 0x20 || byte == 0x7f
 }
 
+#[cfg(test)]
 fn write_payload_with_backpressure(
     tx: &std_mpsc::SyncSender<Vec<u8>>,
     mut payload: Vec<u8>,
@@ -291,6 +309,7 @@ fn write_payload_with_backpressure(
     Err(WriteInputError::QueueFullDropped(stats))
 }
 
+#[cfg(test)]
 fn apply_macos_zsh_startup_shim(command: &mut CommandBuilder, shell: &str) -> Result<(), String> {
     if !cfg!(target_os = "macos") || !is_zsh_shell(shell) {
         return Ok(());
@@ -310,6 +329,7 @@ fn apply_macos_zsh_startup_shim(command: &mut CommandBuilder, shell: &str) -> Re
     Ok(())
 }
 
+#[cfg(test)]
 fn is_zsh_shell(shell: &str) -> bool {
     Path::new(shell)
         .file_name()
@@ -317,6 +337,7 @@ fn is_zsh_shell(shell: &str) -> bool {
         .is_some_and(|value| value.eq_ignore_ascii_case("zsh"))
 }
 
+#[cfg(test)]
 fn ensure_macos_zsh_startup_shim_dir() -> Result<std::path::PathBuf, String> {
     let dir = std::env::temp_dir().join(format!("chatminal-zsh-startup-{}", std::process::id()));
     std::fs::create_dir_all(&dir)

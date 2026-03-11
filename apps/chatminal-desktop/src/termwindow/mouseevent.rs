@@ -6,6 +6,7 @@ use ::window::{
     MouseButtons as WMB, MouseCursor, MouseEvent, MouseEventKind as WMEK, MousePress,
     WindowDecorations, WindowOps, WindowState,
 };
+use chatminal_lua_bridge::LeafRef;
 use config::keyassignment::{KeyAssignment, MouseEventTrigger, SpawnTabDomain};
 use config::MouseEventAltScreen;
 use engine_dynamic::ToDynamic;
@@ -13,8 +14,6 @@ use engine_term::input::{MouseButton, MouseEventKind as TMEK};
 use engine_term::{ClickPosition, LastMouseClick, StableRowIndex};
 use mux::pane::{Pane, WithPaneLines};
 use mux::tab::SplitDirection;
-use mux::Mux;
-use mux_lua::MuxPane;
 use std::convert::TryInto;
 use std::ops::Sub;
 use std::rc::Rc;
@@ -40,6 +39,7 @@ impl super::TermWindow {
                 self.update_title_post_status();
             }
             UIItemType::CloseTab(_)
+            | UIItemType::CloseSession(_)
             | UIItemType::ChatminalSidebarBackground
             | UIItemType::ChatminalSidebarCreateProfile
             | UIItemType::ChatminalSidebarProfile(_)
@@ -56,6 +56,7 @@ impl super::TermWindow {
         match item.item_type {
             UIItemType::TabBar(_) => {}
             UIItemType::CloseTab(_)
+            | UIItemType::CloseSession(_)
             | UIItemType::ChatminalSidebarBackground
             | UIItemType::ChatminalSidebarCreateProfile
             | UIItemType::ChatminalSidebarProfile(_)
@@ -70,7 +71,7 @@ impl super::TermWindow {
 
     pub fn mouse_event_impl(&mut self, event: MouseEvent, context: &dyn WindowOps) {
         log::trace!("{:?}", event);
-        let pane = match self.get_active_pane_or_overlay() {
+        let pane = match self.get_active_leaf_or_overlay() {
             Some(pane) => pane,
             None => return,
         };
@@ -270,8 +271,7 @@ impl super::TermWindow {
         y: i64,
         context: &dyn WindowOps,
     ) {
-        let mux = Mux::get();
-        let tab = match mux.get_active_tab_for_window(self.mux_window_id) {
+        let tab = match self.active_host_surface() {
             Some(tab) => tab,
             None => return,
         };
@@ -297,7 +297,7 @@ impl super::TermWindow {
         event: MouseEvent,
         context: &dyn WindowOps,
     ) {
-        let pane = match self.get_active_pane_or_overlay() {
+        let pane = match self.get_active_leaf_or_overlay() {
             Some(pane) => pane,
             None => return,
         };
@@ -392,6 +392,9 @@ impl super::TermWindow {
             UIItemType::CloseTab(idx) => {
                 self.mouse_event_close_tab(idx, event, context);
             }
+            UIItemType::CloseSession(session_id) => {
+                self.mouse_event_close_session(&session_id, event, context);
+            }
             UIItemType::ChatminalSidebarBackground => {
                 context.set_cursor(Some(MouseCursor::Arrow));
             }
@@ -462,18 +465,44 @@ impl super::TermWindow {
         event: MouseEvent,
         context: &dyn WindowOps,
     ) {
+        if self.is_session_ui_mode() {
+            context.set_cursor(Some(MouseCursor::Arrow));
+            return;
+        }
         match event.kind {
             WMEK::Press(MousePress::Left) => {
                 log::debug!("Should close tab {}", idx);
-                self.close_specific_tab(idx, true);
+                self.close_specific_surface(idx, true);
             }
             _ => {}
         }
         context.set_cursor(Some(MouseCursor::Arrow));
     }
 
+    pub fn mouse_event_close_session(
+        &mut self,
+        session_id: &str,
+        event: MouseEvent,
+        context: &dyn WindowOps,
+    ) {
+        if let WMEK::Press(MousePress::Left) = event.kind {
+            self.close_chatminal_session_by_id(session_id);
+        }
+        context.set_cursor(Some(MouseCursor::Arrow));
+    }
+
     fn do_new_tab_button_click(&mut self, button: MousePress) {
-        let pane = match self.get_active_pane_or_overlay() {
+        if self.chatminal_sidebar.is_enabled() {
+            match button {
+                MousePress::Left => {
+                    self.create_chatminal_session();
+                    return;
+                }
+                MousePress::Middle => return,
+                MousePress::Right => {}
+            }
+        }
+        let pane = match self.get_active_leaf_or_overlay() {
             Some(pane) => pane,
             None => return,
         };
@@ -486,7 +515,7 @@ impl super::TermWindow {
         async fn dispatch_new_tab_button(
             lua: Option<Rc<mlua::Lua>>,
             window: GuiWin,
-            pane: MuxPane,
+            pane: LeafRef,
             button: MousePress,
             action: Option<KeyAssignment>,
         ) -> anyhow::Result<()> {
@@ -508,16 +537,18 @@ impl super::TermWindow {
                 None => true,
             };
             if let (true, Some(assignment)) = (default_action, action) {
-                window.window.notify(TermWindowNotif::PerformAssignment {
-                    pane_id: pane.0,
-                    assignment,
-                    tx: None,
-                });
+                window
+                    .window
+                    .notify(TermWindowNotif::PerformAssignmentForLeafId {
+                        leaf_id: pane.0 as u64,
+                        assignment,
+                        tx: None,
+                    });
             }
             Ok(())
         }
         let window = GuiWin::new(self);
-        let pane = MuxPane(pane.pane_id());
+        let pane = LeafRef(pane.pane_id());
         promise::spawn::spawn(config::with_lua_config_on_main_thread(move |lua| {
             dispatch_new_tab_button(lua, window, pane, button, action)
         }))
@@ -532,8 +563,20 @@ impl super::TermWindow {
     ) {
         match event.kind {
             WMEK::Press(MousePress::Left) => match item {
-                TabBarItem::Tab { tab_idx, .. } => {
-                    self.activate_tab(tab_idx as isize).ok();
+                TabBarItem::HostSurface {
+                    host_surface_idx, ..
+                } => {
+                    if self.is_session_ui_mode() {
+                        return;
+                    }
+                    self.activate_surface_index(host_surface_idx as isize).ok();
+                }
+                TabBarItem::Session {
+                    session_id,
+                    surface_id,
+                    ..
+                } => {
+                    self.switch_chatminal_session_target(&session_id, surface_id);
                 }
                 TabBarItem::NewTabButton { .. } => {
                     self.do_new_tab_button_click(MousePress::Left);
@@ -582,8 +625,16 @@ impl super::TermWindow {
                 }
             },
             WMEK::Press(MousePress::Middle) => match item {
-                TabBarItem::Tab { tab_idx, .. } => {
-                    self.close_specific_tab(tab_idx, true);
+                TabBarItem::HostSurface {
+                    host_surface_idx, ..
+                } => {
+                    if self.is_session_ui_mode() {
+                        return;
+                    }
+                    self.close_specific_surface(host_surface_idx, true);
+                }
+                TabBarItem::Session { session_id, .. } => {
+                    self.close_chatminal_session_by_id(&session_id);
                 }
                 TabBarItem::NewTabButton { .. } => {
                     self.do_new_tab_button_click(MousePress::Middle);
@@ -594,9 +645,13 @@ impl super::TermWindow {
                 | TabBarItem::WindowButton(_) => {}
             },
             WMEK::Press(MousePress::Right) => match item {
-                TabBarItem::Tab { .. } => {
-                    self.show_tab_navigator();
+                TabBarItem::HostSurface { .. } => {
+                    if self.is_session_ui_mode() {
+                        return;
+                    }
+                    self.show_surface_navigator();
                 }
+                TabBarItem::Session { .. } => {}
                 TabBarItem::NewTabButton { .. } => {
                     self.do_new_tab_button_click(MousePress::Right);
                 }
@@ -620,13 +675,14 @@ impl super::TermWindow {
                     context.set_maximize_button_position(bounds);
                 }
                 TabBarItem::WindowButton(_)
-                | TabBarItem::Tab { .. }
+                | TabBarItem::HostSurface { .. }
+                | TabBarItem::Session { .. }
                 | TabBarItem::NewTabButton { .. } => {}
             },
             WMEK::VertWheel(n) => {
                 if self.config.mouse_wheel_scrolls_tabs {
-                    self.activate_tab_relative(if n < 1 { 1 } else { -1 }, true)
-                        .ok();
+                    let delta = if n < 1 { 1 } else { -1 };
+                    self.activate_surface_relative(delta, true).ok();
                 }
             }
             _ => {}
@@ -749,18 +805,28 @@ impl super::TermWindow {
                     // We're over a pane that isn't active
                     match &event.kind {
                         WMEK::Press(_) => {
-                            let mux = Mux::get();
-                            mux.get_active_tab_for_window(self.mux_window_id)
-                                .map(|tab| tab.set_active_idx(pos.index));
+                            let mut focused_leaf = false;
+                            if self.chatminal_sidebar.is_enabled() {
+                                focused_leaf = self.focus_active_session_leaf(&pos.pane);
+                            }
+                            if !focused_leaf {
+                                self.active_host_surface()
+                                    .map(|tab| tab.set_active_idx(pos.index));
+                            }
 
                             pane = Arc::clone(&pos.pane);
                             is_click_to_focus_pane = true;
                         }
                         WMEK::Move => {
                             if self.config.pane_focus_follows_mouse {
-                                let mux = Mux::get();
-                                mux.get_active_tab_for_window(self.mux_window_id)
-                                    .map(|tab| tab.set_active_idx(pos.index));
+                                let mut focused_leaf = false;
+                                if self.chatminal_sidebar.is_enabled() {
+                                    focused_leaf = self.focus_active_session_leaf(&pos.pane);
+                                }
+                                if !focused_leaf {
+                                    self.active_host_surface()
+                                        .map(|tab| tab.set_active_idx(pos.index));
+                                }
 
                                 pane = Arc::clone(&pos.pane);
                                 context.invalidate();
@@ -844,7 +910,7 @@ impl super::TermWindow {
             .unwrap_or(dims.physical_top)
             + row as StableRowIndex;
 
-        self.pane_state(pane.pane_id())
+        self.leaf_ui_state(pane.pane_id())
             .mouse_terminal_coords
             .replace((
                 ClickPosition {

@@ -1,7 +1,7 @@
 use crate::selection::{SelectionCoordinate, SelectionRange};
 use crate::termwindow::{TermWindow, TermWindowNotif};
-use config::keyassignment::{ClipboardCopyDestination, QuickSelectArguments, ScrollbackEraseMode};
 use config::ConfigHandle;
+use config::keyassignment::{ClipboardCopyDestination, QuickSelectArguments, ScrollbackEraseMode};
 use engine_term::color::ColorPalette;
 use engine_term::{
     Clipboard, Intensity, KeyCode, KeyModifiers, Line, MouseEvent, StableRowIndex, TerminalSize,
@@ -19,7 +19,7 @@ use std::ops::Range;
 use std::sync::Arc;
 use termwiz::cell::{Cell, CellAttributes};
 use termwiz::color::AnsiColor;
-use termwiz::surface::{SequenceNo, SEQ_ZERO};
+use termwiz::surface::{SEQ_ZERO, SequenceNo};
 use url::Url;
 use window::WindowOps;
 
@@ -737,7 +737,10 @@ impl QuickSelectRenderable {
     }
 
     fn close(&self) {
-        TermWindow::schedule_cancel_overlay_for_pane(self.window.clone(), self.delegate.pane_id());
+        TermWindow::schedule_cancel_overlay_for_leaf(
+            self.window.clone(),
+            self.delegate.pane_id() as u64,
+        );
     }
 
     fn set_viewport(&self, row: Option<StableRowIndex>) {
@@ -875,7 +878,7 @@ impl QuickSelectRenderable {
                 let pane_id = pane.pane_id();
                 let mut results = Some(results);
                 window.notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                    let state = term_window.pane_state(pane_id);
+                    let state = term_window.leaf_ui_state(pane_id);
                     if let Some(overlay) = state.overlay.as_ref() {
                         if let Some(search_overlay) =
                             overlay.pane.downcast_ref::<QuickSelectOverlay>()

@@ -191,7 +191,7 @@ fn register_lua_modules() {
         color_funcs::register,
         termwiz_funcs::register,
         logging::register,
-        mux_lua::register,
+        chatminal_lua_bridge::register,
         procinfo_funcs::register,
         filesystem::register,
         serde_funcs::register,

@@ -1,7 +1,8 @@
+use crate::TermWindow;
 use crate::scripting::guiwin::GuiWin;
+use crate::scripting::guiwin::DesktopWindowId;
 use crate::spawn::SpawnWhere;
 use crate::termwindow::TermWindowNotif;
-use crate::TermWindow;
 use ::window::*;
 use anyhow::{Context, Error};
 use config::keyassignment::{KeyAssignment, SpawnCommand};
@@ -9,19 +10,19 @@ use config::{ConfigSubscription, NotificationHandling};
 use engine_term::{Alert, ClipboardSelection};
 use engine_toast_notification::*;
 use mux::client::ClientId;
-use mux::window::WindowId as MuxWindowId;
 use mux::{Mux, MuxNotification};
 use promise::{Future, Promise};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashSet};
+use std::convert::TryFrom;
 use std::rc::Rc;
 use std::sync::Arc;
 
 pub struct GuiFrontEnd {
     connection: Rc<Connection>,
     switching_workspaces: RefCell<bool>,
-    spawned_mux_window: RefCell<HashSet<MuxWindowId>>,
-    known_windows: RefCell<BTreeMap<Window, MuxWindowId>>,
+    spawned_window_ids: RefCell<HashSet<DesktopWindowId>>,
+    known_windows: RefCell<BTreeMap<Window, DesktopWindowId>>,
     client_id: Arc<ClientId>,
     config_subscription: RefCell<Option<ConfigSubscription>>,
 }
@@ -43,7 +44,7 @@ impl GuiFrontEnd {
         let front_end = Rc::new(GuiFrontEnd {
             connection,
             switching_workspaces: RefCell::new(false),
-            spawned_mux_window: RefCell::new(HashSet::new()),
+            spawned_window_ids: RefCell::new(HashSet::new()),
             known_windows: RefCell::new(BTreeMap::new()),
             client_id: client_id.clone(),
             config_subscription: RefCell::new(None),
@@ -328,10 +329,14 @@ impl GuiFrontEnd {
 
     pub fn gui_windows(&self) -> Vec<GuiWin> {
         let windows = self.known_windows.borrow();
+        let active_workspace = Mux::get()
+            .active_workspace_for_client(&self.client_id)
+            .to_string();
         let mut windows: Vec<GuiWin> = windows
             .iter()
-            .map(|(window, &mux_window_id)| GuiWin {
-                mux_window_id,
+            .map(|(window, &window_id)| GuiWin {
+                active_workspace: active_workspace.clone(),
+                window_id: window_id as DesktopWindowId,
                 window: window.clone(),
             })
             .collect();
@@ -364,7 +369,11 @@ impl GuiFrontEnd {
         let workspace = mux.active_workspace_for_client(&self.client_id);
         log::debug!("workspace is {}, fixup windows", workspace);
 
-        let mut mux_windows = mux.iter_windows_in_workspace(&workspace);
+        let mut workspace_window_ids: Vec<DesktopWindowId> = mux
+            .iter_windows_in_workspace(&workspace)
+            .into_iter()
+            .map(|window_id| window_id as DesktopWindowId)
+            .collect();
 
         // First, repurpose existing windows.
         // Note that both iter_windows_in_workspace and self.known_windows have a
@@ -375,26 +384,26 @@ impl GuiFrontEnd {
         let mut unused = BTreeMap::new();
 
         for (window, window_id) in known_windows.into_iter() {
-            if let Some(idx) = mux_windows.iter().position(|&id| id == window_id) {
+            if let Some(idx) = workspace_window_ids.iter().position(|&id| id == window_id) {
                 // it already points to the desired mux window
                 windows.insert(window, window_id);
-                mux_windows.remove(idx);
+                workspace_window_ids.remove(idx);
             } else {
                 unused.insert(window, window_id);
             }
         }
 
-        let mut mux_windows = mux_windows.into_iter();
+        let mut workspace_window_ids = workspace_window_ids.into_iter();
 
         for (window, old_id) in unused.into_iter() {
-            if let Some(mux_window_id) = mux_windows.next() {
-                window.notify(TermWindowNotif::SwitchToMuxWindow(mux_window_id));
-                windows.insert(window, mux_window_id);
+            if let Some(window_id) = workspace_window_ids.next() {
+                window.notify(TermWindowNotif::SwitchToWindowId(window_id));
+                windows.insert(window, window_id);
             } else {
                 // We have more windows than are in the new workspace;
                 // we no longer need this one!
                 window.close();
-                front_end().spawned_mux_window.borrow_mut().remove(&old_id);
+                front_end().spawned_window_ids.borrow_mut().remove(&old_id);
             }
         }
 
@@ -405,28 +414,30 @@ impl GuiFrontEnd {
 
         // then spawn any new windows that are needed
         promise::spawn::spawn(async move {
-            while let Some(mux_window_id) = mux_windows.next() {
-                if front_end().has_mux_window(mux_window_id)
+            while let Some(window_id) = workspace_window_ids.next() {
+                if front_end().has_window_id(window_id)
                     || front_end()
-                        .spawned_mux_window
+                        .spawned_window_ids
                         .borrow()
-                        .contains(&mux_window_id)
+                        .contains(&window_id)
                 {
                     continue;
                 }
                 front_end()
-                    .spawned_mux_window
+                    .spawned_window_ids
                     .borrow_mut()
-                    .insert(mux_window_id);
-                log::trace!("Creating TermWindow for mux_window_id={}", mux_window_id);
-                if let Err(err) = TermWindow::new_window(mux_window_id).await {
+                    .insert(window_id);
+                log::trace!("Creating TermWindow for window_id={}", window_id);
+                if let Err(err) = TermWindow::new_window(window_id).await {
                     log::error!("Failed to create window: {:#}", err);
-                    let mux = Mux::get();
-                    mux.kill_window(mux_window_id);
+                    if let Ok(engine_window_id) = usize::try_from(window_id) {
+                        let mux = Mux::get();
+                        mux.kill_window(engine_window_id);
+                    }
                     front_end()
-                        .spawned_mux_window
+                        .spawned_window_ids
                         .borrow_mut()
-                        .remove(&mux_window_id);
+                        .remove(&window_id);
                 }
             }
             *front_end().switching_workspaces.borrow_mut() = false;
@@ -436,9 +447,9 @@ impl GuiFrontEnd {
         future
     }
 
-    fn has_mux_window(&self, mux_window_id: MuxWindowId) -> bool {
-        for &mux_id in self.known_windows.borrow().values() {
-            if mux_id == mux_window_id {
+    fn has_window_id(&self, window_id: DesktopWindowId) -> bool {
+        for &known_window_id in self.known_windows.borrow().values() {
+            if known_window_id == window_id {
                 return true;
             }
         }
@@ -452,10 +463,10 @@ impl GuiFrontEnd {
         self.reconcile_workspace();
     }
 
-    pub fn record_known_window(&self, window: Window, mux_window_id: MuxWindowId) {
+    pub fn record_window_binding(&self, window: Window, window_id: DesktopWindowId) {
         self.known_windows
             .borrow_mut()
-            .insert(window, mux_window_id);
+            .insert(window, window_id);
         if !self.is_switching_workspace() {
             self.reconcile_workspace();
         }
@@ -472,12 +483,16 @@ impl GuiFrontEnd {
         *self.switching_workspaces.borrow()
     }
 
-    pub fn gui_window_for_mux_window(&self, mux_window_id: MuxWindowId) -> Option<GuiWin> {
+    pub fn gui_window_for_window_id(&self, window_id: DesktopWindowId) -> Option<GuiWin> {
         let windows = self.known_windows.borrow();
+        let active_workspace = Mux::get()
+            .active_workspace_for_client(&self.client_id)
+            .to_string();
         for (window, v) in windows.iter() {
-            if *v == mux_window_id {
+            if *v == window_id {
                 return Some(GuiWin {
-                    mux_window_id,
+                    active_workspace: active_workspace.clone(),
+                    window_id,
                     window: window.clone(),
                 });
             }

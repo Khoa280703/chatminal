@@ -3,7 +3,6 @@ use crate::scripting::guiwin::GuiWin;
 use config::configuration;
 use config::keyassignment::{InputSelector, InputSelectorEntry, KeyAssignment};
 use mux::termwiztermtab::TermWizTerminal;
-use mux_lua::MuxPane;
 use nucleo_matcher::pattern::Pattern;
 use nucleo_matcher::{Matcher, Utf32Str};
 use rayon::prelude::*;
@@ -43,7 +42,7 @@ struct SelectorState {
     top_row: usize,
     filter_term: String,
     filtered_entries: Vec<InputSelectorEntry>,
-    pane: MuxPane,
+    pane_id: u64,
     window: GuiWin,
     filtering: bool,
     always_fuzzy: bool,
@@ -207,10 +206,10 @@ impl SelectorState {
     fn trigger_event(&self, entry: Option<InputSelectorEntry>) {
         let name = self.event_name.clone();
         let window = self.window.clone();
-        let pane = self.pane.clone();
+        let pane_id = self.pane_id;
 
         promise::spawn::spawn_into_main_thread(async move {
-            trampoline(name, window, pane, entry);
+            trampoline(name, window, pane_id, entry);
             anyhow::Result::<()>::Ok(())
         })
         .detach();
@@ -383,10 +382,12 @@ impl SelectorState {
     }
 }
 
-fn trampoline(name: String, window: GuiWin, pane: MuxPane, entry: Option<InputSelectorEntry>) {
+fn trampoline(name: String, window: GuiWin, pane_id: u64, entry: Option<InputSelectorEntry>) {
     promise::spawn::spawn(async move {
-        config::with_lua_config_on_main_thread(move |lua| do_event(lua, name, window, pane, entry))
-            .await
+        config::with_lua_config_on_main_thread(move |lua| {
+            do_event(lua, name, window, pane_id, entry)
+        })
+        .await
     })
     .detach();
 }
@@ -395,14 +396,14 @@ async fn do_event(
     lua: Option<Rc<mlua::Lua>>,
     name: String,
     window: GuiWin,
-    pane: MuxPane,
+    pane_id: u64,
     entry: Option<InputSelectorEntry>,
 ) -> anyhow::Result<()> {
     if let Some(lua) = lua {
         let id = entry.as_ref().map(|entry| entry.id.clone());
         let label = entry.as_ref().map(|entry| entry.label.to_string());
 
-        let args = lua.pack_multi((window, pane, id, label))?;
+        let args = lua.pack_multi((window, pane_id, id, label))?;
 
         if let Err(err) = config::lua::emit_event(&lua, (name.clone(), args)).await {
             log::error!("while processing {} event: {:#}", name, err);
@@ -416,7 +417,7 @@ pub fn selector(
     mut term: TermWizTerminal,
     args: InputSelector,
     window: GuiWin,
-    pane: MuxPane,
+    pane_id: u64,
 ) -> anyhow::Result<()> {
     let event_name = match *args.action {
         KeyAssignment::EmitEvent(ref id) => id.to_string(),
@@ -429,7 +430,7 @@ pub fn selector(
     let mut state = SelectorState {
         active_idx: 0,
         max_items: 0,
-        pane,
+        pane_id,
         top_row: 0,
         filter_term: String::new(),
         filtered_entries: vec![],

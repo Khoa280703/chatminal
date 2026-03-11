@@ -6,30 +6,49 @@ use luahelper::{from_lua, to_lua};
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug)]
-pub struct MuxTab(pub TabId);
+pub struct SurfaceRef(pub TabId);
 
-impl MuxTab {
+impl SurfaceRef {
     pub fn resolve<'a>(&self, mux: &'a Arc<Mux>) -> mlua::Result<Arc<Tab>> {
-        mux.get_tab(self.0)
-            .ok_or_else(|| mlua::Error::external(format!("tab id {} not found in mux", self.0)))
+        mux.get_tab(self.0).ok_or_else(|| {
+            mlua::Error::external(format!(
+                "surface host surface id {} not found in mux",
+                self.0
+            ))
+        })
     }
 }
 
-impl UserData for MuxTab {
+impl UserData for SurfaceRef {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
         methods.add_meta_method(mlua::MetaMethod::ToString, |_, this, _: ()| {
-            Ok(format!("MuxTab(tab_id:{}, pid:{})", this.0, unsafe {
+            Ok(format!("SurfaceRef(host_surface_id:{}, pid:{})", this.0, unsafe {
                 libc::getpid()
             }))
         });
-        methods.add_method("tab_id", |_, this, _: ()| Ok(this.0));
+        methods.add_method("host_surface_id", |_, this, _: ()| Ok(this.0));
+        methods.add_method("session_id", |_, this, _: ()| {
+            let mux = get_mux()?;
+            let tab = this.resolve(&mux)?;
+            Ok(surface_session_id(&tab))
+        });
+        methods.add_method("surface_id", |_, this, _: ()| {
+            let mux = get_mux()?;
+            let tab = this.resolve(&mux)?;
+            Ok(surface_public_id(&tab))
+        });
+        methods.add_method("active_leaf_id", |_, this, _: ()| {
+            let mux = get_mux()?;
+            let tab = this.resolve(&mux)?;
+            Ok(surface_active_leaf_id(&tab))
+        });
         methods.add_method("window", |_, this, _: ()| {
             let mux = get_mux()?;
             for window_id in mux.iter_windows() {
                 if let Some(window) = mux.get_window(window_id) {
                     for tab in window.iter() {
                         if tab.tab_id() == this.0 {
-                            return Ok(Some(MuxWindow(window_id)));
+                            return Ok(Some(WindowRef(window_id)));
                         }
                     }
                 }
@@ -46,22 +65,22 @@ impl UserData for MuxTab {
             let tab = this.resolve(&mux)?;
             Ok(tab.set_title(&title))
         });
-        methods.add_method("active_pane", |_, this, _: ()| {
+        methods.add_method("active_leaf", |_, this, _: ()| {
             let mux = get_mux()?;
             let tab = this.resolve(&mux)?;
-            Ok(tab.get_active_pane().map(|pane| MuxPane(pane.pane_id())))
+            Ok(tab.get_active_pane().map(|pane| LeafRef(pane.pane_id())))
         });
-        methods.add_method("panes", |_, this, _: ()| {
+        methods.add_method("leaves", |_, this, _: ()| {
             let mux = get_mux()?;
             let tab = this.resolve(&mux)?;
             Ok(tab
                 .iter_panes_ignoring_zoom()
                 .into_iter()
-                .map(|info| MuxPane(info.pane.pane_id()))
-                .collect::<Vec<MuxPane>>())
+                .map(|info| LeafRef(info.pane.pane_id()))
+                .collect::<Vec<LeafRef>>())
         });
 
-        methods.add_method("get_pane_direction", |_, this, direction: Value| {
+        methods.add_method("get_leaf_direction", |_, this, direction: Value| {
             let mux = get_mux()?;
             let tab = this.resolve(&mux)?;
             let panes = tab.iter_panes_ignoring_zoom();
@@ -69,7 +88,7 @@ impl UserData for MuxTab {
             let dir: PaneDirection = from_lua(direction)?;
             let pane = tab
                 .get_pane_direction(dir, true)
-                .map(|pane_index| MuxPane(panes[pane_index].pane.pane_id()));
+                .map(|pane_index| LeafRef(panes[pane_index].pane.pane_id()));
             Ok(pane)
         });
 
@@ -80,13 +99,13 @@ impl UserData for MuxTab {
             Ok(was_zoomed)
         });
 
-        methods.add_method("panes_with_info", |lua, this, _: ()| {
+        methods.add_method("leaves_with_info", |lua, this, _: ()| {
             let mux = get_mux()?;
             let tab = this.resolve(&mux)?;
 
             let result = lua.create_table()?;
             for (idx, pos) in tab.iter_panes_ignoring_zoom().into_iter().enumerate() {
-                let info = MuxPaneInfo {
+                let info = LeafInfo {
                     index: pos.index,
                     is_active: pos.is_active,
                     is_zoomed: pos.is_zoomed,
@@ -100,7 +119,10 @@ impl UserData for MuxTab {
                 let info = luahelper::dynamic_to_lua_value(lua, info.to_dynamic())?;
                 match &info {
                     LuaValue::Table(t) => {
-                        t.set("pane", MuxPane(pos.pane.pane_id()))?;
+                        t.set("leaf", LeafRef(pos.pane.pane_id()))?;
+                        t.set("session_id", pane_session_id(&pos.pane))?;
+                        t.set("surface_id", pane_surface_id(&pos.pane))?;
+                        t.set("leaf_id", pane_leaf_id(&pos.pane))?;
                     }
                     _ => {}
                 }
@@ -135,12 +157,18 @@ impl UserData for MuxTab {
             let tab = this.resolve(&mux)?;
 
             let pane = tab.get_active_pane().ok_or_else(|| {
-                mlua::Error::external(format!("tab {} has no active pane!?", this.0))
+                mlua::Error::external(format!(
+                    "surface host surface {} has no active leaf",
+                    this.0
+                ))
             })?;
 
             let (_domain_id, window_id, tab_id) =
                 mux.resolve_pane_id(pane.pane_id()).ok_or_else(|| {
-                    mlua::Error::external(format!("pane {} not found", pane.pane_id()))
+                    mlua::Error::external(format!(
+                        "active leaf host leaf {} not found",
+                        pane.pane_id()
+                    ))
                 })?;
             {
                 let mut window = mux.get_window_mut(window_id).ok_or_else(|| {
@@ -148,7 +176,7 @@ impl UserData for MuxTab {
                 })?;
                 let tab_idx = window.idx_by_id(tab_id).ok_or_else(|| {
                     mlua::Error::external(format!(
-                        "tab {tab_id} isn't really in window {window_id}!?"
+                        "surface host surface {tab_id} is not attached to window {window_id}"
                     ))
                 })?;
                 window.save_and_then_set_active(tab_idx);

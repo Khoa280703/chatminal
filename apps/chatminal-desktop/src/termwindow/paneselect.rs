@@ -1,3 +1,5 @@
+use crate::chatminal_session_surface;
+use crate::scripting::guiwin::DesktopWindowId;
 use crate::termwindow::box_model::*;
 use crate::termwindow::modal::Modal;
 use crate::termwindow::render::corners::{
@@ -7,6 +9,7 @@ use crate::termwindow::render::corners::{
 use crate::termwindow::DimensionContext;
 use crate::utilsprites::RenderMetrics;
 use crate::TermWindow;
+use ::window::WindowOps;
 use config::keyassignment::{KeyAssignment, PaneSelectArguments, PaneSelectMode};
 use config::Dimension;
 use engine_term::{KeyCode, KeyModifiers, MouseEvent};
@@ -32,12 +35,10 @@ impl PaneSelector {
         };
 
         // Ensure that we are un-zoomed and remember the original state
-        let was_zoomed = {
-            let mux = Mux::get();
-            mux.get_active_tab_for_window(term_window.mux_window_id)
-                .map(|tab| tab.set_zoomed(false))
-                .unwrap_or(false)
-        };
+        let was_zoomed = term_window
+            .active_host_surface()
+            .map(|tab| tab.set_zoomed(false))
+            .unwrap_or(false);
 
         Self {
             element: RefCell::new(None),
@@ -163,54 +164,113 @@ impl PaneSelector {
         term_window: &mut TermWindow,
     ) -> anyhow::Result<()> {
         let mux = Mux::get();
-        let tab = match mux.get_active_tab_for_window(term_window.mux_window_id) {
+        let tab = match term_window.active_host_surface() {
             Some(tab) => tab,
             None => return Ok(()),
         };
 
-        let tab_id = tab.tab_id();
-
-        if term_window.tab_state(tab_id).overlay.is_none() {
+        if !term_window.active_surface_has_overlay() {
             let panes = tab.iter_panes();
 
             match self.mode {
                 PaneSelectMode::Activate => {
-                    if panes.iter().position(|p| p.index == pane_index).is_some() {
+                    let focused_leaf = term_window.chatminal_sidebar.is_enabled()
+                        && panes
+                            .iter()
+                            .find(|p| p.index == pane_index)
+                            .map(|pos| term_window.focus_active_session_leaf(&pos.pane))
+                            .is_some();
+                    if focused_leaf {
+                        if let Some(window) = term_window.window.as_ref() {
+                            window.invalidate();
+                        }
+                    } else if panes.iter().position(|p| p.index == pane_index).is_some() {
                         tab.set_active_idx(pane_index);
                     }
                 }
                 PaneSelectMode::SwapWithActiveKeepFocus | PaneSelectMode::SwapWithActive => {
-                    tab.swap_active_with_index(
-                        pane_index,
-                        self.mode == PaneSelectMode::SwapWithActiveKeepFocus,
-                    );
+                    let swapped_leaf = term_window.chatminal_sidebar.is_enabled()
+                        && panes
+                            .iter()
+                            .find(|p| p.index == pane_index)
+                            .map(|pos| {
+                                term_window.swap_active_with_session_leaf(
+                                    &pos.pane,
+                                    self.mode == PaneSelectMode::SwapWithActiveKeepFocus,
+                                )
+                            })
+                            .is_some();
+                    if !swapped_leaf {
+                        tab.swap_active_with_index(
+                            pane_index,
+                            self.mode == PaneSelectMode::SwapWithActiveKeepFocus,
+                        );
+                    }
                 }
                 PaneSelectMode::MoveToNewWindow => {
-                    if let Some(pos) = panes.iter().find(|p| p.index == pane_index) {
-                        let pane_id = pos.pane.pane_id();
-                        promise::spawn::spawn(async move {
-                            if let Err(err) = mux.move_pane_to_new_tab(pane_id, None, None).await {
-                                log::error!("failed to move_pane_to_new_tab: {err:#}");
-                            }
-                        })
-                        .detach();
+                    let active_session_id = term_window.active_session_id();
+                    let moved_leaf = term_window.chatminal_sidebar.is_enabled()
+                        && panes
+                            .iter()
+                            .find(|p| p.index == pane_index)
+                            .and_then(|pos| {
+                                let session_id = active_session_id.clone()?;
+                                Some(chatminal_session_surface::move_session_leaf_to_new_window(
+                                    term_window.window_id as DesktopWindowId,
+                                    &session_id,
+                                    chatminal_session_runtime::LeafId::new(
+                                        pos.pane.pane_id() as u64
+                                    ),
+                                ))
+                            })
+                            .unwrap_or(false);
+                    if !moved_leaf {
+                        if let Some(pos) = panes.iter().find(|p| p.index == pane_index) {
+                            let host_leaf_id = pos.pane.pane_id();
+                            promise::spawn::spawn(async move {
+                                if let Err(err) =
+                                    mux.move_pane_to_new_tab(host_leaf_id, None, None).await
+                                {
+                                    log::error!("failed to move leaf to new window: {err:#}");
+                                }
+                            })
+                            .detach();
+                        }
                     }
                 }
                 PaneSelectMode::MoveToNewTab => {
-                    if let Some(pos) = panes.iter().find(|p| p.index == pane_index) {
-                        let pane_id = pos.pane.pane_id();
-                        let window_id = term_window.mux_window_id;
-                        promise::spawn::spawn(async move {
-                            if let Err(err) = mux
-                                .move_pane_to_new_tab(pane_id, Some(window_id), None)
-                                .await
-                            {
-                                log::error!("failed to move_pane_to_new_tab: {err:#}");
-                            }
+                    let active_session_id = term_window.active_session_id();
+                    let moved_leaf = term_window.chatminal_sidebar.is_enabled()
+                        && panes
+                            .iter()
+                            .find(|p| p.index == pane_index)
+                            .and_then(|pos| {
+                                let session_id = active_session_id.clone()?;
+                                Some(chatminal_session_surface::move_session_leaf_to_new_surface(
+                                    term_window.window_id as DesktopWindowId,
+                                    &session_id,
+                                    chatminal_session_runtime::LeafId::new(
+                                        pos.pane.pane_id() as u64
+                                    ),
+                                ))
+                            })
+                            .unwrap_or(false);
+                    if !moved_leaf {
+                        if let Some(pos) = panes.iter().find(|p| p.index == pane_index) {
+                            let host_leaf_id = pos.pane.pane_id();
+                            let window_id = term_window.window_id;
+                            promise::spawn::spawn(async move {
+                                if let Err(err) = mux
+                                    .move_pane_to_new_tab(host_leaf_id, Some(window_id), None)
+                                    .await
+                                {
+                                    log::error!("failed to move leaf to new surface: {err:#}");
+                                }
 
-                            mux.focus_pane_and_containing_tab(pane_id).ok();
-                        })
-                        .detach();
+                                mux.focus_pane_and_containing_tab(host_leaf_id).ok();
+                            })
+                            .detach();
+                        }
                     }
                 }
             }

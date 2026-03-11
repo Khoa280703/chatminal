@@ -8,9 +8,9 @@ use chatminal_runtime::{RuntimeCreatedSession, RuntimeEvent, RuntimeProfile, Run
 use crate::chatminal_runtime::runtime_client;
 
 const SIDEBAR_ENABLE_ENV: &str = "CHATMINAL_DESKTOP_SESSIONS_SIDEBAR";
-const SIDEBAR_DEFAULT_WIDTH_PX: f32 = 272.0;
-const SIDEBAR_MIN_WIDTH_PX: f32 = 208.0;
-const SIDEBAR_MAX_WINDOW_RATIO: f32 = 0.38;
+const SIDEBAR_DEFAULT_WIDTH_PX: f32 = 304.0;
+const SIDEBAR_MIN_WIDTH_PX: f32 = 280.0;
+const SIDEBAR_MAX_WINDOW_RATIO: f32 = 0.32;
 const EVENT_POLL_TIMEOUT: Duration = Duration::from_millis(400);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,7 +107,11 @@ impl ChatminalSidebar {
         cols: usize,
         rows: usize,
     ) -> Result<RuntimeCreatedSession, String> {
-        runtime_client()?.session_create(None, cols, rows, None, Some(false))
+        runtime_client()?.session_create(None, cols, rows, None, Some(true))
+    }
+
+    pub fn close_session(&self, session_id: &str) -> Result<(), String> {
+        runtime_client()?.session_close(session_id)
     }
 
     pub fn switch_profile(&self, profile_id: &str) -> Result<RuntimeWorkspace, String> {

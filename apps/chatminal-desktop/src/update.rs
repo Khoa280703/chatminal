@@ -7,14 +7,14 @@ use http_req::uri::Uri;
 use mux::connui::ConnectionUI;
 use serde::*;
 use std::convert::TryFrom;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use termwiz::cell::{Hyperlink, Underline};
 use termwiz::color::AnsiColor;
 use termwiz::escape::csi::{Cursor, Sgr};
 use termwiz::escape::osc::{ITermDimension, ITermFileData, ITermProprietary};
-use termwiz::escape::{OneBased, OperatingSystemCommand, CSI};
+use termwiz::escape::{CSI, OneBased, OperatingSystemCommand};
 
 const CHATMINAL_ENABLE_DESKTOP_UPDATE_CHECK: &str = "CHATMINAL_ENABLE_DESKTOP_UPDATE_CHECK";
 const CHATMINAL_ALWAYS_SHOW_UPDATE_UI: &str = "CHATMINAL_ALWAYS_SHOW_UPDATE_UI";

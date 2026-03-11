@@ -236,7 +236,7 @@ impl crate::TermWindow {
         config: &ConfigHandle,
         target: VisualBellTarget,
     ) -> Option<f32> {
-        let mut per_pane = self.pane_state(pane.pane_id());
+        let mut per_pane = self.leaf_ui_state(pane.pane_id());
         if let Some(ringing) = per_pane.bell_start {
             if config.visual_bell.target == target {
                 let mut color_ease = ColorEase::new(
@@ -358,12 +358,14 @@ impl crate::TermWindow {
             .evaluate_as_pixels(h_context)
             + self.chatminal_sidebar_width() as f32;
         let padding_right = self.config.window_padding.right;
-        let padding_top = self.config.window_padding.top.evaluate_as_pixels(v_context);
+        let padding_top = self.config.window_padding.top.evaluate_as_pixels(v_context)
+            + self.chatminal_terminal_chrome_height();
         let padding_bottom = self
             .config
             .window_padding
             .bottom
-            .evaluate_as_pixels(v_context);
+            .evaluate_as_pixels(v_context)
+            + self.chatminal_terminal_footer_height();
 
         let horizontal_gap = self.dimensions.pixel_width as f32
             - self.terminal_size.pixel_width as f32

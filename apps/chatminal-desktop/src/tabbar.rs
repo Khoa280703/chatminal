@@ -1,15 +1,16 @@
-use crate::termwindow::{PaneInformation, TabInformation, UIItem, UIItemType};
+use crate::termwindow::{LeafInformation, SurfaceInformation, UIItem, UIItemType};
+use chatminal_session_runtime::{LeafId, SurfaceId};
 use config::{ConfigHandle, TabBarColors};
 use engine_term::{Line, Progress};
 use finl_unicode::grapheme_clusters::Graphemes;
 use mlua::FromLua;
-use termwiz::cell::{unicode_column_width, Cell, CellAttributes};
+use termwiz::cell::{Cell, CellAttributes, unicode_column_width};
 use termwiz::color::{AnsiColor, ColorSpec};
 use termwiz::escape::csi::Sgr;
 use termwiz::escape::parser::Parser;
-use termwiz::escape::{Action, ControlCode, CSI};
+use termwiz::escape::{Action, CSI, ControlCode};
 use termwiz::surface::SEQ_ZERO;
-use termwiz_funcs::{format_as_escapes, FormatColor, FormatItem};
+use termwiz_funcs::{FormatColor, FormatItem, format_as_escapes};
 use window::{IntegratedTitleButton, IntegratedTitleButtonAlignment, IntegratedTitleButtonStyle};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -18,12 +19,21 @@ pub struct TabBarState {
     items: Vec<TabEntry>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TabBarItem {
     None,
     LeftStatus,
     RightStatus,
-    Tab { tab_idx: usize, active: bool },
+    HostSurface {
+        host_surface_idx: usize,
+        active: bool,
+    },
+    Session {
+        session_id: String,
+        surface_id: Option<SurfaceId>,
+        active_leaf_id: Option<LeafId>,
+        active: bool,
+    },
     NewTabButton,
     WindowButton(IntegratedTitleButton),
 }
@@ -43,9 +53,9 @@ struct TitleText {
 }
 
 fn call_format_tab_title(
-    tab: &TabInformation,
-    tab_info: &[TabInformation],
-    pane_info: &[PaneInformation],
+    tab: &SurfaceInformation,
+    tab_info: &[SurfaceInformation],
+    pane_info: &[LeafInformation],
     config: &ConfigHandle,
     hover: bool,
     tab_max_width: usize,
@@ -131,9 +141,9 @@ fn pct_to_glyph(pct: u8) -> char {
 }
 
 fn compute_tab_title(
-    tab: &TabInformation,
-    tab_info: &[TabInformation],
-    pane_info: &[PaneInformation],
+    tab: &SurfaceInformation,
+    tab_info: &[SurfaceInformation],
+    pane_info: &[LeafInformation],
     config: &ConfigHandle,
     hover: bool,
     tab_max_width: usize,
@@ -146,18 +156,21 @@ fn compute_tab_title(
             let mut items = vec![];
             let mut len = 0;
 
-            if let Some(pane) = &tab.active_pane {
-                let mut title = if tab.tab_title.is_empty() {
-                    pane.title.clone()
-                } else {
-                    tab.tab_title.clone()
-                };
+            let mut title = if tab.surface_title.is_empty() {
+                tab.active_leaf
+                    .as_ref()
+                    .map(|pane| pane.title.clone())
+                    .unwrap_or_else(|| " no pane ".to_string())
+            } else {
+                tab.surface_title.clone()
+            };
 
+            if let Some(pane) = &tab.active_leaf {
                 let classic_spacing = if config.use_fancy_tab_bar { "" } else { " " };
                 if config.show_tab_index_in_tab_bar {
                     let index = format!(
                         "{classic_spacing}{}: ",
-                        tab.tab_index
+                        tab.surface_index
                             + if config.tab_and_split_indices_are_zero_based {
                                 0
                             } else {
@@ -202,7 +215,12 @@ fn compute_tab_title(
                 len += unicode_column_width(&title, None);
                 items.push(FormatItem::Text(title));
             } else {
-                let title = " no pane ".to_string();
+                if !config.use_fancy_tab_bar {
+                    title = format!(" {title} ");
+                    while len + unicode_column_width(&title, None) < 5 {
+                        title.push(' ');
+                    }
+                }
                 len += unicode_column_width(&title, None);
                 items.push(FormatItem::Text(title));
             };
@@ -333,8 +351,8 @@ impl TabBarState {
     pub fn new(
         title_width: usize,
         mouse_x: Option<usize>,
-        tab_info: &[TabInformation],
-        pane_info: &[PaneInformation],
+        tab_info: &[SurfaceInformation],
+        pane_info: &[LeafInformation],
         colors: Option<&TabBarColors>,
         config: &ConfigHandle,
         left_status: &str,
@@ -368,6 +386,8 @@ impl TabBarState {
         let use_integrated_title_buttons = config
             .window_decorations
             .contains(window::WindowDecorations::INTEGRATED_BUTTONS);
+        let reserve_integrated_title_button_space =
+            use_integrated_title_buttons && !crate::chatminal_sidebar::sidebar_enabled_from_env();
 
         // We ultimately want to produce a line looking like this:
         // ` | tab1-title x | tab2-title x |  +      . - X `
@@ -382,7 +402,7 @@ impl TabBarState {
                 .iter()
                 .map(|tab| {
                     if tab.is_active {
-                        active_tab_no = tab.tab_index;
+                        active_tab_no = tab.surface_index;
                     }
                     compute_tab_title(
                         tab,
@@ -422,7 +442,7 @@ impl TabBarState {
                 .clone(),
         );
 
-        if use_integrated_title_buttons
+        if reserve_integrated_title_button_space
             && config.integrated_title_button_style == IntegratedTitleButtonStyle::MacOsNative
             && config.use_fancy_tab_bar == false
             && config.tab_bar_at_bottom == false
@@ -433,7 +453,7 @@ impl TabBarState {
             }
         }
 
-        if use_integrated_title_buttons
+        if reserve_integrated_title_button_space
             && config.integrated_title_button_style != IntegratedTitleButtonStyle::MacOsNative
             && config.integrated_title_button_alignment == IntegratedTitleButtonAlignment::Left
         {
@@ -452,15 +472,15 @@ impl TabBarState {
             line.append_line(left_status_line, SEQ_ZERO);
         }
 
-        for (tab_idx, tab_title) in tab_titles.iter().enumerate() {
+        for (host_surface_idx, tab_title) in tab_titles.iter().enumerate() {
             let tab_title_len = tab_title.len.min(tab_width_max);
-            let active = tab_idx == active_tab_no;
+            let active = host_surface_idx == active_tab_no;
             let hover = !active && is_tab_hover(mouse_x, x, tab_title_len);
 
             // Recompute the title so that it factors in both the hover state
             // and the adjusted maximum tab width based on available space.
             let tab_title = compute_tab_title(
-                &tab_info[tab_idx],
+                &tab_info[host_surface_idx],
                 tab_info,
                 pane_info,
                 config,
@@ -495,8 +515,21 @@ impl TabBarState {
 
             let width = tab_line.len();
 
+            let item = match &tab_info[host_surface_idx].session_id {
+                Some(session_id) => TabBarItem::Session {
+                    session_id: session_id.clone(),
+                    surface_id: tab_info[host_surface_idx].surface_id,
+                    active_leaf_id: tab_info[host_surface_idx].active_leaf_id,
+                    active,
+                },
+                None => TabBarItem::HostSurface {
+                    host_surface_idx,
+                    active,
+                },
+            };
+
             items.push(TabEntry {
-                item: TabBarItem::Tab { tab_idx, active },
+                item,
                 title,
                 x: tab_start_idx,
                 width,
@@ -528,7 +561,7 @@ impl TabBarState {
         }
 
         // Reserve place for integrated title buttons
-        let title_width = if use_integrated_title_buttons
+        let title_width = if reserve_integrated_title_button_space
             && config.integrated_title_button_style != IntegratedTitleButtonStyle::MacOsNative
             && config.integrated_title_button_alignment == IntegratedTitleButtonAlignment::Right
         {
@@ -595,7 +628,7 @@ impl TabBarState {
             line.insert_cell(x, black_cell.clone(), title_width, SEQ_ZERO);
         }
 
-        if use_integrated_title_buttons
+        if reserve_integrated_title_button_space
             && config.integrated_title_button_style != IntegratedTitleButtonStyle::MacOsNative
             && config.integrated_title_button_alignment == IntegratedTitleButtonAlignment::Right
         {
@@ -606,16 +639,22 @@ impl TabBarState {
         Self { line, items }
     }
 
-    pub fn compute_ui_items(&self, y: usize, cell_height: usize, cell_width: usize) -> Vec<UIItem> {
+    pub fn compute_ui_items(
+        &self,
+        x_offset: usize,
+        y: usize,
+        cell_height: usize,
+        cell_width: usize,
+    ) -> Vec<UIItem> {
         let mut items = vec![];
 
         for entry in self.items.iter() {
             items.push(UIItem {
-                x: entry.x * cell_width,
+                x: x_offset + entry.x * cell_width,
                 width: entry.width * cell_width,
                 y,
                 height: cell_height,
-                item_type: UIItemType::TabBar(entry.item),
+                item_type: UIItemType::TabBar(entry.item.clone()),
             });
         }
 

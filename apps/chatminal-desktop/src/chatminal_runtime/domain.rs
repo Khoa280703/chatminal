@@ -1,16 +1,16 @@
 use std::sync::Arc;
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use config::keyassignment::SpawnTabDomain;
 use engine_term::TerminalSize;
-use mux::domain::{alloc_domain_id, Domain, DomainId, DomainState};
+use mux::domain::{Domain, DomainId, DomainState, alloc_domain_id};
 use mux::pane::Pane;
 use mux::window::WindowId;
 use portable_pty::CommandBuilder;
 
-use super::client::{resolve_target_session_id, ChatminalRuntimeClient};
-use super::pane::ChatminalRuntimePane;
-use super::{parse_proxy_session_id, EmbeddedRuntime, CHATMINAL_RUNTIME_DOMAIN_NAME};
+use super::client::{ChatminalRuntimeClient, resolve_target_session_id};
+use super::session_pane::ChatminalSessionPane;
+use super::{CHATMINAL_RUNTIME_DOMAIN_NAME, EmbeddedRuntime, parse_proxy_session_id};
 
 pub struct ChatminalRuntimeDomain {
     runtime: Arc<EmbeddedRuntime>,
@@ -42,9 +42,25 @@ impl Domain for ChatminalRuntimeDomain {
         _command_dir: Option<String>,
     ) -> anyhow::Result<Arc<dyn Pane>> {
         let session_id = self.resolve_session_id(command)?;
-        ChatminalRuntimePane::new(Arc::clone(&self.runtime), self.domain_id, session_id, size)
-            .map(|pane| pane as Arc<dyn Pane>)
-            .context("create chatminal runtime pane")
+        self.runtime
+            .state
+            .session_activate(&session_id, size.cols.max(20), size.rows.max(5))
+            .map_err(anyhow::Error::msg)?;
+        let (surface_id, leaf_id) = self
+            .runtime
+            .state
+            .session_runtime_attachment(&session_id)
+            .ok_or_else(|| anyhow::anyhow!("missing runtime attachment for session {session_id}"))?;
+        ChatminalSessionPane::new(
+            self.runtime.state.session_engine_shared(),
+            self.domain_id,
+            session_id,
+            surface_id,
+            leaf_id,
+            size,
+        )
+        .map(|pane| pane as Arc<dyn Pane>)
+        .context("create chatminal session pane")
     }
 
     fn spawnable(&self) -> bool {

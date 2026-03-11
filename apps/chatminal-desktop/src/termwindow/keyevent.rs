@@ -215,7 +215,7 @@ impl super::TermWindow {
         mods: Modifiers,
         only_key_bindings: OnlyKeyBindings,
     ) -> Option<(KeyTableEntry, Option<String>)> {
-        if let Some(overlay) = self.pane_state(pane.pane_id()).overlay.as_mut() {
+        if let Some(overlay) = self.leaf_ui_state(pane.pane_id()).overlay.as_mut() {
             if let Some((entry, table_name)) = overlay.key_table_state.lookup_key(
                 &self.input_map,
                 keycode,
@@ -404,7 +404,7 @@ impl super::TermWindow {
                     if did_encode {
                         if is_down
                             && !keycode.is_modifier()
-                            && self.pane_state(pane.pane_id()).overlay.is_none()
+                            && self.leaf_ui_state(pane.pane_id()).overlay.is_none()
                         {
                             self.maybe_scroll_to_bottom_for_input(&pane);
                         }
@@ -458,7 +458,7 @@ impl super::TermWindow {
             self.schedule_next_status_update();
         }
 
-        let pane = match self.get_active_pane_or_overlay() {
+        let pane = match self.get_active_leaf_or_overlay() {
             Some(pane) => pane,
             None => return,
         };
@@ -559,8 +559,8 @@ impl super::TermWindow {
     pub fn current_key_table_name(&mut self) -> Option<String> {
         let mut name = None;
 
-        if let Some(pane) = self.get_active_pane_or_overlay() {
-            if let Some(overlay) = self.pane_state(pane.pane_id()).overlay.as_mut() {
+        if let Some(pane) = self.get_active_leaf_or_overlay() {
+            if let Some(overlay) = self.leaf_ui_state(pane.pane_id()).overlay.as_mut() {
                 name = overlay
                     .key_table_state
                     .current_table()
@@ -597,7 +597,7 @@ impl super::TermWindow {
     }
 
     pub fn key_event_impl(&mut self, window_key: KeyEvent, context: &dyn WindowOps) {
-        let pane = match self.get_active_pane_or_overlay() {
+        let pane = match self.get_active_leaf_or_overlay() {
             Some(pane) => pane,
             None => return,
         };
@@ -705,7 +705,7 @@ impl super::TermWindow {
                 if res.is_ok() {
                     if window_key.key_is_down
                         && !key.is_modifier()
-                        && self.pane_state(pane.pane_id()).overlay.is_none()
+                        && self.leaf_ui_state(pane.pane_id()).overlay.is_none()
                     {
                         self.maybe_scroll_to_bottom_for_input(&pane);
                     }
@@ -768,7 +768,7 @@ impl super::TermWindow {
             WK::Char('\u{1b}') => KC::Escape,
             WK::RawCode(_) => return Key::None,
             WK::Physical(phys) => {
-                return self.win_key_code_to_termwiz_key_code(&phys.to_key_code())
+                return self.win_key_code_to_termwiz_key_code(&phys.to_key_code());
             }
 
             WK::Char(c) => KC::Char(*c),

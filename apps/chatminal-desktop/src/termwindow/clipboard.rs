@@ -40,7 +40,7 @@ impl TermWindow {
             if let Ok(clip) = future.await {
                 window.notify(TermWindowNotif::Apply(Box::new(move |myself| {
                     if let Some(pane) = myself
-                        .pane_state(pane_id)
+                        .leaf_ui_state(pane_id)
                         .overlay
                         .as_ref()
                         .map(|overlay| overlay.pane.clone())

@@ -1,8 +1,10 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
 use chatminal_protocol::{ClientFrame, Request, Response, ServerBody};
+use chatminal_session_runtime::{SessionBridgeAction, SessionSurfaceLookup};
 use chatminal_store::{Store, StoredSessionStatus};
 
 use crate::api::RuntimeEvent;
@@ -10,7 +12,10 @@ use crate::config::DaemonConfig;
 use crate::session::SessionEvent;
 
 use super::explorer_utils::{normalize_relative_path, resolve_explorer_target};
-use super::{DaemonState, SessionSpawnPlan, trim_live_output};
+use super::{
+    DaemonState, SessionSpawnPlan, prepend_run_boundary, snapshot_requires_run_boundary,
+    trim_live_output,
+};
 
 struct TempDb {
     path: PathBuf,
@@ -18,9 +23,11 @@ struct TempDb {
 
 impl TempDb {
     fn new() -> Self {
+        static NEXT_TEMP_DB_ID: AtomicU64 = AtomicU64::new(1);
         let path = std::env::temp_dir().join(format!(
-            "chatminald-state-test-{}-{}.db",
+            "chatminald-state-test-{}-{}-{}.db",
             std::process::id(),
+            NEXT_TEMP_DB_ID.fetch_add(1, Ordering::Relaxed),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|value| value.as_nanos())
@@ -157,6 +164,29 @@ fn trim_live_output_preserves_utf8_boundaries() {
     let mut value = "ééé".to_string();
     trim_live_output(&mut value, 5);
     assert_eq!(value, "éé");
+}
+
+#[test]
+fn snapshot_without_trailing_newline_requires_run_boundary() {
+    assert!(snapshot_requires_run_boundary(
+        &chatminal_store::StoredSessionSnapshot {
+            content: "khoa2807@host ~ % ".to_string(),
+            seq: 1,
+        }
+    ));
+    assert!(!snapshot_requires_run_boundary(
+        &chatminal_store::StoredSessionSnapshot {
+            content: "line\n".to_string(),
+            seq: 1,
+        }
+    ));
+}
+
+#[test]
+fn prepend_run_boundary_only_when_chunk_needs_it() {
+    assert_eq!(prepend_run_boundary("prompt"), "\r\nprompt");
+    assert_eq!(prepend_run_boundary("\nprompt"), "\nprompt");
+    assert_eq!(prepend_run_boundary("\rprompt"), "\rprompt");
 }
 
 #[test]
@@ -404,6 +434,26 @@ fn workspace_load_passive_keeps_active_session_disconnected() {
 }
 
 #[test]
+fn reconcile_session_surface_lookup_prefers_runtime_active_session() {
+    let (state, session_a, session_b, _db) = create_state_with_two_sessions();
+    let lookup = SessionSurfaceLookup {
+        active_session_id: Some(session_b),
+        ..SessionSurfaceLookup::default()
+    };
+
+    let action = state
+        .reconcile_session_surface_lookup(&lookup)
+        .expect("reconcile session surface lookup");
+
+    assert_eq!(
+        action,
+        SessionBridgeAction::FocusSurface {
+            session_id: session_a,
+        }
+    );
+}
+
+#[test]
 fn session_activate_increments_generation_on_each_spawn() {
     let (state, session_id, _db) = create_state_with_session();
     let generation_before = {
@@ -458,6 +508,39 @@ fn session_activate_increments_generation_on_each_spawn() {
     assert!(generation_after_second > generation_after_first);
 
     let _ = request_ok(&state, Request::AppShutdown);
+}
+
+#[test]
+fn session_create_spawn_failure_does_not_change_active_session() {
+    let (state, active_session_id, _other_session_id, _db) = create_state_with_two_sessions();
+    {
+        let mut inner = state.inner.lock().expect("lock state");
+        inner.config.default_shell = "/definitely/missing-shell".to_string();
+    }
+
+    let err = state
+        .session_create(Some("Broken".to_string()), 120, 32, None, Some(true))
+        .expect_err("session create should fail when shell is invalid");
+    assert!(
+        err.contains("No such file")
+            || err.contains("not found")
+            || err.contains("failed")
+            || err.contains("spawn"),
+        "unexpected error: {err}"
+    );
+
+    let workspace = state
+        .workspace_load_passive()
+        .expect("workspace should remain readable");
+    assert_eq!(
+        workspace.active_session_id.as_deref(),
+        Some(active_session_id.as_str())
+    );
+    assert_eq!(workspace.sessions.len(), 2);
+
+    let inner = state.inner.lock().expect("lock state");
+    assert_eq!(inner.sessions.len(), 2);
+    assert!(inner.sessions.contains_key(&active_session_id));
 }
 
 #[test]
@@ -664,6 +747,53 @@ fn session_set_persist_flushes_live_output_into_store_snapshot() {
         .session_snapshot(&session_id, 100)
         .expect("load snapshot");
     assert_eq!(snapshot.content, "cached-line\n");
+}
+
+#[test]
+fn first_output_after_respawn_is_separated_from_prompt_only_snapshot() {
+    let (state, session_id, _db) = create_state_with_session();
+    {
+        let mut inner = state.inner.lock().expect("lock state");
+        let entry = inner
+            .sessions
+            .get_mut(&session_id)
+            .expect("session entry exists");
+        entry.session.persist_history = true;
+        entry.session.status = StoredSessionStatus::Running;
+    }
+
+    state.apply_session_event(SessionEvent::Output {
+        session_id: session_id.clone(),
+        generation: 0,
+        chunk: "khoa2807@host ~ % ".to_string(),
+        ts: 1,
+    });
+
+    {
+        let mut inner = state.inner.lock().expect("lock state");
+        let entry = inner
+            .sessions
+            .get_mut(&session_id)
+            .expect("session entry exists");
+        entry.generation = 1;
+        entry.runtime = None;
+        entry.session.status = StoredSessionStatus::Disconnected;
+        entry.prepend_run_boundary_on_next_output = true;
+    }
+
+    state.apply_session_event(SessionEvent::Output {
+        session_id: session_id.clone(),
+        generation: 1,
+        chunk: "khoa2807@host ~ % ".to_string(),
+        ts: 2,
+    });
+
+    let inner = state.inner.lock().expect("lock state");
+    let snapshot = inner
+        .store
+        .session_snapshot(&session_id, 100)
+        .expect("load snapshot");
+    assert_eq!(snapshot.content, "khoa2807@host ~ % \r\nkhoa2807@host ~ % ");
 }
 
 #[test]

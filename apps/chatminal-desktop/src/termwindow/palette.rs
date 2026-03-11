@@ -8,13 +8,13 @@ use crate::termwindow::render::corners::{
 };
 use crate::termwindow::{DimensionContext, GuiWin, TermWindow};
 use crate::utilsprites::RenderMetrics;
+use chatminal_lua_bridge::LeafRef;
 use config::keyassignment::KeyAssignment;
 use config::Dimension;
 use engine_dynamic::{FromDynamic, ToDynamic};
 use engine_term::{KeyCode, KeyModifiers, MouseEvent};
 use frecency::Frecency;
 use luahelper::{from_lua_value_dynamic, impl_lua_conversion_dynamic};
-use mux_lua::MuxPane;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -90,7 +90,7 @@ impl_lua_conversion_dynamic!(UserPaletteEntry);
 
 fn build_commands(
     gui_window: GuiWin,
-    pane: Option<MuxPane>,
+    pane: Option<LeafRef>,
     filter_copy_mode: bool,
 ) -> Vec<ExpandedCommand> {
     let mut commands = CommandDef::actions_for_palette_and_menubar(&config::configuration());
@@ -221,18 +221,18 @@ impl CommandPalette {
         // if the CopyOverlay isn't active, so figure out if that
         // is the case so that we can filter them out in build_commands.
         let filter_copy_mode = term_window
-            .get_active_pane_or_overlay()
+            .get_active_leaf_or_overlay()
             .map(|pane| {
                 pane.downcast_ref::<crate::termwindow::CopyOverlay>()
                     .is_none()
             })
             .unwrap_or(true);
 
-        let mux_pane = term_window
-            .get_active_pane_or_overlay()
-            .map(|pane| MuxPane(pane.pane_id()));
+        let pane_ref = term_window
+            .get_active_leaf_or_overlay()
+            .map(|pane| LeafRef(pane.pane_id()));
 
-        let commands = build_commands(GuiWin::new(term_window), mux_pane, filter_copy_mode);
+        let commands = build_commands(GuiWin::new(term_window), pane_ref, filter_copy_mode);
 
         Self {
             element: RefCell::new(None),
@@ -635,7 +635,7 @@ impl Modal for CommandPalette {
                 }
                 term_window.cancel_modal();
 
-                if let Some(pane) = term_window.get_active_pane_or_overlay() {
+                if let Some(pane) = term_window.get_active_leaf_or_overlay() {
                     if let Err(err) = term_window.perform_key_assignment(&pane, &item.action) {
                         log::error!("Error while performing {item:?}: {err:#}");
                     }

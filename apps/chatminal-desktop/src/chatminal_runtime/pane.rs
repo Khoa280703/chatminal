@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::collections::HashMap;
 use std::io::Write;
 use std::ops::Range;
@@ -6,8 +8,8 @@ use std::thread;
 use std::time::Duration;
 
 use chatminal_runtime::{RuntimeEvent, RuntimeSessionStatus};
-use config::keyassignment::ScrollbackEraseMode;
 use config::TermConfig;
+use config::keyassignment::ScrollbackEraseMode;
 use engine_dynamic::Value;
 use engine_term::color::ColorPalette;
 use engine_term::{
@@ -16,13 +18,13 @@ use engine_term::{
 };
 use mux::domain::DomainId;
 use mux::pane::{
-    alloc_pane_id, CachePolicy, CloseReason, ForEachPaneLogicalLine, LogicalLine, Pane, PaneId,
-    Pattern, SearchResult, WithPaneLines,
+    CachePolicy, CloseReason, ForEachPaneLogicalLine, LogicalLine, Pane, PaneId, Pattern,
+    SearchResult, WithPaneLines, alloc_pane_id,
 };
 use mux::renderable::{
-    terminal_for_each_logical_line_in_stable_range_mut, terminal_get_cursor_position,
-    terminal_get_dimensions, terminal_get_dirty_lines, terminal_get_lines, terminal_with_lines_mut,
-    RenderableDimensions, StableCursorPosition,
+    RenderableDimensions, StableCursorPosition, terminal_for_each_logical_line_in_stable_range_mut,
+    terminal_get_cursor_position, terminal_get_dimensions, terminal_get_dirty_lines,
+    terminal_get_lines, terminal_with_lines_mut,
 };
 use mux::{Mux, MuxNotification};
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
@@ -33,7 +35,7 @@ use termwiz::surface::{Line, SequenceNo};
 use url::Url;
 
 use super::client::ChatminalRuntimeClient;
-use super::{clamp_preview_lines, EmbeddedRuntime};
+use super::{EmbeddedRuntime, clamp_preview_lines};
 
 const EVENT_POLL_TIMEOUT: Duration = Duration::from_millis(50);
 const DEFAULT_PREVIEW_LINES: usize = 2_000;
@@ -85,6 +87,7 @@ pub struct ChatminalRuntimePane {
     domain_id: DomainId,
     session_id: String,
     terminal: Mutex<Terminal>,
+    last_runtime_seq: Mutex<u64>,
     writer: Mutex<RuntimePaneWriter>,
     dead: Mutex<bool>,
     config: Mutex<Option<Arc<dyn TerminalConfiguration>>>,
@@ -109,6 +112,7 @@ impl ChatminalRuntimePane {
                 config::engine_version(),
                 Box::new(writer.clone()),
             )),
+            last_runtime_seq: Mutex::new(0),
             writer: Mutex::new(writer),
             dead: Mutex::new(false),
             config: Mutex::new(None),
@@ -122,42 +126,74 @@ impl ChatminalRuntimePane {
     fn activate_and_seed(&self, size: TerminalSize) -> anyhow::Result<()> {
         let runtime = Arc::clone(EmbeddedRuntime::global().map_err(anyhow::Error::msg)?);
         let client = ChatminalRuntimeClient::new(runtime).map_err(anyhow::Error::msg)?;
-        client
-            .session_activate(
-                &self.session_id,
-                size.cols.max(20) as usize,
-                size.rows.max(5) as usize,
-            )
-            .map_err(anyhow::Error::msg)?;
+        let session_status = client
+            .workspace_load_passive()
+            .map_err(anyhow::Error::msg)?
+            .sessions
+            .into_iter()
+            .find(|session| session.session_id == self.session_id)
+            .map(|session| session.status)
+            .ok_or_else(|| {
+                anyhow::anyhow!("session '{}' not found in workspace", self.session_id)
+            })?;
+        let snapshot = if session_status == RuntimeSessionStatus::Disconnected {
+            client
+                .session_snapshot_get(
+                    &self.session_id,
+                    Some(clamp_preview_lines(DEFAULT_PREVIEW_LINES)),
+                )
+                .map_err(anyhow::Error::msg)?
+        } else {
+            client
+                .session_activate(
+                    &self.session_id,
+                    size.cols.max(20) as usize,
+                    size.rows.max(5) as usize,
+                )
+                .map_err(anyhow::Error::msg)?;
 
-        let snapshot = client
-            .session_snapshot_get(
-                &self.session_id,
-                Some(clamp_preview_lines(DEFAULT_PREVIEW_LINES)),
-            )
-            .map_err(anyhow::Error::msg)?;
+            client
+                .session_snapshot_get(
+                    &self.session_id,
+                    Some(clamp_preview_lines(DEFAULT_PREVIEW_LINES)),
+                )
+                .map_err(anyhow::Error::msg)?
+        };
+        if session_status == RuntimeSessionStatus::Disconnected {
+            client
+                .session_activate(
+                    &self.session_id,
+                    size.cols.max(20) as usize,
+                    size.rows.max(5) as usize,
+                )
+                .map_err(anyhow::Error::msg)?;
+        }
+
         self.apply_output(&snapshot.content);
+        self.seed_runtime_seq(snapshot.seq);
         Ok(())
     }
 
     fn spawn_event_loop(self: &Arc<Self>, runtime: Arc<EmbeddedRuntime>) -> anyhow::Result<()> {
         let client = ChatminalRuntimeClient::new(runtime).map_err(anyhow::Error::msg)?;
         let pane = Arc::downgrade(self);
-        thread::spawn(move || loop {
-            let Some(pane) = pane.upgrade() else {
-                break;
-            };
-            match client.recv_event(EVENT_POLL_TIMEOUT) {
-                Ok(Some(event)) => pane.handle_event(event),
-                Ok(None) => {}
-                Err(err) => {
-                    log::error!("chatminal runtime pane event loop failed: {err}");
-                    *pane.dead.lock() = true;
+        thread::spawn(move || {
+            loop {
+                let Some(pane) = pane.upgrade() else {
+                    break;
+                };
+                match client.recv_event(EVENT_POLL_TIMEOUT) {
+                    Ok(Some(event)) => pane.handle_event(event),
+                    Ok(None) => {}
+                    Err(err) => {
+                        log::error!("chatminal runtime pane event loop failed: {err}");
+                        *pane.dead.lock() = true;
+                        break;
+                    }
+                }
+                if *pane.dead.lock() {
                     break;
                 }
-            }
-            if *pane.dead.lock() {
-                break;
             }
         });
         Ok(())
@@ -166,6 +202,10 @@ impl ChatminalRuntimePane {
     fn handle_event(&self, event: RuntimeEvent) {
         match event {
             RuntimeEvent::PtyOutput(value) if value.session_id == self.session_id => {
+                let should_apply = self.should_apply_runtime_seq(value.seq);
+                if !should_apply {
+                    return;
+                }
                 self.apply_output(&value.chunk);
                 Mux::get().notify(MuxNotification::PaneOutput(self.pane_id));
             }
@@ -198,6 +238,22 @@ impl ChatminalRuntimePane {
         parser.parse(message.as_bytes(), |action| actions.push(action));
         self.terminal.lock().perform_actions(actions);
     }
+
+    fn seed_runtime_seq(&self, seq: u64) {
+        *self.last_runtime_seq.lock() = seq;
+    }
+
+    fn should_apply_runtime_seq(&self, seq: u64) -> bool {
+        should_apply_runtime_seq(&mut self.last_runtime_seq.lock(), seq)
+    }
+}
+
+fn should_apply_runtime_seq(last_runtime_seq: &mut u64, seq: u64) -> bool {
+    if seq <= *last_runtime_seq {
+        return false;
+    }
+    *last_runtime_seq = seq;
+    true
 }
 
 #[async_trait::async_trait(?Send)]
@@ -455,4 +511,24 @@ fn decode_input_payload_chunks(pending: &mut Vec<u8>, payload: &[u8]) -> Vec<Str
         }
     }
     chunks
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_apply_runtime_seq;
+
+    #[test]
+    fn ignores_replayed_or_stale_runtime_output() {
+        let mut last_seq = 5;
+        assert!(!should_apply_runtime_seq(&mut last_seq, 5));
+        assert!(!should_apply_runtime_seq(&mut last_seq, 4));
+        assert_eq!(last_seq, 5);
+    }
+
+    #[test]
+    fn accepts_only_newer_runtime_output() {
+        let mut last_seq = 5;
+        assert!(should_apply_runtime_seq(&mut last_seq, 6));
+        assert_eq!(last_seq, 6);
+    }
 }

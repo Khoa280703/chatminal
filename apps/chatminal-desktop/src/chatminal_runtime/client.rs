@@ -2,9 +2,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chatminal_runtime::{
-    RuntimeCreatedSession, RuntimeEvent, RuntimeProfile, RuntimeSessionSnapshot,
-    RuntimeSubscription, RuntimeWorkspace,
+    RuntimeCreatedSession, RuntimeEvent, RuntimeProfile, RuntimeSubscription, RuntimeWorkspace,
 };
+#[cfg(test)]
+use chatminal_runtime::RuntimeSessionSnapshot;
+use chatminal_session_runtime::{SessionBridgeAction, SessionSurfaceLookup, SurfaceId};
 
 use super::EmbeddedRuntime;
 
@@ -35,6 +37,10 @@ impl ChatminalRuntimeClient {
         self.runtime.state.session_activate(session_id, cols, rows)
     }
 
+    pub fn session_close(&self, session_id: &str) -> Result<(), String> {
+        self.runtime.state.session_close(session_id)
+    }
+
     pub fn session_create(
         &self,
         name: Option<String>,
@@ -56,6 +62,8 @@ impl ChatminalRuntimeClient {
         self.runtime.state.profile_create(name)
     }
 
+    #[cfg(test)]
+    #[allow(dead_code)]
     pub fn session_snapshot_get(
         &self,
         session_id: &str,
@@ -68,6 +76,34 @@ impl ChatminalRuntimeClient {
 
     pub fn recv_event(&self, timeout: Duration) -> Result<Option<RuntimeEvent>, String> {
         self.subscription.recv_timeout(timeout)
+    }
+
+    pub fn reconcile_session_surface_lookup(
+        &self,
+        lookup: &SessionSurfaceLookup,
+    ) -> Result<SessionBridgeAction, String> {
+        self.runtime.state.reconcile_session_surface_lookup(lookup)
+    }
+
+    pub fn notify_session_surface_focused(
+        &self,
+        session_id: &str,
+        surface_id: SurfaceId,
+    ) -> Result<(), String> {
+        self.runtime
+            .state
+            .notify_session_surface_focused(session_id, surface_id)
+    }
+
+    pub fn notify_session_surface_closed(
+        &self,
+        session_id: &str,
+        surface_id: SurfaceId,
+        lookup_after_close: &SessionSurfaceLookup,
+    ) -> Result<(), String> {
+        self.runtime
+            .state
+            .notify_session_surface_closed(session_id, surface_id, lookup_after_close)
     }
 }
 
@@ -98,6 +134,6 @@ pub fn resolve_target_session_id(
 
 fn create_default_session(client: &ChatminalRuntimeClient) -> Result<String, String> {
     client
-        .session_create(Some("Shell".to_string()), 120, 32, None, Some(false))
+        .session_create(Some("Shell".to_string()), 120, 32, None, Some(true))
         .map(|value| value.session_id)
 }

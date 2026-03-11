@@ -20,6 +20,8 @@ impl crate::TermWindow {
         }
 
         let border = self.get_os_border();
+        let tab_bar_x = self.terminal_tab_bar_left();
+        let tab_bar_width = self.terminal_tab_bar_width();
 
         let palette = self.palette().clone();
         let tab_bar_height = self.tab_bar_pixel_height()?;
@@ -32,6 +34,7 @@ impl crate::TermWindow {
 
         // Register the tab bar location
         self.ui_items.append(&mut self.tab_bar.compute_ui_items(
+            tab_bar_x as usize,
             tab_bar_y as usize,
             self.render_metrics.cell_size.height as usize,
             self.render_metrics.cell_size.width as usize,
@@ -54,23 +57,22 @@ impl crate::TermWindow {
         self.render_screen_line(
             RenderScreenLineParams {
                 top_pixel_y: tab_bar_y,
-                left_pixel_x: 0.,
-                pixel_width: self.dimensions.pixel_width as f32,
+                left_pixel_x: tab_bar_x,
+                pixel_width: tab_bar_width,
                 stable_line_idx: None,
                 line: self.tab_bar.line(),
                 selection: 0..0,
                 cursor: &Default::default(),
                 palette: &palette,
                 dims: &RenderableDimensions {
-                    cols: self.dimensions.pixel_width
-                        / self.render_metrics.cell_size.width as usize,
+                    cols: self.terminal_tab_bar_cols(),
                     physical_top: 0,
                     scrollback_rows: 0,
                     scrollback_top: 0,
                     viewport_rows: 1,
                     dpi: self.terminal_size.dpi,
                     pixel_height: self.render_metrics.cell_size.height as usize,
-                    pixel_width: self.terminal_size.pixel_width,
+                    pixel_width: tab_bar_width as usize,
                     reverse_video: false,
                 },
                 config: &self.config,

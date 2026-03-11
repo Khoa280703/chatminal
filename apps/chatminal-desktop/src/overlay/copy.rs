@@ -7,8 +7,8 @@ use config::keyassignment::{
 };
 use engine_term::color::ColorPalette;
 use engine_term::{
-    unicode_column_width, Clipboard, KeyCode, KeyModifiers, Line, MouseEvent, SemanticType,
-    StableRowIndex, TerminalSize,
+    Clipboard, KeyCode, KeyModifiers, Line, MouseEvent, SemanticType, StableRowIndex, TerminalSize,
+    unicode_column_width,
 };
 use mux::domain::DomainId;
 use mux::pane::{
@@ -27,7 +27,7 @@ use std::time::Duration;
 use termwiz::cell::{Cell, CellAttributes};
 use termwiz::color::AnsiColor;
 use termwiz::lineedit::{LineEditBuffer, Movement};
-use termwiz::surface::{CursorVisibility, SequenceNo, SEQ_ZERO};
+use termwiz::surface::{CursorVisibility, SEQ_ZERO, SequenceNo};
 use unicode_segmentation::*;
 use url::Url;
 use window::{KeyCode as WKeyCode, Modifiers, WindowOps};
@@ -282,7 +282,7 @@ impl CopyRenderable {
         promise::spawn::spawn(async move {
             smol::Timer::after(Duration::from_millis(350)).await;
             window.notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                let state = term_window.pane_state(pane_id);
+                let state = term_window.leaf_ui_state(pane_id);
                 if let Some(overlay) = state.overlay.as_ref() {
                     if let Some(copy_overlay) = overlay.pane.downcast_ref::<CopyOverlay>() {
                         let mut r = copy_overlay.render.lock();
@@ -338,7 +338,7 @@ impl CopyRenderable {
                 let pane_id = pane.pane_id();
                 let mut results = Some(results);
                 window.notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                    let state = term_window.pane_state(pane_id);
+                    let state = term_window.leaf_ui_state(pane_id);
                     if let Some(overlay) = state.overlay.as_ref() {
                         if let Some(copy_overlay) = overlay.pane.downcast_ref::<CopyOverlay>() {
                             let mut r = copy_overlay.render.lock();
@@ -405,7 +405,7 @@ impl CopyRenderable {
             let pane_id = pane.pane_id();
             let mut results = Some(results);
             window.notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                let state = term_window.pane_state(pane_id);
+                let state = term_window.leaf_ui_state(pane_id);
                 if let Some(overlay) = state.overlay.as_ref() {
                     if let Some(copy_overlay) = overlay.pane.downcast_ref::<CopyOverlay>() {
                         let mut r = copy_overlay.render.lock();
@@ -571,7 +571,10 @@ impl CopyRenderable {
     }
 
     fn close(&self) {
-        TermWindow::schedule_cancel_overlay_for_pane(self.window.clone(), self.delegate.pane_id());
+        TermWindow::schedule_cancel_overlay_for_leaf(
+            self.window.clone(),
+            self.delegate.pane_id() as u64,
+        );
     }
 
     fn move_by_page(&mut self, amount: f64) {
@@ -669,7 +672,7 @@ impl CopyRenderable {
         let pane_id = self.delegate.pane_id();
 
         window.notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-            let mut state = term_window.pane_state(pane_id);
+            let mut state = term_window.leaf_ui_state(pane_id);
             if let Some(overlay) = state.overlay.as_mut() {
                 if let Some(copy_overlay) = overlay.pane.downcast_ref::<CopyOverlay>() {
                     let editing_search = copy_overlay.render.lock().editing_search;

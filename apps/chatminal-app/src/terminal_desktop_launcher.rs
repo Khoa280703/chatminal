@@ -201,12 +201,20 @@ fn resolve_desktop_override_binary() -> Option<PathBuf> {
 }
 
 fn build_desktop_start_args(session_id: Option<&str>) -> Vec<String> {
-    let mut args = vec![
+    let mut args = Vec::new();
+    if cfg!(target_os = "macos") {
+        args.push("--config".to_string());
+        args.push(
+            "window_decorations=\"INTEGRATED_BUTTONS|RESIZE|MACOS_USE_BACKGROUND_COLOR_AS_TITLEBAR_COLOR\""
+                .to_string(),
+        );
+    }
+    args.extend([
         "start".to_string(),
         "--".to_string(),
         "chatminal-runtime".to_string(),
         DESKTOP_PROXY_COMMAND.to_string(),
-    ];
+    ]);
     if let Some(value) = session_id {
         args.push(value.to_string());
     }

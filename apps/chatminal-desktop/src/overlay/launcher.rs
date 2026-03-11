@@ -12,11 +12,11 @@ use crate::overlay::selector::{matcher_pattern, matcher_score};
 use crate::termwindow::TermWindowNotif;
 use config::configuration;
 use config::keyassignment::{KeyAssignment, SpawnCommand, SpawnTabDomain};
+use mux::Mux;
 use mux::domain::{DomainId, DomainState};
 use mux::pane::PaneId;
 use mux::termwiztermtab::TermWizTerminal;
 use mux::window::WindowId;
-use mux::Mux;
 use rayon::prelude::*;
 use std::collections::BTreeMap;
 use termwiz::cell::{AttributeChange, CellAttributes};
@@ -68,7 +68,7 @@ impl LauncherArgs {
     pub async fn new(
         title: &str,
         flags: LauncherFlags,
-        mux_window_id: WindowId,
+        window_id: WindowId,
         pane_id: PaneId,
         domain_id_of_current_tab: DomainId,
         help_text: &str,
@@ -91,7 +91,7 @@ impl LauncherArgs {
             // the mux list is a bit awkward.  To get the ball rolling we capture
             // the list of tabs up front and live with a static list.
             let window = mux
-                .get_window(mux_window_id)
+                .get_window(window_id)
                 .expect("to resolve my own window_id");
             window
                 .iter()
@@ -477,8 +477,8 @@ impl LauncherState {
     fn launch(&self, active_idx: usize) -> bool {
         if let Some(entry) = self.filtered_entries.get(active_idx) {
             let assignment = entry.action.clone();
-            self.window.notify(TermWindowNotif::PerformAssignment {
-                pane_id: self.pane_id,
+            self.window.notify(TermWindowNotif::PerformAssignmentForLeafId {
+                leaf_id: self.pane_id as u64,
                 assignment,
                 tx: None,
             });

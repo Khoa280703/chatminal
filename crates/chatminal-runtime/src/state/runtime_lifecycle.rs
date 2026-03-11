@@ -1,10 +1,10 @@
 use std::sync::mpsc as std_mpsc;
 
-use chatminal_store::StoredSessionStatus;
+use chatminal_store::{StoredSession, StoredSessionStatus};
 
 use super::{
-    DaemonState, RuntimeHandle, SessionSpawnPlan, StateInner, kill_runtime_handle, now_millis,
-    spawn_runtime_handle,
+    DaemonState, SessionEntry, SessionSpawnPlan, StateInner, kill_runtime_handle, now_millis,
+    runtime_bridge::RuntimeHandle, snapshot_requires_run_boundary,
 };
 use crate::api::{
     RuntimeDaemonHealthEvent, RuntimeEvent, RuntimeSessionStatus, RuntimeSessionUpdatedEvent,
@@ -16,6 +16,12 @@ enum SpawnCommitOutcome {
     AlreadyRunning,
     Missing,
     Stale,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct DisconnectOptions {
+    pub reset_history: bool,
+    pub bump_generation: bool,
 }
 
 impl DaemonState {
@@ -89,14 +95,13 @@ impl DaemonState {
         &self,
         plan: SessionSpawnPlan,
     ) -> Result<SpawnCommitOutcome, String> {
-        let runtime = spawn_runtime_handle(
+        let runtime = self.spawn_runtime_handle(
             &plan.session_id,
             plan.next_generation,
             &plan.shell,
             &plan.cwd,
             plan.cols,
             plan.rows,
-            self.events.clone(),
         )?;
 
         let outcome = self.finish_spawn_commit(plan, runtime)?;
@@ -131,30 +136,28 @@ impl DaemonState {
                         SpawnCommitOutcome::Stale
                     }
                     Some(entry) if entry.runtime.is_some() => {
-                        inner
-                            .store
-                            .set_active_session(&plan.profile_id, Some(&plan.session_id))?;
-                        inner.publish_session_updated_for(&plan.session_id);
-                        inner.publish_workspace_updated();
+                        inner.set_active_session_and_publish(&plan.profile_id, &plan.session_id)?;
                         SpawnCommitOutcome::AlreadyRunning
                     }
                     Some(entry) if entry.generation != plan.expected_generation => {
                         SpawnCommitOutcome::Stale
                     }
                     Some(_) => {
+                        let prepend_run_boundary_on_next_output = inner
+                            .store
+                            .session_snapshot(&plan.session_id, 1)
+                            .map(|snapshot| snapshot_requires_run_boundary(&snapshot))?;
                         if let Some(entry) = inner.sessions.get_mut(&plan.session_id) {
                             entry.generation = plan.next_generation;
                             entry.runtime = Some(runtime.clone());
                             entry.session.status = StoredSessionStatus::Running;
+                            entry.prepend_run_boundary_on_next_output =
+                                prepend_run_boundary_on_next_output;
                         }
                         inner
                             .store
                             .set_session_status(&plan.session_id, StoredSessionStatus::Running)?;
-                        inner
-                            .store
-                            .set_active_session(&plan.profile_id, Some(&plan.session_id))?;
-                        inner.publish_session_updated_for(&plan.session_id);
-                        inner.publish_workspace_updated();
+                        inner.set_active_session_and_publish(&plan.profile_id, &plan.session_id)?;
                         SpawnCommitOutcome::Committed
                     }
                 }
@@ -173,6 +176,107 @@ impl DaemonState {
 }
 
 impl StateInner {
+    pub(super) fn insert_running_session_and_publish(
+        &mut self,
+        mut session: StoredSession,
+        runtime: RuntimeHandle,
+    ) -> Result<(), String> {
+        session.status = StoredSessionStatus::Running;
+        self.store
+            .set_session_status(&session.session_id, StoredSessionStatus::Running)?;
+        self.sessions.insert(
+            session.session_id.clone(),
+            SessionEntry {
+                session: session.clone(),
+                runtime: Some(runtime),
+                live_output: String::new(),
+                generation: 0,
+                prepend_run_boundary_on_next_output: false,
+            },
+        );
+        self.set_active_session_and_publish(&session.profile_id, &session.session_id)
+    }
+
+    pub(super) fn remove_session_and_publish_workspace(
+        &mut self,
+        session_id: &str,
+    ) -> Result<Option<RuntimeHandle>, String> {
+        self.store.delete_session(session_id)?;
+        let runtime = self
+            .sessions
+            .remove(session_id)
+            .and_then(|mut entry| entry.runtime.take());
+        self.publish_workspace_updated();
+        Ok(runtime)
+    }
+
+    pub(super) fn clear_session_history_and_publish(
+        &mut self,
+        session_id: &str,
+    ) -> Result<Option<RuntimeHandle>, String> {
+        self.store.clear_session_history(session_id)?;
+        let runtime = self.sessions.get_mut(session_id).and_then(|entry| {
+            disconnect_session_entry(
+                entry,
+                DisconnectOptions {
+                    reset_history: true,
+                    bump_generation: true,
+                },
+            )
+        });
+        if self.sessions.contains_key(session_id) {
+            self.store
+                .set_session_status(session_id, StoredSessionStatus::Disconnected)?;
+        }
+        self.publish_session_and_workspace_updated(session_id);
+        Ok(runtime)
+    }
+
+    pub(super) fn disconnect_all_sessions_and_publish(
+        &mut self,
+        options: DisconnectOptions,
+    ) -> Vec<RuntimeHandle> {
+        let mut updated_ids = Vec::new();
+        let mut runtimes = Vec::new();
+        for entry in self.sessions.values_mut() {
+            if let Some(runtime) = disconnect_session_entry(entry, options) {
+                runtimes.push(runtime);
+            }
+            updated_ids.push(entry.session.session_id.clone());
+        }
+        for session_id in &updated_ids {
+            let _ = self
+                .store
+                .set_session_status(session_id, StoredSessionStatus::Disconnected);
+        }
+        for session_id in updated_ids {
+            self.publish_session_updated_for(&session_id);
+        }
+        self.publish_workspace_updated();
+        runtimes
+    }
+
+    pub(super) fn mark_session_exited(&mut self, session_id: &str, generation: u64) -> bool {
+        let Some(entry) = self.sessions.get_mut(session_id) else {
+            return false;
+        };
+        if entry.generation != generation {
+            return false;
+        }
+
+        let _ = disconnect_session_entry(
+            entry,
+            DisconnectOptions {
+                reset_history: false,
+                bump_generation: false,
+            },
+        );
+        let _ = self
+            .store
+            .set_session_status(session_id, StoredSessionStatus::Disconnected);
+        true
+    }
+
     pub(super) fn publish_session_updated_for(&mut self, session_id: &str) {
         if let Some(entry) = self.sessions.get(session_id) {
             self.broadcast_event(RuntimeEvent::SessionUpdated(RuntimeSessionUpdatedEvent {
@@ -246,4 +350,20 @@ impl StateInner {
             });
         self.protocol_clients.broadcast_event(&event, &self.metrics);
     }
+}
+
+fn disconnect_session_entry(
+    entry: &mut SessionEntry,
+    options: DisconnectOptions,
+) -> Option<RuntimeHandle> {
+    if options.bump_generation {
+        entry.generation = entry.generation.saturating_add(1);
+    }
+    if options.reset_history {
+        entry.session.seq = 0;
+        entry.live_output.clear();
+    }
+    entry.prepend_run_boundary_on_next_output = false;
+    entry.session.status = StoredSessionStatus::Disconnected;
+    entry.runtime.take()
 }

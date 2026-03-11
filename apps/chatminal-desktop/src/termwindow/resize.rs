@@ -200,9 +200,17 @@ impl super::TermWindow {
                     dimensions.pixel_width,
                     dimensions.dpi,
                 );
-            let padding_top = config.window_padding.top.evaluate_as_pixels(v_context) as usize;
-            let padding_bottom =
-                config.window_padding.bottom.evaluate_as_pixels(v_context) as usize;
+            let padding_top = config.window_padding.top.evaluate_as_pixels(v_context) as usize
+                + Self::chatminal_terminal_chrome_height_for_dimensions(
+                    dimensions.pixel_width,
+                    dimensions.dpi,
+                );
+            let padding_bottom = config.window_padding.bottom.evaluate_as_pixels(v_context)
+                as usize
+                + Self::chatminal_terminal_footer_height_for_dimensions(
+                    dimensions.pixel_width,
+                    dimensions.dpi,
+                );
             let padding_right = effective_right_padding(&config, h_context);
 
             let pixel_height = (rows * self.render_metrics.cell_size.height as usize)
@@ -250,9 +258,17 @@ impl super::TermWindow {
                     dimensions.pixel_width,
                     dimensions.dpi,
                 );
-            let padding_top = config.window_padding.top.evaluate_as_pixels(v_context) as usize;
-            let padding_bottom =
-                config.window_padding.bottom.evaluate_as_pixels(v_context) as usize;
+            let padding_top = config.window_padding.top.evaluate_as_pixels(v_context) as usize
+                + Self::chatminal_terminal_chrome_height_for_dimensions(
+                    dimensions.pixel_width,
+                    dimensions.dpi,
+                );
+            let padding_bottom = config.window_padding.bottom.evaluate_as_pixels(v_context)
+                as usize
+                + Self::chatminal_terminal_footer_height_for_dimensions(
+                    dimensions.pixel_width,
+                    dimensions.dpi,
+                );
             let padding_right = effective_right_padding(&config, h_context);
 
             let avail_width = dimensions.pixel_width.saturating_sub(
@@ -301,7 +317,7 @@ impl super::TermWindow {
         self.terminal_size = size;
 
         let mux = Mux::get();
-        if let Some(window) = mux.get_window(self.mux_window_id) {
+        if let Some(window) = mux.get_window(self.window_id) {
             for tab in window.iter() {
                 tab.resize(size);
             }
@@ -518,8 +534,16 @@ impl super::TermWindow {
                 self.dimensions.pixel_width,
                 self.dimensions.dpi,
             );
-        let padding_top = config.window_padding.top.evaluate_as_pixels(v_context) as usize;
-        let padding_bottom = config.window_padding.bottom.evaluate_as_pixels(v_context) as usize;
+        let padding_top = config.window_padding.top.evaluate_as_pixels(v_context) as usize
+            + Self::chatminal_terminal_chrome_height_for_dimensions(
+                self.dimensions.pixel_width,
+                self.dimensions.dpi,
+            );
+        let padding_bottom = config.window_padding.bottom.evaluate_as_pixels(v_context) as usize
+            + Self::chatminal_terminal_footer_height_for_dimensions(
+                self.dimensions.pixel_width,
+                self.dimensions.dpi,
+            );
 
         let dimensions = Dimensions {
             pixel_width: ((terminal_size.cols as usize * render_metrics.cell_size.width as usize)

@@ -1,7 +1,6 @@
 use crate::scripting::guiwin::GuiWin;
 use config::keyassignment::{Confirmation, KeyAssignment};
 use mux::termwiztermtab::TermWizTerminal;
-use mux_lua::MuxPane;
 use std::rc::Rc;
 use termwiz::cell::AttributeChange;
 use termwiz::color::ColorAttribute;
@@ -149,7 +148,7 @@ pub fn show_confirmation_overlay(
     mut term: TermWizTerminal,
     args: Confirmation,
     window: GuiWin,
-    pane: MuxPane,
+    pane_id: u64,
 ) -> anyhow::Result<()> {
     let name = match *args.action {
         KeyAssignment::EmitEvent(id) => id,
@@ -161,14 +160,14 @@ pub fn show_confirmation_overlay(
     if let Ok(confirm) = run_confirmation_impl(&args.message, &mut term) {
         if confirm {
             promise::spawn::spawn_into_main_thread(async move {
-                trampoline(name, window, pane);
+                trampoline(name, window, pane_id);
                 anyhow::Result::<()>::Ok(())
             })
             .detach();
         } else if let Some(key_assignment) = args.cancel {
             if let KeyAssignment::EmitEvent(id) = *key_assignment {
                 promise::spawn::spawn_into_main_thread(async move {
-                    trampoline(id, window, pane);
+                    trampoline(id, window, pane_id);
                     anyhow::Result::<()>::Ok(())
                 })
                 .detach();
@@ -178,9 +177,10 @@ pub fn show_confirmation_overlay(
     Ok(())
 }
 
-fn trampoline(name: String, window: GuiWin, pane: MuxPane) {
+fn trampoline(name: String, window: GuiWin, pane_id: u64) {
     promise::spawn::spawn(async move {
-        config::with_lua_config_on_main_thread(move |lua| do_event(lua, name, window, pane)).await
+        config::with_lua_config_on_main_thread(move |lua| do_event(lua, name, window, pane_id))
+            .await
     })
     .detach();
 }
@@ -189,10 +189,10 @@ async fn do_event(
     lua: Option<Rc<mlua::Lua>>,
     name: String,
     window: GuiWin,
-    pane: MuxPane,
+    pane_id: u64,
 ) -> anyhow::Result<()> {
     if let Some(lua) = lua {
-        let args = lua.pack_multi((window, pane))?;
+        let args = lua.pack_multi((window, pane_id))?;
 
         if let Err(err) = config::lua::emit_event(&lua, (name.clone(), args)).await {
             log::error!("while processing {} event: {:#}", name, err);

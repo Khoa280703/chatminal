@@ -1,8 +1,8 @@
 use crate::termwindow::TermWindow;
 use engine_term::{TerminalConfiguration, TerminalSize};
-use mux::pane::{Pane, PaneId};
-use mux::tab::{Tab, TabId};
-use mux::termwiztermtab::{allocate, TermWizTerminal};
+use mux::pane::Pane;
+use mux::tab::Tab;
+use mux::termwiztermtab::{TermWizTerminal, allocate};
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -20,7 +20,7 @@ pub use confirm_close_pane::{
 };
 pub use copy::{CopyModeParams, CopyOverlay};
 pub use debug::show_debug_overlay;
-pub use launcher::{launcher, LauncherArgs, LauncherFlags};
+pub use launcher::{LauncherArgs, LauncherFlags, launcher};
 pub use quickselect::QuickSelectOverlay;
 
 pub fn start_overlay<T, F>(
@@ -33,7 +33,7 @@ pub fn start_overlay<T, F>(
 )
 where
     T: Send + 'static,
-    F: Send + 'static + FnOnce(TabId, TermWizTerminal) -> anyhow::Result<T>,
+    F: Send + 'static + FnOnce(u64, TermWizTerminal) -> anyhow::Result<T>,
 {
     let tab_id = tab.tab_id();
     let tab_size = tab.get_size();
@@ -42,12 +42,25 @@ where
     let (tw_term, tw_tab) = allocate(tab_size, term_config);
 
     let window = term_window.window.clone().unwrap();
+    let surface_id = term_window.active_surface_id();
 
     let overlay_pane_id = tw_tab.pane_id();
 
     let future = promise::spawn::spawn_into_new_thread(move || {
-        let res = func(tab_id, tw_term);
-        TermWindow::schedule_cancel_overlay(window, tab_id, Some(overlay_pane_id));
+        let res = func(tab_id as u64, tw_term);
+        if let Some(surface_id) = surface_id {
+            TermWindow::schedule_cancel_overlay_for_surface(
+                window,
+                surface_id,
+                Some(overlay_pane_id as u64),
+            );
+        } else {
+            TermWindow::schedule_cancel_overlay_for_host_surface(
+                window,
+                tab_id as u64,
+                Some(overlay_pane_id as u64),
+            );
+        }
         res
     });
 
@@ -64,7 +77,7 @@ pub fn start_overlay_pane<T, F>(
 )
 where
     T: Send + 'static,
-    F: Send + 'static + FnOnce(PaneId, TermWizTerminal) -> anyhow::Result<T>,
+    F: Send + 'static + FnOnce(u64, TermWizTerminal) -> anyhow::Result<T>,
 {
     let pane_id = pane.pane_id();
     let dims = pane.get_dimensions();
@@ -82,8 +95,8 @@ where
     let window = term_window.window.clone().unwrap();
 
     let future = promise::spawn::spawn_into_new_thread(move || {
-        let res = func(pane_id, tw_term);
-        TermWindow::schedule_cancel_overlay_for_pane(window, pane_id);
+        let res = func(pane_id as u64, tw_term);
+        TermWindow::schedule_cancel_overlay_for_leaf(window, pane_id as u64);
         res
     });
 

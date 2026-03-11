@@ -257,7 +257,7 @@ impl crate::TermWindow {
             self.paint_pane(&pos, &mut layers).context("paint_pane")?;
         }
 
-        if let Some(pane) = self.get_active_pane_or_overlay() {
+        if let Some(pane) = self.get_active_leaf_or_overlay() {
             let splits = self.get_splits();
             for split in &splits {
                 self.paint_split(&mut layers, split, &pane)

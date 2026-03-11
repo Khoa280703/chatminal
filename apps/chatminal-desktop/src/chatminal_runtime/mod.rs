@@ -1,14 +1,16 @@
 mod client;
 mod domain;
+#[cfg(test)]
 mod pane;
+mod session_pane;
 
 use std::ffi::{OsStr, OsString};
 use std::sync::Arc;
 use std::sync::OnceLock;
 
 use chatminal_runtime::DaemonState;
-use mux::domain::Domain;
 use mux::Mux;
+use mux::domain::Domain;
 use portable_pty::CommandBuilder;
 
 pub use client::ChatminalRuntimeClient;
@@ -88,6 +90,8 @@ pub fn parse_proxy_session_id(builder: &CommandBuilder) -> Option<String> {
         .or(Some(String::new()))
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 pub fn clamp_preview_lines(value: usize) -> usize {
     value.clamp(50, 20_000)
 }

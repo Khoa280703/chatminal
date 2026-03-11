@@ -1,39 +1,47 @@
 use super::confirm;
 use crate::TermWindow;
+use mux::Mux;
 use mux::pane::PaneId;
 use mux::tab::TabId;
 use mux::termwiztermtab::TermWizTerminal;
 use mux::window::WindowId;
-use mux::Mux;
+use std::convert::TryFrom;
+
+fn pane_id_from_u64(pane_id: u64) -> anyhow::Result<PaneId> {
+    PaneId::try_from(pane_id).map_err(|_| anyhow::anyhow!("invalid pane id {pane_id}"))
+}
+
+fn tab_id_from_u64(tab_id: u64) -> anyhow::Result<TabId> {
+    TabId::try_from(tab_id).map_err(|_| anyhow::anyhow!("invalid tab id {tab_id}"))
+}
+
+fn window_id_from_u64(window_id: u64) -> anyhow::Result<WindowId> {
+    WindowId::try_from(window_id).map_err(|_| anyhow::anyhow!("invalid window id {window_id}"))
+}
 
 pub fn confirm_close_pane(
-    pane_id: PaneId,
+    pane_id: u64,
     mut term: TermWizTerminal,
-    mux_window_id: WindowId,
     window: ::window::Window,
 ) -> anyhow::Result<()> {
+    let pane_id = pane_id_from_u64(pane_id)?;
     if confirm::run_confirmation("🛑 Really kill this pane?", &mut term)? {
         promise::spawn::spawn_into_main_thread(async move {
             let mux = Mux::get();
-            let tab = match mux.get_active_tab_for_window(mux_window_id) {
-                Some(tab) => tab,
-                None => return,
-            };
-            tab.kill_pane(pane_id);
+            mux.remove_pane(pane_id);
         })
         .detach();
     }
-    TermWindow::schedule_cancel_overlay_for_pane(window, pane_id);
+    TermWindow::schedule_cancel_overlay_for_leaf(window, pane_id as u64);
 
     Ok(())
 }
 
 pub fn confirm_close_tab(
-    tab_id: TabId,
+    tab_id: u64,
     mut term: TermWizTerminal,
-    _mux_window_id: WindowId,
-    window: ::window::Window,
 ) -> anyhow::Result<()> {
+    let tab_id = tab_id_from_u64(tab_id)?;
     if confirm::run_confirmation(
         "🛑 Really kill this tab and all contained panes?",
         &mut term,
@@ -44,37 +52,30 @@ pub fn confirm_close_tab(
         })
         .detach();
     }
-    TermWindow::schedule_cancel_overlay(window, tab_id, None);
 
     Ok(())
 }
 
 pub fn confirm_close_window(
     mut term: TermWizTerminal,
-    mux_window_id: WindowId,
-    window: ::window::Window,
-    tab_id: TabId,
+    window_id: u64,
 ) -> anyhow::Result<()> {
+    let window_id = window_id_from_u64(window_id)?;
     if confirm::run_confirmation(
         "🛑 Really kill this window and all contained tabs and panes?",
         &mut term,
     )? {
         promise::spawn::spawn_into_main_thread(async move {
             let mux = Mux::get();
-            mux.kill_window(mux_window_id);
+            mux.kill_window(window_id);
         })
         .detach();
     }
-    TermWindow::schedule_cancel_overlay(window, tab_id, None);
 
     Ok(())
 }
 
-pub fn confirm_quit_program(
-    mut term: TermWizTerminal,
-    window: ::window::Window,
-    tab_id: TabId,
-) -> anyhow::Result<()> {
+pub fn confirm_quit_program(mut term: TermWizTerminal) -> anyhow::Result<()> {
     if confirm::run_confirmation("🛑 Really Quit Chatminal?", &mut term)? {
         promise::spawn::spawn_into_main_thread(async move {
             use ::window::{Connection, ConnectionOps};
@@ -83,7 +84,6 @@ pub fn confirm_quit_program(
         })
         .detach();
     }
-    TermWindow::schedule_cancel_overlay(window, tab_id, None);
 
     Ok(())
 }

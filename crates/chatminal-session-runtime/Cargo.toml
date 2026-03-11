@@ -1,0 +1,17 @@
+[package]
+name = "chatminal-session-runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+chatminal-terminal-core = { path = "../chatminal-terminal-core" }
+config = { workspace = true }
+engine-dynamic = { workspace = true, default-features = false }
+engine-term = { workspace = true }
+log = { workspace = true }
+mux = { workspace = true }
+portable-pty = { workspace = true }
+promise = { workspace = true }
+window = { workspace = true }

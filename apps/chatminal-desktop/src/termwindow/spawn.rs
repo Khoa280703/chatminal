@@ -1,3 +1,4 @@
+use crate::scripting::guiwin::DesktopWindowId;
 use crate::spawn::SpawnWhere;
 use config::keyassignment::{SpawnCommand, SpawnTabDomain};
 use config::TermConfig;
@@ -19,12 +20,16 @@ impl super::TermWindow {
             spawn,
             spawn_where,
             size,
-            Some(self.mux_window_id),
+            Some(self.window_id as DesktopWindowId),
             term_config,
         )
     }
 
-    pub fn spawn_tab(&mut self, domain: &SpawnTabDomain) {
+    pub fn spawn_surface(&mut self, domain: &SpawnTabDomain) {
+        if self.chatminal_sidebar.is_enabled() {
+            self.create_chatminal_session();
+            return;
+        }
         self.spawn_command(
             &SpawnCommand {
                 domain: domain.clone(),

@@ -8,7 +8,7 @@ use termwiz::surface::Line;
 
 impl super::TermWindow {
     pub fn selection(&self, pane_id: PaneId) -> RefMut<'_, Selection> {
-        RefMut::map(self.pane_state(pane_id), |state| &mut state.selection)
+        RefMut::map(self.leaf_ui_state(pane_id), |state| &mut state.selection)
     }
 
     /// Returns the selection region as a series of Line
@@ -118,7 +118,7 @@ impl super::TermWindow {
 
     pub fn extend_selection_at_mouse_cursor(&mut self, mode: SelectionMode, pane: &Arc<dyn Pane>) {
         self.selection(pane.pane_id()).seqno = pane.get_current_seqno();
-        let (position, y) = match self.pane_state(pane.pane_id()).mouse_terminal_coords {
+        let (position, y) = match self.leaf_ui_state(pane.pane_id()).mouse_terminal_coords {
             Some(coords) => coords,
             None => return,
         };
@@ -241,7 +241,7 @@ impl super::TermWindow {
     }
 
     pub fn select_text_at_mouse_cursor(&mut self, mode: SelectionMode, pane: &Arc<dyn Pane>) {
-        let (x, y) = match self.pane_state(pane.pane_id()).mouse_terminal_coords {
+        let (x, y) = match self.leaf_ui_state(pane.pane_id()).mouse_terminal_coords {
             Some(coords) => (coords.0.column, coords.1),
             None => return,
         };

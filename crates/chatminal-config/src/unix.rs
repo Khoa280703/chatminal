@@ -26,10 +26,8 @@ pub struct UnixDomain {
     pub no_serve_automatically: bool,
 
     /// If we decide that we need to start the server, the command to run
-    /// to set that up.  The default is to spawn:
-    /// `chatminal-mux --daemonize`
-    /// but it can be useful to set this to eg:
-    /// `wsl -e chatminal-mux --daemonize` to start up
+    /// to set that up. The default is to spawn `chatminald`, but it can
+    /// be useful to set this to eg: `wsl -e chatminald` to start up
     /// a unix domain inside a wsl container.
     pub serve_command: Option<Vec<String>>,
 
@@ -119,12 +117,11 @@ impl UnixDomain {
             None => Ok(vec![
                 std::env::current_exe()?
                     .with_file_name(if cfg!(windows) {
-                        "chatminal-mux.exe"
+                        "chatminald.exe"
                     } else {
-                        "chatminal-mux"
+                        "chatminald"
                     })
                     .into_os_string(),
-                OsString::from("--daemonize"),
             ]),
         }
     }
@@ -135,7 +132,7 @@ mod tests {
     use super::UnixDomain;
 
     #[test]
-    fn default_serve_command_uses_chatminal_mux_binary() {
+    fn default_serve_command_uses_chatminald_binary() {
         let command = UnixDomain::default().serve_command().unwrap();
         let binary = command
             .first()
@@ -144,15 +141,12 @@ mod tests {
             .unwrap();
 
         let expected = if cfg!(windows) {
-            "chatminal-mux.exe"
+            "chatminald.exe"
         } else {
-            "chatminal-mux"
+            "chatminald"
         };
 
         assert_eq!(binary, expected);
-        assert_eq!(
-            command.get(1).and_then(|value| value.to_str()),
-            Some("--daemonize")
-        );
+        assert_eq!(command.len(), 1);
     }
 }
