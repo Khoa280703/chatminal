@@ -1,20 +1,20 @@
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionPaneBinding {
+pub struct SessionTerminalBinding {
     pub session_id: String,
     pub terminal_id: String,
 }
 
 #[derive(Debug, Default)]
-pub struct SessionPaneRegistry {
-    bindings: Vec<SessionPaneBinding>,
+pub struct SessionTerminalRegistry {
+    bindings: Vec<SessionTerminalBinding>,
     active_session_id: Option<String>,
     next_terminal_index: u64,
 }
 
 #[allow(dead_code)]
-impl SessionPaneRegistry {
+impl SessionTerminalRegistry {
     pub fn new() -> Self {
         Self::default()
     }
@@ -30,7 +30,7 @@ impl SessionPaneRegistry {
 
         self.next_terminal_index = self.next_terminal_index.saturating_add(1);
         let terminal_id = format!("terminal-{}", self.next_terminal_index);
-        self.bindings.push(SessionPaneBinding {
+        self.bindings.push(SessionTerminalBinding {
             session_id: session_id.to_string(),
             terminal_id: terminal_id.clone(),
         });
@@ -75,7 +75,7 @@ impl SessionPaneRegistry {
         None
     }
 
-    pub fn bindings(&self) -> &[SessionPaneBinding] {
+    pub fn bindings(&self) -> &[SessionTerminalBinding] {
         &self.bindings
     }
 
@@ -96,11 +96,11 @@ impl SessionPaneRegistry {
 
 #[cfg(test)]
 mod tests {
-    use super::SessionPaneRegistry;
+    use super::SessionTerminalRegistry;
 
     #[test]
     fn ensure_terminal_for_session_is_stable() {
-        let mut registry = SessionPaneRegistry::new();
+        let mut registry = SessionTerminalRegistry::new();
         let first = registry.ensure_terminal_for_session("s-1");
         let second = registry.ensure_terminal_for_session("s-1");
         assert_eq!(first, second);
@@ -109,7 +109,7 @@ mod tests {
 
     #[test]
     fn activate_and_remove_session_updates_active_state() {
-        let mut registry = SessionPaneRegistry::new();
+        let mut registry = SessionTerminalRegistry::new();
         let terminal_a = registry.activate_session("s-a");
         let terminal_b = registry.activate_session("s-b");
         assert_ne!(terminal_a, terminal_b);
@@ -125,7 +125,7 @@ mod tests {
 
     #[test]
     fn prune_to_sessions_removes_stale_bindings_and_active_id() {
-        let mut registry = SessionPaneRegistry::new();
+        let mut registry = SessionTerminalRegistry::new();
         registry.activate_session("s-a");
         registry.ensure_terminal_for_session("s-b");
         registry.prune_to_sessions(&["s-b".to_string()]);

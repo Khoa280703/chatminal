@@ -5,7 +5,7 @@ use crossterm::terminal::size;
 
 use crate::config::parse_usize;
 use crate::ipc::ChatminalClient;
-use crate::terminal_pane_adapter::SessionPaneRegistry;
+use crate::session_terminal_adapter::SessionTerminalRegistry;
 use crate::terminal_workspace_ascii_renderer::{
     fit_dashboard_for_terminal, render_terminal_workspace_ascii,
 };
@@ -18,17 +18,17 @@ use crate::terminal_workspace_view_model::build_terminal_workspace_view_model;
 pub fn run_dashboard_watch(
     client: &ChatminalClient,
     args: &[String],
-    pane_registry: &mut SessionPaneRegistry,
+    terminal_registry: &mut SessionTerminalRegistry,
 ) -> Result<(), String> {
     let seconds = parse_usize(args.get(2), 30).max(1);
     let refresh_ms = parse_usize(args.get(3), 500).max(100);
     let preview_lines = parse_usize(args.get(4), 200);
     let cols = parse_usize(args.get(5), 120);
     let rows = parse_usize(args.get(6), 32);
-    let max_pane_preview_lines = parse_usize(args.get(7), 20);
+    let max_terminal_preview_lines = parse_usize(args.get(7), 20);
 
     let mut state =
-        bootstrap_workspace_binding_state(client, pane_registry, preview_lines, cols, rows)?;
+        bootstrap_workspace_binding_state(client, terminal_registry, preview_lines, cols, rows)?;
     let deadline = Instant::now() + Duration::from_secs(seconds as u64);
     let tick = Duration::from_millis(refresh_ms as u64);
     let mut next_render = Instant::now();
@@ -38,7 +38,7 @@ pub fn run_dashboard_watch(
         if state.is_stale() {
             state = bootstrap_workspace_binding_state(
                 client,
-                pane_registry,
+                terminal_registry,
                 preview_lines,
                 cols,
                 rows,
@@ -47,7 +47,7 @@ pub fn run_dashboard_watch(
 
         let now = Instant::now();
         if now >= next_render {
-            let dashboard = render_watch_dashboard(&state, max_pane_preview_lines);
+            let dashboard = render_watch_dashboard(&state, max_terminal_preview_lines);
             let (terminal_cols, terminal_rows) = size().unwrap_or((120, 32));
             let fitted = fit_dashboard_for_terminal(
                 &dashboard,
@@ -66,18 +66,18 @@ pub fn run_dashboard_watch(
         let wait_to_next = next_render.saturating_duration_since(now);
         let wait = wait_to_next.min(Duration::from_millis(100));
         if let Some(event) = client.recv_event(wait)? {
-            apply_event_to_workspace_binding_state(&mut state, pane_registry, event);
+            apply_event_to_workspace_binding_state(&mut state, terminal_registry, event);
         }
     }
 
     Ok(())
 }
 
-fn render_watch_dashboard(state: &WorkspaceBindingState, max_pane_preview_lines: usize) -> String {
-    let pane_snapshots = state.adapter.all_pane_snapshots();
-    let view_model = build_terminal_workspace_view_model(&state.workspace, &pane_snapshots);
+fn render_watch_dashboard(state: &WorkspaceBindingState, max_terminal_preview_lines: usize) -> String {
+    let terminal_snapshots = state.adapter.all_terminal_snapshots();
+    let view_model = build_terminal_workspace_view_model(&state.workspace, &terminal_snapshots);
     let mut dashboard =
-        render_terminal_workspace_ascii(&view_model, &pane_snapshots, max_pane_preview_lines);
+        render_terminal_workspace_ascii(&view_model, &terminal_snapshots, max_terminal_preview_lines);
     if !state.hydrate_errors.is_empty() {
         dashboard.push_str("\n\nWarnings:\n");
         for error in &state.hydrate_errors {

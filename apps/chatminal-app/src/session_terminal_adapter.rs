@@ -7,23 +7,23 @@ use chatminal_protocol::{
 
 use crate::ipc::ChatminalClient;
 
-#[path = "terminal_pane_registry.rs"]
-mod pane_registry;
-#[path = "terminal_pane_stdout_adapter.rs"]
+#[path = "session_terminal_registry.rs"]
+mod terminal_registry;
+#[path = "session_terminal_stdout_adapter.rs"]
 mod stdout_adapter;
 
-pub use pane_registry::SessionPaneRegistry;
-pub use stdout_adapter::StdoutJsonTerminalPaneAdapter;
+pub use terminal_registry::SessionTerminalRegistry;
+pub use stdout_adapter::StdoutJsonSessionTerminalAdapter;
 
-pub trait TerminalPaneAdapter {
+pub trait SessionTerminalAdapter {
     fn on_pty_output(&mut self, _event: PtyOutputEvent) {}
     fn on_pty_exited(&mut self, _event: PtyExitedEvent) {}
     fn on_pty_error(&mut self, _event: PtyErrorEvent) {}
-    fn on_session_output(&mut self, _session_id: &str, _pane_id: &str, _event: &PtyOutputEvent) {}
+    fn on_session_output(&mut self, _session_id: &str, _terminal_id: &str, _event: &PtyOutputEvent) {}
     fn on_session_activated(
         &mut self,
         _session_id: &str,
-        _pane_id: &str,
+        _terminal_id: &str,
         _cols: usize,
         _rows: usize,
     ) {
@@ -31,12 +31,12 @@ pub trait TerminalPaneAdapter {
     fn on_session_snapshot(
         &mut self,
         _session_id: &str,
-        _pane_id: &str,
+        _terminal_id: &str,
         _snapshot: &SessionSnapshot,
     ) {
     }
-    fn on_session_input(&mut self, _session_id: &str, _pane_id: &str, _byte_len: usize) {}
-    fn on_session_resize(&mut self, _session_id: &str, _pane_id: &str, _cols: usize, _rows: usize) {
+    fn on_session_input(&mut self, _session_id: &str, _terminal_id: &str, _byte_len: usize) {}
+    fn on_session_resize(&mut self, _session_id: &str, _terminal_id: &str, _cols: usize, _rows: usize) {
     }
     fn on_session_updated(&mut self, _event: SessionUpdatedEvent) {}
     fn on_workspace_updated(&mut self, _event: WorkspaceUpdatedEvent) {}
@@ -44,14 +44,14 @@ pub trait TerminalPaneAdapter {
 }
 
 #[allow(dead_code)]
-pub fn dispatch_event(adapter: &mut dyn TerminalPaneAdapter, event: Event) {
-    let mut registry = SessionPaneRegistry::new();
+pub fn dispatch_event(adapter: &mut dyn SessionTerminalAdapter, event: Event) {
+    let mut registry = SessionTerminalRegistry::new();
     dispatch_event_with_registry(adapter, &mut registry, event);
 }
 
 pub fn dispatch_event_with_registry(
-    adapter: &mut dyn TerminalPaneAdapter,
-    registry: &mut SessionPaneRegistry,
+    adapter: &mut dyn SessionTerminalAdapter,
+    registry: &mut SessionTerminalRegistry,
     event: Event,
 ) {
     match event {
@@ -70,17 +70,17 @@ pub fn dispatch_event_with_registry(
 
 pub fn pump_events(
     client: &ChatminalClient,
-    adapter: &mut dyn TerminalPaneAdapter,
+    adapter: &mut dyn SessionTerminalAdapter,
     duration: Duration,
 ) -> Result<usize, String> {
-    let mut registry = SessionPaneRegistry::new();
+    let mut registry = SessionTerminalRegistry::new();
     pump_events_with_registry(client, &mut registry, adapter, duration)
 }
 
 pub fn pump_events_with_registry(
     client: &ChatminalClient,
-    registry: &mut SessionPaneRegistry,
-    adapter: &mut dyn TerminalPaneAdapter,
+    registry: &mut SessionTerminalRegistry,
+    adapter: &mut dyn SessionTerminalAdapter,
     duration: Duration,
 ) -> Result<usize, String> {
     let deadline = Instant::now() + duration;

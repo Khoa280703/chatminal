@@ -4,14 +4,14 @@ use chatminal_protocol::{Request, Response, SessionSnapshot};
 use serde::Serialize;
 
 use crate::ipc::ChatminalClient;
-use crate::terminal_pane_adapter::{SessionPaneRegistry, TerminalPaneAdapter};
+use crate::session_terminal_adapter::{SessionTerminalRegistry, SessionTerminalAdapter};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SessionActivationResult {
     pub session_id: String,
-    pub pane_id: String,
+    pub terminal_id: String,
     pub cols: usize,
     pub rows: usize,
     pub snapshot_seq: u64,
@@ -20,8 +20,8 @@ pub struct SessionActivationResult {
 
 pub fn activate_session_with_snapshot(
     client: &ChatminalClient,
-    registry: &mut SessionPaneRegistry,
-    adapter: &mut dyn TerminalPaneAdapter,
+    registry: &mut SessionTerminalRegistry,
+    adapter: &mut dyn SessionTerminalAdapter,
     session_id: &str,
     cols: usize,
     rows: usize,
@@ -39,15 +39,15 @@ pub fn activate_session_with_snapshot(
         "session_activate",
     )?;
 
-    let pane_id = registry.activate_session(session_id);
-    adapter.on_session_activated(session_id, &pane_id, cols, rows);
+    let terminal_id = registry.activate_session(session_id);
+    adapter.on_session_activated(session_id, &terminal_id, cols, rows);
 
     let snapshot = fetch_snapshot_for_session(client, session_id, preview_lines)?;
-    adapter.on_session_snapshot(session_id, &pane_id, &snapshot);
+    adapter.on_session_snapshot(session_id, &terminal_id, &snapshot);
 
     Ok(SessionActivationResult {
         session_id: session_id.to_string(),
-        pane_id,
+        terminal_id,
         cols,
         rows,
         snapshot_seq: snapshot.seq,
@@ -57,8 +57,8 @@ pub fn activate_session_with_snapshot(
 
 pub fn write_input_for_session(
     client: &ChatminalClient,
-    registry: &mut SessionPaneRegistry,
-    adapter: &mut dyn TerminalPaneAdapter,
+    registry: &mut SessionTerminalRegistry,
+    adapter: &mut dyn SessionTerminalAdapter,
     session_id: &str,
     data: &str,
 ) -> Result<(), String> {
@@ -74,8 +74,8 @@ pub fn write_input_for_session(
 
 pub fn write_input_for_session_with_timeout(
     client: &ChatminalClient,
-    registry: &mut SessionPaneRegistry,
-    adapter: &mut dyn TerminalPaneAdapter,
+    registry: &mut SessionTerminalRegistry,
+    adapter: &mut dyn SessionTerminalAdapter,
     session_id: &str,
     data: &str,
     timeout: Duration,
@@ -98,8 +98,8 @@ pub fn write_input_for_session_with_timeout(
 
 pub fn resize_session(
     client: &ChatminalClient,
-    registry: &mut SessionPaneRegistry,
-    adapter: &mut dyn TerminalPaneAdapter,
+    registry: &mut SessionTerminalRegistry,
+    adapter: &mut dyn SessionTerminalAdapter,
     session_id: &str,
     cols: usize,
     rows: usize,

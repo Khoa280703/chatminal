@@ -3,8 +3,8 @@ use chatminal_protocol::{
     SessionUpdatedEvent, WorkspaceState, WorkspaceUpdatedEvent,
 };
 
-use crate::terminal_pane_adapter::SessionPaneRegistry;
-use crate::terminal_pane_emulator::TerminalPaneEmulator;
+use crate::session_terminal_adapter::SessionTerminalRegistry;
+use crate::session_terminal_emulator::SessionTerminalEmulator;
 use crate::terminal_workspace_binding_runtime::{
     WorkspaceBindingState, apply_event_to_workspace_binding_state,
 };
@@ -28,7 +28,7 @@ fn sample_state() -> WorkspaceBindingState {
             }],
             active_session_id: Some("s1".to_string()),
         },
-        adapter: TerminalPaneEmulator::new(120, 32, 5_000),
+        adapter: SessionTerminalEmulator::new(120, 32, 5_000),
         hydrate_errors: Vec::new(),
         stale: false,
         event_watermark_ts: 0,
@@ -67,7 +67,7 @@ fn sample_state_with_two_sessions() -> WorkspaceBindingState {
             ],
             active_session_id: Some("s1".to_string()),
         },
-        adapter: TerminalPaneEmulator::new(120, 32, 5_000),
+        adapter: SessionTerminalEmulator::new(120, 32, 5_000),
         hydrate_errors: Vec::new(),
         stale: false,
         event_watermark_ts: 0,
@@ -82,7 +82,7 @@ fn sample_state_with_two_sessions() -> WorkspaceBindingState {
 #[test]
 fn output_event_updates_known_session_state_without_marking_stale() {
     let mut state = sample_state();
-    let mut registry = SessionPaneRegistry::new();
+    let mut registry = SessionTerminalRegistry::new();
     apply_event_to_workspace_binding_state(
         &mut state,
         &mut registry,
@@ -108,7 +108,7 @@ fn output_event_updates_known_session_state_without_marking_stale() {
 #[test]
 fn unknown_session_output_marks_state_stale() {
     let mut state = sample_state();
-    let mut registry = SessionPaneRegistry::new();
+    let mut registry = SessionTerminalRegistry::new();
     apply_event_to_workspace_binding_state(
         &mut state,
         &mut registry,
@@ -126,7 +126,7 @@ fn unknown_session_output_marks_state_stale() {
 fn unknown_session_output_with_older_timestamp_than_watermark_is_ignored() {
     let mut state = sample_state();
     state.event_watermark_ts = 100;
-    let mut registry = SessionPaneRegistry::new();
+    let mut registry = SessionTerminalRegistry::new();
     apply_event_to_workspace_binding_state(
         &mut state,
         &mut registry,
@@ -143,7 +143,7 @@ fn unknown_session_output_with_older_timestamp_than_watermark_is_ignored() {
 #[test]
 fn workspace_count_mismatch_marks_state_stale() {
     let mut state = sample_state();
-    let mut registry = SessionPaneRegistry::new();
+    let mut registry = SessionTerminalRegistry::new();
     apply_event_to_workspace_binding_state(
         &mut state,
         &mut registry,
@@ -161,7 +161,7 @@ fn workspace_count_mismatch_marks_state_stale() {
 #[test]
 fn workspace_updated_with_same_counts_still_marks_state_stale() {
     let mut state = sample_state();
-    let mut registry = SessionPaneRegistry::new();
+    let mut registry = SessionTerminalRegistry::new();
     apply_event_to_workspace_binding_state(
         &mut state,
         &mut registry,
@@ -179,7 +179,7 @@ fn workspace_updated_with_same_counts_still_marks_state_stale() {
 #[test]
 fn session_updated_for_missing_session_marks_state_stale() {
     let mut state = sample_state();
-    let mut registry = SessionPaneRegistry::new();
+    let mut registry = SessionTerminalRegistry::new();
     apply_event_to_workspace_binding_state(
         &mut state,
         &mut registry,
@@ -198,7 +198,7 @@ fn session_updated_for_missing_session_marks_state_stale() {
 fn session_updated_for_missing_session_with_older_timestamp_is_ignored() {
     let mut state = sample_state();
     state.event_watermark_ts = 200;
-    let mut registry = SessionPaneRegistry::new();
+    let mut registry = SessionTerminalRegistry::new();
     apply_event_to_workspace_binding_state(
         &mut state,
         &mut registry,
@@ -216,7 +216,7 @@ fn session_updated_for_missing_session_with_older_timestamp_is_ignored() {
 #[test]
 fn session_updated_for_known_session_refreshes_status_without_stale() {
     let mut state = sample_state();
-    let mut registry = SessionPaneRegistry::new();
+    let mut registry = SessionTerminalRegistry::new();
     apply_event_to_workspace_binding_state(
         &mut state,
         &mut registry,
@@ -245,7 +245,7 @@ fn session_updated_for_known_session_refreshes_status_without_stale() {
 fn session_updated_out_of_order_does_not_decrease_seq() {
     let mut state = sample_state();
     state.workspace.sessions[0].seq = 10;
-    let mut registry = SessionPaneRegistry::new();
+    let mut registry = SessionTerminalRegistry::new();
 
     apply_event_to_workspace_binding_state(
         &mut state,
@@ -276,7 +276,7 @@ fn session_updated_with_older_timestamp_is_ignored() {
     state.workspace.sessions[0].seq = 10;
     state.workspace.sessions[0].persist_history = false;
     state.session_last_event_ts.insert("s1".to_string(), 100);
-    let mut registry = SessionPaneRegistry::new();
+    let mut registry = SessionTerminalRegistry::new();
 
     apply_event_to_workspace_binding_state(
         &mut state,
@@ -304,7 +304,7 @@ fn session_updated_with_older_timestamp_is_ignored() {
 #[test]
 fn pty_exited_for_known_session_switches_to_disconnected() {
     let mut state = sample_state();
-    let mut registry = SessionPaneRegistry::new();
+    let mut registry = SessionTerminalRegistry::new();
     apply_event_to_workspace_binding_state(
         &mut state,
         &mut registry,
@@ -328,7 +328,7 @@ fn pty_exited_for_known_session_switches_to_disconnected() {
 #[test]
 fn pty_exited_for_missing_session_is_ignored_without_stale() {
     let mut state = sample_state();
-    let mut registry = SessionPaneRegistry::new();
+    let mut registry = SessionTerminalRegistry::new();
     apply_event_to_workspace_binding_state(
         &mut state,
         &mut registry,
@@ -352,7 +352,7 @@ fn pty_exited_for_missing_session_is_ignored_without_stale() {
 #[test]
 fn daemon_health_event_is_non_mutating() {
     let mut state = sample_state();
-    let mut registry = SessionPaneRegistry::new();
+    let mut registry = SessionTerminalRegistry::new();
     apply_event_to_workspace_binding_state(
         &mut state,
         &mut registry,
@@ -369,7 +369,7 @@ fn daemon_health_event_is_non_mutating() {
 #[test]
 fn workspace_switch_event_marks_state_stale_for_reconnect_rehydrate() {
     let mut state = sample_state_with_two_sessions();
-    let mut registry = SessionPaneRegistry::new();
+    let mut registry = SessionTerminalRegistry::new();
 
     apply_event_to_workspace_binding_state(
         &mut state,
@@ -403,7 +403,7 @@ fn workspace_updated_with_older_timestamp_is_ignored() {
     let mut state = sample_state_with_two_sessions();
     state.last_workspace_event_ts = 200;
     state.workspace.active_session_id = Some("s1".to_string());
-    let mut registry = SessionPaneRegistry::new();
+    let mut registry = SessionTerminalRegistry::new();
 
     apply_event_to_workspace_binding_state(
         &mut state,
@@ -424,7 +424,7 @@ fn workspace_updated_with_older_timestamp_is_ignored() {
 #[test]
 fn session_timestamp_guard_is_scoped_per_session() {
     let mut state = sample_state_with_two_sessions();
-    let mut registry = SessionPaneRegistry::new();
+    let mut registry = SessionTerminalRegistry::new();
 
     apply_event_to_workspace_binding_state(
         &mut state,
@@ -485,7 +485,7 @@ fn session_timestamp_guard_is_scoped_per_session() {
 #[test]
 fn stale_reconnect_session_update_is_ignored_after_newer_output() {
     let mut state = sample_state();
-    let mut registry = SessionPaneRegistry::new();
+    let mut registry = SessionTerminalRegistry::new();
 
     apply_event_to_workspace_binding_state(
         &mut state,
@@ -540,7 +540,7 @@ fn session_updated_with_same_timestamp_still_applies_latest_payload() {
     state.workspace.sessions[0].seq = 10;
     state.workspace.sessions[0].persist_history = false;
     state.session_last_event_ts.insert("s1".to_string(), 300);
-    let mut registry = SessionPaneRegistry::new();
+    let mut registry = SessionTerminalRegistry::new();
 
     apply_event_to_workspace_binding_state(
         &mut state,
@@ -571,7 +571,7 @@ fn workspace_updated_with_same_timestamp_is_applied() {
     let mut state = sample_state_with_two_sessions();
     state.last_workspace_event_ts = 500;
     state.workspace.active_session_id = Some("s1".to_string());
-    let mut registry = SessionPaneRegistry::new();
+    let mut registry = SessionTerminalRegistry::new();
 
     apply_event_to_workspace_binding_state(
         &mut state,

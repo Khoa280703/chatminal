@@ -7,8 +7,8 @@ mod terminal_commands;
 mod terminal_dashboard_tui;
 mod terminal_dashboard_watch;
 mod terminal_desktop_launcher;
-mod terminal_pane_adapter;
-mod terminal_pane_emulator;
+mod session_terminal_adapter;
+mod session_terminal_emulator;
 mod terminal_quality_benchmark;
 mod terminal_session_commands;
 mod terminal_workspace_ascii_renderer;
@@ -28,7 +28,7 @@ use terminal_commands::{
 use terminal_dashboard_tui::run_dashboard_tui;
 use terminal_dashboard_watch::run_dashboard_watch;
 use terminal_desktop_launcher::run_window_desktop;
-use terminal_pane_adapter::{SessionPaneRegistry, StdoutJsonTerminalPaneAdapter, pump_events};
+use session_terminal_adapter::{SessionTerminalRegistry, StdoutJsonSessionTerminalAdapter, pump_events};
 use terminal_quality_benchmark::{run_bench_rtt, summary_line};
 use terminal_session_commands::{
     activate_session_with_snapshot, fetch_snapshot_for_session, resize_session,
@@ -56,8 +56,8 @@ const SUPPORTED_COMMANDS: &[&str] = &[
     "window-desktop",
 ];
 
-struct SilentTerminalPaneAdapter;
-impl terminal_pane_adapter::TerminalPaneAdapter for SilentTerminalPaneAdapter {}
+struct SilentSessionTerminalAdapter;
+impl session_terminal_adapter::SessionTerminalAdapter for SilentSessionTerminalAdapter {}
 
 fn main() {
     if let Err(err) = run() {
@@ -90,8 +90,8 @@ fn run() -> Result<(), String> {
     }
 
     let client = ChatminalClient::connect(&config.endpoint)?;
-    let mut pane_registry = SessionPaneRegistry::new();
-    let mut silent_adapter = SilentTerminalPaneAdapter;
+    let mut terminal_registry = SessionTerminalRegistry::new();
+    let mut silent_adapter = SilentSessionTerminalAdapter;
 
     match command {
         "workspace" => {
@@ -129,7 +129,7 @@ fn run() -> Result<(), String> {
             let preview_lines = parse_usize(args.get(5), 200);
             let activation = activate_session_with_snapshot(
                 &client,
-                &mut pane_registry,
+                &mut terminal_registry,
                 &mut silent_adapter,
                 &session_id,
                 cols,
@@ -161,7 +161,7 @@ fn run() -> Result<(), String> {
             }
             write_input_for_session(
                 &client,
-                &mut pane_registry,
+                &mut terminal_registry,
                 &mut silent_adapter,
                 &session_id,
                 &data,
@@ -177,7 +177,7 @@ fn run() -> Result<(), String> {
             let rows = parse_usize(args.get(4), 32);
             resize_session(
                 &client,
-                &mut pane_registry,
+                &mut terminal_registry,
                 &mut silent_adapter,
                 &session_id,
                 cols,
@@ -192,34 +192,34 @@ fn run() -> Result<(), String> {
                 "Listening daemon events for {}s at endpoint {}",
                 seconds, config.endpoint
             );
-            let mut adapter = StdoutJsonTerminalPaneAdapter;
+            let mut adapter = StdoutJsonSessionTerminalAdapter;
             let processed =
                 pump_events(&client, &mut adapter, Duration::from_secs(seconds as u64))?;
             println!("Processed {processed} events");
             Ok(())
         }
         "workspace-terminal" => {
-            let payload = handle_workspace_terminal(&client, &args, &mut pane_registry)?;
+            let payload = handle_workspace_terminal(&client, &args, &mut terminal_registry)?;
             print_pretty_json(&payload)
         }
         "activate-terminal" => {
-            let payload = handle_activate_terminal(&client, &args, &mut pane_registry)?;
+            let payload = handle_activate_terminal(&client, &args, &mut terminal_registry)?;
             print_pretty_json(&payload)
         }
         "events-terminal" => {
-            let payload = handle_events_terminal(&client, &args, &mut pane_registry)?;
+            let payload = handle_events_terminal(&client, &args, &mut terminal_registry)?;
             print_pretty_json(&payload)
         }
         "dashboard" => {
-            let payload = handle_dashboard_terminal(&client, &args, &mut pane_registry)?;
+            let payload = handle_dashboard_terminal(&client, &args, &mut terminal_registry)?;
             print_pretty_json(&payload)
         }
-        "dashboard-watch" => run_dashboard_watch(&client, &args, &mut pane_registry),
-        "dashboard-tui" => run_dashboard_tui(&client, &args, &mut pane_registry),
+        "dashboard-watch" => run_dashboard_watch(&client, &args, &mut terminal_registry),
+        "dashboard-tui" => run_dashboard_tui(&client, &args, &mut terminal_registry),
         "attach" => run_attach_tui(
             &client,
             &args,
-            &mut pane_registry,
+            &mut terminal_registry,
             config.input_pipeline_mode,
         ),
         "bench-rtt" => {

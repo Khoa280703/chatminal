@@ -5,26 +5,26 @@ use crossterm::queue;
 use crossterm::style::Print;
 use crossterm::terminal::{Clear, ClearType};
 
-use crate::terminal_pane_emulator::TerminalPaneEmulator;
+use crate::session_terminal_emulator::SessionTerminalEmulator;
 
 pub fn render_attach_frame(
     out: &mut Stdout,
-    adapter: &TerminalPaneEmulator,
-    pane_id: &str,
+    adapter: &SessionTerminalEmulator,
+    terminal_id: &str,
     session_id: &str,
     cols: usize,
     rows: usize,
 ) -> Result<(), String> {
     let text = adapter
-        .pane_snapshot(pane_id)
+        .terminal_snapshot(terminal_id)
         .map(|value| value.visible_text)
         .unwrap_or_default();
     let body = fit_text_for_terminal(&text, cols, rows);
     let status = truncate_line(
         &format!(
-            "Attached {} pane={} {}x{} | F10 quit",
+            "Attached {} terminal={} {}x{} | F10 quit",
             abbreviate_id(session_id),
-            pane_id,
+            terminal_id,
             cols,
             rows
         ),

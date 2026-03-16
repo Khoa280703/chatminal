@@ -4,15 +4,15 @@ use std::time::Duration;
 use chatminal_protocol::{Event, Request, Response, SessionStatus, WorkspaceState};
 
 use crate::ipc::ChatminalClient;
-use crate::terminal_pane_adapter::{
-    SessionPaneRegistry, TerminalPaneAdapter, dispatch_event_with_registry,
+use crate::session_terminal_adapter::{
+    SessionTerminalRegistry, SessionTerminalAdapter, dispatch_event_with_registry,
 };
-use crate::terminal_pane_emulator::{PaneSnapshotSummary, TerminalPaneEmulator};
+use crate::session_terminal_emulator::{TerminalSnapshotSummary, SessionTerminalEmulator};
 use crate::terminal_session_commands::fetch_snapshot_for_session;
 
 pub struct WorkspaceBindingState {
     pub workspace: WorkspaceState,
-    pub adapter: TerminalPaneEmulator,
+    pub adapter: SessionTerminalEmulator,
     pub hydrate_errors: Vec<String>,
     stale: bool,
     event_watermark_ts: u64,
@@ -21,8 +21,8 @@ pub struct WorkspaceBindingState {
 }
 
 impl WorkspaceBindingState {
-    pub fn pane_snapshots(&self) -> Vec<PaneSnapshotSummary> {
-        self.adapter.all_pane_snapshots()
+    pub fn terminal_snapshots(&self) -> Vec<TerminalSnapshotSummary> {
+        self.adapter.all_terminal_snapshots()
     }
 
     pub fn is_stale(&self) -> bool {
@@ -32,7 +32,7 @@ impl WorkspaceBindingState {
 
 pub fn bootstrap_workspace_binding_state(
     client: &ChatminalClient,
-    pane_registry: &mut SessionPaneRegistry,
+    terminal_registry: &mut SessionTerminalRegistry,
     preview_lines: usize,
     cols: usize,
     rows: usize,
@@ -48,9 +48,9 @@ pub fn bootstrap_workspace_binding_state(
         .iter()
         .map(|value| value.session_id.clone())
         .collect::<Vec<_>>();
-    pane_registry.prune_to_sessions(&session_ids);
+    terminal_registry.prune_to_sessions(&session_ids);
 
-    let mut adapter = TerminalPaneEmulator::new(cols, rows, 5_000);
+    let mut adapter = SessionTerminalEmulator::new(cols, rows, 5_000);
     let mut hydrate_errors = Vec::new();
     let active_session_id = workspace.active_session_id.as_deref();
     let mut session_last_event_ts = HashMap::new();
@@ -58,9 +58,9 @@ pub fn bootstrap_workspace_binding_state(
     for session in &workspace.sessions {
         session_last_event_ts.insert(session.session_id.clone(), bootstrap_started_at);
         let terminal_id = if active_session_id == Some(session.session_id.as_str()) {
-            pane_registry.activate_session(&session.session_id)
+            terminal_registry.activate_session(&session.session_id)
         } else {
-            pane_registry.ensure_terminal_for_session(&session.session_id)
+            terminal_registry.ensure_terminal_for_session(&session.session_id)
         };
         adapter.on_session_activated(&session.session_id, &terminal_id, cols, rows);
 
@@ -86,7 +86,7 @@ pub fn bootstrap_workspace_binding_state(
 
 pub fn apply_event_to_workspace_binding_state(
     state: &mut WorkspaceBindingState,
-    pane_registry: &mut SessionPaneRegistry,
+    terminal_registry: &mut SessionTerminalRegistry,
     event: Event,
 ) {
     if let Some(value) = event_ts_for_ordering(&event) {
@@ -107,7 +107,7 @@ pub fn apply_event_to_workspace_binding_state(
             }
             dispatch_event_with_registry(
                 &mut state.adapter,
-                pane_registry,
+                terminal_registry,
                 Event::PtyOutput(value.clone()),
             );
             if let Some(session) = state
@@ -136,7 +136,7 @@ pub fn apply_event_to_workspace_binding_state(
             {
                 dispatch_event_with_registry(
                     &mut state.adapter,
-                    pane_registry,
+                    terminal_registry,
                     Event::PtyExited(value.clone()),
                 );
                 session.status = SessionStatus::Disconnected;
@@ -153,7 +153,7 @@ pub fn apply_event_to_workspace_binding_state(
             }
             dispatch_event_with_registry(
                 &mut state.adapter,
-                pane_registry,
+                terminal_registry,
                 Event::SessionUpdated(value.clone()),
             );
             if let Some(session) = state
@@ -178,7 +178,7 @@ pub fn apply_event_to_workspace_binding_state(
             }
             dispatch_event_with_registry(
                 &mut state.adapter,
-                pane_registry,
+                terminal_registry,
                 Event::WorkspaceUpdated(value.clone()),
             );
             state.last_workspace_event_ts = value.ts;
@@ -191,12 +191,12 @@ pub fn apply_event_to_workspace_binding_state(
             state.stale = true;
         }
         Event::PtyError(value) => {
-            dispatch_event_with_registry(&mut state.adapter, pane_registry, Event::PtyError(value));
+            dispatch_event_with_registry(&mut state.adapter, terminal_registry, Event::PtyError(value));
         }
         Event::DaemonHealth(value) => {
             dispatch_event_with_registry(
                 &mut state.adapter,
-                pane_registry,
+                terminal_registry,
                 Event::DaemonHealth(value),
             );
         }

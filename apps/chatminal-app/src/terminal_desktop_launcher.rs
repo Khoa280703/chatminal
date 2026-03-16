@@ -266,16 +266,21 @@ mod tests {
     #[test]
     fn build_start_args_contains_proxy_command() {
         let args = build_desktop_start_args(Some("session-1"));
-        assert_eq!(
-            args,
-            vec![
-                "start",
-                "--",
-                "chatminal-runtime",
-                "proxy-desktop-session",
-                "session-1",
-            ]
-        );
+        let mut expected = Vec::new();
+        if cfg!(target_os = "macos") {
+            expected.push("--config");
+            expected.push(
+                "window_decorations=\"INTEGRATED_BUTTONS|RESIZE|MACOS_USE_BACKGROUND_COLOR_AS_TITLEBAR_COLOR\"",
+            );
+        }
+        expected.extend([
+            "start",
+            "--",
+            "chatminal-runtime",
+            "proxy-desktop-session",
+            "session-1",
+        ]);
+        assert_eq!(args, expected);
     }
 
     #[test]

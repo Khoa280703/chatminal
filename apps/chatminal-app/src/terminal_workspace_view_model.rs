@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use chatminal_protocol::WorkspaceState;
 use serde::Serialize;
 
-use crate::terminal_pane_emulator::PaneSnapshotSummary;
+use crate::session_terminal_emulator::TerminalSnapshotSummary;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct SidebarProfileItem {
@@ -19,7 +19,7 @@ pub struct SidebarSessionItem {
     pub name: String,
     pub status: String,
     pub is_active: bool,
-    pub pane_id: Option<String>,
+    pub terminal_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -28,17 +28,17 @@ pub struct TerminalWorkspaceViewModel {
     pub sessions: Vec<SidebarSessionItem>,
     pub active_profile_id: Option<String>,
     pub active_session_id: Option<String>,
-    pub active_pane_id: Option<String>,
+    pub active_terminal_id: Option<String>,
     pub status_line: String,
 }
 
 pub fn build_terminal_workspace_view_model(
     workspace: &WorkspaceState,
-    pane_snapshots: &[PaneSnapshotSummary],
+    terminal_snapshots: &[TerminalSnapshotSummary],
 ) -> TerminalWorkspaceViewModel {
-    let pane_by_session: HashMap<String, String> = pane_snapshots
+    let terminal_by_session: HashMap<String, String> = terminal_snapshots
         .iter()
-        .map(|pane| (pane.session_id.clone(), pane.pane_id.clone()))
+        .map(|terminal| (terminal.session_id.clone(), terminal.terminal_id.clone()))
         .collect();
 
     let profiles = workspace
@@ -55,7 +55,7 @@ pub fn build_terminal_workspace_view_model(
         .sessions
         .iter()
         .map(|session| {
-            let pane_id = pane_by_session.get(&session.session_id).cloned();
+            let terminal_id = terminal_by_session.get(&session.session_id).cloned();
             SidebarSessionItem {
                 session_id: session.session_id.clone(),
                 profile_id: session.profile_id.clone(),
@@ -63,21 +63,21 @@ pub fn build_terminal_workspace_view_model(
                 status: format!("{:?}", session.status).to_lowercase(),
                 is_active: workspace.active_session_id.as_deref()
                     == Some(session.session_id.as_str()),
-                pane_id,
+                terminal_id,
             }
         })
         .collect::<Vec<_>>();
 
-    let active_pane_id = workspace
+    let active_terminal_id = workspace
         .active_session_id
         .as_deref()
-        .and_then(|session_id| pane_by_session.get(session_id).cloned());
+        .and_then(|session_id| terminal_by_session.get(session_id).cloned());
 
     let status_line = format!(
-        "profiles={} sessions={} panes={} active_profile={} active_session={}",
+        "profiles={} sessions={} terminals={} active_profile={} active_session={}",
         workspace.profiles.len(),
         workspace.sessions.len(),
-        pane_snapshots.len(),
+        terminal_snapshots.len(),
         workspace.active_profile_id.as_deref().unwrap_or("none"),
         workspace.active_session_id.as_deref().unwrap_or("none")
     );
@@ -87,7 +87,7 @@ pub fn build_terminal_workspace_view_model(
         sessions,
         active_profile_id: workspace.active_profile_id.clone(),
         active_session_id: workspace.active_session_id.clone(),
-        active_pane_id,
+        active_terminal_id,
         status_line,
     }
 }

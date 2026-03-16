@@ -12,7 +12,7 @@ use crossterm::{execute, queue};
 
 use crate::config::parse_usize;
 use crate::ipc::ChatminalClient;
-use crate::terminal_pane_adapter::SessionPaneRegistry;
+use crate::session_terminal_adapter::SessionTerminalRegistry;
 use crate::terminal_workspace_ascii_renderer::{
     fit_dashboard_for_terminal, render_terminal_workspace_ascii,
 };
@@ -44,18 +44,18 @@ impl Drop for TuiGuard {
 pub fn run_dashboard_tui(
     client: &ChatminalClient,
     args: &[String],
-    pane_registry: &mut SessionPaneRegistry,
+    terminal_registry: &mut SessionTerminalRegistry,
 ) -> Result<(), String> {
     let refresh_ms = parse_usize(args.get(2), 120).clamp(40, 2_000);
     let preview_lines = parse_usize(args.get(3), 200).clamp(20, 5_000);
     let cols = parse_usize(args.get(4), 120).clamp(20, 400);
     let rows = parse_usize(args.get(5), 32).clamp(5, 200);
-    let max_pane_preview_lines = parse_usize(args.get(6), 20).clamp(5, 200);
+    let max_terminal_preview_lines = parse_usize(args.get(6), 20).clamp(5, 200);
 
     let _guard = TuiGuard::enter()?;
     let mut out = stdout();
     let mut state =
-        bootstrap_workspace_binding_state(client, pane_registry, preview_lines, cols, rows)?;
+        bootstrap_workspace_binding_state(client, terminal_registry, preview_lines, cols, rows)?;
     let mut last_render = Instant::now()
         .checked_sub(Duration::from_millis(refresh_ms as u64))
         .unwrap_or_else(Instant::now);
@@ -64,7 +64,7 @@ pub fn run_dashboard_tui(
         if state.is_stale() {
             state = bootstrap_workspace_binding_state(
                 client,
-                pane_registry,
+                terminal_registry,
                 preview_lines,
                 cols,
                 rows,
@@ -73,7 +73,7 @@ pub fn run_dashboard_tui(
 
         let now = Instant::now();
         if now.duration_since(last_render) >= Duration::from_millis(refresh_ms as u64) {
-            render_dashboard_frame(&mut out, &state, max_pane_preview_lines)?;
+            render_dashboard_frame(&mut out, &state, max_terminal_preview_lines)?;
             last_render = now;
         }
 
@@ -87,7 +87,7 @@ pub fn run_dashboard_tui(
                 KeyCode::Char('r') | KeyCode::Char('R') => {
                     state = bootstrap_workspace_binding_state(
                         client,
-                        pane_registry,
+                        terminal_registry,
                         preview_lines,
                         cols,
                         rows,
@@ -98,7 +98,7 @@ pub fn run_dashboard_tui(
         }
 
         if let Some(event) = client.recv_event(Duration::from_millis(25))? {
-            apply_event_to_workspace_binding_state(&mut state, pane_registry, event);
+            apply_event_to_workspace_binding_state(&mut state, terminal_registry, event);
         }
     }
 
@@ -108,12 +108,12 @@ pub fn run_dashboard_tui(
 fn render_dashboard_frame(
     out: &mut std::io::Stdout,
     state: &crate::terminal_workspace_binding_runtime::WorkspaceBindingState,
-    max_pane_preview_lines: usize,
+    max_terminal_preview_lines: usize,
 ) -> Result<(), String> {
-    let pane_snapshots = state.pane_snapshots();
-    let view_model = build_terminal_workspace_view_model(&state.workspace, &pane_snapshots);
+    let terminal_snapshots = state.terminal_snapshots();
+    let view_model = build_terminal_workspace_view_model(&state.workspace, &terminal_snapshots);
     let mut dashboard =
-        render_terminal_workspace_ascii(&view_model, &pane_snapshots, max_pane_preview_lines);
+        render_terminal_workspace_ascii(&view_model, &terminal_snapshots, max_terminal_preview_lines);
     if !state.hydrate_errors.is_empty() {
         dashboard.push_str("\n\nWarnings:\n");
         for error in &state.hydrate_errors {

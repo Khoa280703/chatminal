@@ -16,8 +16,8 @@ use crate::input::{
 };
 use crate::ipc::ChatminalClient;
 use crate::terminal_attach_frame_renderer::render_attach_frame;
-use crate::terminal_pane_adapter::{SessionPaneRegistry, dispatch_event_with_registry};
-use crate::terminal_pane_emulator::TerminalPaneEmulator;
+use crate::session_terminal_adapter::{SessionTerminalRegistry, dispatch_event_with_registry};
+use crate::session_terminal_emulator::SessionTerminalEmulator;
 use crate::terminal_session_commands::{
     activate_session_with_snapshot, resize_session, write_input_for_session,
 };
@@ -47,7 +47,7 @@ impl Drop for AttachTuiGuard {
 pub fn run_attach_tui(
     client: &ChatminalClient,
     args: &[String],
-    pane_registry: &mut SessionPaneRegistry,
+    terminal_registry: &mut SessionTerminalRegistry,
     input_pipeline_mode: InputPipelineMode,
 ) -> Result<(), String> {
     let (term_cols, term_rows) = size().unwrap_or((120, 32));
@@ -72,10 +72,10 @@ pub fn run_attach_tui(
     let preview_lines = parse_usize(args.get(cursor.saturating_add(2)), 400).clamp(50, 10_000);
 
     let session_id = resolve_attach_session_id(client, session_id_arg)?;
-    let mut adapter = TerminalPaneEmulator::new(cols, rows, SCROLLBACK_SIZE);
+    let mut adapter = SessionTerminalEmulator::new(cols, rows, SCROLLBACK_SIZE);
     let activation = activate_session_with_snapshot(
         client,
-        pane_registry,
+        terminal_registry,
         &mut adapter,
         &session_id,
         cols,
@@ -100,7 +100,7 @@ pub fn run_attach_tui(
         if next_cols != current_cols || next_rows != current_rows {
             resize_session(
                 client,
-                pane_registry,
+                terminal_registry,
                 &mut adapter,
                 &session_id,
                 next_cols,
@@ -115,7 +115,7 @@ pub fn run_attach_tui(
             render_attach_frame(
                 &mut out,
                 &adapter,
-                &activation.pane_id,
+                &activation.terminal_id,
                 &session_id,
                 current_cols,
                 current_rows,
@@ -143,7 +143,7 @@ pub fn run_attach_tui(
                     if let Some(data) = mapped {
                         write_input_for_session(
                             client,
-                            pane_registry,
+                            terminal_registry,
                             &mut adapter,
                             &session_id,
                             &data,
@@ -154,7 +154,7 @@ pub fn run_attach_tui(
                     if !data.is_empty() {
                         write_input_for_session(
                             client,
-                            pane_registry,
+                            terminal_registry,
                             &mut adapter,
                             &session_id,
                             &data,
@@ -169,7 +169,7 @@ pub fn run_attach_tui(
         }
 
         if let Some(event) = client.recv_event(Duration::from_millis(15))? {
-            dispatch_event_with_registry(&mut adapter, pane_registry, event);
+            dispatch_event_with_registry(&mut adapter, terminal_registry, event);
             dirty = true;
         }
     }

@@ -3,11 +3,11 @@ use chatminal_protocol::{
     SessionUpdatedEvent, WorkspaceUpdatedEvent,
 };
 
-use super::TerminalPaneAdapter;
+use super::SessionTerminalAdapter;
 
-pub struct StdoutJsonTerminalPaneAdapter;
+pub struct StdoutJsonSessionTerminalAdapter;
 
-impl TerminalPaneAdapter for StdoutJsonTerminalPaneAdapter {
+impl SessionTerminalAdapter for StdoutJsonSessionTerminalAdapter {
     fn on_pty_output(&mut self, event: PtyOutputEvent) {
         print_event(Event::PtyOutput(event));
     }
@@ -20,12 +20,12 @@ impl TerminalPaneAdapter for StdoutJsonTerminalPaneAdapter {
         print_event(Event::PtyError(event));
     }
 
-    fn on_session_output(&mut self, session_id: &str, pane_id: &str, event: &PtyOutputEvent) {
+    fn on_session_output(&mut self, session_id: &str, terminal_id: &str, event: &PtyOutputEvent) {
         print_named_payload(
             "session_output",
             serde_json::json!({
                 "session_id": session_id,
-                "pane_id": pane_id,
+                "terminal_id": terminal_id,
                 "seq": event.seq,
                 "chunk_len": event.chunk.len(),
                 "ts": event.ts
@@ -33,47 +33,47 @@ impl TerminalPaneAdapter for StdoutJsonTerminalPaneAdapter {
         );
     }
 
-    fn on_session_activated(&mut self, session_id: &str, pane_id: &str, cols: usize, rows: usize) {
+    fn on_session_activated(&mut self, session_id: &str, terminal_id: &str, cols: usize, rows: usize) {
         print_named_payload(
             "session_activated",
             serde_json::json!({
                 "session_id": session_id,
-                "pane_id": pane_id,
+                "terminal_id": terminal_id,
                 "cols": cols,
                 "rows": rows
             }),
         );
     }
 
-    fn on_session_snapshot(&mut self, session_id: &str, pane_id: &str, snapshot: &SessionSnapshot) {
+    fn on_session_snapshot(&mut self, session_id: &str, terminal_id: &str, snapshot: &SessionSnapshot) {
         print_named_payload(
             "session_snapshot",
             serde_json::json!({
                 "session_id": session_id,
-                "pane_id": pane_id,
+                "terminal_id": terminal_id,
                 "seq": snapshot.seq,
                 "content_len": snapshot.content.len()
             }),
         );
     }
 
-    fn on_session_input(&mut self, session_id: &str, pane_id: &str, byte_len: usize) {
+    fn on_session_input(&mut self, session_id: &str, terminal_id: &str, byte_len: usize) {
         print_named_payload(
             "session_input",
             serde_json::json!({
                 "session_id": session_id,
-                "pane_id": pane_id,
+                "terminal_id": terminal_id,
                 "byte_len": byte_len
             }),
         );
     }
 
-    fn on_session_resize(&mut self, session_id: &str, pane_id: &str, cols: usize, rows: usize) {
+    fn on_session_resize(&mut self, session_id: &str, terminal_id: &str, cols: usize, rows: usize) {
         print_named_payload(
             "session_resize",
             serde_json::json!({
                 "session_id": session_id,
-                "pane_id": pane_id,
+                "terminal_id": terminal_id,
                 "cols": cols,
                 "rows": rows
             }),

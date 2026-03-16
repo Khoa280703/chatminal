@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
-use crate::terminal_pane_emulator::PaneSnapshotSummary;
+use crate::session_terminal_emulator::TerminalSnapshotSummary;
 use crate::terminal_workspace_view_model::TerminalWorkspaceViewModel;
 
 pub fn render_terminal_workspace_ascii(
     view_model: &TerminalWorkspaceViewModel,
-    pane_snapshots: &[PaneSnapshotSummary],
-    max_pane_preview_lines: usize,
+    terminal_snapshots: &[TerminalSnapshotSummary],
+    max_terminal_preview_lines: usize,
 ) -> String {
     let mut lines = Vec::new();
     lines.push("=== Chatminal Native Workspace Preview ===".to_string());
@@ -27,34 +27,38 @@ pub fn render_terminal_workspace_ascii(
     lines.push("Sessions:".to_string());
     for session in &view_model.sessions {
         let active = if session.is_active { "*" } else { " " };
-        let pane = session
-            .pane_id
+        let terminal = session
+            .terminal_id
             .as_deref()
-            .map_or_else(|| "none".to_string(), |pane_id| abbreviate_id(pane_id));
+            .map_or_else(|| "none".to_string(), |terminal_id| abbreviate_id(terminal_id));
         lines.push(format!(
-            "[{active}] {} [{}] pane={} session={}",
+            "[{active}] {} [{}] terminal={} session={}",
             session.name,
             session.status,
-            pane,
+            terminal,
             abbreviate_id(&session.session_id)
         ));
     }
     lines.push(String::new());
 
-    let pane_by_id: HashMap<String, &PaneSnapshotSummary> = pane_snapshots
+    let terminal_by_id: HashMap<String, &TerminalSnapshotSummary> = terminal_snapshots
         .iter()
-        .map(|pane| (pane.pane_id.clone(), pane))
+        .map(|terminal| (terminal.terminal_id.clone(), terminal))
         .collect();
 
     lines.push("Active Terminal:".to_string());
-    if let Some(active_pane_id) = view_model.active_pane_id.as_deref() {
-        if let Some(active_pane) = pane_by_id.get(active_pane_id) {
+    if let Some(active_terminal_id) = view_model.active_terminal_id.as_deref() {
+        if let Some(active_terminal) = terminal_by_id.get(active_terminal_id) {
             lines.push(format!(
-                "pane={} session={} size={}x{}",
-                active_pane.pane_id, active_pane.session_id, active_pane.cols, active_pane.rows
+                "terminal={} session={} size={}x{}",
+                active_terminal.terminal_id,
+                active_terminal.session_id,
+                active_terminal.cols,
+                active_terminal.rows
             ));
             lines.push("---".to_string());
-            let preview = limit_trailing_lines(&active_pane.visible_text, max_pane_preview_lines);
+            let preview =
+                limit_trailing_lines(&active_terminal.visible_text, max_terminal_preview_lines);
             if preview.is_empty() {
                 lines.push("(empty)".to_string());
             } else {
@@ -62,8 +66,8 @@ pub fn render_terminal_workspace_ascii(
             }
         } else {
             lines.push(format!(
-                "pane={} (snapshot not available yet)",
-                active_pane_id
+                "terminal={} (snapshot not available yet)",
+                active_terminal_id
             ));
         }
     } else {

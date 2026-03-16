@@ -6,7 +6,7 @@ use chatminal_terminal_core::color::ColorPalette;
 use chatminal_terminal_core::{Terminal, TerminalConfiguration, TerminalSize};
 use serde::Serialize;
 
-use crate::terminal_pane_adapter::TerminalPaneAdapter;
+use crate::session_terminal_adapter::SessionTerminalAdapter;
 
 const DEFAULT_DPI: u32 = 96;
 const TERM_PROGRAM: &str = "chatminal-app";
@@ -28,22 +28,22 @@ impl TerminalConfiguration for EmbeddedTerminalConfig {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct PaneSnapshotSummary {
-    pub pane_id: String,
+pub struct TerminalSnapshotSummary {
+    pub terminal_id: String,
     pub session_id: String,
     pub cols: usize,
     pub rows: usize,
     pub visible_text: String,
 }
 
-struct PaneTerminal {
+struct SessionTerminal {
     session_id: String,
     cols: usize,
     rows: usize,
     terminal: Terminal,
 }
 
-impl PaneTerminal {
+impl SessionTerminal {
     fn new(session_id: &str, cols: usize, rows: usize, scrollback_size: usize) -> Self {
         let cols = cols.max(1);
         let rows = rows.max(1);
@@ -149,26 +149,26 @@ fn nth_char_boundary(value: &str, n: usize) -> usize {
         .unwrap_or(value.len())
 }
 
-pub struct TerminalPaneEmulator {
-    panes: HashMap<String, PaneTerminal>,
+pub struct SessionTerminalEmulator {
+    terminals: HashMap<String, SessionTerminal>,
     default_cols: usize,
     default_rows: usize,
     scrollback_size: usize,
 }
 
-impl TerminalPaneEmulator {
+impl SessionTerminalEmulator {
     pub fn new(default_cols: usize, default_rows: usize, scrollback_size: usize) -> Self {
         Self {
-            panes: HashMap::new(),
+            terminals: HashMap::new(),
             default_cols: default_cols.max(1),
             default_rows: default_rows.max(1),
             scrollback_size: scrollback_size.max(100),
         }
     }
 
-    fn ensure_pane(&mut self, session_id: &str, pane_id: &str) -> &mut PaneTerminal {
-        self.panes.entry(pane_id.to_string()).or_insert_with(|| {
-            PaneTerminal::new(
+    fn ensure_terminal(&mut self, session_id: &str, terminal_id: &str) -> &mut SessionTerminal {
+        self.terminals.entry(terminal_id.to_string()).or_insert_with(|| {
+            SessionTerminal::new(
                 session_id,
                 self.default_cols,
                 self.default_rows,
@@ -177,52 +177,52 @@ impl TerminalPaneEmulator {
         })
     }
 
-    pub fn pane_snapshot(&self, pane_id: &str) -> Option<PaneSnapshotSummary> {
-        let pane = self.panes.get(pane_id)?;
-        Some(PaneSnapshotSummary {
-            pane_id: pane_id.to_string(),
-            session_id: pane.session_id.clone(),
-            cols: pane.cols,
-            rows: pane.rows,
-            visible_text: pane.visible_text(),
+    pub fn terminal_snapshot(&self, terminal_id: &str) -> Option<TerminalSnapshotSummary> {
+        let terminal = self.terminals.get(terminal_id)?;
+        Some(TerminalSnapshotSummary {
+            terminal_id: terminal_id.to_string(),
+            session_id: terminal.session_id.clone(),
+            cols: terminal.cols,
+            rows: terminal.rows,
+            visible_text: terminal.visible_text(),
         })
     }
 
-    pub fn all_pane_snapshots(&self) -> Vec<PaneSnapshotSummary> {
-        self.panes
+    pub fn all_terminal_snapshots(&self) -> Vec<TerminalSnapshotSummary> {
+        self.terminals
             .iter()
-            .filter_map(|(pane_id, _)| self.pane_snapshot(pane_id))
+            .filter_map(|(terminal_id, _)| self.terminal_snapshot(terminal_id))
             .collect()
     }
 }
 
-impl TerminalPaneAdapter for TerminalPaneEmulator {
-    fn on_session_activated(&mut self, session_id: &str, pane_id: &str, cols: usize, rows: usize) {
-        let pane = self.ensure_pane(session_id, pane_id);
-        pane.session_id = session_id.to_string();
-        pane.resize(cols, rows);
+impl SessionTerminalAdapter for SessionTerminalEmulator {
+    fn on_session_activated(&mut self, session_id: &str, terminal_id: &str, cols: usize, rows: usize) {
+        let terminal = self.ensure_terminal(session_id, terminal_id);
+        terminal.session_id = session_id.to_string();
+        terminal.resize(cols, rows);
     }
 
-    fn on_session_snapshot(&mut self, session_id: &str, pane_id: &str, snapshot: &SessionSnapshot) {
+    fn on_session_snapshot(&mut self, session_id: &str, terminal_id: &str, snapshot: &SessionSnapshot) {
         let scrollback_size = self.scrollback_size;
-        let pane = self.ensure_pane(session_id, pane_id);
-        pane.session_id = session_id.to_string();
-        pane.reset_with_snapshot(snapshot, scrollback_size);
+        let terminal = self.ensure_terminal(session_id, terminal_id);
+        terminal.session_id = session_id.to_string();
+        terminal.reset_with_snapshot(snapshot, scrollback_size);
     }
 
-    fn on_session_output(&mut self, session_id: &str, pane_id: &str, event: &PtyOutputEvent) {
-        let pane = self.ensure_pane(session_id, pane_id);
-        pane.session_id = session_id.to_string();
-        pane.apply_output(event);
+    fn on_session_output(&mut self, session_id: &str, terminal_id: &str, event: &PtyOutputEvent) {
+        let terminal = self.ensure_terminal(session_id, terminal_id);
+        terminal.session_id = session_id.to_string();
+        terminal.apply_output(event);
     }
 
-    fn on_session_resize(&mut self, session_id: &str, pane_id: &str, cols: usize, rows: usize) {
-        let pane = self.ensure_pane(session_id, pane_id);
-        pane.session_id = session_id.to_string();
-        pane.resize(cols, rows);
+    fn on_session_resize(&mut self, session_id: &str, terminal_id: &str, cols: usize, rows: usize) {
+        let terminal = self.ensure_terminal(session_id, terminal_id);
+        terminal.session_id = session_id.to_string();
+        terminal.resize(cols, rows);
     }
 }
 
 #[cfg(test)]
-#[path = "terminal_pane_emulator_tests.rs"]
-mod terminal_pane_emulator_tests;
+#[path = "session_terminal_emulator_tests.rs"]
+mod session_terminal_emulator_tests;
