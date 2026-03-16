@@ -202,7 +202,7 @@ impl TermWindow {
     fn spawn_overlay_for_render_scope_capability<T, F>(
         &mut self,
         render_scope_id: u64,
-        tab: &Arc<OverlayRenderScope>,
+        scope_size: TerminalSize,
         func: F,
     )
     where
@@ -210,7 +210,7 @@ impl TermWindow {
         F: Send + 'static
             + FnOnce(u64, OverlayTerminal) -> anyhow::Result<T>,
     {
-        let (overlay, future) = start_overlay(self, tab, func);
+        let (overlay, future) = start_overlay(self, render_scope_id, scope_size, func);
         self.assign_overlay_for_render_scope(render_scope_id, overlay);
         promise::spawn::spawn(future).detach();
     }
@@ -224,10 +224,10 @@ impl TermWindow {
         let Some(render_scope_id) = self.active_render_scope_id() else {
             return false;
         };
-        let Some(tab) = self.render_scope_capability(render_scope_id) else {
+        let Some(scope_size) = self.render_scope_size(render_scope_id) else {
             return false;
         };
-        self.spawn_overlay_for_render_scope_capability(render_scope_id, &tab, func);
+        self.spawn_overlay_for_render_scope_capability(render_scope_id, scope_size, func);
         true
     }
 
@@ -237,10 +237,10 @@ impl TermWindow {
         F: Send + 'static
             + FnOnce(u64, OverlayTerminal) -> anyhow::Result<T>,
     {
-        let Some(tab) = self.render_scope_capability(render_scope_id) else {
+        let Some(scope_size) = self.render_scope_size(render_scope_id) else {
             return false;
         };
-        self.spawn_overlay_for_render_scope_capability(render_scope_id, &tab, func);
+        self.spawn_overlay_for_render_scope_capability(render_scope_id, scope_size, func);
         true
     }
 

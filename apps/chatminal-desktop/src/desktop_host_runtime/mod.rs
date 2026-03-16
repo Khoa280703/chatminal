@@ -14,7 +14,7 @@ use std::sync::OnceLock;
 
 use anyhow::anyhow;
 use session_engine::TerminalInstanceId;
-use chatminal_runtime::{DaemonState, RuntimeExecutionAdapter};
+use chatminal_runtime::DaemonState;
 use crate::chatminal_runtime::ChatminalRuntimeClient;
 use config::keyassignment::SpawnSessionDomain;
 use config::ConfigHandle;

@@ -224,13 +224,16 @@ Last updated: 2026-03-13
    - public Lua surface không còn `get_host_tab`/`get_host_leaf`; public ids đổi sang `terminal_instance_id`
    - `desktop_host_runtime` được siết về private adapter zone, không còn public host helper surface dư thừa
    - `cargo check --workspace --all-targets` đã được khóa xanh lại cùng full test matrix active
-44. Session = Tab: Remove HostRenderScope & collapse dual state (2026-03-16):
+44. Session = Tab: Remove HostRenderScope & collapse dual state (2026-03-16) — COMPLETED:
    - hoàn tất plan `260313-1618-session-tab-collapse-host-render-scope-removal` với đủ 9 phase
    - xóa `HostRenderScope` (Tab wrapper); session sở hữu pane trực tiếp qua `session_id → Arc<ChatminalSessionPane>` lookup
    - merge dual state: `SessionExecutionStatus` enum added vào `SessionEntry` để track running status
    - delete `crates/chatminal-session-runtime/` hoàn toàn; execution code move sang `desktop_host_runtime`
    - dependency reversal: `chatminal-runtime` không còn depend `chatminal-session-runtime`; layout types move sang runtime
-   - vocabulary rename: Tab→Session, Pane→Session, PaneDirection→SessionDirection, LeafRef→TerminalRef, `enable_tab_bar`→`enable_session_bar` (~25 files đổi)
+   - vocabulary rename: Tab→Session, Pane→Terminal vocabulary rename, PaneDirection→SessionDirection, LeafRef→TerminalRef (~25 files đổi)
+   - `overlay/mod.rs` no longer imports OverlayRenderScope; overlay spawn uses primitives `(scope_id, size)`
+   - `chatminal-mux` crate fully deleted from workspace (0 references remain)
+   - dead code eliminated: duplicate CloseCurrentSession arm, unused pane functions
    - verification freeze:
      - `cargo check --workspace --all-targets` pass (0 errors)
      - `cargo test -p chatminal-runtime -- --test-threads=1` pass (65/65)

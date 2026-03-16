@@ -5,6 +5,7 @@ use crate::chatminal_runtime::{
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum ChatminalRenderSplitAxis {
     Horizontal,
     Vertical,

@@ -2,6 +2,11 @@
 
 Last updated: 2026-03-16
 
+## Latest changes (Plan 260313-1618)
+- **OverlayRenderScope boundary**: `overlay/mod.rs` isolated; overlay spawn uses primitives `(scope_id, size)` instead of render-scope types.
+- **Session rename complete**: Tab→Session, Pane→Terminal vocabulary across 25+ files; KeyAssignment variants and ArgType updated.
+- **chatminal-mux deletion**: Mux crate removed entirely from workspace; no references remain in active codebase.
+
 ## Topology
 
 ### Desktop app
@@ -57,11 +62,11 @@ chatminald / chatminal-app
 
 ### 4. Private engine adapter
 - `desktop_host_runtime/*` bridge từ facade/runtime sang engine host thực tế.
-- Adapter này giữ host window/session pane/runtime pane/domain internals và overlay compatibility types.
+- Adapter này giữ host window/session pane/runtime pane/domain internals.
 - Host vocabulary bị thu xuống `pub(crate)` hoặc private trong desktop app path.
 - Render path: `WorkspaceLayout → session_id → DesktopSessionHost.pane(session_id) → GPU draw`
-  (không còn đi qua `HostRenderScope` để build pane list)
-- `HostRenderScope (Tab)` chỉ còn tồn tại cho overlay compat (`OverlayRenderScope`); KHÔNG tạo instance trong session spawn/render path.
+  (không còn đi qua `HostRenderScope` để build pane list).
+- `HostRenderScope` fully removed; `OverlayRenderScope` isolated from overlay boundary. Session owns pane directly via `session_id → Arc<ChatminalSessionPane>` lookup.
 
 ### 5. Lua/config boundary
 - `crates/chatminal-lua-bridge/*` expose Chatminal-facing session/window/terminal queries.
@@ -79,7 +84,7 @@ chatminald / chatminal-app
 
 ## Remaining intentional compatibility
 - Engine internals vẫn có `Mux/Tab/Pane` trong `chatminal-host-runtime` và private adapter desktop.
-- Command/config compatibility vẫn giữ upstream `KeyAssignment::*Tab*` trong `desktop_commands.rs` để không gãy config cũ.
-- `OverlayRenderScope = Tab` dùng cho launcher/confirm/prompt overlays — intentional, KHÔNG xóa.
-- `SessionExecutionStatus` enum thêm vào `chatminal-runtime/state.rs` — chưa wire sync (Phase 07 sau khi đảo dependency direction).
+- Command/config compatibility vẫn giữ upstream `KeyAssignment::*Tab*` translation trong `desktop_commands.rs` để không gãy config cũ.
+- `OverlayRenderScope` dùng cho launcher/confirm/prompt overlays nhưng không còn coupled với render scope; boundary fully isolated.
+- `SessionExecutionStatus` enum thêm vào `chatminal-runtime/state.rs` để track running status.
 - Các phần trên là intentional private/compatibility zones, không còn là product-facing architecture.

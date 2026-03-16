@@ -13,7 +13,7 @@
     - Phase 06: Dead code deletion + full verification (grep gate pass, full test suite pass)
     - Phase 07: Dependency reversal — workspace layout types moved to chatminal-runtime; session-runtime no longer depended by runtime
     - Phase 08: chatminal-session-runtime crate deleted entirely; execution code moved to desktop_host_runtime
-    - Phase 09: Vocabulary rename — Tab→Session, Pane→Session, PaneDirection→SessionDirection, LeafRef→TerminalRef, tab_bar→session_bar across ~25 files
+    - Phase 09: Vocabulary rename — Tab→Session, Pane→Terminal vocabulary; PaneDirection→SessionDirection, LeafRef→TerminalRef, tab_bar→session_bar across ~25 files
   - Verification:
     - `cargo check --workspace --all-targets` pass (0 errors)
     - `cargo test -p chatminal-runtime -- --test-threads=1` pass (65/65 tests)
@@ -22,10 +22,15 @@
     - 0 references to `chatminal_session_runtime` in .rs files (outside third_party)
 
 ### Changed
+- **OverlayRenderScope boundary isolated**: `overlay/mod.rs` no longer imports render scope types; overlay spawn now uses primitives `(scope_id: u64, scope_size: TerminalSize)`
+- **chatminal-mux crate fully deleted**: No remaining references in .toml or .rs files (outside third_party)
+- **KeyAssignment vocabulary updated**: `ShowTabNavigator`→`ShowSessionNavigator`, `ActivatePaneByIndex`→`ActivateTerminalByIndex`, `TogglePaneZoomState`→`ToggleTerminalZoomState`, `SetPaneZoomState`→`SetTerminalZoomState`
+- **ArgType vocabulary updated**: `ActivePane`→`ActiveTerminal`, `ActiveTab`→`ActiveSession`
+- **chatminal-app pane model removed**: All `pane_*` vocabulary replaced with `terminal_*`
+- **Dead code eliminated**: Removed duplicate `CloseCurrentSession` arm and unused `close_current_pane`, `start_overlay_pane`, `confirm_close_pane` functions
 - HostRenderScope eliminated from active path; render flow now: session_id → DesktopSessionHost.pane_for_session() → ChatminalRenderState
 - Dual state management consolidated: execution status now owned by chatminal-runtime via SessionExecutionStatus enum
-- Public config/Lua API vocabulary unified: user config now uses SpawnSession/ActivateSession/CloseCurrentSession/TerminalRef (no more Tab/Pane/Leaf)
-- Developer mental model simplified: only need to know chatminal-runtime for feature development; session-runtime execution is private desktop implementation detail
+- Developer mental model simplified: only need to know chatminal-runtime for feature development; session execution is private desktop implementation detail
 
 ## 2026-03-13
 

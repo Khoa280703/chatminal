@@ -21,9 +21,9 @@ use window::{KeyCode, Modifiers};
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum ArgType {
     /// Operates on the active pane
-    ActivePane,
+    ActiveTerminal,
     /// Operates on the active tab
-    ActiveTab,
+    ActiveSession,
     /// Operates on the active window
     ActiveWindow,
 }
@@ -652,7 +652,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: "Paste primary selection".into(),
             doc: "Pastes text from the primary selection".into(),
             keys: vec![(Modifiers::SHIFT, "Insert".into())],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Edit"],
             icon: Some("md_content_paste"),
         },
@@ -664,7 +664,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: "Copy to primary selection".into(),
             doc: "Copies text to the primary selection".into(),
             keys: vec![(Modifiers::CTRL, "Insert".into())],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Edit"],
             icon: Some("md_content_copy"),
         },
@@ -679,7 +679,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
                 (Modifiers::SUPER, "c".into()),
                 (Modifiers::NONE, "Copy".into()),
             ],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Edit"],
             icon: Some("md_content_copy"),
         },
@@ -691,7 +691,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: "Copy to clipboard and primary selection".into(),
             doc: "Copies text to the clipboard and the primary selection".into(),
             keys: vec![(Modifiers::CTRL, "Insert".into())],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Edit"],
             icon: Some("md_content_copy"),
         },
@@ -702,7 +702,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
                 (Modifiers::SUPER, "v".into()),
                 (Modifiers::NONE, "Paste".into()),
             ],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Edit"],
             icon: Some("md_content_paste"),
         },
@@ -795,7 +795,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
               viewport of the current pane"
                 .into(),
             keys: vec![(Modifiers::SUPER, "k".into())],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Edit"],
             icon: Some("cod_clear_all"),
         },
@@ -803,7 +803,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: "Clear the scrollback and viewport".into(),
             doc: "Removes all content from the screen and scrollback".into(),
             keys: vec![],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Edit"],
             icon: Some("cod_clear_all"),
         },
@@ -811,7 +811,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: "Search pane output".into(),
             doc: "Enters the search mode UI for the current pane".into(),
             keys: vec![(Modifiers::SUPER, "f".into())],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Edit"],
             icon: Some("oct_search"),
         },
@@ -819,7 +819,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: "Search pane output".into(),
             doc: "Enters the search mode UI for the current pane".into(),
             keys: vec![],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &[],
             icon: Some("oct_search"),
         },
@@ -859,7 +859,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: "Enter QuickSelect mode".into(),
             doc: "Activates the quick selection UI for the current pane".into(),
             keys: vec![(Modifiers::CTRL.union(Modifiers::SHIFT), "Space".into())],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Edit"],
             icon: None,
         },
@@ -867,7 +867,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: "Enter QuickSelect mode".into(),
             doc: "Activates the quick selection UI for the current pane".into(),
             keys: vec![],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &[],
             icon: None,
         },
@@ -875,7 +875,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: "Enter Emoji / Character selection mode".into(),
             doc: "Activates the character selection UI for the current pane".into(),
             keys: vec![(Modifiers::CTRL.union(Modifiers::SHIFT), "u".into())],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Edit"],
             icon: Some("md_sticker_emoji"),
         },
@@ -886,7 +886,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: "Enter Pane selection mode".into(),
             doc: "Activates the pane selection UI".into(),
             keys: vec![], // FIXME: find a new assignment
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Window"],
             icon: Some("cod_multiple_windows"),
         },
@@ -897,7 +897,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: "Swap a pane with the active pane".into(),
             doc: "Activates the pane selection UI".into(),
             keys: vec![], // FIXME: find a new assignment
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Window"],
             icon: Some("cod_multiple_windows"),
         },
@@ -908,7 +908,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: "Swap a pane with the active pane, keeping focus".into(),
             doc: "Activates the pane selection UI".into(),
             keys: vec![], // FIXME: find a new assignment
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Window"],
             icon: Some("cod_multiple_windows"),
         },
@@ -919,7 +919,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: "Move a pane into its own tab".into(),
             doc: "Activates the pane selection UI".into(),
             keys: vec![], // FIXME: find a new assignment
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Window"],
             icon: Some("cod_multiple_windows"),
         },
@@ -930,7 +930,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: "Move a pane into its own window".into(),
             doc: "Activates the pane selection UI".into(),
             keys: vec![], // FIXME: find a new assignment
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Window"],
             icon: Some("cod_multiple_windows"),
         },
@@ -1053,7 +1053,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
                 icon: None,
             }
         }
-        ActivatePaneByIndex(n) => {
+        ActivateTerminalByIndex(n) => {
             let n = *n;
             let ordinal = english_ordinal(n as isize);
             CommandDef {
@@ -1065,7 +1065,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
                 icon: None,
             }
         }
-        SetPaneZoomState(true) => CommandDef {
+        SetTerminalZoomState(true) => CommandDef {
             brief: format!("Zooms the current Pane").into(),
             doc: format!(
                 "Places the current pane into the zoomed state, \
@@ -1077,7 +1077,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             menubar: &[],
             icon: Some("md_fullscreen"),
         },
-        SetPaneZoomState(false) => CommandDef {
+        SetTerminalZoomState(false) => CommandDef {
             brief: format!("Un-Zooms the current Pane").into(),
             doc: format!("Takes the current pane out of the zoomed state").into(),
             keys: vec![],
@@ -1103,7 +1103,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             processes that are running in its terminal instances."
                 .into(),
             keys: vec![(Modifiers::SUPER, "w".into())],
-            args: &[ArgType::ActiveTab],
+            args: &[ArgType::ActiveSession],
             menubar: &["Shell"],
             icon: Some("md_close_box_outline"),
         },
@@ -1113,7 +1113,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             processes that are running in its terminal instances."
                 .into(),
             keys: vec![],
-            args: &[ArgType::ActiveTab],
+            args: &[ArgType::ActiveSession],
             menubar: &[],
             icon: Some("md_close_box_outline"),
         },
@@ -1299,7 +1299,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             one place to the left"
                 .into(),
             keys: vec![(Modifiers::CTRL.union(Modifiers::SHIFT), "PageUp".into())],
-            args: &[ArgType::ActiveTab],
+            args: &[ArgType::ActiveSession],
             menubar: &["Window", "Move Session"],
             icon: Some("fa_long_arrow_left"),
         },
@@ -1309,7 +1309,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             one place to the right"
                 .into(),
             keys: vec![(Modifiers::CTRL.union(Modifiers::SHIFT), "PageDown".into())],
-            args: &[ArgType::ActiveTab],
+            args: &[ArgType::ActiveSession],
             menubar: &["Window", "Move Session"],
             icon: Some("fa_long_arrow_right"),
         },
@@ -1328,7 +1328,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
                 )
                 .into(),
                 keys: vec![],
-                args: &[ArgType::ActiveTab],
+                args: &[ArgType::ActiveSession],
                 menubar: &[],
                 icon: Some(icon),
             }
@@ -1343,7 +1343,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
                 )
                 .into(),
                 keys: vec![],
-                args: &[ArgType::ActiveTab],
+                args: &[ArgType::ActiveSession],
                 menubar: &[],
                 icon: None,
             }
@@ -1355,7 +1355,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
                     brief: "Scroll Up One Page".into(),
                     doc: "Scrolls the viewport up by 1 page".into(),
                     keys: vec![(Modifiers::SHIFT, "PageUp".into())],
-                    args: &[ArgType::ActivePane],
+                    args: &[ArgType::ActiveTerminal],
                     menubar: &["View"],
                     icon: None,
                 }
@@ -1364,7 +1364,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
                     brief: "Scroll Down One Page".into(),
                     doc: "Scrolls the viewport down by 1 page".into(),
                     keys: vec![(Modifiers::SHIFT, "PageDown".into())],
-                    args: &[ArgType::ActivePane],
+                    args: &[ArgType::ActiveTerminal],
                     menubar: &["View"],
                     icon: None,
                 }
@@ -1374,7 +1374,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
                     brief: format!("Scroll Up {amount} Page(s)").into(),
                     doc: format!("Scrolls the viewport up by {amount} pages").into(),
                     keys: vec![],
-                    args: &[ArgType::ActivePane],
+                    args: &[ArgType::ActiveTerminal],
                     menubar: &["View"],
                     icon: None,
                 }
@@ -1383,7 +1383,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
                     brief: format!("Scroll Down {amount} Page(s)").into(),
                     doc: format!("Scrolls the viewport down by {amount} pages").into(),
                     keys: vec![],
-                    args: &[ArgType::ActivePane],
+                    args: &[ArgType::ActiveTerminal],
                     menubar: &["View"],
                     icon: None,
                 }
@@ -1403,7 +1403,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
                 )
                 .into(),
                 keys: vec![],
-                args: &[ArgType::ActivePane],
+                args: &[ArgType::ActiveTerminal],
                 menubar: &[],
                 icon: None,
             }
@@ -1419,7 +1419,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
                 )
                 .into(),
                 keys: vec![],
-                args: &[ArgType::ActivePane],
+                args: &[ArgType::ActiveTerminal],
                 menubar: &[],
                 icon: Some("oct_terminal"),
             }
@@ -1432,7 +1432,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
                 in the current mouse event"
                 .into(),
             keys: vec![],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &[],
             icon: None,
         },
@@ -1440,7 +1440,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: "Scroll to the bottom".into(),
             doc: "Scrolls to the bottom of the viewport".into(),
             keys: vec![],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["View"],
             icon: Some("md_format_align_bottom"),
         },
@@ -1448,7 +1448,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: "Scroll to the top".into(),
             doc: "Scrolls to the top of the viewport".into(),
             keys: vec![],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["View"],
             icon: Some("md_format_align_top"),
         },
@@ -1458,7 +1458,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             the keyboard"
                 .into(),
             keys: vec![(Modifiers::CTRL.union(Modifiers::SHIFT), "x".into())],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Edit"],
             icon: Some("md_content_copy"),
         },
@@ -1476,7 +1476,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
                     .union(Modifiers::SHIFT),
                 "'".into(),
             )],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Shell"],
             icon: Some("cod_split_vertical"),
         },
@@ -1494,7 +1494,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
                     .union(Modifiers::SHIFT),
                 "5".into(),
             )],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Shell"],
             icon: Some("cod_split_horizontal"),
         },
@@ -1504,7 +1504,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             the default program into the right hand side"
                 .into(),
             keys: vec![],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &[],
             icon: Some("cod_split_horizontal"),
         },
@@ -1514,7 +1514,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             the default program into the bottom"
                 .into(),
             keys: vec![],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &[],
             icon: Some("cod_split_vertical"),
         },
@@ -1527,7 +1527,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
                     .union(Modifiers::SHIFT),
                 "LeftArrow".into(),
             )],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Window", "Resize Pane"],
             icon: None,
         },
@@ -1540,7 +1540,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
                     .union(Modifiers::SHIFT),
                 "RightArrow".into(),
             )],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Window", "Resize Pane"],
             icon: None,
         },
@@ -1553,7 +1553,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
                     .union(Modifiers::SHIFT),
                 "UpArrow".into(),
             )],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Window", "Resize Pane"],
             icon: None,
         },
@@ -1566,7 +1566,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
                     .union(Modifiers::SHIFT),
                 "DownArrow".into(),
             )],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Window", "Resize Pane"],
             icon: None,
         },
@@ -1576,7 +1576,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: "Activate Pane Left".into(),
             doc: "Activates the pane to the left of the current pane".into(),
             keys: vec![(Modifiers::CTRL.union(Modifiers::SHIFT), "LeftArrow".into())],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Window", "Select Pane"],
             icon: Some("fa_long_arrow_left"),
         },
@@ -1584,7 +1584,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: "Activate Pane Right".into(),
             doc: "Activates the pane to the right of the current pane".into(),
             keys: vec![(Modifiers::CTRL.union(Modifiers::SHIFT), "RightArrow".into())],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Window", "Select Pane"],
             icon: Some("fa_long_arrow_right"),
         },
@@ -1592,7 +1592,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: "Activate Pane Up".into(),
             doc: "Activates the pane to the top of the current pane".into(),
             keys: vec![(Modifiers::CTRL.union(Modifiers::SHIFT), "UpArrow".into())],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Window", "Select Pane"],
             icon: Some("fa_long_arrow_up"),
         },
@@ -1600,15 +1600,15 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: "Activate Pane Down".into(),
             doc: "Activates the pane to the bottom of the current pane".into(),
             keys: vec![(Modifiers::CTRL.union(Modifiers::SHIFT), "DownArrow".into())],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Window", "Select Pane"],
             icon: Some("fa_long_arrow_down"),
         },
-        TogglePaneZoomState => CommandDef {
+        ToggleTerminalZoomState => CommandDef {
             brief: "Toggle Pane Zoom".into(),
             doc: "Toggles the zoom state for the current pane".into(),
             keys: vec![(Modifiers::CTRL.union(Modifiers::SHIFT), "z".into())],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Window"],
             icon: Some("md_fullscreen"),
         },
@@ -1632,7 +1632,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: "Open link at mouse cursor".into(),
             doc: "If there is no link under the mouse cursor, has no effect.".into(),
             keys: vec![],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Shell"],
             icon: None,
         },
@@ -1644,7 +1644,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             menubar: &["Shell"],
             icon: None,
         },
-        ShowTabNavigator => CommandDef {
+        ShowSessionNavigator => CommandDef {
             brief: "Navigate sessions".into(),
             doc: "Shows the session navigator".into(),
             keys: vec![],
@@ -1656,7 +1656,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: "Detach the domain of the active pane".into(),
             doc: "Detaches (disconnects from) the domain of the active pane".into(),
             keys: vec![],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Shell", "Detach"],
             icon: Some("md_pipe_disconnected"),
         },
@@ -1664,7 +1664,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: "Detach the default domain".into(),
             doc: "Detaches (disconnects from) the default domain".into(),
             keys: vec![],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Shell", "Detach"],
             icon: Some("md_pipe_disconnected"),
         },
@@ -1672,7 +1672,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: format!("Detach the `{name}` domain").into(),
             doc: format!("Detaches (disconnects from) the domain named `{name}`").into(),
             keys: vec![],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Shell", "Detach"],
             icon: Some("md_pipe_disconnected"),
         },
@@ -1680,7 +1680,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: format!("Detach the domain with id {id}").into(),
             doc: format!("Detaches (disconnects from) the domain with id {id}").into(),
             keys: vec![],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Shell", "Detach"],
             icon: Some("md_pipe_disconnected"),
         },
@@ -1858,7 +1858,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
                 brief: brief.into(),
                 doc: "Performs multiple nested actions".into(),
                 keys: vec![],
-                args: &[ArgType::ActivePane],
+                args: &[ArgType::ActiveTerminal],
                 menubar: &[],
                 icon: None,
             }
@@ -1946,7 +1946,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
                 )
                 .into(),
                 keys: vec![],
-                args: &[ArgType::ActivePane],
+                args: &[ArgType::ActiveTerminal],
                 menubar: &["Window", "Workspace"],
                 icon: None,
             }
@@ -1955,7 +1955,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: format!("Activate key table `{name}`").into(),
             doc: format!("Activate key table `{name}`").into(),
             keys: vec![],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &[],
             icon: None,
         },
@@ -1963,7 +1963,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: "Pop the current key table".into(),
             doc: "Pop the current key table".into(),
             keys: vec![],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &[],
             icon: None,
         },
@@ -1971,7 +1971,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: format!("Attach domain `{name}`").into(),
             doc: format!("Attach domain `{name}`").into(),
             keys: vec![],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Shell", "Attach"],
             icon: Some("md_pipe"),
         },
@@ -1979,7 +1979,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: format!("{copy_mode:?}").into(),
             doc: "".into(),
             keys: vec![],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Edit", "Copy Mode"],
             icon: None,
         },
@@ -1987,7 +1987,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: format!("Rotate panes {direction:?}").into(),
             doc: format!("Rotate panes {direction:?}").into(),
             keys: vec![],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Window", "Rotate Pane"],
             icon: Some(match direction {
                 RotationDirection::Clockwise => "md_rotate_right",
@@ -2000,7 +2000,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
                 brief: label_string(action, format!("Split the current pane {direction:?}")).into(),
                 doc: format!("Split the current pane {direction:?}").into(),
                 keys: vec![],
-                args: &[ArgType::ActivePane],
+                args: &[ArgType::ActiveTerminal],
                 menubar: &[],
                 icon: match split.direction {
                     SessionDirection::Up | SessionDirection::Down => Some("cod_split_vertical"),
@@ -2013,7 +2013,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: "Reset the terminal emulation state in the current pane".into(),
             doc: "Reset the terminal emulation state in the current pane".into(),
             keys: vec![],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Shell"],
             icon: None,
         },
@@ -2021,7 +2021,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             brief: "Activate Command Palette".into(),
             doc: "Shows the command palette modal".into(),
             keys: vec![(Modifiers::CTRL.union(Modifiers::SHIFT), "p".into())],
-            args: &[ArgType::ActivePane],
+            args: &[ArgType::ActiveTerminal],
             menubar: &["Edit"],
             icon: None,
         },
@@ -2146,10 +2146,10 @@ fn compute_default_actions() -> Vec<KeyAssignment> {
         ActivateSessionDirection(SessionDirection::Right),
         ActivateSessionDirection(SessionDirection::Up),
         ActivateSessionDirection(SessionDirection::Down),
-        TogglePaneZoomState,
+        ToggleTerminalZoomState,
         ActivateLastSession,
         ShowLauncher,
-        ShowTabNavigator,
+        ShowSessionNavigator,
         // ----------------- Help
         ShowDebugOverlay,
         // ----------------- Misc

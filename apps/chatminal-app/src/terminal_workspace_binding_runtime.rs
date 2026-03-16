@@ -57,15 +57,15 @@ pub fn bootstrap_workspace_binding_state(
 
     for session in &workspace.sessions {
         session_last_event_ts.insert(session.session_id.clone(), bootstrap_started_at);
-        let pane_id = if active_session_id == Some(session.session_id.as_str()) {
+        let terminal_id = if active_session_id == Some(session.session_id.as_str()) {
             pane_registry.activate_session(&session.session_id)
         } else {
-            pane_registry.ensure_pane_for_session(&session.session_id)
+            pane_registry.ensure_terminal_for_session(&session.session_id)
         };
-        adapter.on_session_activated(&session.session_id, &pane_id, cols, rows);
+        adapter.on_session_activated(&session.session_id, &terminal_id, cols, rows);
 
         match fetch_snapshot_for_session(client, &session.session_id, preview_lines) {
-            Ok(snapshot) => adapter.on_session_snapshot(&session.session_id, &pane_id, &snapshot),
+            Ok(snapshot) => adapter.on_session_snapshot(&session.session_id, &terminal_id, &snapshot),
             Err(err) => hydrate_errors.push(format!(
                 "session '{}' snapshot hydrate failed: {err}",
                 session.session_id

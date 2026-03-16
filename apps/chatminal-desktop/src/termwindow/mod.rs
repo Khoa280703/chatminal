@@ -6,8 +6,7 @@ use crate::colorease::ColorEase;
 use crate::frontend::{front_end, try_front_end};
 use crate::inputmap::InputMap;
 use crate::overlay::{
-    confirm_close_chatminal_session_leaf_or_session,
-    confirm_close_window, confirm_quit_program, launcher, start_overlay, start_overlay_pane,
+    confirm_close_window, confirm_quit_program, launcher, start_overlay,
     CopyModeParams, CopyOverlay, LauncherArgs, LauncherFlags, QuickSelectOverlay,
 };
 use crate::chatminal_runtime::overlay_compat::{
@@ -37,9 +36,7 @@ use crate::termwindow::render::{
     CachedLineState, LineQuadCacheKey, LineQuadCacheValue, LineToEleShapeCacheKey,
     LineToElementShapeItem,
 };
-use crate::desktop_overlay_actions::{
-    show_close_runtime_entry_overlay, show_close_terminal_overlay,
-};
+use crate::desktop_overlay_actions::show_close_runtime_entry_overlay;
 use crate::desktop_termwindow_types::{TerminalPaneLayout, TerminalSplit, TerminalUiKey};
 use crate::termwindow::webgpu::WebGpuState;
 use ::engine_term::input::{ClickPosition, MouseButton as TMB};
@@ -769,10 +766,13 @@ impl TermWindow {
 
     fn render_scope_capability(&self, render_target_id: u64) -> Option<Arc<OverlayRenderScope>> {
         if self.chatminal_sidebar.is_enabled() {
-            return crate::chatminal_runtime::desktop_render_scope_capability(
+            let session_id = crate::chatminal_runtime::desktop_session_entry_binding_for_render_target(
                 self.window_id as DesktopWindowId,
                 crate::chatminal_runtime::SessionRenderTargetId::new(render_target_id),
-            );
+            )?.session_id;
+            let runtime_id = crate::chatminal_runtime::desktop_runtime_id_for_session(&session_id)?;
+            return crate::chatminal_runtime::desktop_session_host(self.window_id as DesktopWindowId)?
+                .overlay_scope_for_runtime(runtime_id);
         }
 
         crate::chatminal_runtime::host_render_scope_capability(render_target_id)

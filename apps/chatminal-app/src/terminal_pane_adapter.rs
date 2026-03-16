@@ -56,8 +56,8 @@ pub fn dispatch_event_with_registry(
 ) {
     match event {
         Event::PtyOutput(value) => {
-            let pane_id = registry.ensure_pane_for_session(&value.session_id);
-            adapter.on_session_output(&value.session_id, &pane_id, &value);
+            let terminal_id = registry.ensure_terminal_for_session(&value.session_id);
+            adapter.on_session_output(&value.session_id, &terminal_id, &value);
             adapter.on_pty_output(value);
         }
         Event::PtyExited(value) => adapter.on_pty_exited(value),

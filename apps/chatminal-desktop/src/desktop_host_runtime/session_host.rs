@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use super::session_engine::{
     TerminalInstanceId, SessionEngine, SessionEngineShared,
-    SessionLayoutSnapshot, SessionRuntimeState, StatefulSessionEngine,
+    SessionRuntimeState, StatefulSessionEngine,
     RuntimeId,
 };
 use chatminal_terminal_core::TerminalSize as CoreTerminalSize;
@@ -25,7 +25,7 @@ use portable_pty::CommandBuilder;
 use super::session_pane::ChatminalSessionPane;
 use super::{
     DesktopEngineRuntimeAdapter, HostDomainId as DomainId, HostMux,
-    HostLayoutNode, HostRenderScope, HostTerminal, HostTerminalHandle,
+    HostRenderScope, HostTerminal, HostTerminalHandle,
     HostRenderableDimensions as RenderableDimensions, HostSplitSource as SplitSource,
     RuntimeSplitRequest as SplitRequest, RuntimeWindowId as EngineWindowId,
 };

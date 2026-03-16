@@ -46,7 +46,7 @@ pub fn render_terminal_workspace_ascii(
         .map(|pane| (pane.pane_id.clone(), pane))
         .collect();
 
-    lines.push("Active Pane:".to_string());
+    lines.push("Active Terminal:".to_string());
     if let Some(active_pane_id) = view_model.active_pane_id.as_deref() {
         if let Some(active_pane) = pane_by_id.get(active_pane_id) {
             lines.push(format!(

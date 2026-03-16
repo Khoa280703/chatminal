@@ -28,16 +28,15 @@ pub use engine_runtime_adapter::{
 };
 pub use runtime_bridge::{SessionBridgeAction, SessionRuntimeBridge};
 pub use session_core_state::{
-    SessionCoreState, SessionRuntimeRecord, TerminalInstanceProcessState,
-    TerminalInstanceRuntimeState,
+    SessionCoreState, TerminalInstanceProcessState,
 };
 pub use session_engine::{SessionEngine, StatefulSessionEngine};
 pub use session_engine_shared::SessionEngineShared;
 pub use session_event_bus::{SessionEventBus, SessionEventSubscription, SessionRuntimeEvent};
-pub use session_ids::{LayoutNodeId, RuntimeId, SessionViewId, TerminalInstanceId, WorkspaceNodeId};
+pub use session_ids::{LayoutNodeId, RuntimeId, TerminalInstanceId};
 pub use session_layout_tree::{
-    SessionLayoutNodeKind, SessionLayoutNodeSnapshot, SessionLayoutSnapshot, SessionLayoutTreeNode,
-    SessionSplitAxis, SessionTerminalInstanceSnapshot, build_layout_snapshot_from_tree,
+    SessionLayoutSnapshot, SessionLayoutTreeNode,
+    SessionSplitAxis, build_layout_snapshot_from_tree,
 };
 pub use session_runtime_state::SessionRuntimeState;
 pub use session_snapshot::{SessionRuntimeLookup, SessionRuntimeSnapshot};

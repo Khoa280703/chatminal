@@ -408,7 +408,7 @@ fn session_engine_shared() -> Option<Arc<SessionEngineShared>> {
         .map(|runtime| runtime.session_engine_shared())
 }
 
-fn desktop_runtime_id_for_session(session_id: &str) -> Option<RuntimeId> {
+pub(crate) fn desktop_runtime_id_for_session(session_id: &str) -> Option<RuntimeId> {
     session_engine_shared()?
         .core_state()
         .lock()
@@ -730,15 +730,6 @@ pub fn desktop_active_render_target_id(
         .and_then(|snapshot| snapshot.window_binding.active_render_target_id)
 }
 
-pub(crate) fn desktop_render_scope_capability(
-    window_id: DesktopWindowId,
-    render_target_id: SessionRenderTargetId,
-) -> Option<Arc<overlay_compat::OverlayRenderScope>> {
-    let session_id =
-        desktop_session_entry_binding_for_render_target(window_id, render_target_id)?.session_id;
-    desktop_render_scope_capability_for_session(window_id, &session_id)
-}
-
 pub fn desktop_workspace_subscribe(
     workspace_id: &str,
 ) -> Result<DesktopWorkspaceSubscription, String> {
@@ -837,16 +828,6 @@ pub fn desktop_render_state_for_session(
 ) -> Option<ChatminalRenderState> {
     let runtime_id = desktop_runtime_id_for_session(session_id)?;
     desktop_session_host(window_id)?.render_state_for_runtime(runtime_id)
-}
-
-// Kept for overlay compatibility: `OverlayRenderScope = Tab` is used by launcher/confirm/prompt
-// overlays. This path is NOT used for session render state (splits = [] after Phase 03).
-pub(crate) fn desktop_render_scope_capability_for_session(
-    window_id: DesktopWindowId,
-    session_id: &str,
-) -> Option<Arc<overlay_compat::OverlayRenderScope>> {
-    let runtime_id = desktop_runtime_id_for_session(session_id)?;
-    desktop_session_host(window_id)?.overlay_scope_for_runtime(runtime_id)
 }
 
 /// Direct pane lookup for a session (1 session = 1 pane invariant, Phase 02+).

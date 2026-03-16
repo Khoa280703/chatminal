@@ -91,8 +91,8 @@ pub fn write_input_for_session_with_timeout(
         "session_input_write",
     )?;
 
-    let pane_id = registry.ensure_pane_for_session(session_id);
-    adapter.on_session_input(session_id, &pane_id, data.len());
+    let terminal_id = registry.ensure_terminal_for_session(session_id);
+    adapter.on_session_input(session_id, &terminal_id, data.len());
     Ok(())
 }
 
@@ -116,8 +116,8 @@ pub fn resize_session(
         "session_resize",
     )?;
 
-    let pane_id = registry.ensure_pane_for_session(session_id);
-    adapter.on_session_resize(session_id, &pane_id, cols, rows);
+    let terminal_id = registry.ensure_terminal_for_session(session_id);
+    adapter.on_session_resize(session_id, &terminal_id, cols, rows);
     Ok(())
 }
 

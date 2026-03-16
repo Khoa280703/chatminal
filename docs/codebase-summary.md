@@ -1,6 +1,6 @@
 # Codebase Summary
 
-Last updated: 2026-03-13
+Last updated: 2026-03-16
 
 ## Runtime baseline
 Chatminal hiện chia làm ba lớp rõ ràng:
@@ -78,6 +78,11 @@ Chatminal hiện chia làm ba lớp rõ ràng:
 - `cargo test --manifest-path crates/chatminal-protocol/Cargo.toml -- --test-threads=1`: pass
 - `cargo test --manifest-path apps/chatminal-desktop/Cargo.toml -- --test-threads=1`: pass
 - `cargo test --manifest-path apps/chatminald/Cargo.toml -- --test-threads=1`: pass
+
+## High-signal improvements (2026-03-16)
+- `OverlayRenderScope` boundary fully isolated: `overlay/mod.rs` no longer references render scope types. Overlay spawning now primitive: `(scope_id: u64, scope_size: TerminalSize)`.
+- Session vocabulary unified: KeyAssignment now uses `ShowSessionNavigator`, `ActivateTerminalByIndex`, `ToggleTerminalZoomState`, `SetTerminalZoomState`. ArgType uses `ActiveTerminal`, `ActiveSession`.
+- `chatminal-mux` crate fully deleted from workspace.
 
 ## Current risk
 - Engine-side lower layer vẫn giữ host primitives; đó là intentional private debt, không còn leak ra product-facing desktop path.

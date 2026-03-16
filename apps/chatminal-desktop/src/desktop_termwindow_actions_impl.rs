@@ -195,7 +195,6 @@
                 }
             }
             CloseCurrentSession { confirm } => self.close_current_runtime_entry(*confirm),
-            CloseCurrentSession { confirm } => self.close_current_pane(*confirm),
             Nop | DisableDefaultAssignment => {}
             ReloadConfiguration => config::reload(),
             ScrollByPage(n) => self.scroll_by_page(**n, pane)?,
@@ -204,7 +203,7 @@
             ScrollToPrompt(n) => self.scroll_to_prompt(*n, pane)?,
             ScrollToTop => self.scroll_to_top(pane),
             ScrollToBottom => self.scroll_to_bottom(pane),
-            ShowTabNavigator => self.show_runtime_entry_navigator(),
+            ShowSessionNavigator => self.show_runtime_entry_navigator(),
             ShowDebugOverlay => self.show_debug_overlay(),
             ShowLauncher => self.show_launcher(),
             ShowLauncherArgs(args) => {
@@ -375,7 +374,7 @@
                     return Ok(PerformAssignmentResult::Handled);
                 }
             }
-            ActivatePaneByIndex(index) => {
+            ActivateTerminalByIndex(index) => {
                 if !self.active_runtime_has_overlay() {
                     if self.chatminal_sidebar.is_enabled() {
                         if let Some(pos) = self.get_panes_to_render().into_iter().nth(*index) {
@@ -406,12 +405,12 @@
                     }
                 }
             }
-            TogglePaneZoomState => {
+            ToggleTerminalZoomState => {
                 if !self.toggle_active_runtime_zoom() {
                     return Ok(PerformAssignmentResult::Handled);
                 }
             }
-            SetPaneZoomState(zoomed) => {
+            SetTerminalZoomState(zoomed) => {
                 if self.set_active_runtime_zoomed(*zoomed).is_none() {
                     return Ok(PerformAssignmentResult::Handled);
                 }
