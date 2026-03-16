@@ -2,7 +2,7 @@ use crate::overlay::quickselect;
 use crate::scripting::guiwin::GuiWin;
 use config::configuration;
 use config::keyassignment::{InputSelector, InputSelectorEntry, KeyAssignment};
-use mux::termwiztermtab::TermWizTerminal;
+use crate::chatminal_runtime::overlay_compat::OverlayTerminal;
 use nucleo_matcher::pattern::Pattern;
 use nucleo_matcher::{Matcher, Utf32Str};
 use rayon::prelude::*;
@@ -90,7 +90,7 @@ impl SelectorState {
         self.top_row = 0;
     }
 
-    fn render(&mut self, term: &mut TermWizTerminal) -> termwiz::Result<()> {
+    fn render(&mut self, term: &mut OverlayTerminal) -> termwiz::Result<()> {
         let size = term.get_screen_size()?;
         let max_width = size.cols.saturating_sub(6);
         let max_items = size.rows.saturating_sub(ROW_OVERHEAD);
@@ -238,7 +238,7 @@ impl SelectorState {
         }
     }
 
-    fn run_loop(&mut self, term: &mut TermWizTerminal) -> anyhow::Result<()> {
+    fn run_loop(&mut self, term: &mut OverlayTerminal) -> anyhow::Result<()> {
         while let Ok(Some(event)) = term.poll_input(None) {
             match event {
                 InputEvent::Key(KeyEvent {
@@ -414,7 +414,7 @@ async fn do_event(
 }
 
 pub fn selector(
-    mut term: TermWizTerminal,
+    mut term: OverlayTerminal,
     args: InputSelector,
     window: GuiWin,
     pane_id: u64,

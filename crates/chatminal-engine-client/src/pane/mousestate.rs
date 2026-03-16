@@ -1,7 +1,7 @@
 use crate::client::Client;
 use codec::*;
 use engine_term::{MouseButton, MouseEvent, MouseEventKind};
-use mux::tab::TabId;
+use host_runtime::tab::TabId;
 use parking_lot::Mutex;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};

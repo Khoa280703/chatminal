@@ -1,14 +1,14 @@
 use crate::quad::TripleLayerQuadAllocator;
+use crate::chatminal_runtime::overlay_compat::RenderableDimensions;
 use crate::termwindow::render::RenderScreenLineParams;
 use crate::utilsprites::RenderMetrics;
 use config::ConfigHandle;
 use engine_term::color::ColorAttribute;
-use mux::renderable::RenderableDimensions;
 use window::color::LinearRgba;
 
 impl crate::TermWindow {
     pub fn paint_tab_bar(&mut self, layers: &mut TripleLayerQuadAllocator) -> anyhow::Result<()> {
-        if self.config.use_fancy_tab_bar {
+        if self.config.use_fancy_session_bar {
             if self.fancy_tab_bar.is_none() {
                 let palette = self.palette().clone();
                 let tab_bar = self.build_fancy_tab_bar(&palette)?;
@@ -25,7 +25,7 @@ impl crate::TermWindow {
 
         let palette = self.palette().clone();
         let tab_bar_height = self.tab_bar_pixel_height()?;
-        let tab_bar_y = if self.config.tab_bar_at_bottom {
+        let tab_bar_y = if self.config.session_bar_at_bottom {
             ((self.dimensions.pixel_height as f32) - (tab_bar_height + border.bottom.get() as f32))
                 .max(0.)
         } else {
@@ -107,7 +107,7 @@ impl crate::TermWindow {
         fontconfig: &engine_font::FontConfiguration,
         render_metrics: &RenderMetrics,
     ) -> anyhow::Result<f32> {
-        if config.use_fancy_tab_bar {
+        if config.use_fancy_session_bar {
             let font = fontconfig.title_font()?;
             Ok((font.metrics().cell_height.get() as f32 * 1.75).ceil())
         } else {

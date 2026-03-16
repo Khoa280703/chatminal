@@ -1,4 +1,4 @@
-use mux::renderable::StableCursorPosition;
+use crate::chatminal_runtime::overlay_compat::StableCursorPosition;
 use std::time::Instant;
 
 #[derive(Clone)]

@@ -13,7 +13,7 @@ config.workspace = true
 leb128.workspace = true
 log.workspace = true
 metrics.workspace = true
-mux.workspace = true
+host_runtime.workspace = true
 portable-pty = { workspace = true, features = ["serde_support"]}
 rangeset.workspace = true
 serde = {workspace=true, features = ["rc", "derive"]}

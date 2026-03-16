@@ -1,22 +1,20 @@
 //! The launcher is a menu that presents a list of activities that can
-//! be launched, such as spawning a new tab in various domains or attaching
+//! be launched, such as spawning a new session in various domains or attaching
 //! ssh/tls domains.
 //! The launcher is implemented here as an overlay, but could potentially
 //! be rendered as a popup/context menu if the system supports it; at the
 //! time of writing our window layer doesn't provide an API for context
 //! menus.
 use crate::commands::derive_command_from_key_assignment;
+use crate::scripting::guiwin::DesktopWindowId;
 use crate::inputmap::InputMap;
 use crate::overlay::quickselect;
 use crate::overlay::selector::{matcher_pattern, matcher_score};
 use crate::termwindow::TermWindowNotif;
+use crate::chatminal_runtime::{HostLauncherDomainEntry, LauncherSessionEntry};
 use config::configuration;
-use config::keyassignment::{KeyAssignment, SpawnCommand, SpawnTabDomain};
-use mux::Mux;
-use mux::domain::{DomainId, DomainState};
-use mux::pane::PaneId;
-use mux::termwiztermtab::TermWizTerminal;
-use mux::window::WindowId;
+use config::keyassignment::{KeyAssignment, SpawnCommand, SpawnSessionDomain};
+use crate::chatminal_runtime::overlay_compat::OverlayTerminal;
 use rayon::prelude::*;
 use std::collections::BTreeMap;
 use termwiz::cell::{AttributeChange, CellAttributes};
@@ -35,26 +33,15 @@ struct Entry {
     pub action: KeyAssignment,
 }
 
-pub struct LauncherTabEntry {
-    pub title: String,
-    pub tab_idx: usize,
-    pub pane_count: Option<usize>,
-}
-
-#[derive(Debug)]
-pub struct LauncherDomainEntry {
-    pub domain_id: DomainId,
-    pub name: String,
-    pub state: DomainState,
-    pub label: String,
-}
+pub type LauncherTabEntry = LauncherSessionEntry;
+pub type LauncherDomainEntry = HostLauncherDomainEntry;
 
 pub struct LauncherArgs {
     flags: LauncherFlags,
     domains: Vec<LauncherDomainEntry>,
     tabs: Vec<LauncherTabEntry>,
-    pane_id: PaneId,
-    domain_id_of_current_tab: DomainId,
+    pane_id: u64,
+    domain_id_of_current_tab: usize,
     title: String,
     active_workspace: String,
     workspaces: Vec<String>,
@@ -68,87 +55,29 @@ impl LauncherArgs {
     pub async fn new(
         title: &str,
         flags: LauncherFlags,
-        window_id: WindowId,
-        pane_id: PaneId,
-        domain_id_of_current_tab: DomainId,
+        window_id: DesktopWindowId,
+        pane_id: u64,
+        domain_id_of_current_tab: usize,
         help_text: &str,
         fuzzy_help_text: &str,
         alphabet: &str,
     ) -> Self {
-        let mux = Mux::get();
-
-        let active_workspace = mux.active_workspace();
+        let active_workspace = crate::chatminal_runtime::host_workspace_name();
 
         let workspaces = if flags.contains(LauncherFlags::WORKSPACES) {
-            mux.iter_workspaces()
+            crate::chatminal_runtime::host_workspace_names()
         } else {
             vec![]
         };
 
         let tabs = if flags.contains(LauncherFlags::TABS) {
-            // Ideally we'd resolve the tabs on the fly once we've started the
-            // overlay, but since the overlay runs in a different thread, accessing
-            // the mux list is a bit awkward.  To get the ball rolling we capture
-            // the list of tabs up front and live with a static list.
-            let window = mux
-                .get_window(window_id)
-                .expect("to resolve my own window_id");
-            window
-                .iter()
-                .enumerate()
-                .map(|(tab_idx, tab)| {
-                    let tab_title = tab.get_title();
-                    let title = if tab_title.is_empty() {
-                        tab.get_active_pane()
-                            .expect("tab to have a pane")
-                            .get_title()
-                    } else {
-                        tab_title
-                    };
-                    LauncherTabEntry {
-                        title,
-                        tab_idx,
-                        pane_count: tab.count_panes(),
-                    }
-                })
-                .collect()
+            crate::chatminal_runtime::launcher_sessions(window_id)
         } else {
             vec![]
         };
 
         let domains = if flags.contains(LauncherFlags::DOMAINS) {
-            let mut domains = mux.iter_domains();
-            domains.sort_by(|a, b| {
-                let a_state = a.state();
-                let b_state = b.state();
-                if a_state != b_state {
-                    use std::cmp::Ordering;
-                    return if a_state == DomainState::Attached {
-                        Ordering::Less
-                    } else {
-                        Ordering::Greater
-                    };
-                }
-                a.domain_id().cmp(&b.domain_id())
-            });
-            domains.retain(|dom| dom.spawnable());
-            let mut d = vec![];
-            for dom in domains.into_iter() {
-                let name = dom.domain_name();
-                let label = dom.domain_label().await;
-                let label = if name == label || label == "" {
-                    format!("domain `{}`", name)
-                } else {
-                    format!("domain `{}` - {}", name, label)
-                };
-                d.push(LauncherDomainEntry {
-                    domain_id: dom.domain_id(),
-                    name: name.to_string(),
-                    state: dom.state(),
-                    label,
-                });
-            }
-            d
+            crate::chatminal_runtime::host_launcher_domains().await
         } else {
             vec![]
         };
@@ -178,7 +107,7 @@ struct LauncherState {
     entries: Vec<Entry>,
     filter_term: String,
     filtered_entries: Vec<Entry>,
-    pane_id: PaneId,
+    pane_id: u64,
     window: ::window::Window,
     filtering: bool,
     help_text: String,
@@ -240,17 +169,17 @@ impl LauncherState {
                             None => "(default shell)".to_string(),
                         },
                     },
-                    action: KeyAssignment::SpawnCommandInNewTab(item.clone()),
+                    action: KeyAssignment::SpawnCommandInNewSession(item.clone()),
                 });
             }
         }
 
         for domain in &args.domains {
-            let entry = if domain.state == DomainState::Attached {
+            let entry = if domain.is_attached {
                 Entry {
-                    label: format!("New Tab ({})", domain.label),
-                    action: KeyAssignment::SpawnCommandInNewTab(SpawnCommand {
-                        domain: SpawnTabDomain::DomainName(domain.name.to_string()),
+                    label: format!("New Session ({})", domain.label),
+                    action: KeyAssignment::SpawnCommandInNewSession(SpawnCommand {
+                        domain: SpawnSessionDomain::DomainName(domain.name.to_string()),
                         ..SpawnCommand::default()
                     }),
                 }
@@ -263,7 +192,7 @@ impl LauncherState {
 
             // Preselect the entry that corresponds to the active tab
             // at the time that the launcher was set up, so that pressing
-            // Enter immediately afterwards spawns a tab in the same domain.
+            // Enter immediately afterwards spawns a session in the same domain.
             if domain.domain_id == args.domain_id_of_current_tab {
                 self.active_idx = self.entries.len();
             }
@@ -297,20 +226,19 @@ impl LauncherState {
         for tab in &args.tabs {
             self.entries.push(Entry {
                 label: match tab.pane_count {
-                    Some(pane_count) => format!("{}. {pane_count} panes", tab.title),
+                    Some(pane_count) => format!("{}. {pane_count} terminal instances", tab.title),
                     None => format!("{}.", tab.title),
                 },
-                action: KeyAssignment::ActivateTab(tab.tab_idx as isize),
+                action: crate::desktop_commands::session_bar_activate_index_assignment(
+                    tab.tab_idx as isize,
+                ),
             });
         }
 
         if args.flags.contains(LauncherFlags::COMMANDS) {
             let commands = crate::commands::CommandDef::expanded_commands(&config);
             for cmd in commands {
-                if matches!(
-                    &cmd.action,
-                    KeyAssignment::ActivateTabRelative(_) | KeyAssignment::ActivateTab(_)
-                ) {
+                if crate::desktop_commands::is_session_bar_switching_key_assignment(&cmd.action) {
                     // Filter out some noisy, repetitive entries
                     continue;
                 }
@@ -328,10 +256,8 @@ impl LauncherState {
             // Give a consistent order to the entries
             let keys: BTreeMap<_, _> = input_map.keys.default.into_iter().collect();
             for ((keycode, mods), entry) in keys {
-                if matches!(
-                    &entry.action,
-                    KeyAssignment::ActivateTabRelative(_) | KeyAssignment::ActivateTab(_)
-                ) {
+                if crate::desktop_commands::is_session_bar_switching_key_assignment(&entry.action)
+                {
                     // Filter out some noisy, repetitive entries
                     continue;
                 }
@@ -364,7 +290,7 @@ impl LauncherState {
         }
     }
 
-    fn render(&mut self, term: &mut TermWizTerminal) -> termwiz::Result<()> {
+    fn render(&mut self, term: &mut OverlayTerminal) -> termwiz::Result<()> {
         let size = term.get_screen_size()?;
         let max_width = size.cols.saturating_sub(6);
         let max_items = size.rows.saturating_sub(ROW_OVERHEAD);
@@ -477,11 +403,12 @@ impl LauncherState {
     fn launch(&self, active_idx: usize) -> bool {
         if let Some(entry) = self.filtered_entries.get(active_idx) {
             let assignment = entry.action.clone();
-            self.window.notify(TermWindowNotif::PerformAssignmentForLeafId {
-                leaf_id: self.pane_id as u64,
-                assignment,
-                tx: None,
-            });
+            self.window
+                .notify(TermWindowNotif::PerformAssignmentForTerminalHandle {
+                    terminal_handle: self.pane_id,
+                    assignment,
+                    tx: None,
+                });
             true
         } else {
             false
@@ -502,7 +429,7 @@ impl LauncherState {
         }
     }
 
-    fn run_loop(&mut self, term: &mut TermWizTerminal) -> anyhow::Result<()> {
+    fn run_loop(&mut self, term: &mut OverlayTerminal) -> anyhow::Result<()> {
         while let Ok(Some(event)) = term.poll_input(None) {
             match event {
                 InputEvent::Key(KeyEvent {
@@ -646,7 +573,7 @@ impl LauncherState {
 
 pub fn launcher(
     args: LauncherArgs,
-    mut term: TermWizTerminal,
+    mut term: OverlayTerminal,
     window: ::window::Window,
     initial_choice_idx: usize,
 ) -> anyhow::Result<()> {

@@ -1,5 +1,5 @@
 use engine_term::StableRowIndex;
-use mux::pane::Pane;
+use crate::chatminal_runtime::overlay_compat::OverlayPane;
 
 pub struct ScrollHit {
     /// Offset from the top of the window in pixels
@@ -12,7 +12,7 @@ impl ScrollHit {
     /// Compute the y-coordinate for the top of the scrollbar thumb
     /// and the height of the thumb and return them.
     pub fn thumb(
-        pane: &dyn Pane,
+        pane: &dyn OverlayPane,
         viewport: Option<StableRowIndex>,
         max_thumb_height: usize,
         min_thumb_size: usize,
@@ -51,7 +51,7 @@ impl ScrollHit {
     /// compute the equivalent viewport offset.
     pub fn thumb_top_to_scroll_top(
         thumb_top: usize,
-        pane: &dyn Pane,
+        pane: &dyn OverlayPane,
         viewport: Option<StableRowIndex>,
         max_thumb_height: usize,
         min_thumb_size: usize,

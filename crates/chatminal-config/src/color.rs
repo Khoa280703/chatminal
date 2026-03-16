@@ -149,7 +149,7 @@ pub struct Palette {
     #[dynamic(default)]
     pub indexed: HashMap<u8, RgbaColor>,
     /// Configure the colors and styling of the tab bar
-    pub tab_bar: Option<TabBarColors>,
+    pub tab_bar: Option<SessionBarColors>,
     /// The color of the "thumb" of the scrollbar; the segment that
     /// represents the current viewable area
     pub scrollbar_thumb: Option<RgbaColor>,
@@ -354,7 +354,7 @@ impl TabBarColor {
 /// These are not part of the terminal model and cannot be updated
 /// in the same way that the dynamic color schemes are.
 #[derive(Default, Debug, Clone, PartialEq, FromDynamic, ToDynamic)]
-pub struct TabBarColors {
+pub struct SessionBarColors {
     /// The background color for the tab bar
     #[dynamic(default)]
     pub background: Option<RgbaColor>,
@@ -386,7 +386,7 @@ pub struct TabBarColors {
     pub inactive_tab_edge_hover: Option<RgbaColor>,
 }
 
-impl TabBarColors {
+impl SessionBarColors {
     pub fn background(&self) -> RgbaColor {
         self.background.unwrap_or_else(default_background)
     }
@@ -515,7 +515,7 @@ fn default_active_tab() -> TabBarColor {
 }
 
 #[derive(Debug, Clone, FromDynamic, ToDynamic)]
-pub struct TabBarStyle {
+pub struct SessionBarStyle {
     #[dynamic(default = "default_new_tab")]
     pub new_tab: String,
     #[dynamic(default = "default_new_tab")]
@@ -534,7 +534,7 @@ pub struct TabBarStyle {
     pub window_close_hover: String,
 }
 
-impl Default for TabBarStyle {
+impl Default for SessionBarStyle {
     fn default() -> Self {
         Self {
             new_tab: default_new_tab(),

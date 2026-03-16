@@ -4,7 +4,6 @@ use ::window::{Dimensions, ResizeIncrement, Window, WindowOps, WindowState};
 use config::{ConfigHandle, DimensionContext};
 use engine_font::FontConfiguration;
 use engine_term::TerminalSize;
-use mux::Mux;
 use std::rc::Rc;
 
 #[derive(Debug, Clone, Copy)]
@@ -163,7 +162,7 @@ impl super::TermWindow {
 
         let config = &self.config;
 
-        let tab_bar_height = if self.show_tab_bar {
+        let tab_bar_height = if self.show_session_bar {
             self.tab_bar_pixel_height().unwrap_or(0.)
         } else {
             0.
@@ -316,12 +315,7 @@ impl super::TermWindow {
 
         self.terminal_size = size;
 
-        let mux = Mux::get();
-        if let Some(window) = mux.get_window(self.window_id) {
-            for tab in window.iter() {
-                tab.resize(size);
-            }
-        };
+        crate::chatminal_runtime::resize_host_window_tabs(self.window_id, size);
         self.resize_overlays();
         self.invalidate_fancy_tab_bar();
         self.update_title();
@@ -512,8 +506,8 @@ impl super::TermWindow {
             dpi: size.dpi,
         };
 
-        let show_tab_bar = Self::should_show_tab_bar_for_count(&config, 1);
-        let tab_bar_height = if show_tab_bar {
+        let show_session_bar = Self::should_show_session_bar_for_count(&config, 1);
+        let tab_bar_height = if show_session_bar {
             self.tab_bar_pixel_height()? as usize
         } else {
             0

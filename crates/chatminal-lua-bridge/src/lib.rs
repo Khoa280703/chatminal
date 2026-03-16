@@ -1,44 +1,31 @@
-use config::keyassignment::SpawnTabDomain;
+use config::keyassignment::SpawnSessionDomain;
 use config::lua::mlua::{self, Lua, UserData, UserDataMethods, Value as LuaValue};
 use config::lua::{get_or_create_module, get_or_create_sub_module};
 use engine_dynamic::{FromDynamic, ToDynamic, Value};
 use engine_term::TerminalSize;
 use luahelper::impl_lua_conversion_dynamic;
 use mlua::UserDataRef;
-use mux::domain::{DomainId, SplitSource};
-use mux::pane::{Pane, PaneId};
-use mux::tab::{SplitDirection, SplitRequest, SplitSize, Tab, TabId};
-use mux::window::{Window, WindowId};
-use mux::Mux;
+use host_runtime::domain::{DomainId, SplitSource};
+use host_runtime::pane::Pane;
+use host_runtime::tab::{SplitDirection, SplitRequest, SplitSize, Tab, TabId};
+use host_runtime::window::{Window, WindowId};
+use host_runtime::Mux;
 use portable_pty::CommandBuilder;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 mod domain;
 mod leaf;
-mod surface;
+mod session;
 mod window;
 
 pub use domain::DomainRef;
-pub use leaf::LeafRef;
-pub use surface::SurfaceRef;
+pub use leaf::TerminalRef;
+pub use session::SessionRef;
 pub use window::WindowRef;
 
 fn get_mux() -> mlua::Result<Arc<Mux>> {
     Mux::try_get().ok_or_else(|| mlua::Error::external("cannot get Mux!?"))
-}
-
-pub(crate) fn pane_metadata_u64(pane: &Arc<dyn Pane>, key: &str) -> Option<u64> {
-    match pane.get_metadata() {
-        Value::Object(obj) => {
-            obj.get(&Value::String(key.to_string()))
-                .and_then(|value| match value {
-                    Value::U64(value) => Some(*value),
-                    _ => None,
-                })
-        }
-        _ => None,
-    }
 }
 
 pub(crate) fn pane_metadata_string(pane: &Arc<dyn Pane>, key: &str) -> Option<String> {
@@ -54,54 +41,32 @@ pub(crate) fn pane_metadata_string(pane: &Arc<dyn Pane>, key: &str) -> Option<St
     }
 }
 
+pub(crate) fn pane_metadata_u64(pane: &Arc<dyn Pane>, key: &str) -> Option<u64> {
+    match pane.get_metadata() {
+        Value::Object(obj) => {
+            obj.get(&Value::String(key.to_string()))
+                .and_then(|value| match value {
+                    Value::U64(value) => Some(*value),
+                    Value::I64(value) => (*value).try_into().ok(),
+                    _ => None,
+                })
+        }
+        _ => None,
+    }
+}
+
 pub(crate) fn pane_session_id(pane: &Arc<dyn Pane>) -> Option<String> {
     pane_metadata_string(pane, "chatminal_session_id")
 }
 
-pub(crate) fn pane_surface_id(pane: &Arc<dyn Pane>) -> Option<u64> {
-    pane_metadata_u64(pane, "chatminal_surface_id")
+pub(crate) fn pane_terminal_instance_id(pane: &Arc<dyn Pane>) -> Option<u64> {
+    pane_metadata_u64(pane, "chatminal_terminal_instance_id")
 }
 
-pub(crate) fn pane_leaf_id(pane: &Arc<dyn Pane>) -> Option<u64> {
-    pane_metadata_u64(pane, "chatminal_leaf_id")
-}
-
-pub(crate) fn resolve_pane_by_public_id(mux: &Arc<Mux>, public_id: u64) -> Option<Arc<dyn Pane>> {
-    PaneId::try_from(public_id)
-        .ok()
-        .and_then(|pane_id| mux.get_pane(pane_id))
-        .or_else(|| {
-            mux.iter_panes()
-                .into_iter()
-                .find(|pane| pane_leaf_id(pane) == Some(public_id))
-        })
-}
-
-pub(crate) fn surface_session_id(tab: &Arc<Tab>) -> Option<String> {
+pub(crate) fn session_id_for_tab(tab: &Arc<Tab>) -> Option<String> {
     tab.iter_panes()
         .into_iter()
         .find_map(|pos| pane_session_id(&pos.pane))
-}
-
-pub(crate) fn surface_public_id(tab: &Arc<Tab>) -> Option<u64> {
-    tab.iter_panes()
-        .into_iter()
-        .find_map(|pos| pane_surface_id(&pos.pane))
-}
-
-pub(crate) fn surface_active_leaf_id(tab: &Arc<Tab>) -> Option<u64> {
-    tab.get_active_pane().and_then(|pane| pane_leaf_id(&pane))
-}
-
-pub(crate) fn resolve_surface_by_id(mux: &Arc<Mux>, surface_id: u64) -> Option<Arc<Tab>> {
-    mux.iter_windows().into_iter().find_map(|window_id| {
-        mux.get_window(window_id).and_then(|window| {
-            window
-                .iter()
-                .find(|tab| surface_public_id(tab) == Some(surface_id))
-                .cloned()
-        })
-    })
 }
 
 pub fn register(lua: &Lua) -> anyhow::Result<()> {
@@ -213,27 +178,6 @@ pub fn register(lua: &Lua) -> anyhow::Result<()> {
     )?;
 
     session_module.set(
-        "get_surface",
-        lua.create_function(|_, surface_id: u64| {
-            let mux = get_mux()?;
-            let tab = resolve_surface_by_id(&mux, surface_id).ok_or_else(|| {
-                mlua::Error::external(format!("surface id {surface_id} not found"))
-            })?;
-            Ok(SurfaceRef(tab.tab_id()))
-        })?,
-    )?;
-
-    session_module.set(
-        "get_leaf",
-        lua.create_function(|_, leaf_id: u64| {
-            let mux = get_mux()?;
-            let pane = resolve_pane_by_public_id(&mux, leaf_id)
-                .ok_or_else(|| mlua::Error::external(format!("leaf id {leaf_id} not found")))?;
-            Ok(LeafRef(pane.pane_id()))
-        })?,
-    )?;
-
-    session_module.set(
         "all_windows",
         lua.create_function(|_, _: ()| {
             let mux = get_mux()?;
@@ -246,33 +190,42 @@ pub fn register(lua: &Lua) -> anyhow::Result<()> {
     )?;
 
     session_module.set(
-        "all_surfaces",
+        "all_sessions",
         lua.create_function(|_, _: ()| {
             let mux = get_mux()?;
-            let mut surfaces = vec![];
+            let mut sessions = vec![];
             for window_id in mux.iter_windows() {
                 if let Some(window) = mux.get_window(window_id) {
-                    for tab in window.iter() {
-                        if surface_public_id(tab).is_some() {
-                            surfaces.push(SurfaceRef(tab.tab_id()));
-                        }
-                    }
+                    sessions.extend(window.iter().map(|tab| SessionRef(tab.tab_id())));
                 }
             }
-            Ok(surfaces)
+            Ok(sessions)
         })?,
     )?;
 
     session_module.set(
-        "all_leaves",
+        "list_sessions",
+        lua.create_function(|_, _: ()| {
+            let mux = get_mux()?;
+            let mut sessions = vec![];
+            for window_id in mux.iter_windows() {
+                if let Some(window) = mux.get_window(window_id) {
+                    sessions.extend(window.iter().map(|tab| SessionRef(tab.tab_id())));
+                }
+            }
+            Ok(sessions)
+        })?,
+    )?;
+
+    session_module.set(
+        "all_terminals",
         lua.create_function(|_, _: ()| {
             let mux = get_mux()?;
             Ok(mux
                 .iter_panes()
                 .into_iter()
-                .filter(|pane| pane_leaf_id(pane).is_some())
-                .map(|pane| LeafRef(pane.pane_id()))
-                .collect::<Vec<LeafRef>>())
+                .map(|pane| TerminalRef(pane.pane_id()))
+                .collect::<Vec<TerminalRef>>())
         })?,
     )?;
 
@@ -305,15 +258,15 @@ impl CommandBuilderFrag {
 }
 
 #[derive(Debug, FromDynamic, ToDynamic)]
-enum HandySplitDirection {
+enum SessionSplitDirection {
     Left,
     Right,
     Top,
     Bottom,
 }
-impl_lua_conversion_dynamic!(HandySplitDirection);
+impl_lua_conversion_dynamic!(SessionSplitDirection);
 
-impl Default for HandySplitDirection {
+impl Default for SessionSplitDirection {
     fn default() -> Self {
         Self::Right
     }
@@ -321,8 +274,8 @@ impl Default for HandySplitDirection {
 
 #[derive(Debug, FromDynamic, ToDynamic)]
 struct SpawnWindow {
-    #[dynamic(default = "spawn_surface_default_domain")]
-    domain: SpawnTabDomain,
+    #[dynamic(default = "spawn_session_default_domain")]
+    domain: SpawnSessionDomain,
     width: Option<usize>,
     height: Option<usize>,
     workspace: Option<String>,
@@ -332,12 +285,12 @@ struct SpawnWindow {
 }
 impl_lua_conversion_dynamic!(SpawnWindow);
 
-fn spawn_surface_default_domain() -> SpawnTabDomain {
-    SpawnTabDomain::DefaultDomain
+fn spawn_session_default_domain() -> SpawnSessionDomain {
+    SpawnSessionDomain::DefaultDomain
 }
 
 impl SpawnWindow {
-    async fn spawn(self) -> mlua::Result<(SurfaceRef, LeafRef, WindowRef)> {
+    async fn spawn(self) -> mlua::Result<(SessionRef, TerminalRef, WindowRef)> {
         let mux = get_mux()?;
 
         let size = match (self.width, self.height) {
@@ -365,24 +318,24 @@ impl SpawnWindow {
             .map_err(|e| mlua::Error::external(format!("{:#?}", e)))?;
 
         Ok((
-            SurfaceRef(tab.tab_id()),
-            LeafRef(pane.pane_id()),
+            SessionRef(tab.tab_id()),
+            TerminalRef(pane.pane_id()),
             WindowRef(window_id),
         ))
     }
 }
 
 #[derive(Debug, FromDynamic, ToDynamic)]
-struct SpawnSurface {
+struct SpawnSession {
     #[dynamic(default)]
-    domain: SpawnTabDomain,
+    domain: SpawnSessionDomain,
     #[dynamic(flatten)]
     cmd_builder: CommandBuilderFrag,
 }
-impl_lua_conversion_dynamic!(SpawnSurface);
+impl_lua_conversion_dynamic!(SpawnSession);
 
-impl SpawnSurface {
-    async fn spawn(self, window: &WindowRef) -> mlua::Result<(SurfaceRef, LeafRef, WindowRef)> {
+impl SpawnSession {
+    async fn spawn(self, window: &WindowRef) -> mlua::Result<(SessionRef, TerminalRef, WindowRef)> {
         let mux = get_mux()?;
         let size;
         let pane;
@@ -416,31 +369,31 @@ impl SpawnSurface {
             .map_err(|e| mlua::Error::external(format!("{:#?}", e)))?;
 
         Ok((
-            SurfaceRef(tab.tab_id()),
-            LeafRef(pane.pane_id()),
+            SessionRef(tab.tab_id()),
+            TerminalRef(pane.pane_id()),
             WindowRef(window_id),
         ))
     }
 }
 
 #[derive(Clone, FromDynamic, ToDynamic)]
-struct SurfaceInfo {
+struct SessionInfo {
     pub index: usize,
     pub is_active: bool,
 }
-impl_lua_conversion_dynamic!(SurfaceInfo);
+impl_lua_conversion_dynamic!(SessionInfo);
 
 #[derive(Clone, FromDynamic, ToDynamic)]
 struct LeafInfo {
-    /// Topological leaf index that can be used to reference this leaf within the surface.
+    /// Topological leaf index that can be used to reference this leaf within the session tab.
     pub index: usize,
     /// True if this leaf is active at the time the position was computed.
     pub is_active: bool,
     /// True if this leaf is zoomed.
     pub is_zoomed: bool,
-    /// Cell offset from the surface origin to the left edge of this leaf.
+    /// Cell offset from the session tab origin to the left edge of this leaf.
     pub left: usize,
-    /// Cell offset from the surface origin to the top edge of this leaf.
+    /// Cell offset from the session tab origin to the top edge of this leaf.
     pub top: usize,
     /// Width of this leaf in cells.
     pub width: usize,

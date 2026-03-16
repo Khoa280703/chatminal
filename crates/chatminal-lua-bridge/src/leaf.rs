@@ -3,7 +3,7 @@ use engine_term::{SemanticZone, StableRowIndex};
 use luahelper::mlua::LuaSerdeExt;
 use luahelper::{dynamic_to_lua_value, from_lua, to_lua};
 use mlua::Value;
-use mux::pane::CachePolicy;
+use host_runtime::pane::{CachePolicy, PaneId};
 use std::cmp::Ordering;
 use std::sync::Arc;
 use termwiz::cell::SemanticType;
@@ -11,13 +11,12 @@ use termwiz_funcs::lines_to_escapes;
 use url_funcs::Url;
 
 #[derive(Clone, Copy, Debug)]
-pub struct LeafRef(pub PaneId);
+pub struct TerminalRef(pub PaneId);
 
-impl LeafRef {
+impl TerminalRef {
     pub fn resolve<'a>(&self, mux: &'a Arc<Mux>) -> mlua::Result<Arc<dyn Pane>> {
-        mux.get_pane(self.0).ok_or_else(|| {
-            mlua::Error::external(format!("leaf host leaf id {} not found in mux", self.0))
-        })
+        mux.get_pane(self.0)
+            .ok_or_else(|| mlua::Error::external(format!("terminal handle {} not found in runtime", self.0)))
     }
 
     fn get_text_from_semantic_zone(&self, zone: SemanticZone) -> mlua::Result<String> {
@@ -85,31 +84,23 @@ impl LeafRef {
     }
 }
 
-impl UserData for LeafRef {
+impl UserData for TerminalRef {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
-        methods.add_meta_method(mlua::MetaMethod::ToString, |_, this, _: ()| {
-            Ok(format!("LeafRef(host_leaf_id:{}, pid:{})", this.0, unsafe {
-                libc::getpid()
-            }))
+        methods.add_meta_method(mlua::MetaMethod::ToString, |_, _this, _: ()| {
+            Ok(format!("TerminalRef(pid:{})", unsafe { libc::getpid() }))
         });
-        methods.add_method("host_leaf_id", |_, this, _: ()| Ok(this.0));
+        methods.add_method("terminal_instance_id", |_, this, _: ()| {
+            let mux = get_mux()?;
+            let pane = this.resolve(&mux)?;
+            Ok(pane_terminal_instance_id(&pane))
+        });
         methods.add_method("session_id", |_, this, _: ()| {
             let mux = get_mux()?;
             let pane = this.resolve(&mux)?;
             Ok(pane_session_id(&pane))
         });
-        methods.add_method("surface_id", |_, this, _: ()| {
-            let mux = get_mux()?;
-            let pane = this.resolve(&mux)?;
-            Ok(pane_surface_id(&pane))
-        });
-        methods.add_method("leaf_id", |_, this, _: ()| {
-            let mux = get_mux()?;
-            let pane = this.resolve(&mux)?;
-            Ok(pane_leaf_id(&pane).or_else(|| Some(pane.pane_id() as u64)))
-        });
 
-        methods.add_async_method("split", |_, this, args: Option<SplitPane>| async move {
+        methods.add_async_method("split", |_, this, args: Option<SplitSession>| async move {
             args.unwrap_or_default().run(this).await
         });
 
@@ -143,11 +134,11 @@ impl UserData for LeafRef {
                 .resolve_pane_id(this.0)
                 .map(|(_domain_id, window_id, _tab_id)| WindowRef(window_id)))
         });
-        methods.add_method("surface", |_, this, _: ()| {
+        methods.add_method("session", |_, this, _: ()| {
             let mux = get_mux()?;
             Ok(mux
                 .resolve_pane_id(this.0)
-                .map(|(_domain_id, _window_id, tab_id)| SurfaceRef(tab_id)))
+                .map(|(_domain_id, _window_id, tab_id)| SessionRef(tab_id)))
         });
 
         methods.add_method("get_title", |_, this, _: ()| {
@@ -388,7 +379,7 @@ impl UserData for LeafRef {
             this.get_text_from_semantic_zone(zone)
         });
 
-        methods.add_async_method("move_to_new_surface", |_lua, this, ()| async move {
+        methods.add_async_method("move_to_new_session", |_lua, this, ()| async move {
             let mux = Mux::get();
             let (_domain, window_id, _tab) = mux
                 .resolve_pane_id(this.0)
@@ -398,7 +389,7 @@ impl UserData for LeafRef {
                 .await
                 .map_err(|e| mlua::Error::external(format!("{:#?}", e)))?;
 
-            Ok((SurfaceRef(tab.tab_id()), WindowRef(window)))
+            Ok((SessionRef(tab.tab_id()), WindowRef(window)))
         });
 
         methods.add_async_method(
@@ -410,7 +401,7 @@ impl UserData for LeafRef {
                     .await
                     .map_err(|e| mlua::Error::external(format!("{:#?}", e)))?;
 
-                Ok((SurfaceRef(tab.tab_id()), WindowRef(window)))
+                Ok((SessionRef(tab.tab_id()), WindowRef(window)))
             },
         );
 
@@ -426,16 +417,14 @@ impl UserData for LeafRef {
                 })?;
                 let tab_idx = window.idx_by_id(tab_id).ok_or_else(|| {
                     mlua::Error::external(format!(
-                        "surface host surface {tab_id} is not attached to window {window_id}"
+                        "session handle {tab_id} is not attached to window {window_id}"
                     ))
                 })?;
                 window.save_and_then_set_active(tab_idx);
             }
             let tab = mux
                 .get_tab(tab_id)
-                .ok_or_else(|| {
-                    mlua::Error::external(format!("surface host surface {tab_id} not found"))
-                })?;
+                .ok_or_else(|| mlua::Error::external(format!("session handle {tab_id} not found")))?;
             tab.set_active_pane(&pane);
             Ok(())
         });
@@ -449,26 +438,26 @@ impl UserData for LeafRef {
 }
 
 #[derive(Debug, Default, FromDynamic, ToDynamic)]
-struct SplitPane {
+struct SplitSession {
     #[dynamic(flatten)]
     cmd_builder: CommandBuilderFrag,
-    #[dynamic(default = "spawn_surface_default_domain")]
-    domain: SpawnTabDomain,
+    #[dynamic(default = "spawn_session_default_domain")]
+    domain: SpawnSessionDomain,
     #[dynamic(default)]
-    direction: HandySplitDirection,
+    direction: SessionSplitDirection,
     #[dynamic(default)]
     top_level: bool,
     #[dynamic(default = "default_split_size")]
     size: f32,
 }
-impl_lua_conversion_dynamic!(SplitPane);
+impl_lua_conversion_dynamic!(SplitSession);
 
 fn default_split_size() -> f32 {
     0.5
 }
 
-impl SplitPane {
-    async fn run(&self, pane: &LeafRef) -> mlua::Result<LeafRef> {
+impl SplitSession {
+    async fn run(&self, pane: &TerminalRef) -> mlua::Result<TerminalRef> {
         let (command, command_dir) = self.cmd_builder.to_command_builder();
         let source = SplitSource::Spawn {
             command,
@@ -484,15 +473,15 @@ impl SplitPane {
         };
 
         let direction = match self.direction {
-            HandySplitDirection::Right | HandySplitDirection::Left => SplitDirection::Horizontal,
-            HandySplitDirection::Top | HandySplitDirection::Bottom => SplitDirection::Vertical,
+            SessionSplitDirection::Right | SessionSplitDirection::Left => SplitDirection::Horizontal,
+            SessionSplitDirection::Top | SessionSplitDirection::Bottom => SplitDirection::Vertical,
         };
 
         let request = SplitRequest {
             direction,
             target_is_second: match self.direction {
-                HandySplitDirection::Top | HandySplitDirection::Left => false,
-                HandySplitDirection::Bottom | HandySplitDirection::Right => true,
+                SessionSplitDirection::Top | SessionSplitDirection::Left => false,
+                SessionSplitDirection::Bottom | SessionSplitDirection::Right => true,
             },
             top_level: self.top_level,
             size,
@@ -504,6 +493,8 @@ impl SplitPane {
             .await
             .map_err(|e| mlua::Error::external(format!("{:#?}", e)))?;
 
-        Ok(LeafRef(pane.pane_id()))
+        Ok(TerminalRef(pane.pane_id()))
     }
 }
+
+

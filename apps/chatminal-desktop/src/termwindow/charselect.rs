@@ -392,7 +392,7 @@ impl CharSelector {
             .expect("to resolve char selection font");
         let metrics = RenderMetrics::with_font_metrics(&font.metrics());
 
-        let top_bar_height = if term_window.show_tab_bar && !term_window.config.tab_bar_at_bottom {
+        let top_bar_height = if term_window.show_session_bar && !term_window.config.session_bar_at_bottom {
             term_window.tab_bar_pixel_height().unwrap()
         } else {
             0.
@@ -681,7 +681,7 @@ impl Modal for CharSelector {
                 if self.copy_on_select {
                     term_window.copy_to_clipboard(self.copy_to, glyph.clone());
                 }
-                if let Some(pane) = term_window.get_active_leaf_or_overlay() {
+                if let Some(pane) = term_window.active_terminal_instance_or_overlay() {
                     pane.writer().write_all(glyph.as_bytes()).ok();
                 }
                 term_window.cancel_modal();

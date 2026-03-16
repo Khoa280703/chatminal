@@ -7,39 +7,39 @@ use config::keyassignment::{
 };
 use engine_term::color::ColorPalette;
 use engine_term::{
-    Clipboard, KeyCode, KeyModifiers, Line, MouseEvent, SemanticType, StableRowIndex, TerminalSize,
-    unicode_column_width,
+    unicode_column_width, Clipboard, KeyCode, KeyModifiers, Line, MouseEvent, SemanticType,
+    StableRowIndex, TerminalSize,
 };
-use mux::domain::DomainId;
-use mux::pane::{
-    CachePolicy, ForEachPaneLogicalLine, LogicalLine, Pane, PaneId, Pattern, PatternType,
-    PerformAssignmentResult, SearchResult, WithPaneLines,
+use crate::chatminal_runtime::overlay_compat::{
+    OverlayAssignmentResult, OverlayCachePolicy, OverlayDomainHandle, OverlayForEachLogicalLine,
+    OverlayLogicalLine, OverlayPane, OverlayPaneHandle, OverlayPattern, OverlayPatternType,
+    OverlayRuntimeEntryHandle, OverlaySearchResult, OverlayWithPaneLines, RenderableDimensions,
+    StableCursorPosition,
 };
-use mux::renderable::*;
-use mux::tab::TabId;
 use ordered_float::NotNan;
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
 use rangeset::RangeSet;
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
 use termwiz::cell::{Cell, CellAttributes};
 use termwiz::color::AnsiColor;
 use termwiz::lineedit::{LineEditBuffer, Movement};
-use termwiz::surface::{CursorVisibility, SEQ_ZERO, SequenceNo};
+use termwiz::surface::{CursorVisibility, SequenceNo, SEQ_ZERO};
 use unicode_segmentation::*;
 use url::Url;
 use window::{KeyCode as WKeyCode, Modifiers, WindowOps};
 
 lazy_static::lazy_static! {
-    static ref SAVED_PATTERN: Mutex<HashMap<TabId, Pattern>> = Mutex::new(HashMap::new());
+    static ref SAVED_PATTERN: Mutex<HashMap<OverlayRuntimeEntryHandle, OverlayPattern>> = Mutex::new(HashMap::new());
 }
 
 const SEARCH_CHUNK_SIZE: StableRowIndex = 1000;
 
 pub struct CopyOverlay {
-    delegate: Arc<dyn Pane>,
+    delegate: Arc<dyn OverlayPane>,
     render: Arc<Mutex<CopyRenderable>>,
     writer: Mutex<SearchOverlayPatternWriter>,
 }
@@ -59,7 +59,7 @@ struct Jump {
 
 struct CopyRenderable {
     cursor: StableCursorPosition,
-    delegate: Arc<dyn Pane>,
+    delegate: Arc<dyn OverlayPane>,
     start: Option<SelectionCoordinate>,
     selection_mode: SelectionMode,
     viewport: Option<StableRowIndex>,
@@ -67,10 +67,10 @@ struct CopyRenderable {
     window: ::window::Window,
 
     /// The text that the user entered
-    pattern_type: PatternType,
+    pattern_type: OverlayPatternType,
     search_line: LineEditBuffer,
     /// The most recently queried set of matches
-    results: Vec<SearchResult>,
+    results: Vec<OverlaySearchResult>,
     by_line: HashMap<StableRowIndex, Vec<MatchResult>>,
     last_result_seqno: SequenceNo,
     last_bar_pos: Option<StableRowIndex>,
@@ -79,7 +79,7 @@ struct CopyRenderable {
     height: usize,
     editing_search: bool,
     result_pos: Option<usize>,
-    tab_id: TabId,
+    tab_id: OverlayRuntimeEntryHandle,
     /// Used to debounce queries while the user is typing
     typing_cookie: usize,
     searching: Option<Searching>,
@@ -105,23 +105,23 @@ struct Dimensions {
 
 #[derive(Debug)]
 pub struct CopyModeParams {
-    pub pattern: Pattern,
+    pub pattern: OverlayPattern,
     pub editing_search: bool,
 }
 
 impl CopyOverlay {
     pub fn with_pane(
         term_window: &TermWindow,
-        pane: &Arc<dyn Pane>,
+        pane: &Arc<dyn OverlayPane>,
         params: CopyModeParams,
-    ) -> anyhow::Result<Arc<dyn Pane>> {
+    ) -> anyhow::Result<Arc<dyn OverlayPane>> {
         let mut cursor = pane.get_cursor_position();
         cursor.shape = termwiz::surface::CursorShape::SteadyBlock;
         cursor.visibility = CursorVisibility::Visible;
 
-        let (_domain, _window, tab_id) = mux::Mux::get()
-            .resolve_pane_id(pane.pane_id())
-            .ok_or_else(|| anyhow::anyhow!("no tab contains the current pane"))?;
+        let tab_id = crate::chatminal_runtime::frontend_resolve_pane(pane.pane_id() as u64)
+            .and_then(|pane| OverlayRuntimeEntryHandle::try_from(pane.runtime_entry_id).ok())
+            .ok_or_else(|| anyhow::anyhow!("no runtime entry contains the current pane"))?;
 
         let window = term_window
             .window
@@ -144,7 +144,7 @@ impl CopyOverlay {
             window,
             delegate: Arc::clone(pane),
             start: None,
-            viewport: term_window.get_viewport(pane.pane_id()),
+            viewport: term_window.get_viewport(pane.pane_id() as u64),
             results: vec![],
             by_line: HashMap::new(),
             dirty_results: RangeSet::default(),
@@ -153,7 +153,7 @@ impl CopyOverlay {
             last_result_seqno: SEQ_ZERO,
             last_bar_pos: None,
             tab_id,
-            pattern_type: PatternType::from(&pattern),
+            pattern_type: OverlayPatternType::from(&pattern),
             search_line,
             editing_search: params.editing_search,
             result_pos: None,
@@ -192,7 +192,7 @@ impl CopyOverlay {
         let mut render = self.render.lock();
         render.editing_search = params.editing_search;
         if render.get_pattern() != params.pattern {
-            render.pattern_type = PatternType::from(&params.pattern);
+            render.pattern_type = OverlayPatternType::from(&params.pattern);
             render
                 .search_line
                 .set_line_and_cursor(&params.pattern, params.pattern.len());
@@ -238,7 +238,7 @@ impl CopyRenderable {
         self.result_pos = pos;
     }
 
-    fn incrementally_recompute_results(&mut self, mut results: Vec<SearchResult>) {
+    fn incrementally_recompute_results(&mut self, mut results: Vec<OverlaySearchResult>) {
         results.sort();
         results.reverse();
         for (result_index, res) in results.iter().enumerate() {
@@ -282,7 +282,7 @@ impl CopyRenderable {
         promise::spawn::spawn(async move {
             smol::Timer::after(Duration::from_millis(350)).await;
             window.notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                let state = term_window.leaf_ui_state(pane_id);
+                let state = term_window.terminal_ui_state(pane_id as u64);
                 if let Some(overlay) = state.overlay.as_ref() {
                     if let Some(copy_overlay) = overlay.pane.downcast_ref::<CopyOverlay>() {
                         let mut r = copy_overlay.render.lock();
@@ -317,7 +317,7 @@ impl CopyRenderable {
 
         let pattern = self.get_pattern();
         if !pattern.is_empty() {
-            let pane: Arc<dyn Pane> = self.delegate.clone();
+            let pane: Arc<dyn OverlayPane> = self.delegate.clone();
             let window = self.window.clone();
             let dims = pane.get_dimensions();
 
@@ -338,7 +338,7 @@ impl CopyRenderable {
                 let pane_id = pane.pane_id();
                 let mut results = Some(results);
                 window.notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                    let state = term_window.leaf_ui_state(pane_id);
+                    let state = term_window.terminal_ui_state(pane_id as u64);
                     if let Some(overlay) = state.overlay.as_ref() {
                         if let Some(copy_overlay) = overlay.pane.downcast_ref::<CopyOverlay>() {
                             let mut r = copy_overlay.render.lock();
@@ -359,8 +359,8 @@ impl CopyRenderable {
 
     fn processed_search_chunk(
         &mut self,
-        pattern: Pattern,
-        results: Vec<SearchResult>,
+        pattern: OverlayPattern,
+        results: Vec<OverlaySearchResult>,
         range: Range<StableRowIndex>,
     ) {
         self.window.invalidate();
@@ -386,7 +386,7 @@ impl CopyRenderable {
         }
 
         // Search next chunk
-        let pane: Arc<dyn Pane> = self.delegate.clone();
+        let pane: Arc<dyn OverlayPane> = self.delegate.clone();
         let window = self.window.clone();
         let end = range.start;
         let range = end
@@ -405,7 +405,7 @@ impl CopyRenderable {
             let pane_id = pane.pane_id();
             let mut results = Some(results);
             window.notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                let state = term_window.leaf_ui_state(pane_id);
+                let state = term_window.terminal_ui_state(pane_id as u64);
                 if let Some(overlay) = state.overlay.as_ref() {
                     if let Some(copy_overlay) = overlay.pane.downcast_ref::<CopyOverlay>() {
                         let mut r = copy_overlay.render.lock();
@@ -423,7 +423,7 @@ impl CopyRenderable {
         let pane_id = self.delegate.pane_id();
         self.window
             .notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                let mut selection = term_window.selection(pane_id);
+                let mut selection = term_window.selection(pane_id as u64);
                 selection.origin.take();
                 selection.range.take();
             })));
@@ -514,7 +514,7 @@ impl CopyRenderable {
         let mode = self.selection_mode;
         self.window
             .notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                let mut selection = term_window.selection(pane_id);
+                let mut selection = term_window.selection(pane_id as u64);
                 selection.origin = Some(start);
                 selection.range = Some(range);
                 selection.rectangular = mode == SelectionMode::Block;
@@ -566,12 +566,12 @@ impl CopyRenderable {
         let pane_id = self.delegate.pane_id();
         self.window
             .notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                term_window.set_viewport(pane_id, row, dims);
+                term_window.set_viewport(pane_id as u64, row, dims);
             })));
     }
 
     fn close(&self) {
-        TermWindow::schedule_cancel_overlay_for_leaf(
+        TermWindow::schedule_cancel_overlay_for_terminal_handle(
             self.window.clone(),
             self.delegate.pane_id() as u64,
         );
@@ -643,12 +643,12 @@ impl CopyRenderable {
         }
     }
 
-    fn get_pattern(&self) -> Pattern {
+    fn get_pattern(&self) -> OverlayPattern {
         let pattern = self.search_line.get_line().to_string();
         match self.pattern_type {
-            PatternType::CaseSensitiveString => Pattern::CaseSensitiveString(pattern),
-            PatternType::CaseInSensitiveString => Pattern::CaseInSensitiveString(pattern),
-            PatternType::Regex => Pattern::Regex(pattern),
+            OverlayPatternType::CaseSensitiveString => OverlayPattern::CaseSensitiveString(pattern),
+            OverlayPatternType::CaseInSensitiveString => OverlayPattern::CaseInSensitiveString(pattern),
+            OverlayPatternType::Regex => OverlayPattern::Regex(pattern),
         }
     }
 
@@ -672,7 +672,7 @@ impl CopyRenderable {
         let pane_id = self.delegate.pane_id();
 
         window.notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-            let mut state = term_window.leaf_ui_state(pane_id);
+            let mut state = term_window.terminal_ui_state(pane_id as u64);
             if let Some(overlay) = state.overlay.as_mut() {
                 if let Some(copy_overlay) = overlay.pane.downcast_ref::<CopyOverlay>() {
                     let editing_search = copy_overlay.render.lock().editing_search;
@@ -696,9 +696,9 @@ impl CopyRenderable {
 
     fn cycle_match_type(&mut self) {
         let pattern_type = match &self.pattern_type {
-            PatternType::CaseSensitiveString => PatternType::CaseInSensitiveString,
-            PatternType::CaseInSensitiveString => PatternType::Regex,
-            PatternType::Regex => PatternType::CaseSensitiveString,
+            OverlayPatternType::CaseSensitiveString => OverlayPatternType::CaseInSensitiveString,
+            OverlayPatternType::CaseInSensitiveString => OverlayPatternType::Regex,
+            OverlayPatternType::Regex => OverlayPatternType::CaseSensitiveString,
         };
         self.pattern_type = pattern_type;
         self.schedule_update_search();
@@ -1103,8 +1103,8 @@ impl CopyRenderable {
     }
 }
 
-impl Pane for CopyOverlay {
-    fn pane_id(&self) -> PaneId {
+impl OverlayPane for CopyOverlay {
+    fn pane_id(&self) -> OverlayPaneHandle {
         self.delegate.pane_id()
     }
 
@@ -1241,13 +1241,13 @@ impl Pane for CopyOverlay {
         Ok(())
     }
 
-    fn perform_assignment(&self, assignment: &KeyAssignment) -> PerformAssignmentResult {
+    fn perform_assignment(&self, assignment: &KeyAssignment) -> OverlayAssignmentResult {
         use CopyModeAssignment::*;
         let mut render = self.render.lock();
         if render.pending_jump.is_some() {
             // Block key assignments until key_down is called
             // and resolves the next state
-            return PerformAssignmentResult::BlockAssignmentAndRouteToKeyDown;
+            return OverlayAssignmentResult::BlockAssignmentAndRouteToKeyDown;
         }
         match assignment {
             KeyAssignment::CopyMode(assignment) => {
@@ -1293,9 +1293,9 @@ impl Pane for CopyOverlay {
                     JumpAgain => render.jump_again(false),
                     JumpReverse => render.jump_again(true),
                 }
-                PerformAssignmentResult::Handled
+                OverlayAssignmentResult::Handled
             }
-            _ => PerformAssignmentResult::Unhandled,
+            _ => OverlayAssignmentResult::Unhandled,
         }
     }
 
@@ -1315,7 +1315,7 @@ impl Pane for CopyOverlay {
         self.delegate.palette()
     }
 
-    fn domain_id(&self) -> DomainId {
+    fn domain_id(&self) -> OverlayDomainHandle {
         self.delegate.domain_id()
     }
 
@@ -1336,7 +1336,7 @@ impl Pane for CopyOverlay {
         self.delegate.set_clipboard(clipboard)
     }
 
-    fn get_current_working_dir(&self, policy: CachePolicy) -> Option<Url> {
+    fn get_current_working_dir(&self, policy: OverlayCachePolicy) -> Option<Url> {
         self.delegate.get_current_working_dir(policy)
     }
 
@@ -1373,20 +1373,20 @@ impl Pane for CopyOverlay {
         self.delegate.get_changed_since(lines, seqno)
     }
 
-    fn get_logical_lines(&self, lines: Range<StableRowIndex>) -> Vec<LogicalLine> {
+    fn get_logical_lines(&self, lines: Range<StableRowIndex>) -> Vec<OverlayLogicalLine> {
         self.delegate.get_logical_lines(lines)
     }
 
     fn for_each_logical_line_in_stable_range_mut(
         &self,
         lines: Range<StableRowIndex>,
-        for_line: &mut dyn ForEachPaneLogicalLine,
+        for_line: &mut dyn OverlayForEachLogicalLine,
     ) {
         self.delegate
             .for_each_logical_line_in_stable_range_mut(lines, for_line);
     }
 
-    fn with_lines_mut(&self, lines: Range<StableRowIndex>, with_lines: &mut dyn WithPaneLines) {
+    fn with_lines_mut(&self, lines: Range<StableRowIndex>, with_lines: &mut dyn OverlayWithPaneLines) {
         // Take care to access self.delegate methods here before we get into
         // calling into its own with_lines_mut to avoid a runtime
         // lock erro!
@@ -1399,7 +1399,7 @@ impl Pane for CopyOverlay {
         let search_row = renderer.compute_search_row();
 
         struct OverlayLines<'a> {
-            with_lines: &'a mut dyn WithPaneLines,
+            with_lines: &'a mut dyn OverlayWithPaneLines,
             dims: RenderableDimensions,
             search_row: StableRowIndex,
             renderer: &'a mut CopyRenderable,
@@ -1415,7 +1415,7 @@ impl Pane for CopyOverlay {
             },
         );
 
-        impl<'a> WithPaneLines for OverlayLines<'a> {
+        impl<'a> OverlayWithPaneLines for OverlayLines<'a> {
             fn with_lines_mut(&mut self, first_row: StableRowIndex, lines: &mut [&mut Line]) {
                 let mut overlay_lines = vec![];
                 let config = config::configuration();
@@ -1434,9 +1434,9 @@ impl Pane for CopyOverlay {
                         let rev = CellAttributes::default().set_reverse(true).clone();
                         line.fill_range(0..self.dims.cols, &Cell::new(' ', rev.clone()), SEQ_ZERO);
                         let mode = &match pattern {
-                            Pattern::CaseSensitiveString(_) => "case-sensitive",
-                            Pattern::CaseInSensitiveString(_) => "ignore-case",
-                            Pattern::Regex(_) => "regex",
+                            OverlayPattern::CaseSensitiveString(_) => "case-sensitive",
+                            OverlayPattern::CaseInSensitiveString(_) => "ignore-case",
+                            OverlayPattern::Regex(_) => "regex",
                         };
 
                         let remain = match &self.renderer.searching {
@@ -1535,9 +1535,9 @@ impl Pane for CopyOverlay {
                 let rev = CellAttributes::default().set_reverse(true).clone();
                 line.fill_range(0..dims.cols, &Cell::new(' ', rev.clone()), SEQ_ZERO);
                 let mode = &match pattern {
-                    Pattern::CaseSensitiveString(_) => "case-sensitive",
-                    Pattern::CaseInSensitiveString(_) => "ignore-case",
-                    Pattern::Regex(_) => "regex",
+                    OverlayPattern::CaseSensitiveString(_) => "case-sensitive",
+                    OverlayPattern::CaseInSensitiveString(_) => "ignore-case",
+                    OverlayPattern::Regex(_) => "regex",
                 };
                 line.overlay_text_with_attribute(
                     0,

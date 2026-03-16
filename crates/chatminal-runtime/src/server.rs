@@ -208,6 +208,7 @@ mod tests {
     use chatminal_protocol::{ClientFrame, Event, Request, Response, ServerBody, ServerFrame};
     use chatminal_store::Store;
 
+    use crate::state::test_bridge::make_test_bridge;
     use crate::transport::ensure_socket_path;
     use crate::{DaemonConfig, DaemonState};
 
@@ -245,7 +246,8 @@ mod tests {
                 default_rows: 32,
                 health_interval_ms: 1_000,
             };
-            let state = DaemonState::new(config.clone(), store).expect("create daemon state");
+            let state = DaemonState::new(config.clone(), store, make_test_bridge())
+                .expect("create daemon state");
 
             let endpoint_clone = endpoint.clone();
             let handle = std::thread::spawn(move || run_server(&endpoint_clone, state));
@@ -710,7 +712,8 @@ mod tests {
                 default_rows: 32,
                 health_interval_ms: 1_000,
             };
-            let state = DaemonState::new(config, store).expect("create daemon state");
+            let state =
+                DaemonState::new(config, store, make_test_bridge()).expect("create daemon state");
             let endpoint_clone = endpoint.clone();
             let handle = std::thread::spawn(move || run_server(&endpoint_clone, state));
             wait_for_server(&endpoint);
@@ -779,7 +782,8 @@ mod tests {
                 default_rows: 32,
                 health_interval_ms: 1_000,
             };
-            let state = DaemonState::new(config, store).expect("create daemon state restart");
+            let state = DaemonState::new(config, store, make_test_bridge())
+                .expect("create daemon state restart");
             let endpoint_clone = endpoint.clone();
             let handle = std::thread::spawn(move || run_server(&endpoint_clone, state));
             wait_for_server(&endpoint);

@@ -49,7 +49,7 @@ impl UserData for WindowRef {
             let mut window = this.resolve_mut(&mux)?;
             Ok(window.set_workspace(&new_name))
         });
-        methods.add_async_method("spawn_surface", |_, this, spawn: SpawnSurface| async move {
+        methods.add_async_method("spawn_session", |_, this, spawn: SpawnSession| async move {
             spawn.spawn(this).await
         });
         methods.add_method("get_title", |_, this, _: ()| {
@@ -62,31 +62,34 @@ impl UserData for WindowRef {
             let mut window = this.resolve_mut(&mux)?;
             Ok(window.set_title(&title))
         });
-        methods.add_method("surfaces", |_, this, _: ()| {
+        methods.add_method("sessions", |_, this, _: ()| {
             let mux = get_mux()?;
             let window = this.resolve(&mux)?;
             Ok(window
                 .iter()
-                .map(|tab| SurfaceRef(tab.tab_id()))
-                .collect::<Vec<SurfaceRef>>())
+                .map(|tab| SessionRef(tab.tab_id()))
+                .collect::<Vec<SessionRef>>())
         });
-        methods.add_method("surfaces_with_info", |lua, this, _: ()| {
+        methods.add_method("sessions_with_info", |lua, this, _: ()| {
             let mux = get_mux()?;
             let window = this.resolve(&mux)?;
             let result = lua.create_table()?;
             let active_idx = window.get_active_idx();
             for (index, tab) in window.iter().enumerate() {
-                let info = SurfaceInfo {
+                let info = SessionInfo {
                     index,
                     is_active: index == active_idx,
                 };
                 let info = luahelper::dynamic_to_lua_value(lua, info.to_dynamic())?;
                 match &info {
                     LuaValue::Table(t) => {
-                        t.set("surface", SurfaceRef(tab.tab_id()))?;
-                        t.set("session_id", surface_session_id(tab))?;
-                        t.set("surface_id", surface_public_id(tab))?;
-                        t.set("active_leaf_id", surface_active_leaf_id(tab))?;
+                        t.set("session", SessionRef(tab.tab_id()))?;
+                        t.set("session_id", session_id_for_tab(tab))?;
+                        t.set(
+                            "active_terminal_instance_id",
+                            tab.get_active_pane()
+                                .and_then(|pane| pane_terminal_instance_id(&pane)),
+                        )?;
                     }
                     _ => {}
                 }
@@ -94,32 +97,22 @@ impl UserData for WindowRef {
             }
             Ok(result)
         });
-        methods.add_method("active_surface", |_, this, _: ()| {
+        methods.add_method("active_session", |_, this, _: ()| {
             let mux = get_mux()?;
             let window = this.resolve(&mux)?;
-            Ok(window.get_active().map(|tab| SurfaceRef(tab.tab_id())))
+            Ok(window.get_active().map(|tab| SessionRef(tab.tab_id())))
         });
         methods.add_method("active_session_id", |_, this, _: ()| {
             let mux = get_mux()?;
             let window = this.resolve(&mux)?;
-            Ok(window.get_active().and_then(|tab| surface_session_id(tab)))
+            Ok(window.get_active().and_then(|tab| session_id_for_tab(tab)))
         });
-        methods.add_method("active_surface_id", |_, this, _: ()| {
-            let mux = get_mux()?;
-            let window = this.resolve(&mux)?;
-            Ok(window.get_active().and_then(|tab| surface_public_id(tab)))
-        });
-        methods.add_method("active_leaf_id", |_, this, _: ()| {
-            let mux = get_mux()?;
-            let window = this.resolve(&mux)?;
-            Ok(window.get_active().and_then(|tab| surface_active_leaf_id(tab)))
-        });
-        methods.add_method("active_leaf", |_, this, _: ()| {
+        methods.add_method("active_terminal", |_, this, _: ()| {
             let mux = get_mux()?;
             let window = this.resolve(&mux)?;
             Ok(window
                 .get_active()
-                .and_then(|tab| tab.get_active_pane().map(|pane| LeafRef(pane.pane_id()))))
+                .and_then(|tab| tab.get_active_pane().map(|pane| TerminalRef(pane.pane_id()))))
         });
     }
 }

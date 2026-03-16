@@ -4,6 +4,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::workspace_ids::{SessionViewId, WorkspaceNodeId};
+use crate::workspace_layout::{WorkspaceLayoutState, WorkspaceSplitAxis};
 use chatminal_store::{Store, StoredSession, StoredSessionSnapshot, StoredSessionStatus};
 
 use crate::api::{
@@ -12,22 +14,37 @@ use crate::api::{
 use crate::config::{DaemonConfig, resolve_session_cwd};
 use crate::metrics::{RuntimeMetrics, RuntimeMetricsSnapshot};
 use crate::session::{SessionEvent, WriteInputError};
-use crate::state::runtime_bridge::RuntimeHandle;
+use crate::state::runtime_bridge::{RuntimeExecutionAdapter, RuntimeHandle};
 
 mod explorer_utils;
 mod native_api;
 mod protocol_adapter;
 mod protocol_clients;
-mod runtime_bridge;
+pub mod runtime_bridge;
 mod runtime_lifecycle;
 mod session_event_processor;
 mod session_explorer;
+#[cfg(test)]
+pub mod test_bridge;
 
 const MAX_INPUT_BYTES: usize = 65_536;
 const KEEP_ALIVE_ON_CLOSE_KEY: &str = "keep_alive_on_close";
 const START_IN_TRAY_KEY: &str = "start_in_tray";
+const WORKSPACE_LAYOUT_PREFIX: &str = "workspace_layout:";
 const DEFAULT_KEEP_ALIVE_ON_CLOSE: bool = true;
 const DEFAULT_START_IN_TRAY: bool = false;
+
+/// Execution status of a session. Owned by `chatminal-runtime`; updated via the desktop adapter.
+/// Uses only primitive types — no import from `chatminal-session-runtime` allowed here.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SessionExecutionStatus {
+    /// Session exists in DaemonState but no PTY has been spawned yet.
+    NotStarted,
+    /// PTY is running; `runtime_id` is the opaque handle from the session engine.
+    Running { runtime_id: u64 },
+    /// PTY was stopped (detached or closed); SessionEntry still present.
+    Stopped,
+}
 
 struct SessionEntry {
     session: StoredSession,
@@ -35,6 +52,10 @@ struct SessionEntry {
     live_output: String,
     generation: u64,
     prepend_run_boundary_on_next_output: bool,
+    /// Tracks whether this session's PTY is running. Populated by the desktop adapter; not yet
+    /// synced in Phase 05 (sync wiring deferred to Phase 07 after dependency direction is
+    /// reversed).
+    execution_status: SessionExecutionStatus,
 }
 
 struct SessionSpawnPlan {
@@ -62,13 +83,13 @@ struct StateInner {
 
 #[derive(Clone)]
 pub struct DaemonState {
-    // Direction B boundary freeze:
-    // `DaemonState` remains the owner of business/workspace state. Live session
-    // surface/layout state will be delegated to `chatminal-session-runtime`.
+    // `DaemonState` owns business/workspace state.
+    // Live execution state is delegated to the `execution` adapter (concrete impl in
+    // `desktop_host_runtime`). No `chatminal-session-runtime` types leak into this struct.
     inner: Arc<Mutex<StateInner>>,
     events: std_mpsc::SyncSender<SessionEvent>,
     metrics: RuntimeMetrics,
-    execution: Arc<runtime_bridge::RuntimeExecutionBridge>,
+    execution: Arc<dyn RuntimeExecutionAdapter>,
 }
 
 pub struct RuntimeSubscription {
@@ -104,17 +125,23 @@ impl Drop for RuntimeSubscription {
 }
 
 impl DaemonState {
-    pub fn initialize_default() -> Result<(Self, DaemonConfig), String> {
+    pub fn initialize_default(
+        execution: Arc<dyn RuntimeExecutionAdapter>,
+    ) -> Result<(Self, DaemonConfig), String> {
         let config = DaemonConfig::from_env()?;
         let store = Store::initialize_default()?;
-        let state = Self::new(config.clone(), store)?;
+        let state = Self::new(config.clone(), store, execution)?;
         Ok((state, config))
     }
 
-    pub fn new(config: DaemonConfig, store: Store) -> Result<Self, String> {
+    pub fn new(
+        config: DaemonConfig,
+        store: Store,
+        execution: Arc<dyn RuntimeExecutionAdapter>,
+    ) -> Result<Self, String> {
         let (events_tx, events_rx) = std_mpsc::sync_channel::<SessionEvent>(4096);
+        execution.connect_session_events(events_tx.clone());
         let metrics = RuntimeMetrics::new();
-        let execution = Arc::new(runtime_bridge::RuntimeExecutionBridge::new(events_tx.clone()));
         let mut sessions = HashMap::new();
         let workspace = store.load_workspace()?;
 
@@ -135,6 +162,7 @@ impl DaemonState {
                         live_output: String::new(),
                         generation: 0,
                         prepend_run_boundary_on_next_output: false,
+                        execution_status: SessionExecutionStatus::NotStarted,
                     },
                 );
             }
@@ -356,6 +384,19 @@ impl DaemonState {
         })
     }
 
+    /// Activate using config default terminal size. Convenience for callers that
+    /// don't have an explicit size (e.g. the `SessionWorkspaceHost` bridge adapter).
+    pub fn session_activate_with_default_size(&self, session_id: &str) -> Result<(), String> {
+        let (cols, rows) = {
+            let inner = self
+                .inner
+                .lock()
+                .map_err(|_| "state lock poisoned".to_string())?;
+            (inner.config.default_cols, inner.config.default_rows)
+        };
+        self.session_activate(session_id, cols, rows)
+    }
+
     pub fn session_activate(
         &self,
         session_id: &str,
@@ -452,6 +493,208 @@ impl DaemonState {
         };
 
         Ok(merged.into())
+    }
+
+    pub fn workspace_layout_load(&self) -> Result<Option<WorkspaceLayoutState>, String> {
+        let inner = self
+            .inner
+            .lock()
+            .map_err(|_| "state lock poisoned".to_string())?;
+        inner.workspace_layout_load()
+    }
+
+    pub fn workspace_layout_save(&self, layout: &WorkspaceLayoutState) -> Result<(), String> {
+        let inner = self
+            .inner
+            .lock()
+            .map_err(|_| "state lock poisoned".to_string())?;
+        inner.workspace_layout_save(layout)
+    }
+
+    pub fn workspace_layout_clear(&self) -> Result<(), String> {
+        let inner = self
+            .inner
+            .lock()
+            .map_err(|_| "state lock poisoned".to_string())?;
+        inner.workspace_layout_clear()
+    }
+
+    pub fn workspace_layout_restore_persisted(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Option<WorkspaceLayoutState>, String> {
+        let persisted = self.workspace_layout_load()?;
+        let layouts = self.execution.workspace_layouts();
+        let mut layouts = layouts
+            .lock()
+            .map_err(|_| "workspace layout lock poisoned".to_string())?;
+        if let Some(layout) = persisted.clone() {
+            layouts.replace_layout(workspace_id.to_string(), layout);
+        } else {
+            layouts.remove_layout(workspace_id);
+        }
+        Ok(persisted)
+    }
+
+    pub fn workspace_layout_snapshot(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Option<WorkspaceLayoutState>, String> {
+        let layouts = self.execution.workspace_layouts();
+        let layouts = layouts
+            .lock()
+            .map_err(|_| "workspace layout lock poisoned".to_string())?;
+        Ok(layouts.layout(workspace_id).cloned())
+    }
+
+    pub fn workspace_layout_remove(&self, workspace_id: &str) -> Result<(), String> {
+        let layouts = self.execution.workspace_layouts();
+        layouts
+            .lock()
+            .map_err(|_| "workspace layout lock poisoned".to_string())?
+            .remove_layout(workspace_id);
+        self.workspace_layout_clear()
+    }
+
+    pub fn workspace_layout_replace(
+        &self,
+        workspace_id: &str,
+        layout: WorkspaceLayoutState,
+    ) -> Result<WorkspaceLayoutState, String> {
+        let layout = {
+            let layouts = self.execution.workspace_layouts();
+            layouts
+                .lock()
+                .map_err(|_| "workspace layout lock poisoned".to_string())?
+                .replace_layout(workspace_id.to_string(), layout)
+        };
+        self.workspace_layout_save(&layout)?;
+        Ok(layout)
+    }
+
+    pub fn workspace_layout_ensure_session(
+        &self,
+        workspace_id: &str,
+        session_id: &str,
+    ) -> Result<WorkspaceLayoutState, String> {
+        let layout = {
+            let layouts = self.execution.workspace_layouts();
+            let mut layouts = layouts
+                .lock()
+                .map_err(|_| "workspace layout lock poisoned".to_string())?;
+            let layout = layouts.ensure_layout(workspace_id.to_string(), session_id.to_string());
+            layouts
+                .ensure_session_view(workspace_id, session_id.to_string())
+                .unwrap_or(layout)
+        };
+        self.workspace_layout_save(&layout)?;
+        Ok(layout)
+    }
+
+    pub fn workspace_layout_split_view(
+        &self,
+        workspace_id: &str,
+        view_id: SessionViewId,
+        axis: WorkspaceSplitAxis,
+        session_id: &str,
+    ) -> Result<Option<WorkspaceLayoutState>, String> {
+        let layout = {
+            let layouts = self.execution.workspace_layouts();
+            layouts
+                .lock()
+                .map_err(|_| "workspace layout lock poisoned".to_string())?
+                .split_view(workspace_id, view_id, axis, session_id.to_string())
+        };
+        if let Some(layout_ref) = layout.as_ref() {
+            self.workspace_layout_save(layout_ref)?;
+        }
+        Ok(layout)
+    }
+
+    pub fn workspace_layout_attach_session(
+        &self,
+        workspace_id: &str,
+        view_id: SessionViewId,
+        session_id: &str,
+    ) -> Result<Option<WorkspaceLayoutState>, String> {
+        let layout = {
+            let layouts = self.execution.workspace_layouts();
+            layouts
+                .lock()
+                .map_err(|_| "workspace layout lock poisoned".to_string())?
+                .attach_session(workspace_id, view_id, session_id.to_string())
+        };
+        if let Some(layout_ref) = layout.as_ref() {
+            self.workspace_layout_save(layout_ref)?;
+        }
+        Ok(layout)
+    }
+
+    pub fn workspace_layout_focus_view(
+        &self,
+        workspace_id: &str,
+        view_id: SessionViewId,
+    ) -> Result<Option<WorkspaceLayoutState>, String> {
+        let layout = {
+            let layouts = self.execution.workspace_layouts();
+            layouts
+                .lock()
+                .map_err(|_| "workspace layout lock poisoned".to_string())?
+                .focus_view(workspace_id, view_id)
+        };
+        if let Some(layout_ref) = layout.as_ref() {
+            self.workspace_layout_save(layout_ref)?;
+        }
+        Ok(layout)
+    }
+
+    pub fn workspace_layout_close_view(
+        &self,
+        workspace_id: &str,
+        view_id: SessionViewId,
+    ) -> Result<Option<WorkspaceLayoutState>, String> {
+        let layout = {
+            let layouts = self.execution.workspace_layouts();
+            layouts
+                .lock()
+                .map_err(|_| "workspace layout lock poisoned".to_string())?
+                .close_view(workspace_id, view_id)
+        };
+        if let Some(layout_ref) = layout.as_ref() {
+            self.workspace_layout_save(layout_ref)?;
+        }
+        Ok(layout)
+    }
+
+    pub fn workspace_layout_resize_split(
+        &self,
+        workspace_id: &str,
+        node_id: WorkspaceNodeId,
+        ratio: u16,
+    ) -> Result<Option<WorkspaceLayoutState>, String> {
+        let layout = {
+            let layouts = self.execution.workspace_layouts();
+            layouts
+                .lock()
+                .map_err(|_| "workspace layout lock poisoned".to_string())?
+                .resize_split(workspace_id, node_id, ratio)
+        };
+        if let Some(layout_ref) = layout.as_ref() {
+            self.workspace_layout_save(layout_ref)?;
+        }
+        Ok(layout)
+    }
+
+    pub fn workspace_layout_view_id_for_session(
+        &self,
+        workspace_id: &str,
+        session_id: &str,
+    ) -> Result<Option<SessionViewId>, String> {
+        let layouts = self.execution.workspace_layouts();
+        let layouts = layouts
+            .lock()
+            .map_err(|_| "workspace layout lock poisoned".to_string())?;
+        Ok(layouts.view_id_for_session(workspace_id, session_id))
     }
 
     pub fn session_resize(&self, session_id: &str, cols: usize, rows: usize) -> Result<(), String> {

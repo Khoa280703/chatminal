@@ -5,9 +5,9 @@ use codec::*;
 use config::{configuration, ConfigHandle};
 use engine_term::{KeyCode, KeyModifiers, Line, StableRowIndex};
 use lru::LruCache;
-use mux::pane::PaneId;
-use mux::renderable::{RenderableDimensions, StableCursorPosition};
-use mux::Mux;
+use host_runtime::pane::PaneId;
+use host_runtime::renderable::{RenderableDimensions, StableCursorPosition};
+use host_runtime::Mux;
 use promise::BrokenPromise;
 use rangeset::*;
 use ratelim::RateLimiter;
@@ -371,7 +371,7 @@ impl RenderableInner {
             "apply_changes_to_surface: Generate PaneOutput event for local={}",
             self.local_pane_id
         );
-        Mux::get().notify(mux::MuxNotification::PaneOutput(self.local_pane_id));
+        Mux::get().notify(host_runtime::MuxNotification::PaneOutput(self.local_pane_id));
 
         let mut to_fetch = RangeSet::new();
         log::trace!("dirty as of seq {} -> {:?}", delta.seqno, dirty);
@@ -579,7 +579,7 @@ impl RenderableInner {
             "Generate PaneOutput event for local_pane_id={}",
             local_pane_id
         );
-        mux.notify(mux::MuxNotification::PaneOutput(local_pane_id));
+        mux.notify(host_runtime::MuxNotification::PaneOutput(local_pane_id));
         Ok(())
     }
 

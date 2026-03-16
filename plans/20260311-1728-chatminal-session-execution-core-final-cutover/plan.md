@@ -1,6 +1,6 @@
 # Chatminal Session Execution Core Final Cutover
 
-Status: planned
+Status: complete
 Goal: hoàn tất bước cuối để `session` trở thành execution primitive thật của Chatminal; active session execution path không còn phụ thuộc `mux/tab/pane` host để spawn, focus, split, move, close và route input. Render boundary có thể tạm giữ compatibility object nếu chưa thể bóc trong cùng plan.
 
 ## Problem Statement
@@ -26,14 +26,14 @@ Goal: hoàn tất bước cuối để `session` trở thành execution primitiv
 - Phase 08: Verification Rollout And Post-Cutover Cleanup
 
 ## Progress
-- Phase 01: pending
-- Phase 02: pending
-- Phase 03: pending
-- Phase 04: pending
-- Phase 05: pending
-- Phase 06: pending
-- Phase 07: pending
-- Phase 08: pending
+- Phase 01: complete
+- Phase 02: complete
+- Phase 03: complete
+- Phase 04: complete
+- Phase 05: complete
+- Phase 06: complete
+- Phase 07: complete
+- Phase 08: complete
 
 ## Hard Invariants
 - Không đụng `third_party/`

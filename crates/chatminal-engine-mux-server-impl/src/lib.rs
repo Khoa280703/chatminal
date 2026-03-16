@@ -1,8 +1,8 @@
 use config::{ConfigHandle, SshMultiplexing};
 use engine_client::domain::{ClientDomain, ClientDomainConfig};
-use mux::domain::{Domain, LocalDomain};
-use mux::ssh::RemoteSshDomain;
-use mux::Mux;
+use host_runtime::domain::{Domain, LocalDomain};
+use host_runtime::ssh::RemoteSshDomain;
+use host_runtime::Mux;
 use std::sync::Arc;
 
 pub mod dispatch;

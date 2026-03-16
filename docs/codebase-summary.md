@@ -1,53 +1,84 @@
 # Codebase Summary
 
-Last updated: 2026-03-06
+Last updated: 2026-03-13
 
 ## Runtime baseline
-Chatminal hiện chỉ dùng runtime native Rust:
-- `apps/chatminald` (~1,704 LOC, 15 files)
-- `apps/chatminal-app` (~3,097+ LOC, 45+ files)
-- `crates/chatminal-terminal-core` (208 LOC, VT100 parser)
-- `crates/chatminal-protocol` (316 LOC)
-- `crates/chatminal-store` (891 LOC)
+Chatminal hiện chia làm ba lớp rõ ràng:
+- `apps/chatminal-desktop` — desktop app first-party, render/input shell + desktop facade + private engine adapter.
+- `crates/chatminal-runtime` — app/runtime orchestrator, persistence facade, native API, workspace/session state.
+- `crates/chatminal-session-runtime` — execution subsystem, workspace layout model, session engine, runtime registry.
 
-## High-signal files
-- `apps/chatminald/src/main.rs`: daemon entrypoint
-- `apps/chatminald/src/server.rs`: local IPC server loop
-- `apps/chatminald/src/state.rs`: request handling + runtime state machine
-- `apps/chatminald/src/state/request_handler.rs`: daemon request dispatch logic (request frame -> response frame)
-- `apps/chatminald/src/state/explorer_utils.rs`: session-explorer path normalization and root-boundary guards
-- `apps/chatminald/src/state/session_explorer.rs`: session explorer request handlers (state/list/read/update)
-- `apps/chatminald/src/state/runtime_lifecycle.rs`: active-runtime ensure/publish workspace/session updates + broadcast helpers
-- `apps/chatminald/src/state/session_event_processor.rs`: PTY output/exited/error event processing path
-- `apps/chatminald/src/state/tests.rs`: daemon state tests moved out from runtime file
-- `apps/chatminald/src/session.rs`: PTY wrapper per session
-- `apps/chatminald/src/config.rs`: daemon env/default config
-- `apps/chatminald/src/transport/unix.rs`: UDS transport backend
-- `apps/chatminald/src/transport/windows.rs`: Named Pipe transport backend
-- `apps/chatminal-app/src/main.rs`: CLI command router
-- `apps/chatminal-app/src/ipc/transport/unix.rs`: UDS client connector
-- `apps/chatminal-app/src/ipc/transport/windows.rs`: Named Pipe client connector
-- `apps/chatminal-app/src/input/pty_key_translator.rs`: key event -> PTY byte translation
-- `apps/chatminal-app/src/input/ime_commit_deduper.rs`: IME commit deduplication logic
-- `apps/chatminal-app/src/input/ime_composition_state.rs`: IME composition state tracking
-- `apps/chatminal-app/src/terminal_wezterm_attach_frame_renderer.rs`: attach TUI frame rendering utilities
-- `apps/chatminal-app/src/terminal_quality_benchmark/runner.rs`: RTT benchmark runner (`bench-rtt-wezterm`)
-- `apps/chatminal-app/src/terminal_quality_benchmark/stats.rs`: percentile/statistics + benchmark report
-- `apps/chatminal-app/src/terminal_wezterm_core.rs`: terminal pane adapter (dùng terminal core nội bộ)
-- `crates/chatminal-terminal-core/src/lib.rs`: internal terminal parser/state wrapper
-- `apps/chatminal-app/src/terminal_wezterm_dashboard_tui.rs`: interactive TUI dashboard
-- `apps/chatminal-app/src/window/native_window_wezterm.rs`: eframe window shell
-- `apps/chatminal-app/src/window/native_window_wezterm_controller.rs`: window state hydration/event sync
-- `apps/chatminal-app/src/window/native_window_wezterm_actions.rs`: window session actions/input/resize
-- `apps/chatminal-app/src/window/native_window_wezterm_input_worker.rs`: async input worker for window
-- `apps/chatminal-app/src/window/native_window_wezterm_reducer.rs`: pure reducer logic + unit tests cho window flow
-- `apps/chatminal-app/src/terminal_workspace_view_model.rs`: workspace TUI view model
-- `crates/chatminal-protocol/src/lib.rs`: protocol contracts
-- `crates/chatminal-store/src/lib.rs`: SQLite persistence API
-- `apps/chatminald/src/metrics.rs`: daemon runtime counters (request/event/broadcast/drop + input backpressure)
-- `scripts/bench/phase02-rtt-memory-gate.sh`: phase-02 RTT/RSS hard gate script
-- `scripts/fidelity/phase03-fidelity-matrix-smoke.sh`: phase-03 fidelity smoke (required cases + JSON report)
-- `scripts/soak/phase05-soak-smoke.sh`: phase-05 soak smoke (`pr|nightly`) + JSON envelope
+## High-signal modules
+
+### Desktop facade and shell
+- `apps/chatminal-desktop/src/chatminal_runtime/mod.rs`
+  - desktop-facing bindings/query/action cho session/view/render-target/terminal handle/window snapshot.
+- `apps/chatminal-desktop/src/chatminal_runtime/client.rs`
+  - desktop runtime client dùng để resolve/dispatch actions qua runtime boundary.
+- `apps/chatminal-desktop/src/termwindow/mod.rs`
+  - coordinator cho render/input/overlay shell.
+- `apps/chatminal-desktop/src/tabbar.rs`
+  - product-facing session bar state.
+- `apps/chatminal-desktop/src/chatminal_layout/*`
+  - layout helpers cho workspace/session views.
+- `apps/chatminal-desktop/src/chatminal_render/*`
+  - render DTO/adapters dùng boundary types mới.
+
+### Desktop private adapter
+- `apps/chatminal-desktop/src/desktop_host_runtime/mod.rs`
+  - private adapter boundary duy nhất còn biết host runtime.
+- `apps/chatminal-desktop/src/desktop_host_runtime/session_host.rs`
+  - private session host: builds `ChatminalRenderState` trực tiếp từ `session_pane` map; `HostRenderScope` chỉ còn cho overlay compat.
+- `apps/chatminal-desktop/src/desktop_host_runtime/session_pane.rs`
+  - terminal pane bridge cho output/input/runtime metadata.
+- `apps/chatminal-desktop/src/desktop_host_runtime/pane.rs`
+  - runtime pane wrapper.
+- `apps/chatminal-desktop/src/desktop_host_runtime/engine_runtime_adapter.rs`
+  - desktop-side bridge sang execution/runtime core.
+
+### Runtime and execution core
+- `crates/chatminal-runtime/src/state/native_api.rs`
+  - desktop/native API cho workspace/session lifecycle.
+- `crates/chatminal-runtime/src/state/runtime_bridge.rs`
+  - mapping giữa persisted/runtime-facing state.
+- `crates/chatminal-runtime/src/api/mod.rs`
+  - app-facing boundary ids/snapshots.
+- `crates/chatminal-session-runtime/src/session_engine.rs`
+  - facade execution engine.
+- `crates/chatminal-session-runtime/src/session_engine_core.rs`
+  - native execution mutations/focus/close/spawn core logic.
+- `crates/chatminal-session-runtime/src/workspace_layout.rs`
+  - public layout model cho session view/group tree.
+- `crates/chatminal-session-runtime/src/workspace_layout_registry.rs`
+  - registry/source of truth cho layout snapshots theo workspace.
+- `crates/chatminal-session-runtime/src/session_runtime_state.rs`
+  - runtime state snapshots và render-target tracking.
+- `crates/chatminal-session-runtime/src/leaf_runtime_registry.rs`
+  - live terminal runtime registry.
+
+### Lower engine/private compatibility
+- `crates/chatminal-host-runtime/*`
+  - lower engine host internals; được phép giữ `Mux/Tab/Pane`.
+- `crates/chatminal-lua-bridge/src/lib.rs`
+  - Lua/config bridge theo vocabulary Chatminal.
+- `apps/chatminal-desktop/src/desktop_commands.rs`
+  - compatibility translation layer cho upstream `KeyAssignment` names.
+
+## Architectural ownership
+- Product source of truth: `chatminal-runtime` + `chatminal-session-runtime`.
+- Desktop source of truth trong app layer: `apps/chatminal-desktop/src/chatminal_runtime/*`.
+- Render/input shell: `termwindow/*`.
+- Engine/private host zone: `desktop_host_runtime/*` + `crates/chatminal-host-runtime/*`.
+
+## Verification snapshot
+- `cargo check --workspace`: pass
+- `cargo check --workspace --all-targets`: pass
+- `cargo test -p chatminal-runtime -- --test-threads=1`: pass
+- `cargo test -p chatminal-session-runtime -- --test-threads=1`: pass
+- `cargo test --manifest-path crates/chatminal-protocol/Cargo.toml -- --test-threads=1`: pass
+- `cargo test --manifest-path apps/chatminal-desktop/Cargo.toml -- --test-threads=1`: pass
+- `cargo test --manifest-path apps/chatminald/Cargo.toml -- --test-threads=1`: pass
 
 ## Current risk
-- `apps/chatminald/src/state.rs` vẫn có global mutex scope rộng; tải cao có thể contention.
+- Engine-side lower layer vẫn giữ host primitives; đó là intentional private debt, không còn leak ra product-facing desktop path.
+- Command/config compatibility vẫn phải duy trì translation layer cho upstream-style key assignments.

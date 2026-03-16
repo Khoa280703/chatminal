@@ -8,12 +8,12 @@ use config::{configuration, SshDomain, TlsDomainClient, UnixDomain, UnixTarget};
 use engine_uds::UnixStream;
 use filedescriptor::FileDescriptor;
 use futures::FutureExt;
-use mux::client::ClientId;
-use mux::connui::ConnectionUI;
-use mux::domain::DomainId;
-use mux::pane::PaneId;
-use mux::ssh::ssh_connect_with_ui;
-use mux::Mux;
+use host_runtime::client::ClientId;
+use host_runtime::connui::ConnectionUI;
+use host_runtime::domain::DomainId;
+use host_runtime::pane::PaneId;
+use host_runtime::ssh::ssh_connect_with_ui;
+use host_runtime::Mux;
 use openssl::ssl::{SslConnector, SslFiletype, SslMethod};
 use openssl::x509::X509;
 use portable_pty::Child;
@@ -680,7 +680,7 @@ impl Reconnectable {
         initial: bool,
         ui: &mut ConnectionUI,
     ) -> anyhow::Result<()> {
-        let ssh_config = mux::ssh::ssh_domain_to_ssh_config(&ssh_dom)?;
+        let ssh_config = host_runtime::ssh::ssh_domain_to_ssh_config(&ssh_dom)?;
 
         let sess = ssh_connect_with_ui(ssh_config, ui)?;
         let proxy_bin = Self::engine_bin_path(&ssh_dom.remote_chatminal_path);
@@ -1353,7 +1353,7 @@ impl Client {
     rpc!(mouse_event, SendMouseEvent, UnitResponse);
     rpc!(resize, Resize, UnitResponse);
     rpc!(set_zoomed, SetPaneZoomed, UnitResponse);
-    rpc!(activate_pane_direction, ActivatePaneDirection, UnitResponse);
+    rpc!(activate_pane_direction, ActivateSessionDirection, UnitResponse);
     rpc!(
         get_pane_render_changes,
         GetPaneRenderChanges,
@@ -1385,8 +1385,8 @@ impl Client {
     rpc!(erase_scrollback, EraseScrollbackRequest, UnitResponse);
     rpc!(
         get_pane_direction,
-        GetPaneDirection,
-        GetPaneDirectionResponse
+        GetSessionDirection,
+        GetSessionDirectionResponse
     );
     rpc!(adjust_pane_size, AdjustPaneSize, UnitResponse);
 }

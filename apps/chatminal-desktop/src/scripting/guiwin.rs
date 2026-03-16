@@ -120,17 +120,19 @@ impl UserData for GuiWin {
             Ok(dims)
         });
         methods.add_async_method(
-            "get_selection_text_for_leaf_id",
-            |_, this, leaf_id: u64| async move {
+            "get_selection_text_for_terminal_handle",
+            |_, this, terminal_handle: u64| async move {
                 let (tx, rx) = smol::channel::bounded(1);
-                this.window.notify(TermWindowNotif::GetSelectionForLeafId {
-                    leaf_id,
-                    tx,
-                });
+                this.window
+                    .notify(TermWindowNotif::Apply(Box::new(move |term_window| {
+                        tx.try_send(term_window.selection_text_for_terminal_handle(terminal_handle))
+                            .ok();
+                    })));
                 let text = rx
                     .recv()
                     .await
                     .map_err(|e| anyhow::anyhow!("{:#}", e))
+                    .map_err(luaerr)?
                     .map_err(luaerr)?;
 
                 Ok(text)
@@ -159,12 +161,11 @@ impl UserData for GuiWin {
 
             Ok(result)
         });
-        methods.add_async_method("active_surface_id", |_, this, _: ()| async move {
+        methods.add_async_method("active_view_id", |_, this, _: ()| async move {
             let (tx, rx) = smol::channel::bounded(1);
             this.window
                 .notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                    tx.try_send(term_window.active_surface_id().map(|id| id.as_u64()))
-                        .ok();
+                    tx.try_send(term_window.active_view_id()).ok();
                 })));
             let result = rx
                 .recv()
@@ -174,12 +175,11 @@ impl UserData for GuiWin {
 
             Ok(result)
         });
-        methods.add_async_method("active_leaf_id", |_, this, _: ()| async move {
+        methods.add_async_method("active_terminal_handle", |_, this, _: ()| async move {
             let (tx, rx) = smol::channel::bounded(1);
             this.window
                 .notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                    tx.try_send(term_window.active_leaf_id().map(|id| id.as_u64()))
-                        .ok();
+                    tx.try_send(term_window.active_terminal_handle()).ok();
                 })));
             let result = rx
                 .recv()
@@ -190,41 +190,44 @@ impl UserData for GuiWin {
             Ok(result)
         });
         methods.add_async_method(
-            "perform_action_for_leaf_id",
-            |_, this, (assignment, leaf_id): (KeyAssignment, u64)| async move {
+            "perform_action_for_terminal_handle",
+            |_, this, (assignment, terminal_handle): (KeyAssignment, u64)| async move {
                 let (tx, rx) = smol::channel::bounded(1);
                 this.window
-                    .notify(TermWindowNotif::PerformAssignmentForLeafId {
-                        leaf_id,
-                        assignment,
-                        tx: Some(tx),
-                    });
+                    .notify(TermWindowNotif::Apply(Box::new(move |term_window| {
+                        tx.try_send(
+                            term_window
+                                .perform_assignment_for_terminal_handle(terminal_handle, &assignment),
+                        )
+                        .ok();
+                    })));
                 let result = rx.recv().await.map_err(mlua::Error::external)?;
                 result.map_err(mlua::Error::external)
             },
         );
         methods.add_async_method(
-            "perform_action_on_active_leaf",
+            "perform_action_on_active_terminal_handle",
             |_, this, assignment: KeyAssignment| async move {
                 let (tx, rx) = smol::channel::bounded(1);
                 this.window
                     .notify(TermWindowNotif::Apply(Box::new(move |term_window| {
                         let result = term_window
-                            .active_leaf_id()
-                            .map(|id| id.as_u64())
-                            .ok_or_else(|| anyhow::anyhow!("no active leaf"));
+                            .active_terminal_handle()
+                            .ok_or_else(|| anyhow::anyhow!("no active terminal handle"));
                         tx.try_send(result.map_err(|err| err.to_string())).ok();
                     })));
-                let leaf_id = rx.recv().await.map_err(mlua::Error::external)?;
-                let leaf_id = leaf_id.map_err(mlua::Error::external)?;
+                let terminal_handle = rx.recv().await.map_err(mlua::Error::external)?;
+                let terminal_handle = terminal_handle.map_err(mlua::Error::external)?;
 
                 let (tx, rx) = smol::channel::bounded(1);
                 this.window
-                    .notify(TermWindowNotif::PerformAssignmentForLeafId {
-                        leaf_id,
-                        assignment,
-                        tx: Some(tx),
-                    });
+                    .notify(TermWindowNotif::Apply(Box::new(move |term_window| {
+                        tx.try_send(
+                            term_window
+                                .perform_assignment_for_terminal_handle(terminal_handle, &assignment),
+                        )
+                        .ok();
+                    })));
                 let result = rx.recv().await.map_err(mlua::Error::external)?;
                 result.map_err(mlua::Error::external)
             },
@@ -347,14 +350,14 @@ impl UserData for GuiWin {
             },
         );
         methods.add_async_method(
-            "get_selection_escapes_for_leaf_id",
-            |_, this, leaf_id: u64| async move {
+            "get_selection_escapes_for_terminal_handle",
+            |_, this, terminal_handle: u64| async move {
                 let (tx, rx) = smol::channel::bounded(1);
                 this.window
-                    .notify(TermWindowNotif::GetSelectionEscapesForLeafId {
-                        leaf_id,
-                        tx,
-                    });
+                    .notify(TermWindowNotif::Apply(Box::new(move |term_window| {
+                        tx.try_send(term_window.selection_escapes_for_terminal_handle(terminal_handle))
+                            .ok();
+                    })));
                 let result = rx.recv().await.map_err(mlua::Error::external)?;
                 result.map_err(mlua::Error::external)
             },

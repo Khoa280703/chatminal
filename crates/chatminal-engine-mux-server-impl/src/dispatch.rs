@@ -4,7 +4,7 @@ use async_ossl::AsyncSslStream;
 use codec::{DecodedPdu, Pdu};
 use engine_uds::UnixStream;
 use futures::FutureExt;
-use mux::{Mux, MuxNotification};
+use host_runtime::{Mux, MuxNotification};
 use smol::prelude::*;
 use smol::Async;
 

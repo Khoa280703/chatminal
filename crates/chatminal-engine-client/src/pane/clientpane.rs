@@ -12,14 +12,14 @@ use engine_term::{
     Alert, Clipboard, KeyCode, KeyModifiers, Line, MouseEvent, Progress, StableRowIndex,
     TerminalConfiguration, TerminalSize,
 };
-use mux::domain::DomainId;
-use mux::pane::{
+use host_runtime::domain::DomainId;
+use host_runtime::pane::{
     alloc_pane_id, CachePolicy, CloseReason, ForEachPaneLogicalLine, LogicalLine, Pane, PaneId,
     Pattern, SearchResult, WithPaneLines,
 };
-use mux::renderable::{RenderableDimensions, StableCursorPosition};
-use mux::tab::TabId;
-use mux::{Mux, MuxNotification};
+use host_runtime::renderable::{RenderableDimensions, StableCursorPosition};
+use host_runtime::tab::TabId;
+use host_runtime::{Mux, MuxNotification};
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
 use rangeset::RangeSet;
 use ratelim::RateLimiter;
@@ -284,7 +284,7 @@ impl Pane for ClientPane {
     }
 
     fn with_lines_mut(&self, lines: Range<StableRowIndex>, with_lines: &mut dyn WithPaneLines) {
-        mux::pane::impl_with_lines_via_get_lines(self, lines, with_lines);
+        host_runtime::pane::impl_with_lines_via_get_lines(self, lines, with_lines);
     }
 
     fn for_each_logical_line_in_stable_range_mut(
@@ -292,7 +292,7 @@ impl Pane for ClientPane {
         lines: Range<StableRowIndex>,
         for_line: &mut dyn ForEachPaneLogicalLine,
     ) {
-        mux::pane::impl_for_each_logical_line_via_get_logical_lines(self, lines, for_line);
+        host_runtime::pane::impl_for_each_logical_line_via_get_logical_lines(self, lines, for_line);
     }
 
     fn get_lines(&self, lines: Range<StableRowIndex>) -> (StableRowIndex, Vec<Line>) {
@@ -300,7 +300,7 @@ impl Pane for ClientPane {
     }
 
     fn get_logical_lines(&self, lines: Range<StableRowIndex>) -> Vec<LogicalLine> {
-        mux::pane::impl_get_logical_lines_via_get_lines(self, lines)
+        host_runtime::pane::impl_get_logical_lines_via_get_lines(self, lines)
     }
 
     fn get_current_seqno(&self) -> SequenceNo {
@@ -502,7 +502,7 @@ impl Pane for ClientPane {
         {
             let mux = Mux::get();
             if let Some(client_domain) = mux.get_domain(local_domain_id) {
-                if client_domain.state() == mux::domain::DomainState::Detached {
+                if client_domain.state() == host_runtime::domain::DomainState::Detached {
                     send_kill = false;
                 }
             }

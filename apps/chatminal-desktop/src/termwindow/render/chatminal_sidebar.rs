@@ -12,6 +12,26 @@ use window::color::LinearRgba;
 
 const RAIL_WIDTH_PX: f32 = 48.0;
 
+fn ordered_sidebar_snapshot(
+    term_window: &crate::TermWindow,
+    mut snapshot: SidebarSnapshot,
+) -> SidebarSnapshot {
+    let ordered_session_ids = term_window.ordered_chatminal_session_ids();
+    let active_session_id = term_window.active_session_id();
+
+    snapshot.sessions.sort_by_key(|session| {
+        ordered_session_ids
+            .iter()
+            .position(|session_id| session_id == &session.session_id)
+            .unwrap_or(usize::MAX)
+    });
+    for session in &mut snapshot.sessions {
+        session.is_active = active_session_id.as_deref() == Some(session.session_id.as_str());
+    }
+    snapshot.active_session_id = active_session_id;
+    snapshot
+}
+
 impl crate::TermWindow {
     pub fn paint_chatminal_sidebar(&mut self) -> anyhow::Result<()> {
         if !self.chatminal_sidebar.is_enabled() {
@@ -38,7 +58,7 @@ impl crate::TermWindow {
     fn build_chatminal_sidebar(
         &mut self,
     ) -> anyhow::Result<crate::termwindow::box_model::ComputedElement> {
-        let snapshot = self.chatminal_sidebar.snapshot();
+        let snapshot = ordered_sidebar_snapshot(self, self.chatminal_sidebar.snapshot());
         let border = self.get_os_border();
         let sidebar_width = self.chatminal_sidebar_width() as f32;
         let sidebar_height =
@@ -133,7 +153,7 @@ impl crate::TermWindow {
     fn build_chatminal_terminal_chrome(
         &mut self,
     ) -> anyhow::Result<crate::termwindow::box_model::ComputedElement> {
-        let snapshot = self.chatminal_sidebar.snapshot();
+        let snapshot = ordered_sidebar_snapshot(self, self.chatminal_sidebar.snapshot());
         let border = self.get_os_border();
         let x = self.chatminal_sidebar_width() as f32;
         let y = border.top.get() as f32;
@@ -237,7 +257,7 @@ impl crate::TermWindow {
     fn build_chatminal_terminal_footer(
         &mut self,
     ) -> anyhow::Result<crate::termwindow::box_model::ComputedElement> {
-        let snapshot = self.chatminal_sidebar.snapshot();
+        let snapshot = ordered_sidebar_snapshot(self, self.chatminal_sidebar.snapshot());
         let border = self.get_os_border();
         // Span full window width so background fills to right edge;
         // sidebar renders on top and covers the left portion.

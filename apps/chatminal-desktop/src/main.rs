@@ -9,7 +9,7 @@ use ::window::*;
 use anyhow::{Context, anyhow};
 use clap::builder::ValueParser;
 use clap::{Parser, ValueHint};
-use config::keyassignment::{SpawnCommand, SpawnTabDomain};
+use config::keyassignment::{SpawnCommand, SpawnSessionDomain};
 use config::{ConfigHandle, SerialDomain, SshDomain, SshMultiplexing};
 use engine_bidi::Direction;
 use engine_client::domain::ClientDomain;
@@ -18,9 +18,6 @@ use engine_font::shaper::PresentationWidth;
 use engine_gui_subcommands::*;
 use engine_mux_server_impl::update_mux_domains;
 use engine_toast_notification::*;
-use mux::Mux;
-use mux::activity::Activity;
-use mux::domain::{Domain, LocalDomain};
 use chatminal_lua_bridge::DomainRef;
 use portable_pty::cmdbuilder::CommandBuilder;
 use promise::spawn::block_on;
@@ -35,8 +32,15 @@ use termwiz::cell::CellAttributes;
 use termwiz::surface::{Line, SEQ_ZERO};
 use unicode_normalization::UnicodeNormalization;
 
+mod chatminal_layout;
 mod chatminal_runtime;
-mod chatminal_session_surface;
+mod chatminal_render;
+mod desktop_commands;
+mod desktop_host_runtime;
+mod desktop_mouse_actions;
+mod desktop_overlay_actions;
+mod desktop_spawn;
+mod desktop_termwindow_types;
 mod chatminal_sidebar;
 mod colorease;
 mod commands;
@@ -174,10 +178,9 @@ async fn async_run_ssh(opts: SshCommand) -> anyhow::Result<()> {
         None
     };
 
-    let domain: Arc<dyn Domain> = Arc::new(mux::ssh::RemoteSshDomain::with_ssh_domain(&dom)?);
-    let mux = Mux::get();
-    mux.add_domain(&domain);
-    mux.set_default_domain(&domain);
+    let domain = chatminal_runtime::create_remote_ssh_domain(&dom)?;
+    chatminal_runtime::add_host_domain(&domain);
+    chatminal_runtime::set_default_host_domain(&domain);
 
     let should_publish = false;
     async_run_terminal_gui(cmd, start_command, should_publish).await
@@ -191,7 +194,7 @@ fn run_ssh(opts: SshCommand) -> anyhow::Result<()> {
         set_window_position(pos.clone());
     }
 
-    build_initial_mux(&config::configuration(), None, None)?;
+    chatminal_runtime::build_initial_host_mux(&config::configuration(), None, None)?;
 
     let gui = crate::frontend::try_new()?;
 
@@ -226,9 +229,8 @@ async fn async_run_serial(opts: SerialCommand) -> anyhow::Result<()> {
 
     let cmd = None;
 
-    let domain: Arc<dyn Domain> = Arc::new(LocalDomain::new_serial_domain(serial_domain)?);
-    let mux = Mux::get();
-    mux.add_domain(&domain);
+    let domain = chatminal_runtime::create_serial_domain(serial_domain)?;
+    chatminal_runtime::add_host_domain(&domain);
 
     let should_publish = false;
     async_run_terminal_gui(cmd, start_command, should_publish).await
@@ -242,7 +244,7 @@ fn run_serial(config: config::ConfigHandle, opts: SerialCommand) -> anyhow::Resu
         set_window_position(pos.clone());
     }
 
-    build_initial_mux(&config, None, None)?;
+    chatminal_runtime::build_initial_host_mux(&config, None, None)?;
 
     let gui = crate::frontend::try_new()?;
 
@@ -257,44 +259,23 @@ fn run_serial(config: config::ConfigHandle, opts: SerialCommand) -> anyhow::Resu
     gui.run_forever()
 }
 
-fn have_panes_in_domain_and_ws(domain: &Arc<dyn Domain>, workspace: &Option<String>) -> bool {
-    let mux = Mux::get();
-    let have_panes_in_domain = mux
-        .iter_panes()
-        .iter()
-        .any(|p| p.domain_id() == domain.domain_id());
-
-    if !have_panes_in_domain {
-        return false;
-    }
-
-    if let Some(ws) = &workspace {
-        for window_id in mux.iter_windows_in_workspace(ws) {
-            if let Some(win) = mux.get_window(window_id) {
-                for t in win.iter() {
-                    for p in t.iter_panes_ignoring_zoom() {
-                        if p.pane.domain_id() == domain.domain_id() {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-        false
-    } else {
-        true
-    }
+fn have_panes_in_domain_and_ws(
+    domain: &chatminal_runtime::HostDomainHandle,
+    workspace: &Option<String>,
+) -> bool {
+    chatminal_runtime::host_domain_has_panes_in_workspace(
+        domain.domain_id(),
+        workspace.as_deref(),
+    )
 }
 
 async fn spawn_tab_in_domain_if_mux_is_empty(
     cmd: Option<CommandBuilder>,
     is_connecting: bool,
-    domain: Option<Arc<dyn Domain>>,
+    domain: Option<chatminal_runtime::HostDomainHandle>,
     workspace: Option<String>,
 ) -> anyhow::Result<()> {
-    let mux = Mux::get();
-
-    let domain = domain.unwrap_or_else(|| mux.default_domain());
+    let domain = domain.unwrap_or_else(chatminal_runtime::default_host_domain);
 
     if !is_connecting {
         if have_panes_in_domain_and_ws(&domain, &workspace) {
@@ -302,23 +283,12 @@ async fn spawn_tab_in_domain_if_mux_is_empty(
         }
     }
 
-    let window_id = {
-        // Force the builder to notify the frontend early,
-        // so that the attach await below doesn't block it.
-        // This has the consequence of creating the window
-        // at the initial size instead of populating it
-        // from the size specified in the remote mux.
-        // We use the TabAddedToWindow mux notification
-        // to detect and adjust the size later on.
-        let position = None;
-        let builder = mux.new_empty_window(workspace.clone(), position);
-        *builder
-    };
+    let window_id = chatminal_runtime::create_empty_host_window(workspace.clone()) as usize;
 
     let config = config::configuration();
     config.update_ulimit()?;
 
-    domain.attach(Some(window_id)).await?;
+    chatminal_runtime::attach_host_domain(&domain, Some(window_id as u64)).await?;
 
     if have_panes_in_domain_and_ws(&domain, &workspace) {
         trigger_and_log_gui_attached(DomainRef(domain.domain_id())).await;
@@ -349,12 +319,10 @@ async fn spawn_tab_in_domain_if_mux_is_empty(
 }
 
 async fn connect_to_auto_connect_domains() -> anyhow::Result<()> {
-    let mux = Mux::get();
-    let domains = mux.iter_domains();
-    for dom in domains {
-        if let Some(dom) = dom.downcast_ref::<ClientDomain>() {
-            if dom.connect_automatically() {
-                dom.attach(None).await?;
+    for domain in chatminal_runtime::host_client_domains() {
+        if let Some(client_domain) = domain.downcast_ref::<ClientDomain>() {
+            if client_domain.connect_automatically() {
+                chatminal_runtime::attach_host_domain(&domain, None).await?;
             }
         }
     }
@@ -437,26 +405,23 @@ async fn async_run_terminal_gui(
     // Apply the domain to the command
     let spawn_command = match (spawn_command, &opts.domain) {
         (Some(spawn), Some(name)) => Some(SpawnCommand {
-            domain: SpawnTabDomain::DomainName(name.to_string()),
+            domain: SpawnSessionDomain::DomainName(name.to_string()),
             ..spawn
         }),
         (None, Some(name)) => Some(SpawnCommand {
-            domain: SpawnTabDomain::DomainName(name.to_string()),
+            domain: SpawnSessionDomain::DomainName(name.to_string()),
             ..SpawnCommand::default()
         }),
         (spawn, None) => spawn,
     };
-    let mux = Mux::get();
-
     let chatminal_domain = chatminal_runtime::ensure_chatminal_domain_for_command(&cmd)
         .context("initialize chatminal runtime domain")?;
 
     let domain = if let Some(domain) = chatminal_domain {
         Some(domain)
     } else if let Some(name) = &opts.domain {
-        let domain = mux
-            .get_domain_by_name(name)
-            .ok_or_else(|| anyhow!("invalid domain {name}"))?;
+        let domain = chatminal_runtime::host_domain_by_name(name)
+            .map_err(|_| anyhow!("invalid domain {name}"))?;
         Some(domain)
     } else {
         None
@@ -470,16 +435,9 @@ async fn async_run_terminal_gui(
 
     if let Some(domain) = &domain {
         if !opts.attach {
-            let window_id = {
-                // Force the builder to notify the frontend early,
-                // so that the attach await below doesn't block it.
-                let workspace = None;
-                let position = None;
-                let builder = mux.new_empty_window(workspace, position);
-                *builder
-            };
+            let window_id = chatminal_runtime::create_empty_host_window(None) as usize;
 
-            domain.attach(Some(window_id)).await?;
+            chatminal_runtime::attach_host_domain(domain, Some(window_id as u64)).await?;
             let config = config::configuration();
             let dpi = config.dpi.unwrap_or_else(|| ::window::default_dpi());
             let tab = domain
@@ -490,12 +448,7 @@ async fn async_run_terminal_gui(
                     window_id,
                 )
                 .await?;
-            let mut window = mux
-                .get_window_mut(window_id)
-                .ok_or_else(|| anyhow!("failed to get mux window id {window_id}"))?;
-            if let Some(tab_idx) = window.idx_by_id(tab.tab_id()) {
-                window.set_active_without_saving(tab_idx);
-            }
+            chatminal_runtime::activate_host_runtime_entry(window_id as u64, tab.tab_id() as u64)?;
             trigger_and_log_gui_attached(DomainRef(domain.domain_id())).await;
         }
     }
@@ -510,9 +463,12 @@ enum Publish {
 }
 
 impl Publish {
-    pub fn resolve(mux: &Arc<Mux>, config: &ConfigHandle, always_new_process: bool) -> Self {
-        if mux.default_domain().domain_name() != config.default_domain.as_deref().unwrap_or("local")
-        {
+    pub fn resolve(
+        active_domain_name: &str,
+        config: &ConfigHandle,
+        always_new_process: bool,
+    ) -> Self {
+        if active_domain_name != config.default_domain.as_deref().unwrap_or("local") {
             return Self::NoConnectNoPublish;
         }
 
@@ -546,7 +502,7 @@ impl Publish {
         cmd: Option<CommandBuilder>,
         config: &ConfigHandle,
         workspace: Option<&str>,
-        domain: SpawnTabDomain,
+        domain: SpawnSessionDomain,
         new_tab: bool,
     ) -> anyhow::Result<bool> {
         if let Publish::TryPathOrPublish(gui_sock) = &self {
@@ -555,13 +511,15 @@ impl Publish {
                 no_serve_automatically: true,
                 ..Default::default()
             };
-            let mut ui = mux::connui::ConnectionUI::new_headless();
+            let mut ui = chatminal_runtime::new_headless_connection_ui();
             match engine_client::client::Client::new_unix_domain(None, &dom, false, &mut ui, true) {
                 Ok(client) => {
                     let executor = promise::spawn::ScopedExecutor::new();
                     let command = cmd.clone();
                     let res = block_on(executor.run(async move {
                         let vers = client.verify_version_compat(&mut ui).await?;
+                        let default_workspace_name =
+                            chatminal_runtime::configured_default_workspace_name(config);
 
                         if vers.executable_path != std::env::current_exe().context("resolve executable path")? {
                             *self = Publish::NoConnectNoPublish;
@@ -614,12 +572,9 @@ impl Publish {
                                 command,
                                 command_dir: None,
                                 size: config.initial_size(0, None),
-                                workspace: workspace.unwrap_or(
-                                    config
-                                        .default_workspace
-                                        .as_deref()
-                                        .unwrap_or(mux::DEFAULT_WORKSPACE)
-                                ).to_string(),
+                                workspace: workspace
+                                    .unwrap_or(default_workspace_name.as_str())
+                                    .to_string(),
                             })
                             .await
                     }));
@@ -681,50 +636,6 @@ fn spawn_mux_server(unix_socket_path: PathBuf, should_publish: bool) -> anyhow::
     Ok(())
 }
 
-fn setup_mux(
-    local_domain: Arc<dyn Domain>,
-    config: &ConfigHandle,
-    default_domain_name: Option<&str>,
-    default_workspace_name: Option<&str>,
-) -> anyhow::Result<Arc<Mux>> {
-    let mux = Arc::new(mux::Mux::new(Some(local_domain.clone())));
-    Mux::set_mux(&mux);
-    let client_id = Arc::new(mux::client::ClientId::new());
-    mux.register_client(client_id.clone());
-    mux.replace_identity(Some(client_id));
-    let default_workspace_name = default_workspace_name.unwrap_or(
-        config
-            .default_workspace
-            .as_deref()
-            .unwrap_or(mux::DEFAULT_WORKSPACE),
-    );
-    mux.set_active_workspace(&default_workspace_name);
-    crate::update::load_last_release_info_and_set_banner();
-    update_mux_domains(config)?;
-
-    let default_name =
-        default_domain_name.unwrap_or(config.default_domain.as_deref().unwrap_or("local"));
-
-    let domain = mux.get_domain_by_name(default_name).ok_or_else(|| {
-        anyhow::anyhow!(
-            "desired default domain '{}' was not found in mux!?",
-            default_name
-        )
-    })?;
-    mux.set_default_domain(&domain);
-
-    Ok(mux)
-}
-
-fn build_initial_mux(
-    config: &ConfigHandle,
-    default_domain_name: Option<&str>,
-    default_workspace_name: Option<&str>,
-) -> anyhow::Result<Arc<Mux>> {
-    let domain: Arc<dyn Domain> = Arc::new(LocalDomain::new("local")?);
-    setup_mux(domain, config, default_domain_name, default_workspace_name)
-}
-
 fn run_terminal_gui(opts: StartCommand, default_domain_name: Option<String>) -> anyhow::Result<()> {
     if let Some(cls) = opts.class.as_ref() {
         crate::set_window_class(cls);
@@ -755,7 +666,7 @@ fn run_terminal_gui(opts: StartCommand, default_domain_name: Option<String>) -> 
         None
     };
 
-    let mux = build_initial_mux(
+    chatminal_runtime::build_initial_host_mux(
         &config,
         default_domain_name.as_deref(),
         opts.workspace.as_deref(),
@@ -765,7 +676,7 @@ fn run_terminal_gui(opts: StartCommand, default_domain_name: Option<String>) -> 
     // We must do this before we start the gui frontend as the scheduler
     // requirements are different.
     let mut publish = Publish::resolve(
-        &mux,
+        &chatminal_runtime::active_host_domain_name(),
         &config,
         opts.always_new_process || opts.position.is_some(),
     );
@@ -775,8 +686,8 @@ fn run_terminal_gui(opts: StartCommand, default_domain_name: Option<String>) -> 
         &config,
         opts.workspace.as_deref(),
         match &opts.domain {
-            Some(name) => SpawnTabDomain::DomainName(name.to_string()),
-            None => SpawnTabDomain::DefaultDomain,
+            Some(name) => SpawnSessionDomain::DomainName(name.to_string()),
+            None => SpawnSessionDomain::DefaultDomain,
         },
         opts.new_tab,
     )? {
@@ -784,7 +695,7 @@ fn run_terminal_gui(opts: StartCommand, default_domain_name: Option<String>) -> 
     }
 
     let gui = crate::frontend::try_new()?;
-    let activity = Activity::new();
+    let activity = chatminal_runtime::start_host_activity();
 
     promise::spawn::spawn(async move {
         if let Err(err) = async_run_terminal_gui(cmd, opts, publish.should_publish()).await {
@@ -810,7 +721,7 @@ fn notify_on_panic() {
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         if let Some(s) = info.payload().downcast_ref::<&str>() {
-            fatal_toast_notification("Wezterm panic", s);
+            fatal_toast_notification("Chatminal panic", s);
         }
         default_hook(info);
     }));
@@ -818,7 +729,7 @@ fn notify_on_panic() {
 
 fn terminate_with_error_message(err: &str) -> ! {
     log::error!("{}; terminating", err);
-    fatal_toast_notification("Wezterm Error", &err);
+    fatal_toast_notification("Chatminal Error", &err);
     std::process::exit(1);
 }
 
@@ -839,12 +750,12 @@ fn main() {
     let _profiler = dhat::Profiler::new_heap();
 
     config::designate_this_as_the_main_thread();
-    config::assign_error_callback(mux::connui::show_configuration_error_message);
+    config::assign_error_callback(chatminal_runtime::show_host_configuration_error_message);
     notify_on_panic();
     if let Err(e) = run() {
         terminate_with_error(e);
     }
-    Mux::shutdown();
+    chatminal_runtime::shutdown_host_mux();
     frontend::shutdown();
 }
 
@@ -852,7 +763,7 @@ fn maybe_show_configuration_error_window() {
     let warnings = config::configuration_warnings_and_errors();
     if !warnings.is_empty() {
         let err = warnings.join("\n");
-        mux::connui::show_configuration_error_message(&err);
+        chatminal_runtime::show_host_configuration_error_message(&err);
     }
 }
 
@@ -1221,9 +1132,9 @@ fn run() -> anyhow::Result<()> {
     if crate::chatminal_sidebar::sidebar_enabled_from_env() {
         if !config_overrides
             .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case("show_tab_index_in_tab_bar"))
+            .any(|(name, _)| name.eq_ignore_ascii_case("show_session_index_in_session_bar"))
         {
-            config_overrides.push(("show_tab_index_in_tab_bar".to_string(), "false".to_string()));
+            config_overrides.push(("show_session_index_in_session_bar".to_string(), "false".to_string()));
         }
     }
 

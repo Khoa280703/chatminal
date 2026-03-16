@@ -1,8 +1,8 @@
 // The range_plus_one lint can't see when the LHS is not compatible with
 // and inclusive range
 #![allow(clippy::range_plus_one)]
+use crate::chatminal_runtime::overlay_compat::OverlayPane;
 use engine_term::{SemanticZone, StableRowIndex};
-use mux::pane::Pane;
 use std::cmp::Ordering;
 use std::ops::Range;
 use termwiz::surface::SequenceNo;
@@ -180,7 +180,7 @@ impl SelectionRange {
     }
 
     /// Computes the selection range for the line around the specified coords
-    pub fn line_around(start: SelectionCoordinate, pane: &dyn Pane) -> Self {
+    pub fn line_around(start: SelectionCoordinate, pane: &dyn OverlayPane) -> Self {
         for logical in pane.get_logical_lines(start.y..start.y + 1) {
             if logical.contains_y(start.y) {
                 return Self {
@@ -196,7 +196,7 @@ impl SelectionRange {
         Self { start, end: start }
     }
 
-    pub fn zone_around(start: SelectionCoordinate, pane: &dyn mux::pane::Pane) -> Self {
+    pub fn zone_around(start: SelectionCoordinate, pane: &dyn OverlayPane) -> Self {
         let zones = match pane.get_semantic_zones() {
             Ok(z) => z,
             Err(_) => return Self { start, end: start },
@@ -237,7 +237,7 @@ impl SelectionRange {
     }
 
     /// Computes the selection range for the word around the specified coords
-    pub fn word_around(start: SelectionCoordinate, pane: &dyn Pane) -> Self {
+    pub fn word_around(start: SelectionCoordinate, pane: &dyn OverlayPane) -> Self {
         for logical in pane.get_logical_lines(start.y..start.y + 1) {
             if !logical.contains_y(start.y) {
                 continue;

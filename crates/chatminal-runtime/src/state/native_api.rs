@@ -1,14 +1,23 @@
+use crate::workspace_layout::WorkspaceLayoutState;
 use chatminal_store::StoredSessionSnapshot;
 
 use super::{
     DEFAULT_KEEP_ALIVE_ON_CLOSE, DEFAULT_START_IN_TRAY, KEEP_ALIVE_ON_CLOSE_KEY, START_IN_TRAY_KEY,
-    StateInner, now_millis,
+    StateInner, WORKSPACE_LAYOUT_PREFIX, now_millis,
 };
 use crate::api::{
     RuntimeLifecyclePreferences, RuntimeProfile, RuntimeSessionSnapshot, RuntimeWorkspace,
 };
 
 impl StateInner {
+    fn active_workspace_layout_key(&self) -> Result<String, String> {
+        let workspace = self.store.load_workspace()?;
+        Ok(format!(
+            "{WORKSPACE_LAYOUT_PREFIX}{}",
+            workspace.active_profile_id
+        ))
+    }
+
     pub(super) fn load_workspace_snapshot(&self) -> Result<RuntimeWorkspace, String> {
         let mut workspace = self.store.load_workspace()?;
         for session in &mut workspace.sessions {
@@ -87,13 +96,14 @@ impl StateInner {
     ) -> Result<(), String> {
         let mut flush_seq: Option<u64> = None;
         let mut flush_chunk: Option<String> = None;
-        if let Some(entry) = self.sessions.get(session_id)
-            && entry.session.persist_history != persist_history
-            && persist_history
-            && !entry.live_output.is_empty()
-        {
-            flush_seq = Some(entry.session.seq.saturating_add(1));
-            flush_chunk = Some(entry.live_output.clone());
+        if let Some(entry) = self.sessions.get(session_id) {
+            if entry.session.persist_history != persist_history
+                && persist_history
+                && !entry.live_output.is_empty()
+            {
+                flush_seq = Some(entry.session.seq.saturating_add(1));
+                flush_chunk = Some(entry.live_output.clone());
+            }
         }
 
         self.store
@@ -123,6 +133,48 @@ impl StateInner {
         }
         self.publish_session_updated_for(session_id);
         Ok(())
+    }
+
+    pub(super) fn workspace_layout_load(&self) -> Result<Option<WorkspaceLayoutState>, String> {
+        let workspace = self.store.load_workspace()?;
+        let key = format!("{WORKSPACE_LAYOUT_PREFIX}{}", workspace.active_profile_id);
+        let Some(raw) = self.store.get_string_state(&key)? else {
+            return Ok(None);
+        };
+
+        let mut layout = serde_json::from_str::<WorkspaceLayoutState>(&raw)
+            .map_err(|err| format!("parse workspace layout failed: {err}"))?;
+        let valid_sessions = workspace
+            .sessions
+            .iter()
+            .map(|session| session.session_id.as_str());
+        if !layout.retain_sessions(valid_sessions) {
+            self.store.clear_state(&key)?;
+            return Ok(None);
+        }
+
+        let normalized = serde_json::to_string(&layout)
+            .map_err(|err| format!("serialize workspace layout failed: {err}"))?;
+        if normalized != raw {
+            self.store.set_string_state(&key, &normalized)?;
+        }
+
+        Ok(Some(layout))
+    }
+
+    pub(super) fn workspace_layout_save(
+        &self,
+        layout: &WorkspaceLayoutState,
+    ) -> Result<(), String> {
+        let key = self.active_workspace_layout_key()?;
+        let value = serde_json::to_string(layout)
+            .map_err(|err| format!("serialize workspace layout failed: {err}"))?;
+        self.store.set_string_state(&key, &value)
+    }
+
+    pub(super) fn workspace_layout_clear(&self) -> Result<(), String> {
+        let key = self.active_workspace_layout_key()?;
+        self.store.clear_state(&key)
     }
 
     pub(super) fn get_lifecycle_preferences(&self) -> Result<RuntimeLifecyclePreferences, String> {

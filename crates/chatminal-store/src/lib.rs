@@ -246,14 +246,7 @@ impl Store {
 
     pub fn get_bool_state(&self, key: &str, default: bool) -> Result<bool, String> {
         let conn = self.open_connection()?;
-        let raw: Option<String> = conn
-            .query_row(
-                "SELECT value FROM app_state WHERE key = ?1",
-                params![key],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(|err| format!("get bool state failed: {err}"))?;
+        let raw = self.get_string_state_with_conn(&conn, key)?;
 
         let Some(value) = raw else {
             return Ok(default);
@@ -270,12 +263,28 @@ impl Store {
     }
 
     pub fn set_bool_state(&self, key: &str, value: bool) -> Result<(), String> {
+        self.set_string_state(key, if value { "1" } else { "0" })
+    }
+
+    pub fn get_string_state(&self, key: &str) -> Result<Option<String>, String> {
+        let conn = self.open_connection()?;
+        self.get_string_state_with_conn(&conn, key)
+    }
+
+    pub fn set_string_state(&self, key: &str, value: &str) -> Result<(), String> {
         let conn = self.open_connection()?;
         conn.execute(
             "INSERT INTO app_state (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            params![key, if value { "1" } else { "0" }],
+            params![key, value],
         )
-        .map_err(|err| format!("set bool state failed: {err}"))?;
+        .map_err(|err| format!("set string state failed: {err}"))?;
+        Ok(())
+    }
+
+    pub fn clear_state(&self, key: &str) -> Result<(), String> {
+        let conn = self.open_connection()?;
+        conn.execute("DELETE FROM app_state WHERE key = ?1", params![key])
+            .map_err(|err| format!("clear state failed: {err}"))?;
         Ok(())
     }
 
@@ -809,13 +818,8 @@ impl Store {
     }
 
     fn active_profile_id_with_conn(&self, conn: &Connection) -> Result<Option<String>, String> {
-        conn.query_row(
-            "SELECT value FROM app_state WHERE key = ?1",
-            params![ACTIVE_PROFILE_KEY],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|err| format!("load active profile failed: {err}"))
+        self.get_string_state_with_conn(conn, ACTIVE_PROFILE_KEY)
+            .map_err(|err| format!("load active profile failed: {err}"))
     }
 
     fn active_session_with_conn(
@@ -823,13 +827,22 @@ impl Store {
         conn: &Connection,
         profile_id: &str,
     ) -> Result<Option<String>, String> {
+        self.get_string_state_with_conn(conn, &format!("{ACTIVE_SESSION_PREFIX}{profile_id}"))
+            .map_err(|err| format!("load active session failed: {err}"))
+    }
+
+    fn get_string_state_with_conn(
+        &self,
+        conn: &Connection,
+        key: &str,
+    ) -> Result<Option<String>, String> {
         conn.query_row(
             "SELECT value FROM app_state WHERE key = ?1",
-            params![format!("{ACTIVE_SESSION_PREFIX}{profile_id}")],
+            params![key],
             |row| row.get(0),
         )
         .optional()
-        .map_err(|err| format!("load active session failed: {err}"))
+        .map_err(|err| format!("get string state failed: {err}"))
     }
 
     fn list_profiles_with_conn(&self, conn: &Connection) -> Result<Vec<StoredProfile>, String> {

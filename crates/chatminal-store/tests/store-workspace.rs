@@ -262,6 +262,40 @@ fn bool_state_roundtrip_with_default() {
 }
 
 #[test]
+fn string_state_roundtrip_and_clear() {
+    let temp = TempDb::new();
+    let store = Store::initialize(&temp.path).expect("initialize store");
+
+    assert_eq!(
+        store
+            .get_string_state("workspace_layout:test")
+            .expect("get empty"),
+        None
+    );
+
+    store
+        .set_string_state("workspace_layout:test", "{\"ok\":true}")
+        .expect("set string state");
+    assert_eq!(
+        store
+            .get_string_state("workspace_layout:test")
+            .expect("get stored string")
+            .as_deref(),
+        Some("{\"ok\":true}")
+    );
+
+    store
+        .clear_state("workspace_layout:test")
+        .expect("clear string state");
+    assert_eq!(
+        store
+            .get_string_state("workspace_layout:test")
+            .expect("get cleared"),
+        None
+    );
+}
+
+#[test]
 fn session_explorer_state_roundtrip_and_session_delete_cleanup() {
     let temp = TempDb::new();
     let store = Store::initialize(&temp.path).expect("initialize store");

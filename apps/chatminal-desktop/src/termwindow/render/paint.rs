@@ -193,7 +193,7 @@ impl crate::TermWindow {
                 let top = panes
                     .iter()
                     .find(|p| p.is_active)
-                    .map(|p| match self.get_viewport(p.pane.pane_id()) {
+                    .map(|p| match self.get_viewport(p.pane.pane_id() as u64) {
                         Some(top) => top,
                         None => p.pane.get_dimensions().physical_top,
                     })
@@ -251,13 +251,15 @@ impl crate::TermWindow {
                 self.update_text_cursor(&pos);
                 if focused {
                     pos.pane.advise_focus();
-                    mux::Mux::get().record_focus_for_current_identity(pos.pane.pane_id());
+                    crate::chatminal_runtime::record_host_focus_for_current_identity(
+                        pos.pane.pane_id(),
+                    );
                 }
             }
             self.paint_pane(&pos, &mut layers).context("paint_pane")?;
         }
 
-        if let Some(pane) = self.get_active_leaf_or_overlay() {
+        if let Some(pane) = self.active_terminal_instance_or_overlay() {
             let splits = self.get_splits();
             for split in &splits {
                 self.paint_split(&mut layers, split, &pane)
@@ -265,7 +267,7 @@ impl crate::TermWindow {
             }
         }
 
-        if self.show_tab_bar {
+        if self.show_session_bar {
             self.paint_tab_bar(&mut layers).context("paint_tab_bar")?;
         }
         self.paint_chatminal_sidebar()

@@ -4,7 +4,7 @@ use futures::FutureExt;
 use log::Level;
 use luahelper::ValuePrinter;
 use mlua::Value;
-use mux::termwiztermtab::TermWizTerminal;
+use crate::chatminal_runtime::overlay_compat::OverlayTerminal;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -129,7 +129,7 @@ impl LineEditorHost for LuaReplHost {
 }
 
 pub fn show_debug_overlay(
-    mut term: TermWizTerminal,
+    mut term: OverlayTerminal,
     gui_win: GuiWin,
     opengl_info: String,
     connection_info: String,
@@ -155,7 +155,7 @@ pub fn show_debug_overlay(
 
     term.render(&[Change::Title("Debug".to_string())])?;
 
-    fn print_new_log_entries(term: &mut TermWizTerminal) -> termwiz::Result<()> {
+    fn print_new_log_entries(term: &mut OverlayTerminal) -> termwiz::Result<()> {
         let entries = env_bootstrap::ringlog::get_entries();
         let mut changes = vec![];
         for entry in entries {

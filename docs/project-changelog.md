@@ -1,5 +1,71 @@
 # Project Changelog
 
+## 2026-03-16
+
+### Completed
+- Session = Tab consolidation final cutover (plan `260313-1618-session-tab-collapse-host-render-scope-removal`):
+  - All 9 phases completed:
+    - Phase 01: HostRenderScope call-site audit + boundary freeze
+    - Phase 02: Direct pane ownership — `session_pane: HashMap<String, Arc<ChatminalSessionPane>>` added to DesktopSessionHost
+    - Phase 03: Render entry cutover — ChatminalRenderState built directly from session_pane; splits=[]
+    - Phase 04: Background session support — layout collapse + hard-close vs detach semantics wired
+    - Phase 05: SessionExecutionStatus enum added to chatminal-runtime for state merge prep
+    - Phase 06: Dead code deletion + full verification (grep gate pass, full test suite pass)
+    - Phase 07: Dependency reversal — workspace layout types moved to chatminal-runtime; session-runtime no longer depended by runtime
+    - Phase 08: chatminal-session-runtime crate deleted entirely; execution code moved to desktop_host_runtime
+    - Phase 09: Vocabulary rename — Tab→Session, Pane→Session, PaneDirection→SessionDirection, LeafRef→TerminalRef, tab_bar→session_bar across ~25 files
+  - Verification:
+    - `cargo check --workspace --all-targets` pass (0 errors)
+    - `cargo test -p chatminal-runtime -- --test-threads=1` pass (65/65 tests)
+    - `cargo test --manifest-path apps/chatminal-desktop/Cargo.toml -- --test-threads=1` pass (55/55 tests)
+    - 0 references to `chatminal-session-runtime` in .toml files
+    - 0 references to `chatminal_session_runtime` in .rs files (outside third_party)
+
+### Changed
+- HostRenderScope eliminated from active path; render flow now: session_id → DesktopSessionHost.pane_for_session() → ChatminalRenderState
+- Dual state management consolidated: execution status now owned by chatminal-runtime via SessionExecutionStatus enum
+- Public config/Lua API vocabulary unified: user config now uses SpawnSession/ActivateSession/CloseCurrentSession/TerminalRef (no more Tab/Pane/Leaf)
+- Developer mental model simplified: only need to know chatminal-runtime for feature development; session-runtime execution is private desktop implementation detail
+
+## 2026-03-13
+
+### Completed
+- Engine private primitives cutover (plan `20260313-1140`):
+  - product-facing desktop shell đã chuyển vocabulary chính sang `session/session_view/session_group/workspace_layout/render_target/terminal_instance`
+  - `termwindow` và `desktop_termwindow_*` không còn leak `MuxWindow` hay route trực tiếp `ActivateTab*`/`MoveTab*`
+  - `tabbar.rs` đã trở thành session bar model; launcher/action routing consume `SessionBarAssignment`
+  - public Lua surface không còn `get_host_tab` / `get_host_leaf`; host id fields đổi sang `terminal`/`terminal_instance_id`
+  - `desktop_host_runtime` bị thu hẹp visibility xuống private adapter zone; public desktop path không còn host-vocabulary helper exports dư thừa
+  - fixed `cargo check --workspace --all-targets` bằng cách cập nhật benches active theo API engine hiện tại
+  - verification freeze:
+    - `cargo check --workspace` pass
+    - `cargo check --workspace --all-targets` pass
+    - `cargo test -p chatminal-runtime -- --test-threads=1` pass
+    - `cargo test -p chatminal-session-runtime -- --test-threads=1` pass
+    - `cargo test --manifest-path crates/chatminal-protocol/Cargo.toml -- --test-threads=1` pass
+    - `cargo test --manifest-path apps/chatminal-desktop/Cargo.toml -- --test-threads=1` pass
+    - `cargo test --manifest-path apps/chatminald/Cargo.toml -- --test-threads=1` pass
+
+### Changed
+- `desktop_commands.rs` được khóa vai trò thành compatibility translation layer duy nhất cho upstream `KeyAssignment::*Tab*`.
+- Docs kiến trúc/codebase đã được sync lại theo boundary mới: runtime facade là product surface, host primitives là private implementation detail.
+
+## 2026-03-11
+
+### Completed
+- Session execution core final cutover (plan `20260311-1728`):
+  - DesktopSessionHost now owns session→surface→pane lifecycle natively on active desktop path
+  - chatminal_session_surface core operations (active_session_id, collect_lookup, remove_session_surface, host_surface_for_session, focus_leaf) all route through DesktopSessionHost instead of bouncing through mux Tab host-lookup
+  - StatefulSessionEngine<()> (native path) is the primary execution primitive for session runtime
+  - EngineSurfaceAdapter and ChatminalMuxSessionEngine retained only in adapter-compat section for future multi-leaf ops (Phase 07 target)
+  - Verification: all 33 session-runtime tests pass, all 15 desktop tests pass, cargo check --workspace clean
+  - All 8 plan phases completed
+
+### Changed
+- Session lifecycle now decoupled from mux Tab host semantics on active path
+- Desktop surface hosting consolidated into single DesktopSessionHost ownership
+- Removed active-path dependency on mux::Tab host lookup for session operations
+
 ## 2026-03-07
 
 ### Changed

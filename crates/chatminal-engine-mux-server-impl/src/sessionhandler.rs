@@ -4,12 +4,12 @@ use codec::*;
 use config::TermConfig;
 use engine_term::terminal::Alert;
 use engine_term::StableRowIndex;
-use mux::client::ClientId;
-use mux::domain::SplitSource;
-use mux::pane::{CachePolicy, Pane, PaneId};
-use mux::renderable::{RenderableDimensions, StableCursorPosition};
-use mux::tab::TabId;
-use mux::{Mux, MuxNotification};
+use host_runtime::client::ClientId;
+use host_runtime::domain::SplitSource;
+use host_runtime::pane::{CachePolicy, Pane, PaneId};
+use host_runtime::renderable::{RenderableDimensions, StableCursorPosition};
+use host_runtime::tab::TabId;
+use host_runtime::{Mux, MuxNotification};
 use promise::spawn::spawn_into_main_thread;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -361,7 +361,7 @@ impl SessionHandler {
                             tab.set_active_pane(&pane);
 
                             mux.record_focus_for_current_identity(pane_id);
-                            mux.notify(mux::MuxNotification::PaneFocused(pane_id));
+                            mux.notify(host_runtime::MuxNotification::PaneFocused(pane_id));
 
                             Ok(Pdu::UnitResponse(UnitResponse {}))
                         },
@@ -515,7 +515,7 @@ impl SessionHandler {
                 range,
                 limit,
             }) => {
-                use mux::pane::Pattern;
+                use host_runtime::pane::Pattern;
 
                 async fn do_search(
                     pane_id: TabId,
@@ -584,7 +584,7 @@ impl SessionHandler {
                 .detach();
             }
 
-            Pdu::GetPaneDirection(GetPaneDirection { pane_id, direction }) => {
+            Pdu::GetSessionDirection(GetSessionDirection { pane_id, direction }) => {
                 spawn_into_main_thread(async move {
                     catch(
                         move || {
@@ -600,7 +600,7 @@ impl SessionHandler {
                                 .get_pane_direction(direction, true)
                                 .map(|pane_index| panes[pane_index].pane.pane_id());
 
-                            Ok(Pdu::GetPaneDirectionResponse(GetPaneDirectionResponse {
+                            Ok(Pdu::GetSessionDirectionResponse(GetSessionDirectionResponse {
                                 pane_id,
                             }))
                         },
@@ -610,7 +610,7 @@ impl SessionHandler {
                 .detach();
             }
 
-            Pdu::ActivatePaneDirection(ActivatePaneDirection { pane_id, direction }) => {
+            Pdu::ActivateSessionDirection(ActivateSessionDirection { pane_id, direction }) => {
                 spawn_into_main_thread(async move {
                     catch(
                         move || {
@@ -996,7 +996,7 @@ impl SessionHandler {
             | Pdu::GetPaneRenderChangesResponse { .. }
             | Pdu::UnitResponse { .. }
             | Pdu::LivenessResponse { .. }
-            | Pdu::GetPaneDirectionResponse { .. }
+            | Pdu::GetSessionDirectionResponse { .. }
             | Pdu::SearchScrollbackResponse { .. }
             | Pdu::GetLinesResponse { .. }
             | Pdu::GetCodecVersionResponse { .. }

@@ -1,7 +1,7 @@
 use crate::background::{BackgroundLayer, Gradient};
 use crate::bell::{AudibleBell, EasingFunction, VisualBell};
 use crate::color::{
-    ColorSchemeFile, HsbTransform, Palette, SrgbaTuple, TabBarStyle, WindowFrameConfig,
+    ColorSchemeFile, HsbTransform, Palette, SrgbaTuple, SessionBarStyle, WindowFrameConfig,
 };
 use crate::daemon::DaemonOptions;
 use crate::exec_domain::ExecDomain;
@@ -172,7 +172,7 @@ pub struct Config {
     #[dynamic(default = "default_command_palette_bg_color")]
     pub command_palette_bg_color: RgbaColor,
 
-    /// Font to use for PaneSelect
+    /// Font to use for SessionSelect
     #[dynamic(default)]
     pub pane_select_font: Option<TextStyle>,
 
@@ -186,7 +186,7 @@ pub struct Config {
     pub pane_select_bg_color: RgbaColor,
 
     #[dynamic(default)]
-    pub tab_bar_style: TabBarStyle,
+    pub session_bar_style: SessionBarStyle,
 
     #[dynamic(default)]
     pub resolved_palette: Palette,
@@ -472,30 +472,30 @@ pub struct Config {
     /// The tab bar shows the titles of the tabs and which is the
     /// active tab.  Clicking on a tab activates it.
     #[dynamic(default = "default_true")]
-    pub enable_tab_bar: bool,
+    pub enable_session_bar: bool,
     #[dynamic(default = "default_true")]
-    pub use_fancy_tab_bar: bool,
+    pub use_fancy_session_bar: bool,
 
     #[dynamic(default)]
-    pub tab_bar_at_bottom: bool,
+    pub session_bar_at_bottom: bool,
 
     #[dynamic(default = "default_true")]
     pub mouse_wheel_scrolls_tabs: bool,
 
     /// If true, tab bar titles are prefixed with the tab index
     #[dynamic(default = "default_true")]
-    pub show_tab_index_in_tab_bar: bool,
+    pub show_session_index_in_session_bar: bool,
 
     #[dynamic(default = "default_true")]
-    pub show_tabs_in_tab_bar: bool,
+    pub show_sessions_in_session_bar: bool,
 
     #[dynamic(default = "default_true")]
-    pub show_new_tab_button_in_tab_bar: bool,
+    pub show_new_session_button_in_session_bar: bool,
 
     #[dynamic(default = "default_true")]
     pub show_close_tab_button_in_tabs: bool,
 
-    /// If true, show_tab_index_in_tab_bar uses a zero-based index.
+    /// If true, show_session_index_in_session_bar uses a zero-based index.
     /// The default is false and the tab shows a one-based index.
     #[dynamic(default)]
     pub tab_and_split_indices_are_zero_based: bool,
@@ -507,7 +507,7 @@ pub struct Config {
 
     /// If true, hide the tab bar if the window only has a single tab.
     #[dynamic(default)]
-    pub hide_tab_bar_if_only_one_tab: bool,
+    pub hide_session_bar_if_only_one_session: bool,
 
     #[dynamic(default)]
     pub enable_scroll_bar: bool,

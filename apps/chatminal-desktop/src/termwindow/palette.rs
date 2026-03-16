@@ -8,7 +8,7 @@ use crate::termwindow::render::corners::{
 };
 use crate::termwindow::{DimensionContext, GuiWin, TermWindow};
 use crate::utilsprites::RenderMetrics;
-use chatminal_lua_bridge::LeafRef;
+use chatminal_lua_bridge::TerminalRef;
 use config::keyassignment::KeyAssignment;
 use config::Dimension;
 use engine_dynamic::{FromDynamic, ToDynamic};
@@ -90,7 +90,7 @@ impl_lua_conversion_dynamic!(UserPaletteEntry);
 
 fn build_commands(
     gui_window: GuiWin,
-    pane: Option<LeafRef>,
+    pane: Option<TerminalRef>,
     filter_copy_mode: bool,
 ) -> Vec<ExpandedCommand> {
     let mut commands = CommandDef::actions_for_palette_and_menubar(&config::configuration());
@@ -221,7 +221,7 @@ impl CommandPalette {
         // if the CopyOverlay isn't active, so figure out if that
         // is the case so that we can filter them out in build_commands.
         let filter_copy_mode = term_window
-            .get_active_leaf_or_overlay()
+            .active_terminal_instance_or_overlay()
             .map(|pane| {
                 pane.downcast_ref::<crate::termwindow::CopyOverlay>()
                     .is_none()
@@ -229,8 +229,8 @@ impl CommandPalette {
             .unwrap_or(true);
 
         let pane_ref = term_window
-            .get_active_leaf_or_overlay()
-            .map(|pane| LeafRef(pane.pane_id()));
+            .active_terminal_instance_or_overlay()
+            .map(|pane| TerminalRef(pane.pane_id()));
 
         let commands = build_commands(GuiWin::new(term_window), pane_ref, filter_copy_mode);
 
@@ -260,7 +260,7 @@ impl CommandPalette {
             .expect("to resolve command palette font");
         let metrics = RenderMetrics::with_font_metrics(&font.metrics());
 
-        let top_bar_height = if term_window.show_tab_bar && !term_window.config.tab_bar_at_bottom {
+        let top_bar_height = if term_window.show_session_bar && !term_window.config.session_bar_at_bottom {
             term_window.tab_bar_pixel_height().unwrap()
         } else {
             0.
@@ -635,7 +635,7 @@ impl Modal for CommandPalette {
                 }
                 term_window.cancel_modal();
 
-                if let Some(pane) = term_window.get_active_leaf_or_overlay() {
+                if let Some(pane) = term_window.active_terminal_instance_or_overlay() {
                     if let Err(err) = term_window.perform_key_assignment(&pane, &item.action) {
                         log::error!("Error while performing {item:?}: {err:#}");
                     }

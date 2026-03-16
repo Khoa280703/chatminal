@@ -1,4 +1,10 @@
 use crate::TermWindow;
+use crate::chatminal_runtime::{
+    FrontendClientHandle, RuntimeNotification, active_frontend_client,
+    active_workspace_for_client, focus_terminal_handle_by_id, frontend_resolve_focused_pane,
+    frontend_resolve_pane, set_active_workspace_for_client, subscribe_frontend_notifications,
+    workspace_is_empty, workspace_names, workspace_window_ids,
+};
 use crate::scripting::guiwin::GuiWin;
 use crate::scripting::guiwin::DesktopWindowId;
 use crate::spawn::SpawnWhere;
@@ -9,8 +15,6 @@ use config::keyassignment::{KeyAssignment, SpawnCommand};
 use config::{ConfigSubscription, NotificationHandling};
 use engine_term::{Alert, ClipboardSelection};
 use engine_toast_notification::*;
-use mux::client::ClientId;
-use mux::{Mux, MuxNotification};
 use promise::{Future, Promise};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashSet};
@@ -23,7 +27,7 @@ pub struct GuiFrontEnd {
     switching_workspaces: RefCell<bool>,
     spawned_window_ids: RefCell<HashSet<DesktopWindowId>>,
     known_windows: RefCell<BTreeMap<Window, DesktopWindowId>>,
-    client_id: Arc<ClientId>,
+    client_id: FrontendClientHandle,
     config_subscription: RefCell<Option<ConfigSubscription>>,
 }
 
@@ -38,8 +42,7 @@ impl GuiFrontEnd {
         let connection = Connection::init()?;
         connection.set_event_handler(Self::app_event_handler);
 
-        let mux = Mux::get();
-        let client_id = mux.active_identity().expect("to have set my own id");
+        let client_id = active_frontend_client().expect("to have set my own id");
 
         let front_end = Rc::new(GuiFrontEnd {
             connection,
@@ -50,14 +53,13 @@ impl GuiFrontEnd {
             config_subscription: RefCell::new(None),
         });
 
-        mux.subscribe(move |n| {
+        subscribe_frontend_notifications(move |n| {
             match n {
-                MuxNotification::WorkspaceRenamed {
+                RuntimeNotification::WorkspaceRenamed {
                     old_workspace,
                     new_workspace,
                 } => {
-                    let mux = Mux::get();
-                    let active = mux.active_workspace();
+                    let active = crate::chatminal_runtime::host_workspace_name();
                     if active == old_workspace || active == new_workspace {
                         let switcher = WorkspaceSwitcher::new(&new_workspace);
                         promise::spawn::spawn_into_main_thread(async move {
@@ -66,10 +68,10 @@ impl GuiFrontEnd {
                         .detach();
                     }
                 }
-                MuxNotification::WindowWorkspaceChanged(_)
-                | MuxNotification::ActiveWorkspaceChanged(_)
-                | MuxNotification::WindowCreated(_)
-                | MuxNotification::WindowRemoved(_) => {
+                RuntimeNotification::WindowWorkspaceChanged(_)
+                | RuntimeNotification::ActiveWorkspaceChanged(_)
+                | RuntimeNotification::WindowCreated(_)
+                | RuntimeNotification::WindowRemoved(_) => {
                     promise::spawn::spawn_into_main_thread(async move {
                         let fe = crate::frontend::front_end();
                         if !fe.is_switching_workspace() {
@@ -78,24 +80,23 @@ impl GuiFrontEnd {
                     })
                     .detach();
                 }
-                MuxNotification::PaneFocused(pane_id) => {
+                RuntimeNotification::PaneFocused(pane_id) => {
                     promise::spawn::spawn_into_main_thread(async move {
-                        let mux = Mux::get();
-                        if let Err(err) = mux.focus_pane_and_containing_tab(pane_id) {
+                        if let Err(err) = focus_terminal_handle_by_id(pane_id as u64) {
                             log::error!("Error reconciling PaneFocused notification: {err:#}");
                         }
                     })
                     .detach();
                 }
-                MuxNotification::TabTitleChanged { .. } => {}
-                MuxNotification::WindowTitleChanged { .. } => {}
-                MuxNotification::TabResized(_) => {}
-                MuxNotification::TabAddedToWindow { .. } => {}
-                MuxNotification::PaneRemoved(_) => {}
-                MuxNotification::WindowInvalidated(_) => {}
-                MuxNotification::PaneOutput(_) => {}
-                MuxNotification::PaneAdded(_) => {}
-                MuxNotification::Alert {
+                RuntimeNotification::TabTitleChanged { .. } => {}
+                RuntimeNotification::WindowTitleChanged { .. } => {}
+                RuntimeNotification::TabResized(_) => {}
+                RuntimeNotification::TabAddedToWindow { .. } => {}
+                RuntimeNotification::PaneRemoved(_) => {}
+                RuntimeNotification::WindowInvalidated(_) => {}
+                RuntimeNotification::PaneOutput(_) => {}
+                RuntimeNotification::PaneAdded(_) => {}
+                RuntimeNotification::Alert {
                     pane_id,
                     alert:
                         Alert::ToastNotification {
@@ -104,21 +105,21 @@ impl GuiFrontEnd {
                             focus: _,
                         },
                 } => {
-                    let mux = Mux::get();
-
-                    if let Some((_domain, window_id, tab_id)) = mux.resolve_pane_id(pane_id) {
+                    if let Some(resolved) = frontend_resolve_pane(pane_id as u64) {
                         let config = config::configuration();
 
-                        if let Some((_fdomain, f_window, f_tab, f_pane)) =
-                            mux.resolve_focused_pane(&client_id)
-                        {
+                        if let Some(focused) = frontend_resolve_focused_pane(&client_id) {
                             let show = match config.notification_handling {
                                 NotificationHandling::NeverShow => false,
                                 NotificationHandling::AlwaysShow => true,
-                                NotificationHandling::SuppressFromFocusedPane => f_pane != pane_id,
-                                NotificationHandling::SuppressFromFocusedTab => f_tab != tab_id,
+                                NotificationHandling::SuppressFromFocusedPane => {
+                                    focused.pane_id != pane_id as u64
+                                }
+                                NotificationHandling::SuppressFromFocusedTab => {
+                                    focused.runtime_entry_id != resolved.runtime_entry_id
+                                }
                                 NotificationHandling::SuppressFromFocusedWindow => {
-                                    f_window != window_id
+                                    focused.window_id != resolved.window_id
                                 }
                             };
 
@@ -133,13 +134,13 @@ impl GuiFrontEnd {
                         }
                     }
                 }
-                MuxNotification::Alert {
+                RuntimeNotification::Alert {
                     pane_id: _,
                     alert: Alert::Bell | Alert::Progress(_),
                 } => {
                     // Handled via TermWindowNotif; NOP it here.
                 }
-                MuxNotification::Alert {
+                RuntimeNotification::Alert {
                     pane_id: _,
                     alert:
                         Alert::OutputSinceFocusLost
@@ -150,10 +151,10 @@ impl GuiFrontEnd {
                         | Alert::IconTitleChanged(_)
                         | Alert::SetUserVar { .. },
                 } => {}
-                MuxNotification::Empty => {
+                RuntimeNotification::Empty => {
                     if config::configuration().quit_when_all_windows_are_closed {
                         promise::spawn::spawn_into_main_thread(async move {
-                            if mux::activity::Activity::count() == 0 {
+                            if crate::chatminal_runtime::host_activity_count() == 0 {
                                 log::trace!("Mux is now empty, terminate gui");
                                 Connection::get().unwrap().terminate_message_loop();
                             }
@@ -161,7 +162,7 @@ impl GuiFrontEnd {
                         .detach();
                     }
                 }
-                MuxNotification::SaveToDownloads { name, data } => {
+                RuntimeNotification::SaveToDownloads { name, data } => {
                     if !config::configuration().allow_download_protocols {
                         log::error!(
                             "Ignoring download request for {:?}, \
@@ -172,7 +173,7 @@ impl GuiFrontEnd {
                         log::error!("save_to_downloads: {:#}", err);
                     }
                 }
-                MuxNotification::AssignClipboard {
+                RuntimeNotification::AssignClipboard {
                     pane_id,
                     selection,
                     clipboard,
@@ -231,36 +232,14 @@ impl GuiFrontEnd {
                     }
                 };
                 promise::spawn::spawn(async move {
-                    use config::keyassignment::SpawnTabDomain;
-                    use engine_term::TerminalSize;
-
                     // We send the script to execute to the shell on stdin, rather than ask the
                     // shell to execute it directly, so that we start the shell and read in the
                     // user's rc files before running the script.  Without this, Chatminal on macOS
                     // is launched with a default and very anemic path, and that is frustrating for
                     // users.
 
-                    let mux = Mux::get();
-                    let window_id = None;
-                    let pane_id = None;
-                    let cmd = None;
-                    let cwd = None;
-                    let workspace = mux.active_workspace();
-
-                    match mux
-                        .spawn_tab_or_window(
-                            window_id,
-                            SpawnTabDomain::DomainName("local".to_string()),
-                            cmd,
-                            cwd,
-                            TerminalSize::default(),
-                            pane_id,
-                            workspace,
-                            None, // optional position
-                        )
-                        .await
-                    {
-                        Ok((_tab, pane, _window_id)) => {
+                    match crate::chatminal_runtime::spawn_local_shell_runner().await {
+                        Ok(pane) => {
                             log::trace!("Spawned {file_name} as pane_id {}", pane.pane_id());
                             let mut writer = pane.writer();
                             write!(writer, "{quoted_file_name} ; exit\n").ok();
@@ -298,7 +277,7 @@ impl GuiFrontEnd {
                     KeyAssignment::SpawnWindow => {
                         spawn_command(&SpawnCommand::default(), SpawnWhere::NewWindow);
                     }
-                    KeyAssignment::SpawnTab(spawn_where) => {
+                    KeyAssignment::SpawnSession(spawn_where) => {
                         spawn_command(
                             &SpawnCommand {
                                 domain: spawn_where,
@@ -307,8 +286,8 @@ impl GuiFrontEnd {
                             SpawnWhere::NewWindow,
                         );
                     }
-                    KeyAssignment::SpawnCommandInNewTab(spawn) => {
-                        spawn_command(&spawn, SpawnWhere::NewTab);
+                    KeyAssignment::SpawnCommandInNewSession(spawn) => {
+                        spawn_command(&spawn, SpawnWhere::NewSession);
                     }
                     KeyAssignment::SpawnCommandInNewWindow(spawn) => {
                         spawn_command(&spawn, SpawnWhere::NewWindow);
@@ -329,9 +308,7 @@ impl GuiFrontEnd {
 
     pub fn gui_windows(&self) -> Vec<GuiWin> {
         let windows = self.known_windows.borrow();
-        let active_workspace = Mux::get()
-            .active_workspace_for_client(&self.client_id)
-            .to_string();
+        let active_workspace = active_workspace_for_client(&self.client_id);
         let mut windows: Vec<GuiWin> = windows
             .iter()
             .map(|(window, &window_id)| GuiWin {
@@ -346,10 +323,9 @@ impl GuiFrontEnd {
 
     pub fn reconcile_workspace(&self) -> Future<()> {
         let mut promise = Promise::new();
-        let mux = Mux::get();
-        let workspace = mux.active_workspace_for_client(&self.client_id);
+        let workspace = active_workspace_for_client(&self.client_id);
 
-        if mux.is_workspace_empty(&workspace) {
+        if workspace_is_empty(&workspace) {
             // We don't want to silently kill off things that might
             // be running in other workspaces, so let's pick one
             // and activate it
@@ -357,23 +333,20 @@ impl GuiFrontEnd {
                 promise.ok(());
                 return promise.get_future().unwrap();
             }
-            for workspace in mux.iter_workspaces() {
-                if !mux.is_workspace_empty(&workspace) {
-                    mux.set_active_workspace_for_client(&self.client_id, &workspace);
+            for workspace in workspace_names() {
+                if !workspace_is_empty(&workspace) {
+                    set_active_workspace_for_client(&self.client_id, &workspace);
                     log::debug!("using {} instead, as it is not empty", workspace);
                     break;
                 }
             }
         }
 
-        let workspace = mux.active_workspace_for_client(&self.client_id);
+        let workspace = active_workspace_for_client(&self.client_id);
         log::debug!("workspace is {}, fixup windows", workspace);
 
-        let mut workspace_window_ids: Vec<DesktopWindowId> = mux
-            .iter_windows_in_workspace(&workspace)
-            .into_iter()
-            .map(|window_id| window_id as DesktopWindowId)
-            .collect();
+        let mut workspace_window_ids: Vec<DesktopWindowId> =
+            workspace_window_ids(&workspace).into_iter().collect();
 
         // First, repurpose existing windows.
         // Note that both iter_windows_in_workspace and self.known_windows have a
@@ -431,8 +404,7 @@ impl GuiFrontEnd {
                 if let Err(err) = TermWindow::new_window(window_id).await {
                     log::error!("Failed to create window: {:#}", err);
                     if let Ok(engine_window_id) = usize::try_from(window_id) {
-                        let mux = Mux::get();
-                        mux.kill_window(engine_window_id);
+                        crate::chatminal_runtime::kill_host_window(engine_window_id);
                     }
                     front_end()
                         .spawned_window_ids
@@ -457,8 +429,7 @@ impl GuiFrontEnd {
     }
 
     pub fn switch_workspace(&self, workspace: &str) {
-        let mux = Mux::get();
-        mux.set_active_workspace_for_client(&self.client_id, workspace);
+        set_active_workspace_for_client(&self.client_id, workspace);
         *self.switching_workspaces.borrow_mut() = false;
         self.reconcile_workspace();
     }
@@ -485,9 +456,7 @@ impl GuiFrontEnd {
 
     pub fn gui_window_for_window_id(&self, window_id: DesktopWindowId) -> Option<GuiWin> {
         let windows = self.known_windows.borrow();
-        let active_workspace = Mux::get()
-            .active_workspace_for_client(&self.client_id)
-            .to_string();
+        let active_workspace = active_workspace_for_client(&self.client_id);
         for (window, v) in windows.iter() {
             if *v == window_id {
                 return Some(GuiWin {

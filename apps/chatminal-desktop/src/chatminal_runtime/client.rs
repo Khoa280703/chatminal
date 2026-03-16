@@ -1,22 +1,22 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use chatminal_runtime::RuntimeSessionSnapshot;
 use chatminal_runtime::{
     RuntimeCreatedSession, RuntimeEvent, RuntimeProfile, RuntimeSubscription, RuntimeWorkspace,
 };
-#[cfg(test)]
-use chatminal_runtime::RuntimeSessionSnapshot;
-use chatminal_session_runtime::{SessionBridgeAction, SessionSurfaceLookup, SurfaceId};
 
-use super::EmbeddedRuntime;
+use crate::desktop_host_runtime::EmbeddedRuntime;
 
-pub struct ChatminalRuntimeClient {
+use super::{DesktopSessionBridgeAction, DesktopSessionLookup, RuntimeId};
+
+pub(crate) struct ChatminalRuntimeClient {
     runtime: Arc<EmbeddedRuntime>,
     subscription: RuntimeSubscription,
 }
 
 impl ChatminalRuntimeClient {
-    pub fn new(runtime: Arc<EmbeddedRuntime>) -> Result<Self, String> {
+    pub(crate) fn new(runtime: Arc<EmbeddedRuntime>) -> Result<Self, String> {
         let subscription = runtime.state.subscribe()?;
         Ok(Self {
             runtime,
@@ -24,11 +24,11 @@ impl ChatminalRuntimeClient {
         })
     }
 
-    pub fn workspace_load_passive(&self) -> Result<RuntimeWorkspace, String> {
+    pub(crate) fn workspace_load_passive(&self) -> Result<RuntimeWorkspace, String> {
         self.runtime.state.workspace_load_passive()
     }
 
-    pub fn session_activate(
+    pub(crate) fn session_activate(
         &self,
         session_id: &str,
         cols: usize,
@@ -37,11 +37,11 @@ impl ChatminalRuntimeClient {
         self.runtime.state.session_activate(session_id, cols, rows)
     }
 
-    pub fn session_close(&self, session_id: &str) -> Result<(), String> {
+    pub(crate) fn session_close(&self, session_id: &str) -> Result<(), String> {
         self.runtime.state.session_close(session_id)
     }
 
-    pub fn session_create(
+    pub(crate) fn session_create(
         &self,
         name: Option<String>,
         cols: usize,
@@ -54,17 +54,15 @@ impl ChatminalRuntimeClient {
             .session_create(name, cols, rows, cwd, persist_history)
     }
 
-    pub fn profile_switch(&self, profile_id: &str) -> Result<RuntimeWorkspace, String> {
+    pub(crate) fn profile_switch(&self, profile_id: &str) -> Result<RuntimeWorkspace, String> {
         self.runtime.state.profile_switch(profile_id)
     }
 
-    pub fn profile_create(&self, name: Option<String>) -> Result<RuntimeProfile, String> {
+    pub(crate) fn profile_create(&self, name: Option<String>) -> Result<RuntimeProfile, String> {
         self.runtime.state.profile_create(name)
     }
 
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub fn session_snapshot_get(
+    pub(crate) fn session_snapshot_get(
         &self,
         session_id: &str,
         preview_lines: Option<usize>,
@@ -74,40 +72,40 @@ impl ChatminalRuntimeClient {
             .session_snapshot_get(session_id, preview_lines)
     }
 
-    pub fn recv_event(&self, timeout: Duration) -> Result<Option<RuntimeEvent>, String> {
+    pub(crate) fn recv_event(&self, timeout: Duration) -> Result<Option<RuntimeEvent>, String> {
         self.subscription.recv_timeout(timeout)
     }
 
-    pub fn reconcile_session_surface_lookup(
+    pub(crate) fn reconcile_session_lookup(
         &self,
-        lookup: &SessionSurfaceLookup,
-    ) -> Result<SessionBridgeAction, String> {
-        self.runtime.state.reconcile_session_surface_lookup(lookup)
+        lookup: &DesktopSessionLookup,
+    ) -> Result<DesktopSessionBridgeAction, String> {
+        self.runtime.state.reconcile_session_lookup(lookup)
     }
 
-    pub fn notify_session_surface_focused(
+    pub(crate) fn notify_session_activated(
         &self,
         session_id: &str,
-        surface_id: SurfaceId,
+        runtime_id: RuntimeId,
     ) -> Result<(), String> {
         self.runtime
             .state
-            .notify_session_surface_focused(session_id, surface_id)
+            .notify_session_activated(session_id, runtime_id)
     }
 
-    pub fn notify_session_surface_closed(
+    pub(crate) fn notify_session_closed(
         &self,
         session_id: &str,
-        surface_id: SurfaceId,
-        lookup_after_close: &SessionSurfaceLookup,
+        runtime_id: RuntimeId,
+        lookup_after_close: &DesktopSessionLookup,
     ) -> Result<(), String> {
         self.runtime
             .state
-            .notify_session_surface_closed(session_id, surface_id, lookup_after_close)
+            .notify_session_closed(session_id, runtime_id, lookup_after_close)
     }
 }
 
-pub fn resolve_target_session_id(
+pub(crate) fn resolve_target_session_id(
     client: &ChatminalRuntimeClient,
     explicit: Option<&str>,
 ) -> Result<String, String> {

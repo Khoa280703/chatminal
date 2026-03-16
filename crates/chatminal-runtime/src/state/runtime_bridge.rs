@@ -1,126 +1,51 @@
-use std::sync::mpsc as std_mpsc;
+// Runtime execution adapter — abstraction boundary between `chatminal-runtime`
+// and the actual session execution engine (`chatminal-session-runtime`).
+//
+// `DaemonState` depends only on this trait. The concrete implementation lives in
+// `desktop_host_runtime` (which depends on `chatminal-session-runtime`).
+//
+// Phase 07: this file was rewritten to remove the direct `chatminal-session-runtime`
+// dependency. All engine types are hidden behind `RuntimeExecutionAdapter`.
+
 use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::Duration;
 
-use chatminal_session_runtime::{
-    SessionBridgeAction, SessionCoreState, SessionEngineShared, SessionEventBus,
-    SessionRuntimeBridge, SessionRuntimeEvent, SessionSurfaceLookup, SessionWorkspaceHost,
-    StatefulSessionEngine, SurfaceId,
-};
-use chatminal_terminal_core::TerminalSize;
-use portable_pty::CommandBuilder;
-
-use crate::session::{InputWriteStats, SessionEvent, WriteInputError};
+use crate::api::{RuntimeSessionBridgeAction, RuntimeSessionLookup as RuntimeOwnedSessionLookup};
+use crate::session::{InputWriteStats, WriteInputError};
+use crate::workspace_ids::{RuntimeId, TerminalInstanceId};
+use crate::workspace_layout::WorkspaceLayoutRegistry;
 
 use super::{DaemonState, StateInner};
 
-const EXECUTION_EVENT_POLL_TIMEOUT: Duration = Duration::from_millis(50);
+// ─── handle ────────────────────────────────────────────────────────────────
 
-pub(super) type RuntimeHandle = Arc<Mutex<RuntimeSessionHandle>>;
+pub(super) type RuntimeHandle = Arc<Mutex<dyn RuntimeSessionHandleTrait>>;
 
-#[derive(Debug)]
-pub(super) struct RuntimeSessionHandle {
-    shared: Arc<SessionEngineShared>,
-    surface_id: chatminal_session_runtime::SurfaceId,
-    leaf_id: chatminal_session_runtime::LeafId,
-    size: (usize, usize),
-    closed: bool,
+/// Interface for a live session PTY handle owned by `SessionEntry`.
+/// The concrete type is `RuntimeSessionHandle` in `desktop_host_runtime`.
+pub trait RuntimeSessionHandleTrait: Send + Sync + std::fmt::Debug {
+    fn write_input(&self, data: &str) -> Result<InputWriteStats, WriteInputError>;
+    fn resize(&mut self, cols: usize, rows: usize) -> Result<(), String>;
+    fn kill(&mut self);
+    fn size(&self) -> Result<(usize, usize), String>;
 }
 
-impl RuntimeSessionHandle {
-    fn new(
-        shared: Arc<SessionEngineShared>,
-        surface_id: chatminal_session_runtime::SurfaceId,
-        leaf_id: chatminal_session_runtime::LeafId,
-        cols: usize,
-        rows: usize,
-    ) -> Self {
-        Self {
-            shared,
-            surface_id,
-            leaf_id,
-            size: (cols, rows),
-            closed: false,
-        }
-    }
+// ─── execution adapter trait ────────────────────────────────────────────────
 
-    pub(super) fn write_input(&self, data: &str) -> Result<InputWriteStats, WriteInputError> {
-        let Some(runtime) = self.shared.leaf_runtimes().runtime(self.leaf_id) else {
-            return Err(if self.closed {
-                WriteInputError::Closing
-            } else {
-                WriteInputError::Disconnected
-            });
-        };
-        runtime
-            .write_input(data.as_bytes())
-            .map_err(|_| WriteInputError::Disconnected)?;
-        Ok(InputWriteStats::default())
-    }
+/// Adapter between `DaemonState` and the session execution engine.
+///
+/// This trait is implemented by `DesktopRuntimeExecutionBridge` in
+/// `desktop_host_runtime`. It is the only gateway through which
+/// `chatminal-runtime` reaches session engine internals.
+pub trait RuntimeExecutionAdapter: Send + Sync + std::fmt::Debug {
+    /// Called by `DaemonState::new` to give the adapter a sender it can use to
+    /// forward PTY output events back into the state event loop.
+    fn connect_session_events(
+        &self,
+        events_tx: std::sync::mpsc::SyncSender<crate::session::SessionEvent>,
+    );
 
-    pub(super) fn resize(&mut self, cols: usize, rows: usize) -> Result<(), String> {
-        let Some(runtime) = self.shared.leaf_runtimes().runtime(self.leaf_id) else {
-            return Err("session is not running".to_string());
-        };
-        runtime.resize(TerminalSize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-            dpi: 96,
-        })?;
-        self.size = (cols, rows);
-        Ok(())
-    }
-
-    #[cfg(test)]
-    pub(super) fn size(&self) -> Result<(usize, usize), String> {
-        if self.closed {
-            return Err("session runtime is closed".to_string());
-        }
-        Ok(self.size)
-    }
-
-    pub(super) fn kill(&mut self) {
-        if self.closed {
-            return;
-        }
-        let engine = StatefulSessionEngine::with_shared((), Arc::clone(&self.shared));
-        let _ = engine.close_detached_surface(self.surface_id);
-        self.closed = true;
-    }
-}
-
-#[derive(Debug)]
-pub(super) struct RuntimeExecutionBridge {
-    shared: Arc<SessionEngineShared>,
-}
-
-impl RuntimeExecutionBridge {
-    pub(super) fn new(events: std_mpsc::SyncSender<SessionEvent>) -> Self {
-        let shared = Arc::new(SessionEngineShared::new(Arc::new(Mutex::new(
-            SessionCoreState::default(),
-        ))));
-        let subscription = shared.event_hub().subscribe();
-        thread::spawn(move || loop {
-            match subscription.recv_timeout(EXECUTION_EVENT_POLL_TIMEOUT) {
-                Ok(Some(event)) => {
-                    if let Some(mapped) = map_execution_event(event) {
-                        let _ = events.send(mapped);
-                    }
-                }
-                Ok(None) => {}
-                Err(err) => {
-                    log::warn!("runtime execution bridge stopped: {err}");
-                    break;
-                }
-            }
-        });
-        Self { shared }
-    }
-
-    pub(super) fn spawn_handle(
+    /// Spawn a new session PTY and return a handle.
+    fn spawn_handle(
         &self,
         session_id: &str,
         generation: u64,
@@ -128,123 +53,40 @@ impl RuntimeExecutionBridge {
         cwd: &str,
         cols: usize,
         rows: usize,
-    ) -> Result<RuntimeHandle, String> {
-        let mut command = CommandBuilder::new(shell);
-        command.cwd(cwd);
-        let engine = StatefulSessionEngine::with_shared((), Arc::clone(&self.shared));
-        let state = engine.spawn_detached_surface(
-            session_id.to_string(),
-            generation,
-            command,
-            TerminalSize {
-                rows,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-                dpi: 96,
-            },
-        )?;
-        let leaf_id = state
-            .snapshot
-            .active_leaf_id
-            .ok_or_else(|| "spawned session surface missing active leaf".to_string())?;
-        Ok(Arc::new(Mutex::new(RuntimeSessionHandle::new(
-            Arc::clone(&self.shared),
-            state.snapshot.surface_id,
-            leaf_id,
-            cols,
-            rows,
-        ))))
-    }
+    ) -> Result<RuntimeHandle, String>;
 
-    pub(super) fn shared(&self) -> Arc<SessionEngineShared> {
-        Arc::clone(&self.shared)
-    }
+    /// Return the shared workspace layout registry.
+    fn workspace_layouts(&self) -> Arc<Mutex<WorkspaceLayoutRegistry>>;
 
-    pub(super) fn attachment(
+    /// Return (runtime_id, terminal_instance_id) for a running session, if any.
+    fn attachment(&self, session_id: &str) -> Option<(RuntimeId, TerminalInstanceId)>;
+
+    /// Reconcile the desktop session lookup with the runtime's authoritative state.
+    fn reconcile_session_lookup(
         &self,
+        host: &DaemonState,
+        lookup: &RuntimeOwnedSessionLookup,
+    ) -> Result<RuntimeSessionBridgeAction, String>;
+
+    /// Notify the engine that a session was activated.
+    fn notify_session_activated(
+        &self,
+        host: &DaemonState,
         session_id: &str,
-    ) -> Option<(
-        chatminal_session_runtime::SurfaceId,
-        chatminal_session_runtime::LeafId,
-    )> {
-        let core = self.shared.core_state();
-        let core = core.lock().ok()?;
-        let surface_id = core.surface_id_for_session(session_id)?;
-        let leaf_id = core.surface(surface_id)?.active_leaf_id?;
-        Some((surface_id, leaf_id))
-    }
+        runtime_id: RuntimeId,
+    ) -> Result<(), String>;
+
+    /// Notify the engine that a session was closed.
+    fn notify_session_closed(
+        &self,
+        host: &DaemonState,
+        session_id: &str,
+        runtime_id: RuntimeId,
+        lookup_after_close: &RuntimeOwnedSessionLookup,
+    ) -> Result<(), String>;
 }
 
-fn map_execution_event(event: SessionRuntimeEvent) -> Option<SessionEvent> {
-    match event {
-        SessionRuntimeEvent::LeafOutput {
-            session_id,
-            generation,
-            chunk,
-            ..
-        } => Some(SessionEvent::Output {
-            session_id,
-            generation,
-            chunk,
-            ts: now_millis(),
-        }),
-        SessionRuntimeEvent::LeafExited {
-            session_id,
-            generation,
-            exit_code,
-            ..
-        } => Some(SessionEvent::Exited {
-            session_id,
-            generation,
-            exit_code,
-            reason: "eof".to_string(),
-        }),
-        SessionRuntimeEvent::LeafError {
-            session_id,
-            generation,
-            message,
-            ..
-        } => Some(SessionEvent::Error {
-            session_id,
-            generation,
-            message,
-        }),
-        _ => None,
-    }
-}
-
-#[derive(Default)]
-pub(super) struct RuntimeSessionEventBus;
-
-impl SessionEventBus for RuntimeSessionEventBus {
-    fn publish(&self, event: SessionRuntimeEvent) {
-        log::trace!("session-runtime-bridge event: {:?}", event);
-    }
-}
-
-impl SessionWorkspaceHost for DaemonState {
-    fn active_session_id(&self) -> Option<String> {
-        self.workspace_load_passive()
-            .ok()
-            .and_then(|workspace| workspace.active_session_id)
-    }
-
-    fn activate_session(&self, session_id: &str) -> Result<(), String> {
-        let (cols, rows) = {
-            let inner = self
-                .inner
-                .lock()
-                .map_err(|_| "state lock poisoned".to_string())?;
-            (inner.config.default_cols, inner.config.default_rows)
-        };
-        self.session_activate(session_id, cols, rows)
-    }
-
-    fn close_session(&self, session_id: &str) -> Result<(), String> {
-        self.session_close(session_id)
-    }
-}
+// ─── DaemonState impl ──────────────────────────────────────────────────────
 
 impl DaemonState {
     pub(super) fn spawn_runtime_handle(
@@ -260,48 +102,48 @@ impl DaemonState {
             .spawn_handle(session_id, generation, shell, cwd, cols, rows)
     }
 
-    pub fn reconcile_session_surface_lookup(
+    pub fn reconcile_session_lookup(
         &self,
-        lookup: &SessionSurfaceLookup,
-    ) -> Result<SessionBridgeAction, String> {
-        let bus = RuntimeSessionEventBus;
-        SessionRuntimeBridge::new(self, &bus).reconcile_lookup(lookup)
+        lookup: &RuntimeOwnedSessionLookup,
+    ) -> Result<RuntimeSessionBridgeAction, String> {
+        self.execution.reconcile_session_lookup(self, lookup)
     }
 
-    pub fn notify_session_surface_focused(
-        &self,
-        session_id: &str,
-        surface_id: SurfaceId,
-    ) -> Result<(), String> {
-        let bus = RuntimeSessionEventBus;
-        SessionRuntimeBridge::new(self, &bus).on_surface_focused(session_id, surface_id)
-    }
-
-    pub fn notify_session_surface_closed(
+    pub fn notify_session_activated(
         &self,
         session_id: &str,
-        surface_id: SurfaceId,
-        lookup_after_close: &SessionSurfaceLookup,
+        runtime_id: RuntimeId,
     ) -> Result<(), String> {
-        let bus = RuntimeSessionEventBus;
-        SessionRuntimeBridge::new(self, &bus).on_surface_closed(
-            session_id,
-            surface_id,
-            lookup_after_close,
-        )
+        if let Ok(mut inner) = self.inner.lock() {
+            if let Some(entry) = inner.sessions.get_mut(session_id) {
+                entry.execution_status = crate::state::SessionExecutionStatus::Running {
+                    runtime_id: runtime_id.as_u64(),
+                };
+            }
+        }
+        self.execution
+            .notify_session_activated(self, session_id, runtime_id)
     }
 
-    pub fn session_engine_shared(&self) -> Arc<SessionEngineShared> {
-        self.execution.shared()
+    pub fn notify_session_closed(
+        &self,
+        session_id: &str,
+        runtime_id: RuntimeId,
+        lookup_after_close: &RuntimeOwnedSessionLookup,
+    ) -> Result<(), String> {
+        if let Ok(mut inner) = self.inner.lock() {
+            if let Some(entry) = inner.sessions.get_mut(session_id) {
+                entry.execution_status = crate::state::SessionExecutionStatus::Stopped;
+            }
+        }
+        self.execution
+            .notify_session_closed(self, session_id, runtime_id, lookup_after_close)
     }
 
     pub fn session_runtime_attachment(
         &self,
         session_id: &str,
-    ) -> Option<(
-        chatminal_session_runtime::SurfaceId,
-        chatminal_session_runtime::LeafId,
-    )> {
+    ) -> Option<(RuntimeId, TerminalInstanceId)> {
         self.execution.attachment(session_id)
     }
 }
@@ -322,11 +164,4 @@ impl StateInner {
         self.publish_session_and_workspace_updated(session_id);
         Ok(())
     }
-}
-
-fn now_millis() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|value| value.as_millis() as u64)
-        .unwrap_or(0)
 }

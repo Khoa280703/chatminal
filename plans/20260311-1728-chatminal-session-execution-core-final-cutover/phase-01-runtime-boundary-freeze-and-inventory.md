@@ -44,12 +44,78 @@
 5. Viết acceptance checklist cho từng bucket để phase sau chỉ việc đốt checklist
 6. Xác nhận các file nào sau cùng phải bị xóa hoàn toàn, file nào chỉ cần refactor
 
+## Callsite Inventory
+
+### Bucket 1 — Session Engine Core Commands (Phase 02)
+**File: `crates/chatminal-session-runtime/src/engine_surface_adapter.rs`** (toàn bộ file)
+- L91,97,126,140,152,192,205,207,210,227,228,252,253,276,277,301,302,314,341,359,360 — `Mux::get()` + `get_tab()` calls
+- L153 — `spawn_tab_or_window`
+- L239 — `focus_pane_and_containing_tab`
+- L317,320 — `move_pane_to_new_tab`
+- L329 — `focus_pane_and_containing_tab`
+
+**File: `crates/chatminal-session-runtime/src/session_engine.rs`**
+- L275 — `pub type ChatminalMuxSessionEngine = StatefulSessionEngine<ChatminalEngineSurfaceAdapter>`
+- L277–285 — `impl ChatminalMuxSessionEngine { host_surface_for_session, host_surface_session_id }`
+- L280 — `Mux::get().get_tab(host_surface_id)`
+
+**File: `crates/chatminal-session-runtime/src/session_spawn_manager.rs`**
+- L17 — generic over `EngineSurfaceAdapter`
+
+**File: `crates/chatminal-session-runtime/src/session_focus_manager.rs`**
+- L10,19,28,38,51 — generic over `EngineSurfaceAdapter`
+
+### Bucket 2 — Desktop Session Host/Bootstrap (Phase 03)
+**File: `apps/chatminal-desktop/src/chatminal_session_surface.rs`**
+- L27–31 — `session_engine()` creates `ChatminalMuxSessionEngine` with adapter → active creation path
+- L80–82 — `host_surface_for_session()` returns `Arc<Tab>` in active API
+- L84–95 — `host_surface_for_public_surface()` returns `Arc<Tab>`
+- L97–101 — `host_surface_id_for_public_surface()`
+- L68–78 — `session_id_for_host_surface()` — lookup từ Tab identity
+
+**File: `apps/chatminal-desktop/src/chatminal_runtime/mod.rs`**
+- L55 — `Mux::get()` in domain registration
+
+### Bucket 3 — TermWindow Routing (Phase 04)
+**File: `apps/chatminal-desktop/src/termwindow/mod.rs`**
+- L331,335,789,810,832,935,937,1149,1263,1951,1953,2052,2178,2193,2219,2253,2278,2455,2606,2621,2623,2666,2893,2928,2964,2981,3101,3185,3300,3756,3773,3808,3817,3962,3986,4020,4056,4064,4216,4389,4433 — `Mux::get()`, `get_tab()`, `get_pane()`
+
+**File: `apps/chatminal-desktop/src/termwindow/paneselect.rs`**
+- L166,232,264,270 — `Mux::get()`, `move_pane_to_new_tab`, `focus_pane_and_containing_tab`
+
+**File: `apps/chatminal-desktop/src/termwindow/resize.rs`** — L319
+
+**File: `apps/chatminal-desktop/src/termwindow/clipboard.rs`** — L48–49
+
+### Bucket 4 — Overlay/Frontend Action Routing (Phase 05)
+**File: `apps/chatminal-desktop/src/frontend.rs`**
+- L41,59,83,84,107,243,251,332,349,434,460,488 — `Mux::get()`, `focus_pane_and_containing_tab`, `spawn_tab_or_window`
+
+**File: `apps/chatminal-desktop/src/overlay/launcher.rs`** — L78
+**File: `apps/chatminal-desktop/src/overlay/confirm_close_pane.rs`** — L30,50,69
+**File: `apps/chatminal-desktop/src/overlay/quickselect.rs`** — L941–942
+**File: `apps/chatminal-desktop/src/overlay/copy.rs`** — L122
+
+### Bucket 5 — Pane/Render/Update Notifications (KEEP — render compat)
+- `chatminal_runtime/session_pane.rs:172,180,189,195,312,316,320` — `Mux::get().notify()`, `record_input_for_current_identity`
+- `chatminal_runtime/pane.rs:210,214,219,227,361,366,371` — same
+- `termwindow/render/paint.rs:254` — `record_focus_for_current_identity`
+
+### Bucket 6 — Startup/Dependency/Wiring (Phase 07)
+- `apps/chatminal-desktop/src/main.rs:178,230,261,295,352,449`
+- `apps/chatminal-desktop/src/update.rs:114`
+- `apps/chatminal-desktop/src/spawn.rs:48,132,146`
+
+## Active vs Compatibility
+- **Active path**: Buckets 1, 2, 3, 4, 6 — phải migrate
+- **Compatibility path**: Bucket 5 — giữ nguyên cho render loop
+
 ## Todo List
-- [ ] Hoàn tất callsite inventory có bucket ownership
-- [ ] Inventory có line refs cho từng active callsite
-- [ ] Đánh dấu active path vs compatibility path
-- [ ] Freeze danh sách file target cho từng phase
-- [ ] Chốt grep gates dùng lại ở mọi phase sau
+- [x] Hoàn tất callsite inventory có bucket ownership
+- [x] Inventory có line refs cho từng active callsite
+- [x] Đánh dấu active path vs compatibility path
+- [x] Freeze danh sách file target cho từng phase
+- [x] Chốt grep gates dùng lại ở mọi phase sau
 
 ## Success Criteria
 - Không còn tranh luận mơ hồ “đã bỏ tab chưa”

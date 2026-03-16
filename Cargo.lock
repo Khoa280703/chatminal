@@ -736,7 +736,7 @@ dependencies = [
  "chatminal-base91",
  "chatminal-config",
  "chatminal-engine-term",
- "chatminal-mux",
+ "chatminal-host-runtime",
  "chatminal-portable-pty",
  "chatminal-rangeset",
  "chatminal-termwiz",
@@ -836,16 +836,15 @@ dependencies = [
  "chatminal-env-bootstrap",
  "chatminal-filedescriptor",
  "chatminal-frecency",
+ "chatminal-host-runtime",
  "chatminal-lfucache",
  "chatminal-lua-bridge",
  "chatminal-luahelper",
- "chatminal-mux",
  "chatminal-portable-pty",
  "chatminal-promise",
  "chatminal-rangeset",
  "chatminal-ratelim",
  "chatminal-runtime",
- "chatminal-session-runtime",
  "chatminal-tabout",
  "chatminal-terminal-core",
  "chatminal-termwiz",
@@ -946,6 +945,8 @@ dependencies = [
 name = "chatminal-engine-char-props"
 version = "0.1.3"
 dependencies = [
+ "chatminal-termwiz",
+ "criterion",
  "k9",
  "phf",
  "serde",
@@ -967,7 +968,7 @@ dependencies = [
  "chatminal-engine-term",
  "chatminal-engine-uds",
  "chatminal-filedescriptor",
- "chatminal-mux",
+ "chatminal-host-runtime",
  "chatminal-portable-pty",
  "chatminal-promise",
  "chatminal-rangeset",
@@ -1129,7 +1130,7 @@ dependencies = [
  "chatminal-engine-client",
  "chatminal-engine-term",
  "chatminal-engine-uds",
- "chatminal-mux",
+ "chatminal-host-runtime",
  "chatminal-portable-pty",
  "chatminal-promise",
  "chatminal-rangeset",
@@ -1344,59 +1345,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "chatminal-lfucache"
-version = "0.1.0"
-dependencies = [
- "ahash",
- "chatminal-config",
- "fnv",
- "intrusive-collections",
- "k9",
- "metrics",
-]
-
-[[package]]
-name = "chatminal-logging"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chatminal-config",
- "chatminal-luahelper",
- "log",
-]
-
-[[package]]
-name = "chatminal-lua-bridge"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chatminal-config",
- "chatminal-engine-dynamic",
- "chatminal-engine-term",
- "chatminal-luahelper",
- "chatminal-mux",
- "chatminal-portable-pty",
- "chatminal-termwiz",
- "chatminal-termwiz-funcs",
- "chatminal-url-funcs",
- "libc",
- "log",
- "parking_lot",
- "smol",
-]
-
-[[package]]
-name = "chatminal-luahelper"
-version = "0.1.0"
-dependencies = [
- "bstr",
- "chatminal-engine-dynamic",
- "log",
- "mlua",
-]
-
-[[package]]
-name = "chatminal-mux"
+name = "chatminal-host-runtime"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -1442,6 +1391,58 @@ dependencies = [
  "thiserror 1.0.69",
  "url",
  "winapi",
+]
+
+[[package]]
+name = "chatminal-lfucache"
+version = "0.1.0"
+dependencies = [
+ "ahash",
+ "chatminal-config",
+ "fnv",
+ "intrusive-collections",
+ "k9",
+ "metrics",
+]
+
+[[package]]
+name = "chatminal-logging"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chatminal-config",
+ "chatminal-luahelper",
+ "log",
+]
+
+[[package]]
+name = "chatminal-lua-bridge"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chatminal-config",
+ "chatminal-engine-dynamic",
+ "chatminal-engine-term",
+ "chatminal-host-runtime",
+ "chatminal-luahelper",
+ "chatminal-portable-pty",
+ "chatminal-termwiz",
+ "chatminal-termwiz-funcs",
+ "chatminal-url-funcs",
+ "libc",
+ "log",
+ "parking_lot",
+ "smol",
+]
+
+[[package]]
+name = "chatminal-luahelper"
+version = "0.1.0"
+dependencies = [
+ "bstr",
+ "chatminal-engine-dynamic",
+ "log",
+ "mlua",
 ]
 
 [[package]]
@@ -1546,9 +1547,7 @@ version = "0.1.0"
 dependencies = [
  "chatminal-portable-pty",
  "chatminal-protocol",
- "chatminal-session-runtime",
  "chatminal-store",
- "chatminal-terminal-core",
  "dirs",
  "log",
  "serde",
@@ -1568,21 +1567,6 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "toml 0.8.23",
-]
-
-[[package]]
-name = "chatminal-session-runtime"
-version = "0.1.0"
-dependencies = [
- "chatminal-config",
- "chatminal-engine-dynamic",
- "chatminal-engine-term",
- "chatminal-mux",
- "chatminal-portable-pty",
- "chatminal-promise",
- "chatminal-terminal-core",
- "chatminal-window",
- "log",
 ]
 
 [[package]]
@@ -1834,6 +1818,7 @@ dependencies = [
 name = "chatminald"
 version = "0.1.0"
 dependencies = [
+ "chatminal-portable-pty",
  "chatminal-runtime",
  "chatminal-store",
  "env_logger 0.11.9",

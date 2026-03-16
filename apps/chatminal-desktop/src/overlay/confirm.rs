@@ -1,6 +1,6 @@
 use crate::scripting::guiwin::GuiWin;
 use config::keyassignment::{Confirmation, KeyAssignment};
-use mux::termwiztermtab::TermWizTerminal;
+use crate::chatminal_runtime::overlay_compat::OverlayTerminal;
 use std::rc::Rc;
 use termwiz::cell::AttributeChange;
 use termwiz::color::ColorAttribute;
@@ -8,11 +8,11 @@ use termwiz::input::{InputEvent, KeyCode, KeyEvent, MouseButtons, MouseEvent};
 use termwiz::surface::{Change, CursorVisibility, Position};
 use termwiz::terminal::Terminal;
 
-pub fn run_confirmation(message: &str, term: &mut TermWizTerminal) -> anyhow::Result<bool> {
+pub fn run_confirmation(message: &str, term: &mut OverlayTerminal) -> anyhow::Result<bool> {
     run_confirmation_impl(message, term)
 }
 
-fn run_confirmation_impl(message: &str, term: &mut TermWizTerminal) -> anyhow::Result<bool> {
+fn run_confirmation_impl(message: &str, term: &mut OverlayTerminal) -> anyhow::Result<bool> {
     term.set_raw_mode()?;
 
     let size = term.get_screen_size()?;
@@ -46,7 +46,7 @@ fn run_confirmation_impl(message: &str, term: &mut TermWizTerminal) -> anyhow::R
         No,
     }
 
-    let render = |term: &mut TermWizTerminal, active: ActiveButton| -> termwiz::Result<()> {
+    let render = |term: &mut OverlayTerminal, active: ActiveButton| -> termwiz::Result<()> {
         let mut changes = vec![
             Change::ClearScreen(ColorAttribute::Default),
             Change::CursorVisibility(CursorVisibility::Hidden),
@@ -145,7 +145,7 @@ fn run_confirmation_impl(message: &str, term: &mut TermWizTerminal) -> anyhow::R
 }
 
 pub fn show_confirmation_overlay(
-    mut term: TermWizTerminal,
+    mut term: OverlayTerminal,
     args: Confirmation,
     window: GuiWin,
     pane_id: u64,

@@ -1,54 +1,56 @@
 use super::confirm;
+use crate::termwindow::TermWindowNotif;
 use crate::TermWindow;
-use mux::Mux;
-use mux::pane::PaneId;
-use mux::tab::TabId;
-use mux::termwiztermtab::TermWizTerminal;
-use mux::window::WindowId;
-use std::convert::TryFrom;
-
-fn pane_id_from_u64(pane_id: u64) -> anyhow::Result<PaneId> {
-    PaneId::try_from(pane_id).map_err(|_| anyhow::anyhow!("invalid pane id {pane_id}"))
-}
-
-fn tab_id_from_u64(tab_id: u64) -> anyhow::Result<TabId> {
-    TabId::try_from(tab_id).map_err(|_| anyhow::anyhow!("invalid tab id {tab_id}"))
-}
-
-fn window_id_from_u64(window_id: u64) -> anyhow::Result<WindowId> {
-    WindowId::try_from(window_id).map_err(|_| anyhow::anyhow!("invalid window id {window_id}"))
-}
+use crate::chatminal_runtime::overlay_compat::OverlayTerminal;
+use window::WindowOps;
 
 pub fn confirm_close_pane(
     pane_id: u64,
-    mut term: TermWizTerminal,
+    mut term: OverlayTerminal,
     window: ::window::Window,
 ) -> anyhow::Result<()> {
-    let pane_id = pane_id_from_u64(pane_id)?;
     if confirm::run_confirmation("🛑 Really kill this pane?", &mut term)? {
         promise::spawn::spawn_into_main_thread(async move {
-            let mux = Mux::get();
-            mux.remove_pane(pane_id);
+            if let Err(err) = crate::chatminal_runtime::remove_terminal_handle_by_public_id(pane_id) {
+                log::error!("failed to remove host pane {pane_id}: {err:#}");
+            }
         })
         .detach();
     }
-    TermWindow::schedule_cancel_overlay_for_leaf(window, pane_id as u64);
+    TermWindow::schedule_cancel_overlay_for_terminal_handle(window, pane_id);
 
     Ok(())
 }
 
-pub fn confirm_close_tab(
-    tab_id: u64,
-    mut term: TermWizTerminal,
+pub fn confirm_close_chatminal_session_leaf_or_session(
+    session_id: String,
+    host_terminal_handle: u64,
+    mut term: OverlayTerminal,
+    window: ::window::Window,
 ) -> anyhow::Result<()> {
-    let tab_id = tab_id_from_u64(tab_id)?;
+    if confirm::run_confirmation("🛑 Really kill this pane?", &mut term)? {
+        let window_for_apply = window.clone();
+        promise::spawn::spawn_into_main_thread(async move {
+            window_for_apply.notify(TermWindowNotif::Apply(Box::new(move |term_window| {
+                term_window.close_chatminal_terminal_handle_or_session(
+                    &session_id,
+                    host_terminal_handle,
+                );
+            })));
+        })
+        .detach();
+    }
+    TermWindow::schedule_cancel_overlay_for_terminal_handle(window, host_terminal_handle);
+    Ok(())
+}
+
+pub fn confirm_close_tab(tab_id: u64, mut term: OverlayTerminal) -> anyhow::Result<()> {
     if confirm::run_confirmation(
         "🛑 Really kill this tab and all contained panes?",
         &mut term,
     )? {
         promise::spawn::spawn_into_main_thread(async move {
-            let mux = Mux::get();
-            mux.remove_tab(tab_id);
+            crate::chatminal_runtime::remove_runtime_entry_scope(tab_id);
         })
         .detach();
     }
@@ -56,18 +58,15 @@ pub fn confirm_close_tab(
     Ok(())
 }
 
-pub fn confirm_close_window(
-    mut term: TermWizTerminal,
-    window_id: u64,
-) -> anyhow::Result<()> {
-    let window_id = window_id_from_u64(window_id)?;
+pub fn confirm_close_window(mut term: OverlayTerminal, window_id: u64) -> anyhow::Result<()> {
     if confirm::run_confirmation(
         "🛑 Really kill this window and all contained tabs and panes?",
         &mut term,
     )? {
         promise::spawn::spawn_into_main_thread(async move {
-            let mux = Mux::get();
-            mux.kill_window(window_id);
+            if let Err(err) = crate::chatminal_runtime::kill_host_window_by_public_id(window_id) {
+                log::error!("failed to kill host window {window_id}: {err:#}");
+            }
         })
         .detach();
     }
@@ -75,7 +74,7 @@ pub fn confirm_close_window(
     Ok(())
 }
 
-pub fn confirm_quit_program(mut term: TermWizTerminal) -> anyhow::Result<()> {
+pub fn confirm_quit_program(mut term: OverlayTerminal) -> anyhow::Result<()> {
     if confirm::run_confirmation("🛑 Really Quit Chatminal?", &mut term)? {
         promise::spawn::spawn_into_main_thread(async move {
             use ::window::{Connection, ConnectionOps};

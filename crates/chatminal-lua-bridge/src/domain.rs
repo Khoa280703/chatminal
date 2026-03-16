@@ -1,6 +1,6 @@
 use super::*;
 use mlua::UserDataRef;
-use mux::domain::{Domain, DomainId, DomainState};
+use host_runtime::domain::{Domain, DomainId, DomainState};
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug)]

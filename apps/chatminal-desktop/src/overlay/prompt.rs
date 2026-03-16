@@ -1,6 +1,6 @@
 use crate::scripting::guiwin::GuiWin;
 use config::keyassignment::{KeyAssignment, PromptInputLine};
-use mux::termwiztermtab::TermWizTerminal;
+use crate::chatminal_runtime::overlay_compat::OverlayTerminal;
 use std::rc::Rc;
 use termwiz::input::{InputEvent, KeyCode, KeyEvent};
 use termwiz::lineedit::*;
@@ -47,7 +47,7 @@ impl LineEditorHost for PromptHost {
 }
 
 pub fn show_line_prompt_overlay(
-    mut term: TermWizTerminal,
+    mut term: OverlayTerminal,
     args: PromptInputLine,
     window: GuiWin,
     pane_id: u64,

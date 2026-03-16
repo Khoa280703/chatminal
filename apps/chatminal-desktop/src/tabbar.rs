@@ -1,46 +1,45 @@
-use crate::termwindow::{LeafInformation, SurfaceInformation, UIItem, UIItemType};
-use chatminal_session_runtime::{LeafId, SurfaceId};
-use config::{ConfigHandle, TabBarColors};
+use crate::termwindow::{TerminalInstanceInformation, SessionEntryInformation, UIItem, UIItemType};
+use crate::chatminal_runtime::SessionViewId;
+use config::{ConfigHandle, SessionBarColors};
 use engine_term::{Line, Progress};
 use finl_unicode::grapheme_clusters::Graphemes;
 use mlua::FromLua;
-use termwiz::cell::{Cell, CellAttributes, unicode_column_width};
+use termwiz::cell::{unicode_column_width, Cell, CellAttributes};
 use termwiz::color::{AnsiColor, ColorSpec};
 use termwiz::escape::csi::Sgr;
 use termwiz::escape::parser::Parser;
-use termwiz::escape::{Action, CSI, ControlCode};
+use termwiz::escape::{Action, ControlCode, CSI};
 use termwiz::surface::SEQ_ZERO;
-use termwiz_funcs::{FormatColor, FormatItem, format_as_escapes};
+use termwiz_funcs::{format_as_escapes, FormatColor, FormatItem};
 use window::{IntegratedTitleButton, IntegratedTitleButtonAlignment, IntegratedTitleButtonStyle};
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct TabBarState {
+pub struct SessionBarState {
     line: Line,
-    items: Vec<TabEntry>,
+    items: Vec<SessionBarEntry>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum TabBarItem {
+pub enum SessionBarItem {
     None,
     LeftStatus,
     RightStatus,
-    HostSurface {
-        host_surface_idx: usize,
+    RuntimeEntry {
+        entry_idx: usize,
         active: bool,
     },
     Session {
         session_id: String,
-        surface_id: Option<SurfaceId>,
-        active_leaf_id: Option<LeafId>,
+        view_id: Option<SessionViewId>,
         active: bool,
     },
-    NewTabButton,
+    NewSessionButton,
     WindowButton(IntegratedTitleButton),
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct TabEntry {
-    pub item: TabBarItem,
+pub struct SessionBarEntry {
+    pub item: SessionBarItem,
     pub title: Line,
     x: usize,
     width: usize,
@@ -53,9 +52,9 @@ struct TitleText {
 }
 
 fn call_format_tab_title(
-    tab: &SurfaceInformation,
-    tab_info: &[SurfaceInformation],
-    pane_info: &[LeafInformation],
+    tab: &SessionEntryInformation,
+    tab_info: &[SessionEntryInformation],
+    pane_info: &[TerminalInstanceInformation],
     config: &ConfigHandle,
     hover: bool,
     tab_max_width: usize,
@@ -141,9 +140,9 @@ fn pct_to_glyph(pct: u8) -> char {
 }
 
 fn compute_tab_title(
-    tab: &SurfaceInformation,
-    tab_info: &[SurfaceInformation],
-    pane_info: &[LeafInformation],
+    tab: &SessionEntryInformation,
+    tab_info: &[SessionEntryInformation],
+    pane_info: &[TerminalInstanceInformation],
     config: &ConfigHandle,
     hover: bool,
     tab_max_width: usize,
@@ -156,21 +155,21 @@ fn compute_tab_title(
             let mut items = vec![];
             let mut len = 0;
 
-            let mut title = if tab.surface_title.is_empty() {
-                tab.active_leaf
+            let mut title = if tab.entry_title.is_empty() {
+                tab.active_terminal_instance
                     .as_ref()
                     .map(|pane| pane.title.clone())
                     .unwrap_or_else(|| " no pane ".to_string())
             } else {
-                tab.surface_title.clone()
+                tab.entry_title.clone()
             };
 
-            if let Some(pane) = &tab.active_leaf {
-                let classic_spacing = if config.use_fancy_tab_bar { "" } else { " " };
-                if config.show_tab_index_in_tab_bar {
+            if let Some(pane) = &tab.active_terminal_instance {
+                let classic_spacing = if config.use_fancy_session_bar { "" } else { " " };
+                if config.show_session_index_in_session_bar {
                     let index = format!(
                         "{classic_spacing}{}: ",
-                        tab.surface_index
+                        tab.entry_index
                             + if config.tab_and_split_indices_are_zero_based {
                                 0
                             } else {
@@ -206,7 +205,7 @@ fn compute_tab_title(
                 // easier to click on tab titles, but we'll still go below
                 // this if there are too many tabs to fit the window at
                 // this width.
-                if !config.use_fancy_tab_bar {
+                if !config.use_fancy_session_bar {
                     while len + unicode_column_width(&title, None) < 5 {
                         title.push(' ');
                     }
@@ -215,7 +214,7 @@ fn compute_tab_title(
                 len += unicode_column_width(&title, None);
                 items.push(FormatItem::Text(title));
             } else {
-                if !config.use_fancy_tab_bar {
+                if !config.use_fancy_session_bar {
                     title = format!(" {title} ");
                     while len + unicode_column_width(&title, None) < 5 {
                         title.push(' ');
@@ -236,12 +235,12 @@ fn is_tab_hover(mouse_x: Option<usize>, x: usize, tab_title_len: usize) -> bool 
         .unwrap_or(false);
 }
 
-impl TabBarState {
+impl SessionBarState {
     pub fn default() -> Self {
         Self {
             line: Line::with_width(1, SEQ_ZERO),
-            items: vec![TabEntry {
-                item: TabBarItem::None,
+            items: vec![SessionBarEntry {
+                item: SessionBarItem::None,
                 title: Line::from_text(" ", &CellAttributes::blank(), 1, None),
                 x: 1,
                 width: 1,
@@ -253,7 +252,7 @@ impl TabBarState {
         &self.line
     }
 
-    pub fn items(&self) -> &[TabEntry] {
+    pub fn items(&self) -> &[SessionBarEntry] {
         &self.items
     }
 
@@ -261,40 +260,40 @@ impl TabBarState {
         mouse_x: Option<usize>,
         x: &mut usize,
         config: &ConfigHandle,
-        items: &mut Vec<TabEntry>,
+        items: &mut Vec<SessionBarEntry>,
         line: &mut Line,
-        colors: &TabBarColors,
+        colors: &SessionBarColors,
     ) {
-        let default_cell = if config.use_fancy_tab_bar {
+        let default_cell = if config.use_fancy_session_bar {
             CellAttributes::default()
         } else {
             colors.new_tab().as_cell_attributes()
         };
 
-        let default_cell_hover = if config.use_fancy_tab_bar {
+        let default_cell_hover = if config.use_fancy_session_bar {
             CellAttributes::default()
         } else {
             colors.new_tab_hover().as_cell_attributes()
         };
 
         let window_hide =
-            parse_status_text(&config.tab_bar_style.window_hide, default_cell.clone());
+            parse_status_text(&config.session_bar_style.window_hide, default_cell.clone());
         let window_hide_hover = parse_status_text(
-            &config.tab_bar_style.window_hide_hover,
+            &config.session_bar_style.window_hide_hover,
             default_cell_hover.clone(),
         );
 
         let window_maximize =
-            parse_status_text(&config.tab_bar_style.window_maximize, default_cell.clone());
+            parse_status_text(&config.session_bar_style.window_maximize, default_cell.clone());
         let window_maximize_hover = parse_status_text(
-            &config.tab_bar_style.window_maximize_hover,
+            &config.session_bar_style.window_maximize_hover,
             default_cell_hover.clone(),
         );
 
         let window_close =
-            parse_status_text(&config.tab_bar_style.window_close, default_cell.clone());
+            parse_status_text(&config.session_bar_style.window_close, default_cell.clone());
         let window_close_hover = parse_status_text(
-            &config.tab_bar_style.window_close_hover,
+            &config.session_bar_style.window_close_hover,
             default_cell_hover.clone(),
         );
 
@@ -333,8 +332,8 @@ impl TabBarState {
             line.append_line(title.to_owned(), SEQ_ZERO);
 
             let width = title.len();
-            items.push(TabEntry {
-                item: TabBarItem::WindowButton(*button),
+            items.push(SessionBarEntry {
+                item: SessionBarItem::WindowButton(*button),
                 title: title.to_owned(),
                 x: *x,
                 width,
@@ -351,14 +350,14 @@ impl TabBarState {
     pub fn new(
         title_width: usize,
         mouse_x: Option<usize>,
-        tab_info: &[SurfaceInformation],
-        pane_info: &[LeafInformation],
-        colors: Option<&TabBarColors>,
+        tab_info: &[SessionEntryInformation],
+        pane_info: &[TerminalInstanceInformation],
+        colors: Option<&SessionBarColors>,
         config: &ConfigHandle,
         left_status: &str,
         right_status: &str,
     ) -> Self {
-        let colors = colors.cloned().unwrap_or_else(TabBarColors::default);
+        let colors = colors.cloned().unwrap_or_else(SessionBarColors::default);
 
         let active_cell_attrs = colors.active_tab().as_cell_attributes();
         let inactive_hover_attrs = colors.inactive_tab_hover().as_cell_attributes();
@@ -367,16 +366,16 @@ impl TabBarState {
         let new_tab_attrs = colors.new_tab().as_cell_attributes();
 
         let new_tab = parse_status_text(
-            &config.tab_bar_style.new_tab,
-            if config.use_fancy_tab_bar {
+            &config.session_bar_style.new_tab,
+            if config.use_fancy_session_bar {
                 CellAttributes::default()
             } else {
                 new_tab_attrs.clone()
             },
         );
         let new_tab_hover = parse_status_text(
-            &config.tab_bar_style.new_tab_hover,
-            if config.use_fancy_tab_bar {
+            &config.session_bar_style.new_tab_hover,
+            if config.use_fancy_session_bar {
                 CellAttributes::default()
             } else {
                 new_tab_hover_attrs.clone()
@@ -397,12 +396,12 @@ impl TabBarState {
 
         let mut active_tab_no = 0;
 
-        let tab_titles: Vec<TitleText> = if config.show_tabs_in_tab_bar {
+        let tab_titles: Vec<TitleText> = if config.show_sessions_in_session_bar {
             tab_info
                 .iter()
                 .map(|tab| {
                     if tab.is_active {
-                        active_tab_no = tab.surface_index;
+                        active_tab_no = tab.entry_index;
                     }
                     compute_tab_title(
                         tab,
@@ -422,7 +421,7 @@ impl TabBarState {
 
         let available_cells =
             title_width.saturating_sub(number_of_tabs.saturating_sub(1) + new_tab.len());
-        let tab_width_max = if config.use_fancy_tab_bar || available_cells >= titles_len {
+        let tab_width_max = if config.use_fancy_session_bar || available_cells >= titles_len {
             // We can render each title with its full width
             usize::max_value()
         } else {
@@ -444,8 +443,8 @@ impl TabBarState {
 
         if reserve_integrated_title_button_space
             && config.integrated_title_button_style == IntegratedTitleButtonStyle::MacOsNative
-            && config.use_fancy_tab_bar == false
-            && config.tab_bar_at_bottom == false
+            && config.use_fancy_session_bar == false
+            && config.session_bar_at_bottom == false
         {
             for _ in 0..10 as usize {
                 line.insert_cell(0, black_cell.clone(), title_width, SEQ_ZERO);
@@ -462,8 +461,8 @@ impl TabBarState {
 
         let left_status_line = parse_status_text(left_status, black_cell.attrs().clone());
         if left_status_line.len() > 0 {
-            items.push(TabEntry {
-                item: TabBarItem::LeftStatus,
+            items.push(SessionBarEntry {
+                item: SessionBarItem::LeftStatus,
                 title: left_status_line.clone(),
                 x,
                 width: left_status_line.len(),
@@ -472,15 +471,15 @@ impl TabBarState {
             line.append_line(left_status_line, SEQ_ZERO);
         }
 
-        for (host_surface_idx, tab_title) in tab_titles.iter().enumerate() {
+        for (entry_idx, tab_title) in tab_titles.iter().enumerate() {
             let tab_title_len = tab_title.len.min(tab_width_max);
-            let active = host_surface_idx == active_tab_no;
+            let active = entry_idx == active_tab_no;
             let hover = !active && is_tab_hover(mouse_x, x, tab_title_len);
 
             // Recompute the title so that it factors in both the hover state
             // and the adjusted maximum tab width based on available space.
             let tab_title = compute_tab_title(
-                &tab_info[host_surface_idx],
+                &tab_info[entry_idx],
                 tab_info,
                 pane_info,
                 config,
@@ -501,7 +500,7 @@ impl TabBarState {
             let esc = format_as_escapes(tab_title.items.clone()).expect("already parsed ok above");
             let mut tab_line = parse_status_text(
                 &esc,
-                if config.use_fancy_tab_bar {
+                if config.use_fancy_session_bar {
                     CellAttributes::default()
                 } else {
                     cell_attrs.clone()
@@ -515,20 +514,19 @@ impl TabBarState {
 
             let width = tab_line.len();
 
-            let item = match &tab_info[host_surface_idx].session_id {
-                Some(session_id) => TabBarItem::Session {
+            let item = match &tab_info[entry_idx].session_id {
+                Some(session_id) => SessionBarItem::Session {
                     session_id: session_id.clone(),
-                    surface_id: tab_info[host_surface_idx].surface_id,
-                    active_leaf_id: tab_info[host_surface_idx].active_leaf_id,
+                    view_id: tab_info[entry_idx].view_id,
                     active,
                 },
-                None => TabBarItem::HostSurface {
-                    host_surface_idx,
+                None => SessionBarItem::RuntimeEntry {
+                    entry_idx,
                     active,
                 },
             };
 
-            items.push(TabEntry {
+            items.push(SessionBarEntry {
                 item,
                 title,
                 x: tab_start_idx,
@@ -540,7 +538,7 @@ impl TabBarState {
         }
 
         // New tab button
-        if config.show_new_tab_button_in_tab_bar {
+        if config.show_new_session_button_in_session_bar {
             let hover = is_tab_hover(mouse_x, x, new_tab_hover.len());
 
             let new_tab_button = if hover { &new_tab_hover } else { &new_tab };
@@ -550,8 +548,8 @@ impl TabBarState {
 
             line.append_line(new_tab_button.clone(), SEQ_ZERO);
 
-            items.push(TabEntry {
-                item: TabBarItem::NewTabButton,
+            items.push(SessionBarEntry {
+                item: SessionBarItem::NewSessionButton,
                 title: new_tab_button.clone(),
                 x: button_start,
                 width,
@@ -566,26 +564,26 @@ impl TabBarState {
             && config.integrated_title_button_alignment == IntegratedTitleButtonAlignment::Right
         {
             let window_hide =
-                parse_status_text(&config.tab_bar_style.window_hide, CellAttributes::default());
+                parse_status_text(&config.session_bar_style.window_hide, CellAttributes::default());
             let window_hide_hover = parse_status_text(
-                &config.tab_bar_style.window_hide_hover,
+                &config.session_bar_style.window_hide_hover,
                 CellAttributes::default(),
             );
 
             let window_maximize = parse_status_text(
-                &config.tab_bar_style.window_maximize,
+                &config.session_bar_style.window_maximize,
                 CellAttributes::default(),
             );
             let window_maximize_hover = parse_status_text(
-                &config.tab_bar_style.window_maximize_hover,
+                &config.session_bar_style.window_maximize_hover,
                 CellAttributes::default(),
             );
             let window_close = parse_status_text(
-                &config.tab_bar_style.window_close,
+                &config.session_bar_style.window_close,
                 CellAttributes::default(),
             );
             let window_close_hover = parse_status_text(
-                &config.tab_bar_style.window_close_hover,
+                &config.session_bar_style.window_close_hover,
                 CellAttributes::default(),
             );
 
@@ -612,8 +610,8 @@ impl TabBarState {
         let status_space_available = title_width.saturating_sub(x);
 
         let mut right_status_line = parse_status_text(right_status, black_cell.attrs().clone());
-        items.push(TabEntry {
-            item: TabBarItem::RightStatus,
+        items.push(SessionBarEntry {
+            item: SessionBarItem::RightStatus,
             title: right_status_line.clone(),
             x,
             width: status_space_available,
@@ -654,7 +652,7 @@ impl TabBarState {
                 width: entry.width * cell_width,
                 y,
                 height: cell_height,
-                item_type: UIItemType::TabBar(entry.item.clone()),
+                item_type: UIItemType::SessionBar(entry.item.clone()),
             });
         }
 

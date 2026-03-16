@@ -1,0 +1,45 @@
+// Session execution engine — inlined from crates/chatminal-session-runtime (Phase 08).
+// All execution engine code lives here; chatminal-session-runtime crate is deleted.
+// Only desktop_host_runtime and chatminald may depend on this module.
+
+mod engine_runtime_adapter;
+mod leaf_runtime;
+mod leaf_runtime_command;
+mod leaf_runtime_registry;
+mod leaf_runtime_threads;
+mod runtime_bridge;
+mod session_core_ids;
+mod session_core_state;
+mod session_engine;
+mod session_engine_core;
+mod session_engine_shared;
+mod session_event_bus;
+mod session_focus_manager;
+mod session_ids;
+mod session_layout_tree;
+mod session_runtime_state;
+mod session_snapshot;
+mod session_spawn_manager;
+mod workspace_host;
+
+
+pub use engine_runtime_adapter::{
+    EngineRuntimeAdapter, EngineRuntimeRef, MoveTerminalInstanceTarget, SpawnSessionRuntimeRequest,
+};
+pub use runtime_bridge::{SessionBridgeAction, SessionRuntimeBridge};
+pub use session_core_state::{
+    SessionCoreState, SessionRuntimeRecord, TerminalInstanceProcessState,
+    TerminalInstanceRuntimeState,
+};
+pub use session_engine::{SessionEngine, StatefulSessionEngine};
+pub use session_engine_shared::SessionEngineShared;
+pub use session_event_bus::{SessionEventBus, SessionEventSubscription, SessionRuntimeEvent};
+pub use session_ids::{LayoutNodeId, RuntimeId, SessionViewId, TerminalInstanceId, WorkspaceNodeId};
+pub use session_layout_tree::{
+    SessionLayoutNodeKind, SessionLayoutNodeSnapshot, SessionLayoutSnapshot, SessionLayoutTreeNode,
+    SessionSplitAxis, SessionTerminalInstanceSnapshot, build_layout_snapshot_from_tree,
+};
+pub use session_runtime_state::SessionRuntimeState;
+pub use session_snapshot::{SessionRuntimeLookup, SessionRuntimeSnapshot};
+pub use session_spawn_manager::EnsureRuntimeResult;
+pub use workspace_host::SessionWorkspaceHost;

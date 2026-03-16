@@ -153,20 +153,20 @@ pub enum MouseEventTrigger {
 /// When spawning a tab, specify which domain should be used to
 /// host/spawn that tab.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, FromDynamic, ToDynamic)]
-pub enum SpawnTabDomain {
+pub enum SpawnSessionDomain {
     /// Use the default domain
     DefaultDomain,
     /// Use the domain from the current tab in the associated window
-    CurrentPaneDomain,
+    CurrentSessionDomain,
     /// Use a specific domain by name
     DomainName(String),
     /// Use a specific domain by id
     DomainId(usize),
 }
 
-impl Default for SpawnTabDomain {
+impl Default for SpawnSessionDomain {
     fn default() -> Self {
-        Self::CurrentPaneDomain
+        Self::CurrentSessionDomain
     }
 }
 
@@ -195,7 +195,7 @@ pub struct SpawnCommand {
     pub set_environment_variables: HashMap<String, String>,
 
     #[dynamic(default)]
-    pub domain: SpawnTabDomain,
+    pub domain: SpawnSessionDomain,
 
     pub position: Option<crate::GuiPosition>,
 }
@@ -257,7 +257,7 @@ impl SpawnCommand {
         };
         Ok(Self {
             label: None,
-            domain: SpawnTabDomain::DefaultDomain,
+            domain: SpawnSessionDomain::DefaultDomain,
             args: if args.is_empty() { None } else { Some(args) },
             set_environment_variables,
             cwd,
@@ -267,7 +267,7 @@ impl SpawnCommand {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, FromDynamic, ToDynamic)]
-pub enum PaneDirection {
+pub enum SessionDirection {
     Up,
     Down,
     Left,
@@ -276,11 +276,11 @@ pub enum PaneDirection {
     Prev,
 }
 
-impl PaneDirection {
-    pub fn direction_from_str(arg: &str) -> Result<PaneDirection, String> {
-        for candidate in PaneDirection::variants() {
+impl SessionDirection {
+    pub fn direction_from_str(arg: &str) -> Result<SessionDirection, String> {
+        for candidate in SessionDirection::variants() {
             if candidate.to_lowercase() == arg.to_lowercase() {
-                if let Ok(direction) = PaneDirection::from_dynamic(
+                if let Ok(direction) = SessionDirection::from_dynamic(
                     &Value::String(candidate.to_string()),
                     FromDynamicOptions::default(),
                 ) {
@@ -290,7 +290,7 @@ impl PaneDirection {
         }
         Err(format!(
             "invalid direction {arg}, possible values are {:?}",
-            PaneDirection::variants()
+            SessionDirection::variants()
         ))
     }
 }
@@ -334,31 +334,31 @@ impl Default for ClipboardPasteSource {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromDynamic, ToDynamic)]
-pub enum PaneSelectMode {
+pub enum SessionSelectMode {
     Activate,
     SwapWithActive,
     SwapWithActiveKeepFocus,
-    MoveToNewTab,
+    MoveToNewSession,
     MoveToNewWindow,
 }
 
-impl Default for PaneSelectMode {
+impl Default for SessionSelectMode {
     fn default() -> Self {
         Self::Activate
     }
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq, FromDynamic, ToDynamic)]
-pub struct PaneSelectArguments {
+pub struct SessionSelectArguments {
     /// Overrides the main quick_select_alphabet config
     #[dynamic(default)]
     pub alphabet: String,
 
     #[dynamic(default)]
-    pub mode: PaneSelectMode,
+    pub mode: SessionSelectMode,
 
     #[dynamic(default)]
-    pub show_pane_ids: bool,
+    pub show_session_ids: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromDynamic, ToDynamic)]
@@ -533,7 +533,7 @@ fn default_message() -> String {
 
 #[derive(Debug, Clone, PartialEq, FromDynamic, ToDynamic)]
 pub enum KeyAssignment {
-    SpawnTab(SpawnTabDomain),
+    SpawnSession(SpawnSessionDomain),
     SpawnWindow,
     ToggleFullScreen,
     ToggleAlwaysOnTop,
@@ -545,26 +545,26 @@ pub enum KeyAssignment {
         destination: ClipboardCopyDestination,
     },
     PasteFrom(ClipboardPasteSource),
-    ActivateTabRelative(isize),
-    ActivateTabRelativeNoWrap(isize),
+    ActivateSessionRelative(isize),
+    ActivateSessionRelativeNoWrap(isize),
     IncreaseFontSize,
     DecreaseFontSize,
     ResetFontSize,
     ResetFontAndWindowSize,
-    ActivateTab(isize),
-    ActivateLastTab,
+    ActivateSession(isize),
+    ActivateLastSession,
     SendString(String),
     SendKey(KeyNoAction),
     Nop,
     DisableDefaultAssignment,
     Hide,
     Show,
-    CloseCurrentTab {
+    CloseCurrentSession {
         confirm: bool,
     },
     ReloadConfiguration,
-    MoveTabRelative(isize),
-    MoveTab(usize),
+    MoveSessionRelative(isize),
+    MoveSession(usize),
     ScrollByPage(NotNan<f64>),
     ScrollByLine(isize),
     ScrollByCurrentEventWheelDelta,
@@ -575,7 +575,7 @@ pub enum KeyAssignment {
     ShowDebugOverlay,
     HideApplication,
     QuitApplication,
-    SpawnCommandInNewTab(SpawnCommand),
+    SpawnCommandInNewSession(SpawnCommand),
     SpawnCommandInNewWindow(SpawnCommand),
     SplitHorizontal(SpawnCommand),
     SplitVertical(SpawnCommand),
@@ -593,14 +593,11 @@ pub enum KeyAssignment {
     CompleteSelectionOrOpenLinkAtMouseCursor(ClipboardCopyDestination),
     StartWindowDrag,
 
-    AdjustPaneSize(PaneDirection, usize),
-    ActivatePaneDirection(PaneDirection),
+    AdjustSplitSize(SessionDirection, usize),
+    ActivateSessionDirection(SessionDirection),
     ActivatePaneByIndex(usize),
     TogglePaneZoomState,
     SetPaneZoomState(bool),
-    CloseCurrentPane {
-        confirm: bool,
-    },
     EmitEvent(String),
     QuickSelect,
     QuickSelectArgs(QuickSelectArguments),
@@ -628,13 +625,13 @@ pub enum KeyAssignment {
     },
     PopKeyTable,
     ClearKeyTableStack,
-    DetachDomain(SpawnTabDomain),
+    DetachDomain(SpawnSessionDomain),
     AttachDomain(String),
 
     CopyMode(CopyModeAssignment),
     RotatePanes(RotationDirection),
-    SplitPane(SplitPane),
-    PaneSelect(PaneSelectArguments),
+    SplitSession(SplitSession),
+    SessionSelect(SessionSelectArguments),
     CharSelect(CharSelectArguments),
 
     ResetTerminal,
@@ -650,8 +647,8 @@ pub enum KeyAssignment {
 impl_lua_conversion_dynamic!(KeyAssignment);
 
 #[derive(Debug, Clone, PartialEq, FromDynamic, ToDynamic)]
-pub struct SplitPane {
-    pub direction: PaneDirection,
+pub struct SplitSession {
+    pub direction: SessionDirection,
     #[dynamic(default)]
     pub size: SplitSize,
     #[dynamic(default)]

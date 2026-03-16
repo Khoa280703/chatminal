@@ -1,6 +1,6 @@
 # Development Roadmap
 
-Last updated: 2026-03-06
+Last updated: 2026-03-13
 
 ## Hoan Tat
 1. Tách daemon/client/protocol/store thành các crate/app độc lập.
@@ -210,17 +210,45 @@ Last updated: 2026-03-06
    - gỡ blocker build `chatminal-wezterm-gui` trên host Ubuntu dev hiện tại mà không cần cài package hệ thống
    - verify lại `cargo build -p chatminal-wezterm-gui` và `scripts/smoke/window-wezterm-smoke.sh` đều PASS
    - `make window` trên shell headless hiện tại không còn fail ở compile/link; app dừng đúng ở guard thiếu `DISPLAY`/`WAYLAND_DISPLAY`, nên blocker còn lại chỉ là môi trường desktop
+42. Session execution core final cutover (2026-03-11):
+   - `DesktopSessionHost` quản lý lifecycle session→surface→pane natively (không còn mux Tab host-lookup trên active path)
+   - `chatminal_session_surface` lifecycle ops (active_session_id, collect_lookup, remove_session_surface, host_surface_for_session, focus_leaf) tất cả route qua DesktopSessionHost
+   - `StatefulSessionEngine<()>` (native path) là primitive execution thật
+   - `EngineSurfaceAdapter`/`ChatminalMuxSessionEngine` giữ lại chỉ ở adapter-compat section cho multi-leaf ops (Phase 07 target)
+   - tất cả 33 session-runtime tests pass, 15 desktop tests pass, `cargo check --workspace` clean
+   - Phases 01-08 hoàn tất; plan.md đã đóng status complete
+43. Engine private primitives cutover (2026-03-13):
+   - hoàn tất plan `20260313-1140-chatminal-engine-private-primitives-cutover` với đủ 7 phase
+   - `termwindow`/desktop shell đã dùng vocabulary `session/session_view/session_group/workspace_layout/render_target/terminal_instance` cho product-facing path
+   - `desktop_commands.rs` trở thành compatibility translation layer duy nhất còn giữ upstream `KeyAssignment::*Tab*`
+   - public Lua surface không còn `get_host_tab`/`get_host_leaf`; public ids đổi sang `terminal_instance_id`
+   - `desktop_host_runtime` được siết về private adapter zone, không còn public host helper surface dư thừa
+   - `cargo check --workspace --all-targets` đã được khóa xanh lại cùng full test matrix active
+44. Session = Tab: Remove HostRenderScope & collapse dual state (2026-03-16):
+   - hoàn tất plan `260313-1618-session-tab-collapse-host-render-scope-removal` với đủ 9 phase
+   - xóa `HostRenderScope` (Tab wrapper); session sở hữu pane trực tiếp qua `session_id → Arc<ChatminalSessionPane>` lookup
+   - merge dual state: `SessionExecutionStatus` enum added vào `SessionEntry` để track running status
+   - delete `crates/chatminal-session-runtime/` hoàn toàn; execution code move sang `desktop_host_runtime`
+   - dependency reversal: `chatminal-runtime` không còn depend `chatminal-session-runtime`; layout types move sang runtime
+   - vocabulary rename: Tab→Session, Pane→Session, PaneDirection→SessionDirection, LeafRef→TerminalRef, `enable_tab_bar`→`enable_session_bar` (~25 files đổi)
+   - verification freeze:
+     - `cargo check --workspace --all-targets` pass (0 errors)
+     - `cargo test -p chatminal-runtime -- --test-threads=1` pass (65/65)
+     - `cargo test --manifest-path apps/chatminal-desktop/Cargo.toml -- --test-threads=1` pass (55/55)
+     - 0 references `chatminal-session-runtime` trong .toml + .rs files (ngoài third_party)
 
 ## Active
-1. Theo dõi regression qua CI matrix Linux/macOS/Windows sau mỗi batch lớn.
-2. Migration sang full `wezterm-gui` runtime (Linux/macOS trước), giữ `chatminald` ownership cho session/profile/history.
-   - Đã xong bridge path: `window-wezterm-gui` + `proxy-wezterm-session` + smoke launcher.
-   - Đã hard-cut command surface: bỏ `window-wezterm`/`window-legacy`; CLI entrypoint còn `window-wezterm-gui` (shortcut: `make window`).
-   - Đã ký canary Linux và rollback drills.
-   - Ownership build đã nằm ở `apps/chatminal-wezterm-gui`.
-   - Utility/helper/lua-api/bootstrap/version/codec/foundation proc-macro/parser/layout/color/input/data-path/runtime-utility/PTy-surface/window crates đã là first-party; root workspace không còn path dep trực tiếp vào `third_party/wezterm`.
-   - `third_party/wezterm` giờ là reference-only thật đối với active workspace; guard đã khóa path deps/runtime shell refs, asset path active đã được chuyển sang first-party, và `xcb-imdkit` đã bị loại khỏi graph active.
-   - `wezterm-font` đã là first-party ở mức package graph; `cargo check -p chatminal-wezterm-font` và `cargo test -p chatminal-wezterm-font` đều đã PASS sau khi vá bootstrap libpng (`pngsimd.c`) ở vendor build script.
-   - Manual host-specific (macOS smoke/IME matrix) theo external preflight checklist trước promotion cross-platform.
-3. Nâng mức native window UX parity cho `chatminal-app` (luồng daily-driver) trong giai đoạn chuyển tiếp.
-4. Tăng coverage integration/soak dài hạn (long-run sessions, reconnect churn).
+1. Consolidate session-native execution primitives:
+   - Bây giờ active path là session-native; không còn dependency trên mux Tab host cho spawn/focus/split/move/close
+   - Monitor regression qua desktop smoke test + session runtime tests sau mỗi batch liên quan tới session lifecycle
+   - Tiếp theo: bóc fully `EngineSurfaceAdapter` khỏi active path (Phase 07 target đã đạt nhưng optional cleanup xem xét thêm)
+2. Daemon session/profile/history ownership đã ổn định:
+   - `chatminald` giữ toàn bộ session state management
+   - `chatminal-app` chỉ read snapshot + event stream từ daemon
+3. Nâng mức native window UX parity cho `chatminal-app`:
+   - session switching/creation/management giờ tất cả route qua session-native layer
+   - minimize latency + flicker ở desktop GUI khi thao tác session
+4. Long-term integration:
+   - theo dõi regression CI matrix Linux/macOS/Windows
+   - tăng coverage integration/soak dài hạn (long-run sessions, reconnect churn)
+   - future: evaluate multi-window session management parity

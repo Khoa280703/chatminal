@@ -192,6 +192,7 @@ impl StateInner {
                 live_output: String::new(),
                 generation: 0,
                 prepend_run_boundary_on_next_output: false,
+                execution_status: crate::state::SessionExecutionStatus::NotStarted,
             },
         );
         self.set_active_session_and_publish(&session.profile_id, &session.session_id)

@@ -3,40 +3,23 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use chatminal_runtime::{RuntimeCreatedSession, RuntimeEvent, RuntimeProfile, RuntimeWorkspace};
+use chatminal_runtime::{RuntimeCreatedSession, RuntimeProfile, RuntimeWorkspace};
 
-use crate::chatminal_runtime::runtime_client;
+use crate::chatminal_runtime::DESKTOP_LAYOUT_WORKSPACE_ID;
+use crate::chatminal_runtime::{
+    activate_runtime_session, close_runtime_session, create_runtime_profile,
+    create_runtime_session, desktop_workspace_subscribe, switch_runtime_profile,
+};
+pub use crate::chatminal_runtime::{
+    DesktopSidebarProfile as SidebarProfile, DesktopSidebarSession as SidebarSession,
+    DesktopSidebarSnapshot as SidebarSnapshot,
+};
 
 const SIDEBAR_ENABLE_ENV: &str = "CHATMINAL_DESKTOP_SESSIONS_SIDEBAR";
 const SIDEBAR_DEFAULT_WIDTH_PX: f32 = 304.0;
 const SIDEBAR_MIN_WIDTH_PX: f32 = 280.0;
 const SIDEBAR_MAX_WINDOW_RATIO: f32 = 0.32;
 const EVENT_POLL_TIMEOUT: Duration = Duration::from_millis(400);
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SidebarProfile {
-    pub profile_id: String,
-    pub name: String,
-    pub is_active: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SidebarSession {
-    pub session_id: String,
-    pub name: String,
-    pub status: String,
-    pub is_active: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct SidebarSnapshot {
-    pub active_profile_id: Option<String>,
-    pub active_session_id: Option<String>,
-    pub profiles: Vec<SidebarProfile>,
-    pub sessions: Vec<SidebarSession>,
-    pub error: Option<String>,
-    pub version: u64,
-}
 
 #[derive(Debug, Default)]
 struct SharedState {
@@ -99,7 +82,7 @@ impl ChatminalSidebar {
         cols: usize,
         rows: usize,
     ) -> Result<(), String> {
-        runtime_client()?.session_activate(session_id, cols, rows)
+        activate_runtime_session(session_id, cols, rows)
     }
 
     pub fn create_session(
@@ -107,19 +90,19 @@ impl ChatminalSidebar {
         cols: usize,
         rows: usize,
     ) -> Result<RuntimeCreatedSession, String> {
-        runtime_client()?.session_create(None, cols, rows, None, Some(true))
+        create_runtime_session(None, cols, rows, None, Some(true))
     }
 
     pub fn close_session(&self, session_id: &str) -> Result<(), String> {
-        runtime_client()?.session_close(session_id)
+        close_runtime_session(session_id)
     }
 
     pub fn switch_profile(&self, profile_id: &str) -> Result<RuntimeWorkspace, String> {
-        runtime_client()?.profile_switch(profile_id)
+        switch_runtime_profile(profile_id)
     }
 
     pub fn create_profile(&self) -> Result<RuntimeProfile, String> {
-        runtime_client()?.profile_create(None)
+        create_runtime_profile(None)
     }
 
     pub fn apply_workspace(&self, workspace: RuntimeWorkspace) {
@@ -149,29 +132,22 @@ pub fn sidebar_enabled_from_env() -> bool {
 
 fn run_sync_loop(shared: Arc<Mutex<SharedState>>) {
     loop {
-        let client = match runtime_client() {
-            Ok(client) => client,
+        let subscription = match desktop_workspace_subscribe(DESKTOP_LAYOUT_WORKSPACE_ID) {
+            Ok(subscription) => subscription,
             Err(err) => {
                 replace_error(&shared, format!("sidebar runtime init failed: {err}"));
                 return;
             }
         };
 
-        if let Err(err) = refresh_snapshot(&client, &shared) {
+        if let Err(err) = refresh_snapshot(&subscription, &shared) {
             replace_error(&shared, format!("sidebar load failed: {err}"));
             return;
         }
 
         loop {
-            match client.recv_event(EVENT_POLL_TIMEOUT) {
-                Ok(Some(event)) => {
-                    if should_reload_for_event(&event) {
-                        if let Err(err) = refresh_snapshot(&client, &shared) {
-                            replace_error(&shared, format!("sidebar refresh failed: {err}"));
-                            break;
-                        }
-                    }
-                }
+            match subscription.recv_sidebar_snapshot(EVENT_POLL_TIMEOUT) {
+                Ok(Some(snapshot)) => replace_snapshot(&shared, snapshot),
                 Ok(None) => {}
                 Err(err) => {
                     replace_error(&shared, format!("sidebar stream failed: {err}"));
@@ -182,20 +158,11 @@ fn run_sync_loop(shared: Arc<Mutex<SharedState>>) {
     }
 }
 
-fn should_reload_for_event(event: &RuntimeEvent) -> bool {
-    matches!(
-        event,
-        RuntimeEvent::WorkspaceUpdated(_)
-            | RuntimeEvent::SessionUpdated(_)
-            | RuntimeEvent::PtyExited(_)
-    )
-}
-
 fn refresh_snapshot(
-    client: &crate::chatminal_runtime::ChatminalRuntimeClient,
+    subscription: &crate::chatminal_runtime::DesktopWorkspaceSubscription,
     shared: &Arc<Mutex<SharedState>>,
 ) -> Result<(), String> {
-    replace_workspace(shared, client.workspace_load_passive()?);
+    replace_snapshot(shared, subscription.load_sidebar_snapshot()?);
     Ok(())
 }
 

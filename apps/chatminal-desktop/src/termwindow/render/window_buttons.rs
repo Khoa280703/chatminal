@@ -1,7 +1,7 @@
 use crate::customglyph::*;
 use crate::termwindow::box_model::*;
 use crate::termwindow::render::corners::*;
-use crate::termwindow::{TabBarItem, UIItemType};
+use crate::termwindow::{SessionBarItem, UIItemType};
 use crate::utilsprites::RenderMetrics;
 use config::{ConfigHandle, Dimension, IntegratedTitleButtonColor};
 use engine_font::LoadedFont;
@@ -345,7 +345,7 @@ pub fn window_button_element(
     let colors = window_button_colors_fn(background_lightness, foreground, window_button);
 
     let element = element
-        .item_type(UIItemType::TabBar(TabBarItem::WindowButton(window_button)))
+        .item_type(UIItemType::SessionBar(SessionBarItem::WindowButton(window_button)))
         .colors(colors.colors)
         .hover_colors(Some(colors.hover_colors));
 

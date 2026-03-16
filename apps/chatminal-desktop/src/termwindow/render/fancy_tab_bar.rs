@@ -1,12 +1,12 @@
 use crate::customglyph::*;
-use crate::tabbar::{TabBarItem, TabEntry};
+use crate::tabbar::{SessionBarItem, SessionBarEntry};
 use crate::termwindow::box_model::*;
 use crate::termwindow::render::corners::*;
 
 use crate::termwindow::render::window_buttons::window_button_element;
 use crate::termwindow::{UIItem, UIItemType};
 use crate::utilsprites::RenderMetrics;
-use config::{Dimension, DimensionContext, TabBarColors};
+use config::{Dimension, DimensionContext, SessionBarColors};
 use engine_font::LoadedFont;
 use engine_term::color::{ColorAttribute, ColorPalette};
 use std::rc::Rc;
@@ -70,7 +70,7 @@ impl crate::TermWindow {
             .as_ref()
             .and_then(|c| c.tab_bar.as_ref())
             .cloned()
-            .unwrap_or_else(TabBarColors::default);
+            .unwrap_or_else(SessionBarColors::default);
 
         let mut left_status = vec![];
         let mut left_eles = vec![];
@@ -93,7 +93,7 @@ impl crate::TermWindow {
             .into(),
         };
 
-        let item_to_elem = |item: &TabEntry| -> Element {
+        let item_to_elem = |item: &SessionBarEntry| -> Element {
             let element = Element::with_line(&font, &item.title, palette);
 
             let bg_color = item
@@ -116,8 +116,8 @@ impl crate::TermWindow {
             let active_tab = colors.active_tab();
 
             match item.item {
-                TabBarItem::RightStatus | TabBarItem::LeftStatus | TabBarItem::None => element
-                    .item_type(UIItemType::TabBar(TabBarItem::None))
+                SessionBarItem::RightStatus | SessionBarItem::LeftStatus | SessionBarItem::None => element
+                    .item_type(UIItemType::SessionBar(SessionBarItem::None))
                     .line_height(Some(1.75))
                     .margin(BoxDimension {
                         left: Dimension::Cells(0.),
@@ -133,7 +133,7 @@ impl crate::TermWindow {
                     })
                     .border(BoxDimension::new(Dimension::Pixels(0.)))
                     .colors(bar_colors.clone()),
-                TabBarItem::NewTabButton => Element::new(
+                SessionBarItem::NewSessionButton => Element::new(
                     &font,
                     ElementContent::Poly {
                         line_width: metrics.underline_height.max(2),
@@ -145,7 +145,7 @@ impl crate::TermWindow {
                     },
                 )
                 .vertical_align(VerticalAlign::Middle)
-                .item_type(UIItemType::TabBar(item.item.clone()))
+                .item_type(UIItemType::SessionBar(item.item.clone()))
                 .margin(BoxDimension {
                     left: Dimension::Cells(0.5),
                     right: Dimension::Cells(0.),
@@ -169,12 +169,12 @@ impl crate::TermWindow {
                     bg: new_tab_hover.bg_color.to_linear().into(),
                     text: new_tab_hover.fg_color.to_linear().into(),
                 })),
-                TabBarItem::HostSurface { active, .. } | TabBarItem::Session { active, .. }
+                SessionBarItem::RuntimeEntry { active, .. } | SessionBarItem::Session { active, .. }
                     if active =>
                 {
                     element
                         .vertical_align(VerticalAlign::Bottom)
-                        .item_type(UIItemType::TabBar(item.item.clone()))
+                        .item_type(UIItemType::SessionBar(item.item.clone()))
                         .margin(BoxDimension {
                             left: Dimension::Cells(0.),
                             right: Dimension::Cells(0.),
@@ -218,9 +218,9 @@ impl crate::TermWindow {
                                 .into(),
                         })
                 }
-                TabBarItem::HostSurface { .. } | TabBarItem::Session { .. } => element
+                SessionBarItem::RuntimeEntry { .. } | SessionBarItem::Session { .. } => element
                     .vertical_align(VerticalAlign::Bottom)
-                    .item_type(UIItemType::TabBar(item.item.clone()))
+                    .item_type(UIItemType::SessionBar(item.item.clone()))
                     .margin(BoxDimension {
                         left: Dimension::Cells(0.),
                         right: Dimension::Cells(0.),
@@ -294,7 +294,7 @@ impl crate::TermWindow {
                                 .into(),
                         })
                     }),
-                TabBarItem::WindowButton(button) => window_button_element(
+                SessionBarItem::WindowButton(button) => window_button_element(
                     button,
                     self.window_state.contains(window::WindowState::MAXIMIZED),
                     &font,
@@ -307,24 +307,22 @@ impl crate::TermWindow {
         let num_tabs: f32 = items
             .iter()
             .map(|item| match item.item {
-                TabBarItem::NewTabButton
-                | TabBarItem::HostSurface { .. }
-                | TabBarItem::Session { .. } => {
-                    1.
-                }
+                SessionBarItem::NewSessionButton
+                | SessionBarItem::RuntimeEntry { .. }
+                | SessionBarItem::Session { .. } => 1.,
                 _ => 0.,
             })
             .sum();
         let session_item_count: f32 = items
             .iter()
             .map(|item| match item.item {
-                TabBarItem::HostSurface { .. } | TabBarItem::Session { .. } => 1.,
+                SessionBarItem::RuntimeEntry { .. } | SessionBarItem::Session { .. } => 1.,
                 _ => 0.,
             })
             .sum();
         let show_new_button = items
             .iter()
-            .any(|item| matches!(item.item, TabBarItem::NewTabButton));
+            .any(|item| matches!(item.item, SessionBarItem::NewSessionButton));
         let max_tab_width =
             if crate::chatminal_sidebar::sidebar_enabled_from_env() && session_item_count > 0.0 {
                 let left_padding = 0.5 * metrics.cell_size.width as f32;
@@ -360,9 +358,9 @@ impl crate::TermWindow {
 
         for item in items {
             match item.item {
-                TabBarItem::LeftStatus => left_status.push(item_to_elem(item)),
-                TabBarItem::None | TabBarItem::RightStatus => right_eles.push(item_to_elem(item)),
-                TabBarItem::WindowButton(_) => {
+                SessionBarItem::LeftStatus => left_status.push(item_to_elem(item)),
+                SessionBarItem::None | SessionBarItem::RightStatus => right_eles.push(item_to_elem(item)),
+                SessionBarItem::WindowButton(_) => {
                     if self.config.integrated_title_button_alignment
                         == IntegratedTitleButtonAlignment::Left
                     {
@@ -371,8 +369,8 @@ impl crate::TermWindow {
                         right_eles.push(item_to_elem(item))
                     }
                 }
-                TabBarItem::HostSurface {
-                    host_surface_idx,
+                SessionBarItem::RuntimeEntry {
+                    entry_idx,
                     active,
                 } => {
                     let mut elem = item_to_elem(item);
@@ -387,7 +385,7 @@ impl crate::TermWindow {
                                     &font,
                                     &metrics,
                                     &colors,
-                                    host_surface_idx,
+                                    entry_idx,
                                     active,
                                 ));
                             }
@@ -396,7 +394,7 @@ impl crate::TermWindow {
                     };
                     left_eles.push(elem);
                 }
-                TabBarItem::Session {
+                SessionBarItem::Session {
                     ref session_id,
                     active,
                     ..
@@ -478,7 +476,7 @@ impl crate::TermWindow {
 
         let tabs = Element::new(&font, content)
             .display(DisplayType::Block)
-            .item_type(UIItemType::TabBar(TabBarItem::None))
+            .item_type(UIItemType::SessionBar(SessionBarItem::None))
             .min_width(Some(Dimension::Pixels(tab_bar_width)))
             .min_height(Some(Dimension::Pixels(tab_bar_height)))
             .vertical_align(VerticalAlign::Bottom)
@@ -508,7 +506,7 @@ impl crate::TermWindow {
 
         computed.translate(euclid::vec2(
             0.,
-            if self.config.tab_bar_at_bottom {
+            if self.config.session_bar_at_bottom {
                 self.dimensions.pixel_height as f32
                     - (computed.bounds.height() + border.bottom.get() as f32)
             } else {
@@ -535,7 +533,7 @@ impl crate::TermWindow {
 fn make_x_button(
     font: &Rc<LoadedFont>,
     metrics: &RenderMetrics,
-    colors: &TabBarColors,
+    colors: &SessionBarColors,
     tab_idx: usize,
     active: bool,
 ) -> Element {
@@ -555,7 +553,7 @@ fn make_x_button(
     .zindex(1)
     .vertical_align(VerticalAlign::Middle)
     .float(Float::Right)
-    .item_type(UIItemType::CloseTab(tab_idx))
+    .item_type(UIItemType::CloseSessionEntry(tab_idx))
     .hover_colors({
         let inactive_tab_hover = colors.inactive_tab_hover();
         let active_tab = colors.active_tab();
@@ -595,7 +593,7 @@ fn make_x_button(
 fn make_session_x_button(
     font: &Rc<LoadedFont>,
     metrics: &RenderMetrics,
-    colors: &TabBarColors,
+    colors: &SessionBarColors,
     session_id: &str,
     active: bool,
 ) -> Element {

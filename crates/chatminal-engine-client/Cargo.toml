@@ -24,7 +24,7 @@ libc.workspace = true
 log.workspace = true
 lru.workspace = true
 metrics.workspace = true
-mux.workspace = true
+host_runtime.workspace = true
 openssl.workspace = true
 parking_lot.workspace = true
 portable-pty = { workspace=true, features = ["serde_support"]}

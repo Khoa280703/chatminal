@@ -3,15 +3,15 @@ use crate::pane::ClientPane;
 use anyhow::{anyhow, bail};
 use async_trait::async_trait;
 use codec::{ListPanesResponse, SpawnV2, SplitPane};
-use config::keyassignment::SpawnTabDomain;
+use config::keyassignment::SpawnSessionDomain;
 use config::{SshDomain, TlsDomainClient, UnixDomain};
 use engine_term::TerminalSize;
-use mux::connui::{ConnectionUI, ConnectionUIParams};
-use mux::domain::{alloc_domain_id, Domain, DomainId, DomainState, SplitSource};
-use mux::pane::{Pane, PaneId};
-use mux::tab::{SplitRequest, Tab, TabId};
-use mux::window::WindowId;
-use mux::{Mux, MuxNotification};
+use host_runtime::connui::{ConnectionUI, ConnectionUIParams};
+use host_runtime::domain::{alloc_domain_id, Domain, DomainId, DomainState, SplitSource};
+use host_runtime::pane::{Pane, PaneId};
+use host_runtime::tab::{SplitRequest, Tab, TabId};
+use host_runtime::window::WindowId;
+use host_runtime::{Mux, MuxNotification};
 use portable_pty::CommandBuilder;
 use promise::spawn::spawn_into_new_thread;
 use std::collections::{HashMap, HashSet};
@@ -830,7 +830,7 @@ impl Domain for ClientDomain {
         let result = inner
             .client
             .spawn_v2(SpawnV2 {
-                domain: SpawnTabDomain::DefaultDomain,
+                domain: SpawnSessionDomain::DefaultDomain,
                 window_id: inner.local_to_remote_window(window),
                 size,
                 command,
@@ -894,7 +894,7 @@ impl Domain for ClientDomain {
         let result = inner
             .client
             .split_pane(SplitPane {
-                domain: SpawnTabDomain::CurrentPaneDomain,
+                domain: SpawnSessionDomain::CurrentSessionDomain,
                 pane_id: pane.remote_pane_id,
                 split_request,
                 command,
@@ -937,7 +937,7 @@ impl Domain for ClientDomain {
         let domain_id = self.local_domain_id;
         let config = self.config.clone();
 
-        let activity = mux::activity::Activity::new();
+        let activity = host_runtime::activity::Activity::new();
         let ui = ConnectionUI::with_params(ConnectionUIParams {
             window_id,
             ..Default::default()

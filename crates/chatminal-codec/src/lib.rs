@@ -12,14 +12,14 @@
 #![allow(clippy::range_plus_one)]
 
 use anyhow::{bail, Context as _, Error};
-use config::keyassignment::{PaneDirection, ScrollbackEraseMode};
+use config::keyassignment::{SessionDirection, ScrollbackEraseMode};
 use engine_term::color::ColorPalette;
 use engine_term::{Alert, ClipboardSelection, StableRowIndex, TerminalSize};
-use mux::client::{ClientId, ClientInfo};
-use mux::pane::PaneId;
-use mux::renderable::{RenderableDimensions, StableCursorPosition};
-use mux::tab::{PaneNode, SerdeUrl, SplitRequest, TabId};
-use mux::window::WindowId;
+use host_runtime::client::{ClientId, ClientInfo};
+use host_runtime::pane::PaneId;
+use host_runtime::renderable::{RenderableDimensions, StableCursorPosition};
+use host_runtime::tab::{PaneNode, SerdeUrl, SplitRequest, TabId};
+use host_runtime::window::WindowId;
 use portable_pty::CommandBuilder;
 use rangeset::*;
 use serde::{Deserialize, Serialize};
@@ -489,7 +489,7 @@ pdu! {
     GetImageCellResponse: 47,
     MovePaneToNewTab: 48,
     MovePaneToNewTabResponse: 49,
-    ActivatePaneDirection: 50,
+    ActivateSessionDirection: 50,
     GetPaneRenderableDimensions: 51,
     GetPaneRenderableDimensionsResponse: 52,
     PaneFocused: 53,
@@ -499,8 +499,8 @@ pdu! {
     WindowTitleChanged: 57,
     RenameWorkspace: 58,
     EraseScrollbackRequest: 59,
-    GetPaneDirection: 60,
-    GetPaneDirectionResponse: 61,
+    GetSessionDirection: 60,
+    GetSessionDirectionResponse: 61,
     AdjustPaneSize: 62,
 }
 
@@ -655,7 +655,7 @@ pub struct SplitPane {
     pub split_request: SplitRequest,
     pub command: Option<CommandBuilder>,
     pub command_dir: Option<String>,
-    pub domain: config::keyassignment::SpawnTabDomain,
+    pub domain: config::keyassignment::SpawnSessionDomain,
     /// Instead of spawning a command, move the specified
     /// pane into the new split target
     pub move_pane_id: Option<PaneId>,
@@ -676,7 +676,7 @@ pub struct MovePaneToNewTabResponse {
 
 #[derive(Deserialize, Serialize, PartialEq, Debug)]
 pub struct SpawnV2 {
-    pub domain: config::keyassignment::SpawnTabDomain,
+    pub domain: config::keyassignment::SpawnSessionDomain,
     /// If None, create a new window for this new tab
     pub window_id: Option<WindowId>,
     pub command: Option<CommandBuilder>,
@@ -864,27 +864,27 @@ pub struct SetPaneZoomed {
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Debug)]
-pub struct GetPaneDirection {
+pub struct GetSessionDirection {
     pub pane_id: PaneId,
-    pub direction: PaneDirection,
+    pub direction: SessionDirection,
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Debug)]
 pub struct AdjustPaneSize {
     pub pane_id: PaneId,
-    pub direction: PaneDirection,
+    pub direction: SessionDirection,
     pub amount: usize,
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Debug)]
-pub struct GetPaneDirectionResponse {
+pub struct GetSessionDirectionResponse {
     pub pane_id: Option<PaneId>,
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Debug)]
-pub struct ActivatePaneDirection {
+pub struct ActivateSessionDirection {
     pub pane_id: PaneId,
-    pub direction: PaneDirection,
+    pub direction: SessionDirection,
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Debug)]
@@ -1118,14 +1118,14 @@ pub struct EraseScrollbackRequest {
 #[derive(Deserialize, Serialize, PartialEq, Debug)]
 pub struct SearchScrollbackRequest {
     pub pane_id: PaneId,
-    pub pattern: mux::pane::Pattern,
+    pub pattern: host_runtime::pane::Pattern,
     pub range: Range<StableRowIndex>,
     pub limit: Option<u32>,
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Debug)]
 pub struct SearchScrollbackResponse {
-    pub results: Vec<mux::pane::SearchResult>,
+    pub results: Vec<host_runtime::pane::SearchResult>,
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Debug)]

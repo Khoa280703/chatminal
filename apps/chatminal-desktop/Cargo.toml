@@ -36,7 +36,6 @@ async-trait = "0.1"
 bitflags = { version = "1.3" }
 bytemuck = { version = "1.4", features = ["derive"] }
 chatminal-runtime = { path = "../../crates/chatminal-runtime" }
-chatminal-session-runtime = { path = "../../crates/chatminal-session-runtime" }
 chatminal-terminal-core = { path = "../../crates/chatminal-terminal-core" }
 chrono = { version = "0.4", default-features = false, features = ["unstable-locales", "serde"] }
 clap = { version = "4.0", features = ["derive"] }
@@ -65,7 +64,7 @@ luahelper = { workspace = true }
 metrics = { version = "0.23" }
 mlua = { version = "0.9", features = ["send", "serialize"] }
 chatminal-lua-bridge = { workspace = true }
-mux = { workspace = true }
+host_runtime = { workspace = true }
 nucleo-matcher = { version = "0.3" }
 ordered-float = { version = "4.1", default-features = false }
 openssl = { workspace = true }

@@ -4,10 +4,8 @@ use config::{configuration, engine_version};
 use engine_toast_notification::*;
 use http_req::request::{HttpVersion, Request};
 use http_req::uri::Uri;
-use mux::connui::ConnectionUI;
 use serde::*;
 use std::convert::TryFrom;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use termwiz::cell::{Hyperlink, Underline};
@@ -76,10 +74,6 @@ pub fn get_nightly_release_info() -> anyhow::Result<Release> {
     )?)
 }
 
-lazy_static::lazy_static! {
-    static ref UPDATER_WINDOW: Mutex<Option<ConnectionUI>> = Mutex::new(None);
-}
-
 pub fn load_last_release_info_and_set_banner() {
     if !desktop_update_check_enabled() || !configuration().check_for_updates {
         return;
@@ -111,7 +105,6 @@ fn release_notes_url(latest: &Release) -> String {
 }
 
 fn set_banner_from_release_info(latest: &Release) {
-    let mux = crate::Mux::get();
     let url = release_notes_url(latest);
 
     let icon = ITermFileData {
@@ -138,7 +131,7 @@ fn set_banner_from_release_info(latest: &Release) {
     let underline_on = CSI::Sgr(Sgr::Underline(Underline::Single));
     let reset = CSI::Sgr(Sgr::Reset);
     let link_off = OperatingSystemCommand::SetHyperlink(None);
-    mux.set_banner(Some(format!(
+    crate::chatminal_runtime::set_host_banner(Some(format!(
         "{}{}Chatminal Update Available\r\n{}{}{}{}Click to see what's new{}{}\r\n",
         icon,
         top_line_pos,

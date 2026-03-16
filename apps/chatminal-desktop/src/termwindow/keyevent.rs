@@ -1,10 +1,12 @@
 use crate::termwindow::InputMap;
+use crate::chatminal_runtime::overlay_compat::{
+    OverlayAssignmentResult as PerformAssignmentResult, OverlayPane,
+};
 use ::window::{
     DeadKeyStatus, KeyCode, KeyEvent, KeyboardLedStatus, Modifiers, RawKeyEvent, WindowOps,
 };
 use anyhow::Context;
 use config::keyassignment::{KeyAssignment, KeyTableEntry};
-use mux::pane::{Pane, PerformAssignmentResult};
 use smol::Timer;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -188,7 +190,7 @@ enum OnlyKeyBindings {
 }
 
 impl super::TermWindow {
-    fn encode_win32_input(&self, pane: &Arc<dyn Pane>, key: &KeyEvent) -> Option<String> {
+    fn encode_win32_input(&self, pane: &Arc<dyn OverlayPane>, key: &KeyEvent) -> Option<String> {
         if !self.config.allow_win32_input_mode
             || pane.get_keyboard_encoding() != KeyboardEncoding::Win32
         {
@@ -197,7 +199,7 @@ impl super::TermWindow {
         key.encode_win32_input_mode()
     }
 
-    fn encode_kitty_input(&self, pane: &Arc<dyn Pane>, key: &KeyEvent) -> Option<String> {
+    fn encode_kitty_input(&self, pane: &Arc<dyn OverlayPane>, key: &KeyEvent) -> Option<String> {
         if !self.config.enable_kitty_keyboard {
             return None;
         }
@@ -210,12 +212,12 @@ impl super::TermWindow {
 
     fn lookup_key(
         &mut self,
-        pane: &Arc<dyn Pane>,
+        pane: &Arc<dyn OverlayPane>,
         keycode: &KeyCode,
         mods: Modifiers,
         only_key_bindings: OnlyKeyBindings,
     ) -> Option<(KeyTableEntry, Option<String>)> {
-        if let Some(overlay) = self.leaf_ui_state(pane.pane_id()).overlay.as_mut() {
+        if let Some(overlay) = self.terminal_ui_state(pane.pane_id() as u64).overlay.as_mut() {
             if let Some((entry, table_name)) = overlay.key_table_state.lookup_key(
                 &self.input_map,
                 keycode,
@@ -238,7 +240,7 @@ impl super::TermWindow {
 
     fn process_key(
         &mut self,
-        pane: &Arc<dyn Pane>,
+        pane: &Arc<dyn OverlayPane>,
         context: &dyn WindowOps,
         keycode: &KeyCode,
         raw_modifiers: Modifiers,
@@ -404,7 +406,7 @@ impl super::TermWindow {
                     if did_encode {
                         if is_down
                             && !keycode.is_modifier()
-                            && self.leaf_ui_state(pane.pane_id()).overlay.is_none()
+                            && self.terminal_ui_state(pane.pane_id() as u64).overlay.is_none()
                         {
                             self.maybe_scroll_to_bottom_for_input(&pane);
                         }
@@ -458,7 +460,7 @@ impl super::TermWindow {
             self.schedule_next_status_update();
         }
 
-        let pane = match self.get_active_leaf_or_overlay() {
+        let pane = match self.active_terminal_instance_or_overlay() {
             Some(pane) => pane,
             None => return,
         };
@@ -559,8 +561,8 @@ impl super::TermWindow {
     pub fn current_key_table_name(&mut self) -> Option<String> {
         let mut name = None;
 
-        if let Some(pane) = self.get_active_leaf_or_overlay() {
-            if let Some(overlay) = self.leaf_ui_state(pane.pane_id()).overlay.as_mut() {
+        if let Some(pane) = self.active_terminal_instance_or_overlay() {
+            if let Some(overlay) = self.terminal_ui_state(pane.pane_id() as u64).overlay.as_mut() {
                 name = overlay
                     .key_table_state
                     .current_table()
@@ -597,7 +599,7 @@ impl super::TermWindow {
     }
 
     pub fn key_event_impl(&mut self, window_key: KeyEvent, context: &dyn WindowOps) {
-        let pane = match self.get_active_leaf_or_overlay() {
+        let pane = match self.active_terminal_instance_or_overlay() {
             Some(pane) => pane,
             None => return,
         };
@@ -705,7 +707,7 @@ impl super::TermWindow {
                 if res.is_ok() {
                     if window_key.key_is_down
                         && !key.is_modifier()
-                        && self.leaf_ui_state(pane.pane_id()).overlay.is_none()
+                        && self.terminal_ui_state(pane.pane_id() as u64).overlay.is_none()
                     {
                         self.maybe_scroll_to_bottom_for_input(&pane);
                     }

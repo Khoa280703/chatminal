@@ -4,14 +4,16 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use chatminal_protocol::{ClientFrame, Request, Response, ServerBody};
-use chatminal_session_runtime::{SessionBridgeAction, SessionSurfaceLookup};
+use crate::workspace_ids::SessionViewId;
+use crate::workspace_layout::{WorkspaceLayoutState, WorkspaceSplitAxis};
 use chatminal_store::{Store, StoredSessionStatus};
 
-use crate::api::RuntimeEvent;
+use crate::api::{RuntimeEvent, RuntimeSessionBridgeAction, RuntimeSessionLookup};
 use crate::config::DaemonConfig;
 use crate::session::SessionEvent;
 
 use super::explorer_utils::{normalize_relative_path, resolve_explorer_target};
+use super::test_bridge::make_test_bridge;
 use super::{
     DaemonState, SessionSpawnPlan, prepend_run_boundary, snapshot_requires_run_boundary,
     trim_live_output,
@@ -79,7 +81,8 @@ fn create_state_with_session() -> (DaemonState, String, TempDb) {
         default_rows: 32,
         health_interval_ms: 1_000,
     };
-    let state = DaemonState::new(config, store).expect("create daemon state");
+    let bridge = make_test_bridge();
+    let state = DaemonState::new(config, store, bridge).expect("create daemon state");
     (state, session.session_id, db)
 }
 
@@ -128,7 +131,8 @@ fn create_state_with_two_sessions() -> (DaemonState, String, String, TempDb) {
         default_rows: 32,
         health_interval_ms: 1_000,
     };
-    let state = DaemonState::new(config, store).expect("create daemon state");
+    let bridge = make_test_bridge();
+    let state = DaemonState::new(config, store, bridge).expect("create daemon state");
     (state, session_a.session_id, session_b.session_id, db)
 }
 
@@ -312,6 +316,121 @@ fn native_workspace_load_passive_returns_runtime_snapshot() {
 }
 
 #[test]
+fn workspace_layout_roundtrip_persists_for_active_profile() {
+    let (state, session_a, session_b, _db) = create_state_with_two_sessions();
+    let mut layout = WorkspaceLayoutState::new_single(session_a.clone());
+    layout
+        .split_view(
+            SessionViewId::new(1),
+            WorkspaceSplitAxis::Vertical,
+            session_b.clone(),
+        )
+        .expect("split layout");
+
+    state.workspace_layout_save(&layout).expect("save layout");
+
+    let loaded = state
+        .workspace_layout_load()
+        .expect("load layout")
+        .expect("layout exists");
+    assert_eq!(loaded, layout);
+}
+
+#[test]
+fn workspace_layout_restore_persisted_populates_runtime_registry() {
+    let (state, session_a, session_b, _db) = create_state_with_two_sessions();
+    let mut layout = WorkspaceLayoutState::new_single(session_a.clone());
+    layout
+        .split_view(
+            SessionViewId::new(1),
+            WorkspaceSplitAxis::Vertical,
+            session_b.clone(),
+        )
+        .expect("split layout");
+    state.workspace_layout_save(&layout).expect("save layout");
+
+    assert_eq!(
+        state
+            .workspace_layout_snapshot("desktop-main")
+            .expect("snapshot before restore"),
+        None
+    );
+
+    let restored = state
+        .workspace_layout_restore_persisted("desktop-main")
+        .expect("restore persisted layout")
+        .expect("restored layout");
+    assert_eq!(restored, layout);
+    assert_eq!(
+        state
+            .workspace_layout_snapshot("desktop-main")
+            .expect("snapshot after restore"),
+        Some(layout)
+    );
+}
+
+#[test]
+fn workspace_layout_facade_mutations_update_runtime_registry() {
+    let (state, session_a, session_b, _db) = create_state_with_two_sessions();
+
+    let initial = state
+        .workspace_layout_ensure_session("desktop-main", &session_a)
+        .expect("ensure session a");
+    assert_eq!(initial.views.len(), 1);
+
+    let split = state
+        .workspace_layout_split_view(
+            "desktop-main",
+            SessionViewId::new(1),
+            WorkspaceSplitAxis::Vertical,
+            &session_b,
+        )
+        .expect("split call")
+        .expect("split result");
+    assert_eq!(split.views.len(), 2);
+
+    let session_b_view = state
+        .workspace_layout_view_id_for_session("desktop-main", &session_b)
+        .expect("view lookup")
+        .expect("session b view");
+    assert_eq!(session_b_view, SessionViewId::new(2));
+
+    let focused = state
+        .workspace_layout_focus_view("desktop-main", SessionViewId::new(1))
+        .expect("focus call")
+        .expect("focus result");
+    assert_eq!(focused.active_view_id, SessionViewId::new(1));
+
+    let removed = state
+        .workspace_layout_remove("desktop-main")
+        .map(|_| state.workspace_layout_snapshot("desktop-main").expect("snapshot"))
+        .expect("remove layout");
+    assert_eq!(removed, None);
+}
+
+#[test]
+fn workspace_layout_load_prunes_sessions_missing_from_profile() {
+    let (state, session_a, session_b, _db) = create_state_with_two_sessions();
+    let mut layout = WorkspaceLayoutState::new_single(session_a.clone());
+    layout
+        .split_view(
+            SessionViewId::new(1),
+            WorkspaceSplitAxis::Vertical,
+            session_b.clone(),
+        )
+        .expect("split layout");
+    state.workspace_layout_save(&layout).expect("save layout");
+    state.session_close(&session_b).expect("close session b");
+
+    let loaded = state
+        .workspace_layout_load()
+        .expect("load pruned layout")
+        .expect("layout exists");
+    assert_eq!(loaded.views.len(), 1);
+    assert_eq!(loaded.views[0].session_id, session_a);
+}
+
+#[test]
 fn native_subscription_receives_daemon_health_event() {
     let (state, _session_id, _db) = create_state_with_session();
     let subscription = state.subscribe().expect("subscribe runtime events");
@@ -434,20 +553,20 @@ fn workspace_load_passive_keeps_active_session_disconnected() {
 }
 
 #[test]
-fn reconcile_session_surface_lookup_prefers_runtime_active_session() {
+fn reconcile_session_lookup_prefers_runtime_active_session() {
     let (state, session_a, session_b, _db) = create_state_with_two_sessions();
-    let lookup = SessionSurfaceLookup {
+    let lookup = RuntimeSessionLookup {
         active_session_id: Some(session_b),
-        ..SessionSurfaceLookup::default()
+        ..RuntimeSessionLookup::default()
     };
 
     let action = state
-        .reconcile_session_surface_lookup(&lookup)
-        .expect("reconcile session surface lookup");
+        .reconcile_session_lookup(&lookup)
+        .expect("reconcile session runtime lookup");
 
     assert_eq!(
         action,
-        SessionBridgeAction::FocusSurface {
+        RuntimeSessionBridgeAction::FocusSession {
             session_id: session_a,
         }
     );

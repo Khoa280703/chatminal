@@ -1,17 +1,16 @@
 use crate::selection::{SelectionCoordinate, SelectionRange};
 use crate::termwindow::{TermWindow, TermWindowNotif};
-use config::ConfigHandle;
 use config::keyassignment::{ClipboardCopyDestination, QuickSelectArguments, ScrollbackEraseMode};
+use config::ConfigHandle;
 use engine_term::color::ColorPalette;
 use engine_term::{
     Clipboard, Intensity, KeyCode, KeyModifiers, Line, MouseEvent, StableRowIndex, TerminalSize,
 };
-use mux::domain::DomainId;
-use mux::pane::{
-    CachePolicy, ForEachPaneLogicalLine, LogicalLine, Pane, PaneId, Pattern, SearchResult,
-    WithPaneLines,
+use crate::chatminal_runtime::overlay_compat::{
+    OverlayCachePolicy, OverlayDomainHandle, OverlayForEachLogicalLine, OverlayLogicalLine,
+    OverlayPane, OverlayPaneHandle, OverlayPattern, OverlaySearchResult, OverlayWithPaneLines,
+    RenderableDimensions, StableCursorPosition,
 };
-use mux::renderable::*;
 use parking_lot::{MappedMutexGuard, Mutex};
 use rangeset::RangeSet;
 use std::collections::HashMap;
@@ -19,7 +18,7 @@ use std::ops::Range;
 use std::sync::Arc;
 use termwiz::cell::{Cell, CellAttributes};
 use termwiz::color::AnsiColor;
-use termwiz::surface::{SEQ_ZERO, SequenceNo};
+use termwiz::surface::{SequenceNo, SEQ_ZERO};
 use url::Url;
 use window::WindowOps;
 
@@ -195,7 +194,7 @@ mod alphabet_test {
 
 pub struct QuickSelectOverlay {
     renderer: Mutex<QuickSelectRenderable>,
-    delegate: Arc<dyn Pane>,
+    delegate: Arc<dyn OverlayPane>,
 }
 
 #[derive(Debug)]
@@ -205,11 +204,11 @@ struct MatchResult {
 }
 
 struct QuickSelectRenderable {
-    delegate: Arc<dyn Pane>,
+    delegate: Arc<dyn OverlayPane>,
     /// The text that the user entered
-    pattern: Pattern,
+    pattern: OverlayPattern,
     /// The most recently queried set of matches
-    results: Vec<SearchResult>,
+    results: Vec<OverlaySearchResult>,
     by_line: HashMap<StableRowIndex, Vec<MatchResult>>,
     by_label: HashMap<String, usize>,
     selection: String,
@@ -232,10 +231,10 @@ struct QuickSelectRenderable {
 impl QuickSelectOverlay {
     pub fn with_pane(
         term_window: &TermWindow,
-        pane: &Arc<dyn Pane>,
+        pane: &Arc<dyn OverlayPane>,
         args: &QuickSelectArguments,
-    ) -> Arc<dyn Pane> {
-        let viewport = term_window.get_viewport(pane.pane_id());
+    ) -> Arc<dyn OverlayPane> {
+        let viewport = term_window.get_viewport(pane.pane_id() as u64);
         let dims = pane.get_dimensions();
 
         let config = term_window.config.clone();
@@ -271,7 +270,7 @@ impl QuickSelectOverlay {
         }
         pattern.push(')');
 
-        let pattern = Pattern::Regex(pattern);
+        let pattern = OverlayPattern::Regex(pattern);
 
         let window = term_window.window.clone().unwrap();
         let mut renderer = QuickSelectRenderable {
@@ -316,8 +315,8 @@ impl QuickSelectOverlay {
     }
 }
 
-impl Pane for QuickSelectOverlay {
-    fn pane_id(&self) -> PaneId {
+impl OverlayPane for QuickSelectOverlay {
+    fn pane_id(&self) -> OverlayPaneHandle {
         self.delegate.pane_id()
     }
 
@@ -452,7 +451,7 @@ impl Pane for QuickSelectOverlay {
     fn palette(&self) -> ColorPalette {
         self.delegate.palette()
     }
-    fn domain_id(&self) -> DomainId {
+    fn domain_id(&self) -> OverlayDomainHandle {
         self.delegate.domain_id()
     }
 
@@ -473,7 +472,7 @@ impl Pane for QuickSelectOverlay {
         self.delegate.set_clipboard(clipboard)
     }
 
-    fn get_current_working_dir(&self, policy: CachePolicy) -> Option<Url> {
+    fn get_current_working_dir(&self, policy: OverlayCachePolicy) -> Option<Url> {
         self.delegate.get_current_working_dir(policy)
     }
 
@@ -505,17 +504,17 @@ impl Pane for QuickSelectOverlay {
     fn for_each_logical_line_in_stable_range_mut(
         &self,
         lines: Range<StableRowIndex>,
-        for_line: &mut dyn ForEachPaneLogicalLine,
+        for_line: &mut dyn OverlayForEachLogicalLine,
     ) {
         self.delegate
             .for_each_logical_line_in_stable_range_mut(lines, for_line);
     }
 
-    fn get_logical_lines(&self, lines: Range<StableRowIndex>) -> Vec<LogicalLine> {
+    fn get_logical_lines(&self, lines: Range<StableRowIndex>) -> Vec<OverlayLogicalLine> {
         self.delegate.get_logical_lines(lines)
     }
 
-    fn with_lines_mut(&self, lines: Range<StableRowIndex>, with_lines: &mut dyn WithPaneLines) {
+    fn with_lines_mut(&self, lines: Range<StableRowIndex>, with_lines: &mut dyn OverlayWithPaneLines) {
         let mut renderer = self.renderer.lock();
         // Take care to access self.delegate methods here before we get into
         // calling into its own with_lines_mut to avoid a runtime
@@ -525,7 +524,7 @@ impl Pane for QuickSelectOverlay {
         let search_row = renderer.compute_search_row();
 
         struct OverlayLines<'a> {
-            with_lines: &'a mut dyn WithPaneLines,
+            with_lines: &'a mut dyn OverlayWithPaneLines,
             dims: RenderableDimensions,
             search_row: StableRowIndex,
             renderer: &'a mut QuickSelectRenderable,
@@ -541,7 +540,7 @@ impl Pane for QuickSelectOverlay {
             },
         );
 
-        impl<'a> WithPaneLines for OverlayLines<'a> {
+        impl<'a> OverlayWithPaneLines for OverlayLines<'a> {
             fn with_lines_mut(&mut self, first_row: StableRowIndex, lines: &mut [&mut Line]) {
                 let mut overlay_lines = vec![];
 
@@ -737,7 +736,7 @@ impl QuickSelectRenderable {
     }
 
     fn close(&self) {
-        TermWindow::schedule_cancel_overlay_for_leaf(
+        TermWindow::schedule_cancel_overlay_for_terminal_handle(
             self.window.clone(),
             self.delegate.pane_id() as u64,
         );
@@ -748,7 +747,7 @@ impl QuickSelectRenderable {
         let pane_id = self.delegate.pane_id();
         self.window
             .notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                term_window.set_viewport(pane_id, row, dims);
+                term_window.set_viewport(pane_id as u64, row, dims);
             })));
     }
 
@@ -768,7 +767,7 @@ impl QuickSelectRenderable {
 
     fn recompute_results(&mut self) {
         /// Produce the sorted seq of unique match_ids from the results
-        fn compute_uniq_results(results: &[SearchResult]) -> Vec<usize> {
+        fn compute_uniq_results(results: &[OverlaySearchResult]) -> Vec<usize> {
             let mut ids: Vec<usize> = results.iter().map(|sr| sr.match_id).collect();
             ids.sort();
             ids.dedup();
@@ -860,7 +859,7 @@ impl QuickSelectRenderable {
         self.dirty_results.add(bar_pos);
 
         if !self.pattern.is_empty() {
-            let pane: Arc<dyn Pane> = self.delegate.clone();
+            let pane: Arc<dyn OverlayPane> = self.delegate.clone();
             let window = self.window.clone();
             let pattern = self.pattern.clone();
             let scope = self.args.scope_lines;
@@ -878,7 +877,7 @@ impl QuickSelectRenderable {
                 let pane_id = pane.pane_id();
                 let mut results = Some(results);
                 window.notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                    let state = term_window.leaf_ui_state(pane_id);
+                    let state = term_window.terminal_ui_state(pane_id as u64);
                     if let Some(overlay) = state.overlay.as_ref() {
                         if let Some(search_overlay) =
                             overlay.pane.downcast_ref::<QuickSelectOverlay>()
@@ -924,7 +923,7 @@ impl QuickSelectRenderable {
         let pane_id = self.delegate.pane_id();
         self.window
             .notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                let mut selection = term_window.selection(pane_id);
+                let mut selection = term_window.selection(pane_id as u64);
                 selection.origin.take();
                 selection.range.take();
             })));
@@ -938,10 +937,9 @@ impl QuickSelectRenderable {
         let skip_action_on_paste = self.args.skip_action_on_paste;
         self.window
             .notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                let mux = mux::Mux::get();
-                if let Some(pane) = mux.get_pane(pane_id) {
+                if let Ok(pane) = term_window.resolve_terminal_handle(pane_id as u64) {
                     {
-                        let mut selection = term_window.selection(pane_id);
+                        let mut selection = term_window.selection(pane_id as u64);
                         let start = SelectionCoordinate::x_y(result.start_x, result.start_y);
                         selection.origin = Some(start);
                         selection.range = Some(SelectionRange {

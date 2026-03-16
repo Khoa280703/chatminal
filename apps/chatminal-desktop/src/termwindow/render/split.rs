@@ -1,15 +1,15 @@
+use crate::desktop_termwindow_types::{TerminalSplit, TerminalSplitDirection};
+use crate::chatminal_runtime::overlay_compat::OverlayPane;
 use crate::termwindow::render::TripleLayerQuadAllocator;
 use crate::termwindow::{UIItem, UIItemType};
-use mux::pane::Pane;
-use mux::tab::{PositionedSplit, SplitDirection};
 use std::sync::Arc;
 
 impl crate::TermWindow {
     pub fn paint_split(
         &mut self,
         layers: &mut TripleLayerQuadAllocator,
-        split: &PositionedSplit,
-        pane: &Arc<dyn Pane>,
+        split: &TerminalSplit,
+        pane: &Arc<dyn OverlayPane>,
     ) -> anyhow::Result<()> {
         let palette = pane.palette();
         let foreground = palette.split.to_linear();
@@ -17,7 +17,7 @@ impl crate::TermWindow {
         let cell_height = self.render_metrics.cell_size.height as f32;
 
         let border = self.get_os_border();
-        let first_row_offset = if self.show_tab_bar && !self.config.tab_bar_at_bottom {
+        let first_row_offset = if self.show_session_bar && !self.config.session_bar_at_bottom {
             self.tab_bar_pixel_height()?
         } else {
             0.
@@ -28,7 +28,7 @@ impl crate::TermWindow {
         let pos_y = split.top as f32 * cell_height + first_row_offset + padding_top;
         let pos_x = split.left as f32 * cell_width + padding_left + border.left.get() as f32;
 
-        if split.direction == SplitDirection::Horizontal {
+        if split.direction == TerminalSplitDirection::Horizontal {
             self.filled_rectangle(
                 layers,
                 2,
