@@ -1,6 +1,5 @@
 use super::{
-    TerminalInstanceId, SessionEventBus, SessionRuntimeEvent, SessionRuntimeLookup, SessionWorkspaceHost,
-    RuntimeId,
+    SessionEventBus, SessionRuntimeEvent, SessionRuntimeLookup, SessionWorkspaceHost, RuntimeId,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -50,23 +49,6 @@ impl<'a, H: SessionWorkspaceHost, B: SessionEventBus> SessionRuntimeBridge<'a, H
         Ok(())
     }
 
-    pub fn on_leaf_focused(
-        &self,
-        session_id: &str,
-        runtime_id: RuntimeId,
-        terminal_instance_id: TerminalInstanceId,
-    ) -> Result<(), String> {
-        if self.host.active_session_id().as_deref() != Some(session_id) {
-            self.host.activate_session(session_id)?;
-        }
-        self.bus.publish(SessionRuntimeEvent::TerminalInstanceFocused {
-            session_id: session_id.to_string(),
-            runtime_id,
-            terminal_instance_id,
-        });
-        Ok(())
-    }
-
     pub fn on_session_closed(
         &self,
         session_id: &str,
@@ -108,8 +90,7 @@ mod tests {
     use std::sync::Mutex;
 
     use super::{
-        TerminalInstanceId, SessionEventBus, SessionRuntimeEvent, SessionRuntimeLookup, SessionWorkspaceHost,
-        RuntimeId,
+        SessionEventBus, SessionRuntimeEvent, SessionRuntimeLookup, SessionWorkspaceHost, RuntimeId,
     };
 
     use super::{SessionBridgeAction, SessionRuntimeBridge};
@@ -144,10 +125,6 @@ mod tests {
                 .push(session_id.to_string());
             *self.active_session_id.lock().expect("lock active session") =
                 Some(session_id.to_string());
-            Ok(())
-        }
-
-        fn close_session(&self, _session_id: &str) -> Result<(), String> {
             Ok(())
         }
     }
@@ -273,24 +250,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn focusing_leaf_on_same_session_only_publishes_leaf_event() {
-        let host = TestHost::with_active(Some("session-a"));
-        let bus = RecordingBus::default();
-        let bridge = SessionRuntimeBridge::new(&host, &bus);
-
-        bridge
-            .on_leaf_focused("session-a", RuntimeId::new(1), TerminalInstanceId::new(2))
-            .expect("focus leaf");
-
-        assert!(host.activated.lock().expect("lock activated").is_empty());
-        assert_eq!(
-            bus.events.lock().expect("lock bus").as_slice(),
-            [SessionRuntimeEvent::TerminalInstanceFocused {
-                session_id: "session-a".to_string(),
-                runtime_id: RuntimeId::new(1),
-                terminal_instance_id: TerminalInstanceId::new(2),
-            }]
-        );
-    }
 }

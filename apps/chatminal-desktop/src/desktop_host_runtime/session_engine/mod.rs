@@ -19,18 +19,17 @@ mod session_ids;
 mod session_layout_tree;
 mod session_runtime_state;
 mod session_snapshot;
-mod session_spawn_manager;
 mod workspace_host;
 
 
 pub use engine_runtime_adapter::{
-    EngineRuntimeAdapter, EngineRuntimeRef, MoveTerminalInstanceTarget, SpawnSessionRuntimeRequest,
+    EngineRuntimeAdapter, EngineRuntimeRef,
 };
 pub use runtime_bridge::{SessionBridgeAction, SessionRuntimeBridge};
 pub use session_core_state::{
     SessionCoreState, TerminalInstanceProcessState,
 };
-pub use session_engine::{SessionEngine, StatefulSessionEngine};
+pub use session_engine::StatefulSessionEngine;
 pub use session_engine_shared::SessionEngineShared;
 pub use session_event_bus::{SessionEventBus, SessionEventSubscription, SessionRuntimeEvent};
 pub use session_ids::{LayoutNodeId, RuntimeId, TerminalInstanceId};
@@ -40,5 +39,4 @@ pub use session_layout_tree::{
 };
 pub use session_runtime_state::SessionRuntimeState;
 pub use session_snapshot::{SessionRuntimeLookup, SessionRuntimeSnapshot};
-pub use session_spawn_manager::EnsureRuntimeResult;
 pub use workspace_host::SessionWorkspaceHost;

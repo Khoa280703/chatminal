@@ -11,8 +11,8 @@ use crate::overlay::{
 };
 use crate::chatminal_runtime::overlay_compat::{
     OverlayAssignmentResult as PerformAssignmentResult, OverlayCachePolicy as CachePolicy,
-    OverlayCloseReason as CloseReason, OverlayPane, OverlayPattern,
-    OverlayRenderScope, OverlayTerminal, RenderableDimensions,
+    OverlayCloseReason as CloseReason, OverlayPane, OverlayPattern, OverlayTerminal,
+    RenderableDimensions,
 };
 use crate::chatminal_runtime::{
     DesktopSessionBridgeAction, RuntimeId, RuntimeNotification, RuntimeWindow,
@@ -764,20 +764,6 @@ impl TermWindow {
         crate::chatminal_runtime::host_active_render_scope_id(self.window_id)
     }
 
-    fn render_scope_capability(&self, render_target_id: u64) -> Option<Arc<OverlayRenderScope>> {
-        if self.chatminal_sidebar.is_enabled() {
-            let session_id = crate::chatminal_runtime::desktop_session_entry_binding_for_render_target(
-                self.window_id as DesktopWindowId,
-                crate::chatminal_runtime::SessionRenderTargetId::new(render_target_id),
-            )?.session_id;
-            let runtime_id = crate::chatminal_runtime::desktop_runtime_id_for_session(&session_id)?;
-            return crate::chatminal_runtime::desktop_session_host(self.window_id as DesktopWindowId)?
-                .overlay_scope_for_runtime(runtime_id);
-        }
-
-        crate::chatminal_runtime::host_render_scope_capability(render_target_id)
-    }
-
     pub(crate) fn active_session_id(&self) -> Option<String> {
         if !self.chatminal_sidebar.is_enabled() {
             return None;
@@ -847,10 +833,26 @@ impl TermWindow {
         render_target_id: u64,
         reason: CloseReason,
     ) -> bool {
-        self.with_render_scope_capability_by_id(render_target_id, |tab| {
-            tab.can_close_without_prompting(reason)
-        })
-        .unwrap_or(false)
+        if self.chatminal_sidebar.is_enabled() {
+            let session_id = crate::chatminal_runtime::desktop_session_entry_binding_for_render_target(
+                self.window_id as DesktopWindowId,
+                crate::chatminal_runtime::SessionRenderTargetId::new(render_target_id),
+            )
+            .map(|entry| entry.session_id);
+            return session_id
+                .and_then(|session_id| {
+                    crate::chatminal_runtime::desktop_pane_for_session(
+                        self.window_id as DesktopWindowId,
+                        &session_id,
+                    )
+                })
+                .map(|pane| pane.can_close_without_prompting(reason))
+                .unwrap_or(false);
+        }
+        crate::desktop_host_runtime::host_render_scope_can_close_without_prompting(
+            render_target_id,
+            reason,
+        )
     }
 
     pub(crate) fn resize_split_via_tab_capability(
@@ -2167,12 +2169,11 @@ impl TermWindow {
     }
 
     fn get_positioned_panes_for_render_scope(&self, render_target_id: u64) -> Vec<TerminalPaneLayout> {
-        let Some(tab) = self.render_scope_capability(render_target_id) else {
+        let Some(size) = self.render_scope_size(render_target_id) else {
             return vec![];
         };
 
         if let Some(pane) = self.render_target_overlay(render_target_id) {
-            let size = tab.get_size();
             vec![TerminalPaneLayout {
                 index: 0,
                 is_active: true,
@@ -2186,7 +2187,7 @@ impl TermWindow {
                 pane,
             }]
         } else {
-            let mut panes = crate::chatminal_runtime::overlay_pane_layouts(&tab);
+            let mut panes = crate::desktop_host_runtime::host_overlay_pane_layouts_by_id(render_target_id);
             for p in &mut panes {
                 if let Some(overlay) = self.terminal_ui_state(p.pane.pane_id() as u64).overlay.as_ref() {
                     p.pane = Arc::clone(&overlay.pane);

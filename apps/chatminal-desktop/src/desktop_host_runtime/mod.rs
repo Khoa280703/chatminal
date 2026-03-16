@@ -16,7 +16,7 @@ use anyhow::anyhow;
 use session_engine::TerminalInstanceId;
 use chatminal_runtime::DaemonState;
 use crate::chatminal_runtime::ChatminalRuntimeClient;
-use config::keyassignment::SpawnSessionDomain;
+use config::keyassignment::{RotationDirection, SessionDirection, SpawnSessionDomain};
 use config::ConfigHandle;
 use engine_dynamic::Value;
 use engine_term::TerminalSize;
@@ -51,7 +51,6 @@ pub(crate) mod overlay_compat {
         PatternType as OverlayPatternType, PerformAssignmentResult as OverlayAssignmentResult,
         SearchResult as OverlaySearchResult, WithPaneLines as OverlayWithPaneLines,
     };
-    pub use host_runtime::tab::Tab as OverlayRenderScope;
     pub type OverlaySplitDirection = host_runtime::tab::SplitDirection;
     pub type OverlayDomainHandle = host_runtime::domain::DomainId;
     pub type OverlayPaneHandle = usize;
@@ -285,6 +284,184 @@ pub(crate) fn host_render_scope_capability(render_scope_id: u64) -> Option<Arc<H
         .and_then(host_runtime::runtime_entry_by_id)
 }
 
+fn with_host_render_scope_by_id<R, F>(render_scope_id: u64, func: F) -> Option<R>
+where
+    F: FnOnce(&Arc<HostRenderScope>) -> R,
+{
+    let render_scope = host_render_scope_capability(render_scope_id)?;
+    Some(func(&render_scope))
+}
+
+pub(crate) fn host_render_scope_size(render_scope_id: u64) -> Option<TerminalSize> {
+    with_host_render_scope_by_id(render_scope_id, |render_scope| render_scope.get_size())
+}
+
+pub(crate) fn host_render_scope_can_close_without_prompting(
+    render_scope_id: u64,
+    reason: HostCloseReason,
+) -> bool {
+    with_host_render_scope_by_id(render_scope_id, |render_scope| {
+        render_scope.can_close_without_prompting(reason)
+    })
+    .unwrap_or(false)
+}
+
+pub(crate) fn host_overlay_pane_layouts_by_id(
+    render_scope_id: u64,
+) -> Vec<overlay_compat::OverlayPaneLayout> {
+    with_host_render_scope_by_id(render_scope_id, |render_scope| {
+        overlay_pane_layouts(render_scope)
+    })
+    .unwrap_or_default()
+}
+
+pub(crate) fn host_overlay_split_layouts_by_id(
+    render_scope_id: u64,
+) -> Vec<overlay_compat::OverlaySplitLayout> {
+    with_host_render_scope_by_id(render_scope_id, |render_scope| {
+        overlay_split_layouts(render_scope)
+    })
+    .unwrap_or_default()
+}
+
+pub(crate) fn host_resize_render_scope(render_scope_id: u64, size: TerminalSize) -> bool {
+    with_host_render_scope_by_id(render_scope_id, |render_scope| {
+        render_scope.resize(size);
+        true
+    })
+    .unwrap_or(false)
+}
+
+pub(crate) fn host_resize_render_scope_split(
+    render_scope_id: u64,
+    split_index: usize,
+    delta: isize,
+) -> Option<overlay_compat::OverlaySplitLayout> {
+    with_host_render_scope_by_id(render_scope_id, |render_scope| {
+        render_scope.resize_split_by(split_index, delta);
+        overlay_split_layouts(render_scope).into_iter().nth(split_index)
+    })
+    .flatten()
+}
+
+pub(crate) fn host_set_render_scope_zoomed(
+    render_scope_id: u64,
+    zoomed: bool,
+) -> Option<bool> {
+    with_host_render_scope_by_id(render_scope_id, |render_scope| {
+        render_scope.set_zoomed(zoomed)
+    })
+}
+
+pub(crate) fn host_toggle_render_scope_zoom(render_scope_id: u64) -> bool {
+    with_host_render_scope_by_id(render_scope_id, |render_scope| {
+        render_scope.toggle_zoom()
+    })
+    .is_some()
+}
+
+pub(crate) fn host_adjust_render_scope_terminal_size(
+    render_scope_id: u64,
+    direction: SessionDirection,
+    amount: usize,
+) -> bool {
+    with_host_render_scope_by_id(render_scope_id, |render_scope| {
+        render_scope.adjust_pane_size(direction, amount);
+        true
+    })
+    .is_some()
+}
+
+pub(crate) fn host_rotate_render_scope_terminals(
+    render_scope_id: u64,
+    direction: RotationDirection,
+) -> bool {
+    with_host_render_scope_by_id(render_scope_id, |render_scope| match direction {
+        RotationDirection::Clockwise => render_scope.rotate_clockwise(),
+        RotationDirection::CounterClockwise => render_scope.rotate_counter_clockwise(),
+    })
+    .is_some()
+}
+
+pub(crate) fn host_activate_terminal_handle_in_render_scope(
+    render_scope_id: u64,
+    terminal_handle: u64,
+) -> bool {
+    with_host_render_scope_by_id(render_scope_id, |render_scope| {
+        render_scope
+            .iter_panes()
+            .iter()
+            .position(|positioned| terminal_handle_matches_public_id(&*positioned.pane, terminal_handle))
+            .map(|tab_index| render_scope.set_active_idx(tab_index))
+            .is_some()
+    })
+    .unwrap_or(false)
+}
+
+pub(crate) fn host_swap_active_with_terminal_handle_in_render_scope(
+    render_scope_id: u64,
+    terminal_handle: u64,
+    keep_focus: bool,
+) -> bool {
+    with_host_render_scope_by_id(render_scope_id, |render_scope| {
+        render_scope
+            .iter_panes()
+            .iter()
+            .position(|positioned| terminal_handle_matches_public_id(&*positioned.pane, terminal_handle))
+            .and_then(|tab_index| render_scope.swap_active_with_index(tab_index, keep_focus))
+            .is_some()
+    })
+    .unwrap_or(false)
+}
+
+pub(crate) fn host_active_terminal_in_render_scope(
+    render_scope_id: u64,
+) -> Option<Arc<dyn HostTerminal>> {
+    with_host_render_scope_by_id(render_scope_id, |render_scope| {
+        render_scope.get_active_pane()
+    })
+    .flatten()
+}
+
+pub(crate) fn host_render_scope_contains_terminal(
+    render_scope_id: u64,
+    terminal_handle: u64,
+) -> bool {
+    with_host_render_scope_by_id(render_scope_id, |render_scope| {
+        render_scope
+            .iter_panes()
+            .iter()
+            .any(|positioned| terminal_handle_matches_public_id(&*positioned.pane, terminal_handle))
+    })
+    .unwrap_or(false)
+}
+
+pub(crate) fn host_activate_terminal_index_in_render_scope(
+    render_scope_id: u64,
+    index: usize,
+) -> bool {
+    with_host_render_scope_by_id(render_scope_id, |render_scope| {
+        let panes = render_scope.iter_panes();
+        if panes.iter().position(|positioned| positioned.index == index).is_some() {
+            render_scope.set_active_idx(index);
+            return true;
+        }
+        false
+    })
+    .unwrap_or(false)
+}
+
+pub(crate) fn host_activate_terminal_direction_in_render_scope(
+    render_scope_id: u64,
+    direction: SessionDirection,
+) -> bool {
+    with_host_render_scope_by_id(render_scope_id, |render_scope| {
+        render_scope.activate_pane_direction(direction);
+        true
+    })
+    .unwrap_or(false)
+}
+
 pub(crate) fn overlay_pane_layouts(render_scope: &HostRenderScope) -> Vec<overlay_compat::OverlayPaneLayout> {
     render_scope
         .iter_panes()
@@ -453,13 +630,6 @@ pub(crate) fn host_domain_has_panes(domain_id: usize) -> bool {
         .iter_panes()
         .iter()
         .any(|pane| pane.domain_id() == domain_id)
-}
-
-pub(crate) fn remove_terminal_handle_by_public_id(pane_id: u64) -> anyhow::Result<()> {
-    let pane_id = HostTerminalHandle::try_from(pane_id)
-        .map_err(|_| anyhow!("invalid pane id {pane_id}"))?;
-    remove_terminal_handle(pane_id);
-    Ok(())
 }
 
 pub(crate) fn kill_host_window_by_public_id(window_id: u64) -> anyhow::Result<()> {

@@ -2,13 +2,13 @@ use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use chatminal_runtime::WorkspaceLayoutRegistry;
 use chatminal_terminal_core::TerminalSize;
 
 use super::leaf_runtime::TerminalInstanceRuntimeEvent;
 use super::leaf_runtime_registry::TerminalInstanceRuntimeRegistry;
 use super::session_core_ids::SessionCoreIdAllocator;
 use super::session_event_bus::SessionEventHub;
-use chatminal_runtime::WorkspaceLayoutRegistry;
 use super::{
     SessionCoreState, SessionEventBus, SessionEventSubscription, SessionRuntimeEvent,
     TerminalInstanceId,
@@ -17,6 +17,7 @@ use super::{
 #[derive(Debug)]
 pub struct SessionEngineShared {
     core_state: Arc<Mutex<SessionCoreState>>,
+    #[cfg_attr(not(test), allow(dead_code))]
     workspace_layouts: Arc<Mutex<WorkspaceLayoutRegistry>>,
     leaf_runtimes: Arc<TerminalInstanceRuntimeRegistry>,
     core_ids: Arc<SessionCoreIdAllocator>,
@@ -93,6 +94,7 @@ impl SessionEngineShared {
         Arc::clone(&self.leaf_runtimes)
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn workspace_layouts(&self) -> Arc<Mutex<WorkspaceLayoutRegistry>> {
         Arc::clone(&self.workspace_layouts)
     }
@@ -144,9 +146,7 @@ impl SessionEngineShared {
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use super::SessionCoreState;
-
-    use super::SessionEngineShared;
+    use super::{SessionCoreState, SessionEngineShared};
 
     #[test]
     fn shared_exposes_workspace_layout_registry() {

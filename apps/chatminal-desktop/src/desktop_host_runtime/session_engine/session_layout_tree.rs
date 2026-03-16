@@ -78,45 +78,10 @@ impl SessionLayoutSnapshot {
         self.leaves.iter().find(|leaf| leaf.terminal_instance_id == terminal_instance_id)
     }
 
-    pub fn active_terminal_instance(&self) -> Option<&SessionTerminalInstanceSnapshot> {
-        self.leaf(self.active_terminal_instance_id)
-    }
-
     pub fn node(&self, layout_node_id: LayoutNodeId) -> Option<&SessionLayoutNodeSnapshot> {
         self.nodes
             .iter()
             .find(|node| node.layout_node_id == layout_node_id)
-    }
-
-    pub fn contains_terminal_instance(&self, terminal_instance_id: TerminalInstanceId) -> bool {
-        self.leaf(terminal_instance_id).is_some()
-    }
-
-    pub fn resolve_terminal_instance_layout_node(&self, terminal_instance_id: TerminalInstanceId) -> Option<LayoutNodeId> {
-        self.nodes.iter().find_map(|node| match node.kind {
-            SessionLayoutNodeKind::Leaf {
-                terminal_instance_id: node_terminal_instance_id,
-            } if node_terminal_instance_id == terminal_instance_id => Some(node.layout_node_id),
-            _ => None,
-        })
-    }
-
-    pub fn child_layout_nodes(
-        &self,
-        layout_node_id: LayoutNodeId,
-    ) -> Option<(LayoutNodeId, LayoutNodeId)> {
-        match self.node(layout_node_id)?.kind {
-            SessionLayoutNodeKind::Split { first, second, .. } => Some((first, second)),
-            SessionLayoutNodeKind::Leaf { .. } => None,
-        }
-    }
-
-    pub fn is_stale_terminal_instance(&self, terminal_instance_id: TerminalInstanceId) -> bool {
-        !self.contains_terminal_instance(terminal_instance_id)
-    }
-
-    pub fn is_stale_layout_node(&self, layout_node_id: LayoutNodeId) -> bool {
-        self.node(layout_node_id).is_none()
     }
 
     pub fn remove_terminal_instance(&self, terminal_instance_id: TerminalInstanceId) -> Option<Self> {
@@ -361,11 +326,7 @@ mod tests {
         );
         assert_eq!(layout.leaves.len(), 1);
         assert_eq!(layout.leaves[0].terminal_instance_id, TerminalInstanceId::new(22));
-        assert!(layout.contains_terminal_instance(TerminalInstanceId::new(22)));
-        assert_eq!(
-            layout.active_terminal_instance().expect("active leaf").terminal_instance_id,
-            TerminalInstanceId::new(22)
-        );
+        assert!(layout.leaf(TerminalInstanceId::new(22)).is_some());
         assert_eq!(
             layout
                 .node(LayoutNodeId::new(11))
@@ -393,12 +354,6 @@ mod tests {
         assert_eq!(layout.active_terminal_instance_id, TerminalInstanceId::new(43));
         assert_eq!(layout.leaves.len(), 3);
         assert_eq!(layout.nodes.len(), 5);
-        assert_eq!(
-            layout
-                .resolve_terminal_instance_layout_node(TerminalInstanceId::new(42))
-                .expect("leaf node"),
-            LayoutNodeId::new((7u64 << 32) | 42)
-        );
         match &layout
             .node(layout.root_layout_node_id)
             .expect("root node")
@@ -410,17 +365,15 @@ mod tests {
                 second,
             } => {
                 assert_eq!(*axis, super::SessionSplitAxis::Vertical);
-                assert_eq!(
-                    layout.child_layout_nodes(layout.root_layout_node_id),
-                    Some((*first, *second))
-                );
+                assert!(layout.node(*first).is_some());
+                assert!(layout.node(*second).is_some());
             }
             other => panic!("unexpected root node: {:?}", other),
         }
-        assert!(!layout.is_stale_terminal_instance(TerminalInstanceId::new(41)));
-        assert!(layout.is_stale_terminal_instance(TerminalInstanceId::new(99)));
-        assert!(!layout.is_stale_layout_node(layout.root_layout_node_id));
-        assert!(layout.is_stale_layout_node(LayoutNodeId::new(999)));
+        assert!(layout.leaf(TerminalInstanceId::new(41)).is_some());
+        assert!(layout.leaf(TerminalInstanceId::new(99)).is_none());
+        assert!(layout.node(layout.root_layout_node_id).is_some());
+        assert!(layout.node(LayoutNodeId::new(999)).is_none());
     }
 
     #[test]
@@ -452,18 +405,16 @@ mod tests {
 
         assert_eq!(updated.active_terminal_instance_id, TerminalInstanceId::new(43));
         assert_eq!(updated.leaves.len(), 2);
-        assert!(updated.contains_terminal_instance(TerminalInstanceId::new(41)));
-        assert!(updated.contains_terminal_instance(TerminalInstanceId::new(43)));
-        assert!(!updated.contains_terminal_instance(TerminalInstanceId::new(42)));
+        assert!(updated.leaf(TerminalInstanceId::new(41)).is_some());
+        assert!(updated.leaf(TerminalInstanceId::new(43)).is_some());
+        assert!(updated.leaf(TerminalInstanceId::new(42)).is_none());
         assert_eq!(updated.nodes.len(), 3);
 
         match &updated.node(updated.root_layout_node_id).expect("root node").kind {
             SessionLayoutNodeKind::Split { axis, first, second } => {
                 assert_eq!(*axis, super::SessionSplitAxis::Vertical);
-                assert_eq!(
-                    updated.child_layout_nodes(updated.root_layout_node_id),
-                    Some((*first, *second))
-                );
+                assert!(updated.node(*first).is_some());
+                assert!(updated.node(*second).is_some());
             }
             other => panic!("unexpected collapsed root: {:?}", other),
         }

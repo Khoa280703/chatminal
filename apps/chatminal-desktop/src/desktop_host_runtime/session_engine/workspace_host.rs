@@ -6,5 +6,4 @@
 pub trait SessionWorkspaceHost: Send + Sync {
     fn active_session_id(&self) -> Option<String>;
     fn activate_session(&self, session_id: &str) -> Result<(), String>;
-    fn close_session(&self, session_id: &str) -> Result<(), String>;
 }

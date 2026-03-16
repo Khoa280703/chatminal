@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::chatminal_render::{ChatminalRenderPane, ChatminalRenderSplit, ChatminalRenderSplitAxis};
+use crate::chatminal_render::ChatminalRenderPane;
 use crate::chatminal_runtime::{
     SessionViewId, WorkspaceLayoutNodeKind, WorkspaceLayoutState, WorkspaceNodeId,
     WorkspaceSplitAxis,
@@ -44,14 +44,6 @@ struct RenderPaneGeometry {
     pixel_height: usize,
     is_active: bool,
     is_zoomed: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct RenderSplitGeometry {
-    direction: TerminalSplitDirection,
-    left: usize,
-    top: usize,
-    size: usize,
 }
 
 impl crate::TermWindow {
@@ -451,37 +443,6 @@ fn map_render_pane_geometry(
     }
 }
 
-fn map_render_split_geometry(
-    target: &LayoutRenderTarget,
-    source_size: engine_term::TerminalSize,
-    split: &ChatminalRenderSplit,
-) -> RenderSplitGeometry {
-    let source_cols = source_size.cols.max(1);
-    let source_rows = source_size.rows.max(1);
-    let direction = match split.axis {
-        ChatminalRenderSplitAxis::Horizontal => TerminalSplitDirection::Horizontal,
-        ChatminalRenderSplitAxis::Vertical => TerminalSplitDirection::Vertical,
-    };
-    let (left, top, size) = match direction {
-        TerminalSplitDirection::Horizontal => (
-            target.left + map_offset(split.left, source_cols, target.width),
-            target.top + map_offset(split.top, source_rows, target.height),
-            map_span(split.top, split.size, source_rows, target.height),
-        ),
-        TerminalSplitDirection::Vertical => (
-            target.left + map_offset(split.left, source_cols, target.width),
-            target.top + map_offset(split.top, source_rows, target.height),
-            map_span(split.left, split.size, source_cols, target.width),
-        ),
-    };
-    RenderSplitGeometry {
-        direction,
-        left,
-        top,
-        size,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -542,31 +503,6 @@ mod tests {
                 pixel_height: 400,
                 is_active: true,
                 is_zoomed: false,
-            }
-        );
-    }
-
-    #[test]
-    fn maps_render_split_geometry_for_scaled_layout() {
-        let geometry = map_render_split_geometry(
-            &sample_target(),
-            terminal_size(200, 100),
-            &ChatminalRenderSplit {
-                index: 3,
-                axis: ChatminalRenderSplitAxis::Vertical,
-                left: 100,
-                top: 0,
-                size: 100,
-            },
-        );
-
-        assert_eq!(
-            geometry,
-            RenderSplitGeometry {
-                direction: TerminalSplitDirection::Vertical,
-                left: 60,
-                top: 4,
-                size: 50,
             }
         );
     }

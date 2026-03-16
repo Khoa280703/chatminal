@@ -2,31 +2,27 @@
 //
 // This is the session-native render path (Phase 03+). The host creates `ChatminalSessionPane`
 // objects directly from the session engine's core state and builds `ChatminalRenderState`
-// from the session_pane map — no HostRenderScope shim in the session render path.
-// HostRenderScope is retained only for overlay compatibility (launcher/confirm/prompt).
+// from the session_pane map.
 
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use super::session_engine::{
-    TerminalInstanceId, SessionEngine, SessionEngineShared,
-    SessionRuntimeState, StatefulSessionEngine,
-    RuntimeId,
+    TerminalInstanceId, SessionEngineShared, SessionRuntimeState, StatefulSessionEngine, RuntimeId,
 };
 use chatminal_terminal_core::TerminalSize as CoreTerminalSize;
 use config::keyassignment::SessionDirection;
 use config::keyassignment::SpawnSessionDomain;
 use config::TermConfig;
-use engine_dynamic::Value;
 use engine_term::TerminalSize;
 use portable_pty::CommandBuilder;
 
 use super::session_pane::ChatminalSessionPane;
 use super::{
     DesktopEngineRuntimeAdapter, HostDomainId as DomainId, HostMux,
-    HostRenderScope, HostTerminal, HostTerminalHandle,
-    HostRenderableDimensions as RenderableDimensions, HostSplitSource as SplitSource,
+    HostTerminal, HostTerminalHandle, HostRenderableDimensions as RenderableDimensions,
+    HostSplitSource as SplitSource,
     RuntimeSplitRequest as SplitRequest, RuntimeWindowId as EngineWindowId,
 };
 use crate::chatminal_render::{ChatminalRenderPane, ChatminalRenderState};
@@ -344,17 +340,6 @@ impl DesktopSessionHost {
             .cloned()
     }
 
-    // Retained for overlay compatibility (launcher/confirm/prompt). Not used for render state.
-    pub(crate) fn overlay_scope_for_runtime(&self, runtime_id: RuntimeId) -> Option<Arc<HostRenderScope>> {
-        let mux = HostMux::get();
-        mux.get_window(self.window_id).and_then(|window| {
-            window
-                .iter()
-                .find(|render_scope| runtime_id_for_render_scope(render_scope) == runtime_id)
-                .cloned()
-        })
-    }
-
     pub async fn split_terminal_handle(
         &self,
         terminal_handle: u64,
@@ -652,27 +637,5 @@ fn terminal_size_from_dims(dims: RenderableDimensions) -> TerminalSize {
         pixel_width: dims.pixel_width,
         pixel_height: dims.pixel_height,
         dpi: dims.dpi.max(1),
-    }
-}
-
-fn runtime_id_for_render_scope(render_scope: &Arc<HostRenderScope>) -> RuntimeId {
-    for positioned in render_scope.iter_panes() {
-        if let Some(runtime_id) = pane_runtime_id(&positioned.pane) {
-            return runtime_id;
-        }
-    }
-    RuntimeId::new(render_scope.tab_id() as u64)
-}
-
-fn pane_runtime_id(pane: &Arc<dyn HostTerminal>) -> Option<RuntimeId> {
-    pane_metadata_u64(pane, "chatminal_runtime_id").map(RuntimeId::new)
-}
-
-fn pane_metadata_u64(pane: &Arc<dyn HostTerminal>, key: &str) -> Option<u64> {
-    match pane.get_metadata() {
-        Value::Object(obj) => obj
-            .get(&Value::String(key.to_string()))
-            .and_then(Value::coerce_unsigned),
-        _ => None,
     }
 }

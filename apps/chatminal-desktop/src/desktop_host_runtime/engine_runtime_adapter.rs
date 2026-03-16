@@ -1,14 +1,12 @@
-use std::sync::Arc;
 use std::convert::TryFrom;
+use std::sync::Arc;
 
 use super::session_engine::{
-    build_layout_snapshot_from_tree, EngineRuntimeAdapter, EngineRuntimeRef, TerminalInstanceId,
-    MoveTerminalInstanceTarget, SessionLayoutTreeNode, SessionRuntimeState,
-    SpawnSessionRuntimeRequest, RuntimeId,
+    build_layout_snapshot_from_tree, EngineRuntimeAdapter, EngineRuntimeRef, RuntimeId,
+    SessionLayoutTreeNode, SessionRuntimeState, TerminalInstanceId,
 };
 use config::keyassignment::SessionDirection;
 use engine_dynamic::Value;
-use window::{Window, WindowOps};
 
 use super::{
     host_render_scope_capability, HostLayoutNode, HostMux, HostRenderScope,
@@ -47,40 +45,6 @@ impl DesktopEngineRuntimeAdapter {
         })
     }
 
-    fn spawn_runtime_inner(&self, request: SpawnSessionRuntimeRequest, window: Option<Window>) {
-        let window_id = self.window_id;
-        promise::spawn::spawn(async move {
-            match HostMux::get()
-                .spawn_tab_or_window(
-                    Some(window_id),
-                    request.domain,
-                    Some(request.command),
-                    None,
-                    request.terminal_size,
-                    request
-                        .current_host_handle
-                        .and_then(|handle| usize::try_from(handle).ok()),
-                    request.workspace,
-                    None,
-                )
-                .await
-            {
-                Ok(_) => {
-                    if let Some(window) = window.as_ref() {
-                        window.invalidate();
-                    }
-                }
-                Err(err) => {
-                    log::error!(
-                        "failed to switch chatminal sidebar session {}: {:#}",
-                        request.session_id,
-                        err
-                    );
-                }
-            }
-        })
-        .detach();
-    }
 }
 
 impl EngineRuntimeAdapter for DesktopEngineRuntimeAdapter {
@@ -94,28 +58,6 @@ impl EngineRuntimeAdapter for DesktopEngineRuntimeAdapter {
                 session_id: session_id.to_string(),
             })
             .ok_or("session runtime not found")
-    }
-
-    fn focus_runtime(&self, runtime_id: RuntimeId) -> Result<(), Self::Error> {
-        let render_scope_id = self
-            .render_scope_id_for_runtime(runtime_id)
-            .or_else(|| render_scope_id_from_runtime(runtime_id).ok())
-            .ok_or("render scope missing")?;
-        let mux = HostMux::get();
-        let pane = host_render_scope_capability(render_scope_id as u64)
-            .and_then(|render_scope| render_scope.get_active_pane())
-            .ok_or("runtime has no active pane")?;
-        let render_scope =
-            host_render_scope_capability(render_scope_id as u64).ok_or("render scope missing")?;
-        render_scope.set_active_pane(&pane);
-        let Some(mut window) = mux.get_window_mut(self.window_id) else {
-            return Err("window missing");
-        };
-        let Some(idx) = window.idx_by_id(render_scope_id) else {
-            return Err("host tab not attached to window");
-        };
-        window.save_and_then_set_active(idx);
-        Ok(())
     }
 
     fn focus_terminal_instance(&self, runtime_id: RuntimeId, terminal_instance_id: TerminalInstanceId) -> Result<(), Self::Error> {
@@ -187,66 +129,6 @@ impl EngineRuntimeAdapter for DesktopEngineRuntimeAdapter {
         render_scope
             .swap_active_with_index(target_index, keep_focus)
             .ok_or("swap active leaf failed")
-    }
-
-    fn move_terminal_instance(
-        &self,
-        runtime_id: RuntimeId,
-        terminal_instance_id: TerminalInstanceId,
-        target: MoveTerminalInstanceTarget,
-    ) -> Result<(), Self::Error> {
-        let render_scope_id = self
-            .render_scope_id_for_runtime(runtime_id)
-            .or_else(|| render_scope_id_from_runtime(runtime_id).ok())
-            .ok_or("render scope missing")?;
-        let render_scope =
-            host_render_scope_capability(render_scope_id as u64).ok_or("render scope missing")?;
-        let terminal_handle = render_scope
-            .iter_panes()
-            .into_iter()
-            .find(|pos| {
-                pane_terminal_instance_id(&pos.pane).unwrap_or_else(|| TerminalInstanceId::new(pos.pane.pane_id() as u64))
-                    == terminal_instance_id
-            })
-            .map(|pos| pos.pane.pane_id())
-            .ok_or("leaf not found in runtime")?;
-        let window_id = self.window_id;
-        promise::spawn::spawn(async move {
-            let mux = HostMux::get();
-            let result = match target {
-                MoveTerminalInstanceTarget::NewWindow => mux.move_pane_to_new_tab(terminal_handle, None, None).await,
-                MoveTerminalInstanceTarget::NewRuntimeInWindow => {
-                    mux.move_pane_to_new_tab(terminal_handle, Some(window_id), None).await
-                }
-            };
-            if let Err(err) = result {
-                log::error!("failed to move leaf {terminal_instance_id}: {err:#}");
-                return;
-            }
-            if matches!(target, MoveTerminalInstanceTarget::NewRuntimeInWindow) {
-                let _ = mux.focus_pane_and_containing_tab(terminal_handle);
-            }
-        })
-        .detach();
-        Ok(())
-    }
-
-    fn close_runtime(&self, runtime_id: RuntimeId) -> Result<(), Self::Error> {
-        let render_scope_id = self
-            .render_scope_id_for_runtime(runtime_id)
-            .or_else(|| render_scope_id_from_runtime(runtime_id).ok())
-            .ok_or("render scope missing")?;
-        HostMux::get().remove_tab(render_scope_id);
-        Ok(())
-    }
-
-    fn spawn_runtime(
-        &self,
-        request: SpawnSessionRuntimeRequest,
-        window: Option<Window>,
-    ) -> Result<(), Self::Error> {
-        self.spawn_runtime_inner(request, window);
-        Ok(())
     }
 
     fn snapshot_runtime(&self, runtime_id: RuntimeId) -> Result<SessionRuntimeState, Self::Error> {

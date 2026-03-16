@@ -244,42 +244,43 @@ impl TermWindow {
         true
     }
 
-    fn with_render_scope_capability_by_id<R, F>(&self, render_scope_id: u64, func: F) -> Option<R>
-    where
-        F: FnOnce(&Arc<OverlayRenderScope>) -> R,
-    {
-        let tab = self.render_scope_capability(render_scope_id)?;
-        Some(func(&tab))
-    }
-
-    fn with_active_render_scope_capability<R, F>(&self, func: F) -> Option<R>
-    where
-        F: FnOnce(&Arc<OverlayRenderScope>) -> R,
-    {
-        let render_scope_id = self.active_render_scope_id()?;
-        self.with_render_scope_capability_by_id(render_scope_id, func)
-    }
-
-    fn with_active_render_scope_capability_if_no_overlay<R, F>(&self, func: F) -> Option<R>
-    where
-        F: FnOnce(&Arc<OverlayRenderScope>) -> R,
-    {
-        if self.active_runtime_has_overlay() {
+    fn session_id_for_render_target(&self, render_scope_id: u64) -> Option<String> {
+        if !self.chatminal_sidebar.is_enabled() {
             return None;
         }
-        self.with_active_render_scope_capability(func)
+        crate::chatminal_runtime::desktop_session_entry_binding_for_render_target(
+            self.window_id as DesktopWindowId,
+            crate::chatminal_runtime::SessionRenderTargetId::new(render_scope_id),
+        )
+        .map(|entry| entry.session_id)
+    }
+
+    fn session_pane_for_render_target(&self, render_scope_id: u64) -> Option<Arc<dyn OverlayPane>> {
+        let session_id = self.session_id_for_render_target(render_scope_id)?;
+        crate::chatminal_runtime::desktop_pane_for_session(
+            self.window_id as DesktopWindowId,
+            &session_id,
+        )
+        .map(|pane| pane as Arc<dyn OverlayPane>)
     }
 
     fn render_scope_size(&self, render_scope_id: u64) -> Option<TerminalSize> {
-        self.with_render_scope_capability_by_id(render_scope_id, |tab| tab.get_size())
+        if self.chatminal_sidebar.is_enabled() {
+            let session_id = self.session_id_for_render_target(render_scope_id)?;
+            return crate::chatminal_runtime::desktop_render_state_for_session(
+                self.window_id as DesktopWindowId,
+                &session_id,
+            )
+            .map(|state| state.terminal_size);
+        }
+        crate::desktop_host_runtime::host_render_scope_size(render_scope_id)
     }
 
     fn resize_render_scope(&self, render_scope_id: u64, size: TerminalSize) -> bool {
-        self.with_render_scope_capability_by_id(render_scope_id, |tab| {
-            tab.resize(size);
-            true
-        })
-        .unwrap_or(false)
+        if self.chatminal_sidebar.is_enabled() {
+            return false;
+        }
+        crate::desktop_host_runtime::host_resize_render_scope(render_scope_id, size)
     }
 
     fn resize_render_scope_split(
@@ -288,23 +289,33 @@ impl TermWindow {
         split: TerminalSplit,
         delta: isize,
     ) -> Option<TerminalSplit> {
-        self.with_render_scope_capability_by_id(render_scope_id, |tab| {
-            tab.resize_split_by(split.index, delta);
-            crate::chatminal_runtime::overlay_split_layouts(tab)
-                .into_iter()
-                .nth(split.index)
-                .map(TerminalSplit::from_mux)
-        })
-        .flatten()
+        if self.chatminal_sidebar.is_enabled() {
+            return None;
+        }
+        crate::desktop_host_runtime::host_resize_render_scope_split(
+            render_scope_id,
+            split.index,
+            delta,
+        )
+        .map(TerminalSplit::from_mux)
     }
 
     pub(crate) fn set_active_runtime_zoomed(&self, zoomed: bool) -> Option<bool> {
-        self.with_active_render_scope_capability(|tab| tab.set_zoomed(zoomed))
+        if self.chatminal_sidebar.is_enabled() {
+            return Some(false);
+        }
+        let render_scope_id = self.active_render_scope_id()?;
+        crate::desktop_host_runtime::host_set_render_scope_zoomed(render_scope_id, zoomed)
     }
 
     pub(crate) fn toggle_active_runtime_zoom(&self) -> bool {
-        self.with_active_render_scope_capability(|tab| tab.toggle_zoom())
-            .is_some()
+        if self.chatminal_sidebar.is_enabled() {
+            return false;
+        }
+        let Some(render_scope_id) = self.active_render_scope_id() else {
+            return false;
+        };
+        crate::desktop_host_runtime::host_toggle_render_scope_zoom(render_scope_id)
     }
 
     pub(crate) fn adjust_active_terminal_size(
@@ -312,31 +323,47 @@ impl TermWindow {
         direction: SessionDirection,
         amount: usize,
     ) -> bool {
-        self.with_active_render_scope_capability_if_no_overlay(|tab| {
-            tab.adjust_pane_size(direction, amount);
-        })
-        .is_some()
+        if self.active_runtime_has_overlay() {
+            return false;
+        }
+        if self.chatminal_sidebar.is_enabled() {
+            return false;
+        }
+        let Some(render_scope_id) = self.active_render_scope_id() else {
+            return false;
+        };
+        crate::desktop_host_runtime::host_adjust_render_scope_terminal_size(
+            render_scope_id,
+            direction,
+            amount,
+        )
     }
 
     pub(crate) fn rotate_active_terminals(&self, direction: RotationDirection) -> bool {
-        self.with_active_render_scope_capability(|tab| match direction {
-            RotationDirection::Clockwise => tab.rotate_clockwise(),
-            RotationDirection::CounterClockwise => tab.rotate_counter_clockwise(),
-        })
-        .is_some()
+        if self.chatminal_sidebar.is_enabled() {
+            return false;
+        }
+        let Some(render_scope_id) = self.active_render_scope_id() else {
+            return false;
+        };
+        crate::desktop_host_runtime::host_rotate_render_scope_terminals(render_scope_id, direction)
     }
 
     pub(crate) fn activate_terminal_handle_in_active_runtime(&self, terminal_handle: TerminalUiKey) -> bool {
-        self.with_active_render_scope_capability(|tab| {
-            tab.iter_panes()
-                .iter()
-                .position(|pos| pos.pane.pane_id() as u64 == terminal_handle)
-                .map(|tab_index| {
-                    tab.set_active_idx(tab_index);
-                })
-                .is_some()
-        })
-        .unwrap_or(false)
+        if self.chatminal_sidebar.is_enabled() {
+            return self
+                .resolve_terminal_handle(terminal_handle)
+                .ok()
+                .map(|pane| self.focus_active_session_terminal_instance(&pane))
+                .unwrap_or(false);
+        }
+        let Some(render_scope_id) = self.active_render_scope_id() else {
+            return false;
+        };
+        crate::desktop_host_runtime::host_activate_terminal_handle_in_render_scope(
+            render_scope_id,
+            terminal_handle,
+        )
     }
 
     pub(crate) fn swap_active_with_terminal_handle_in_active_runtime(
@@ -344,57 +371,89 @@ impl TermWindow {
         terminal_handle: TerminalUiKey,
         keep_focus: bool,
     ) -> bool {
-        self.with_active_render_scope_capability(|tab| {
-            tab.iter_panes()
-                .iter()
-                .position(|pos| pos.pane.pane_id() as u64 == terminal_handle)
-                .and_then(|tab_index| tab.swap_active_with_index(tab_index, keep_focus))
-                .is_some()
-        })
-        .unwrap_or(false)
+        if self.chatminal_sidebar.is_enabled() {
+            return self
+                .resolve_terminal_handle(terminal_handle)
+                .ok()
+                .map(|pane| self.swap_active_with_session_terminal_instance(&pane, keep_focus))
+                .unwrap_or(false);
+        }
+        let Some(render_scope_id) = self.active_render_scope_id() else {
+            return false;
+        };
+        crate::desktop_host_runtime::host_swap_active_with_terminal_handle_in_render_scope(
+            render_scope_id,
+            terminal_handle,
+            keep_focus,
+        )
     }
 
     fn active_terminal_instance_from_active_render_target(&self) -> Option<Arc<dyn OverlayPane>> {
-        self.with_active_render_scope_capability(|tab| tab.get_active_pane())
-            .flatten()
+        let render_scope_id = self.active_render_scope_id()?;
+        if self.chatminal_sidebar.is_enabled() {
+            return self.session_pane_for_render_target(render_scope_id);
+        }
+        crate::desktop_host_runtime::host_active_terminal_in_render_scope(render_scope_id)
     }
 
     fn active_render_target_contains_terminal(&self, pane_id: TerminalUiKey) -> bool {
-        let Some(pane_id) = crate::desktop_termwindow_types::pane_id_from_terminal_ui_key(pane_id)
-        else {
+        if self.chatminal_sidebar.is_enabled() {
+            return self
+                .active_terminal_instance_from_active_render_target()
+                .map(|pane| pane.pane_id() as u64 == pane_id)
+                .unwrap_or(false);
+        }
+        let Some(render_scope_id) = self.active_render_scope_id() else {
             return false;
         };
-        self.with_active_render_scope_capability(|tab| tab.contains_pane(pane_id))
-            .unwrap_or(false)
+        crate::desktop_host_runtime::host_render_scope_contains_terminal(render_scope_id, pane_id)
     }
 
     fn activate_terminal_index_in_active_render_target(&self, index: usize) -> bool {
-        self.with_active_render_scope_capability(|tab| {
-            let panes = tab.iter_panes();
-            if panes.iter().position(|p| p.index == index).is_some() {
-                tab.set_active_idx(index);
-                true
-            } else {
-                false
-            }
-        })
-        .unwrap_or(false)
+        if self.chatminal_sidebar.is_enabled() {
+            return index == 0 && self.active_terminal_instance_from_active_render_target().is_some();
+        }
+        let Some(render_scope_id) = self.active_render_scope_id() else {
+            return false;
+        };
+        crate::desktop_host_runtime::host_activate_terminal_index_in_render_scope(
+            render_scope_id,
+            index,
+        )
     }
 
     fn activate_terminal_direction_in_active_render_target(&self, direction: SessionDirection) -> bool {
-        self.with_active_render_scope_capability(|tab| {
-            tab.activate_pane_direction(direction);
-            true
-        })
-        .unwrap_or(false)
+        if self.chatminal_sidebar.is_enabled() {
+            let Some(session_id) = self.active_session_id() else {
+                return false;
+            };
+            return crate::chatminal_runtime::desktop_focus_session_direction(
+                self.window_id as DesktopWindowId,
+                &session_id,
+                direction,
+            )
+            .is_some();
+        }
+        let Some(render_scope_id) = self.active_render_scope_id() else {
+            return false;
+        };
+        crate::desktop_host_runtime::host_activate_terminal_direction_in_render_scope(
+            render_scope_id,
+            direction,
+        )
     }
 
     fn active_render_target_splits(&self) -> Vec<TerminalSplit> {
-        self.with_active_render_scope_capability(|tab| {
-            crate::chatminal_runtime::overlay_split_layouts(tab)
-        })
-            .map(|splits| splits.into_iter().map(TerminalSplit::from_mux).collect())
-            .unwrap_or_default()
+        if self.chatminal_sidebar.is_enabled() {
+            return vec![];
+        }
+        let Some(render_scope_id) = self.active_render_scope_id() else {
+            return vec![];
+        };
+        crate::desktop_host_runtime::host_overlay_split_layouts_by_id(render_scope_id)
+            .into_iter()
+            .map(TerminalSplit::from_mux)
+            .collect()
     }
 
     fn active_render_target_positioned_panes(&self) -> Vec<TerminalPaneLayout> {

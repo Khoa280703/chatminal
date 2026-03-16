@@ -1,4 +1,4 @@
-// Phase 07: SessionViewId, WorkspaceNodeId, RuntimeId, TerminalInstanceId moved to
+// Phase 07: RuntimeId and TerminalInstanceId moved to
 // `chatminal-runtime`. Re-export here so internal code keeps compiling without
 // mass-rewriting all the `use super::` imports inside session-runtime.
 //
@@ -9,7 +9,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 // Re-export product-model IDs from chatminal-runtime (the new canonical location).
-pub use chatminal_runtime::{RuntimeId, SessionViewId, TerminalInstanceId, WorkspaceNodeId};
+pub use chatminal_runtime::{RuntimeId, TerminalInstanceId};
 
 macro_rules! session_id_type {
     ($name:ident, $prefix:literal) => {
@@ -22,10 +22,6 @@ macro_rules! session_id_type {
         impl $name {
             pub const fn new(value: u64) -> Self {
                 Self(value)
-            }
-
-            pub const fn as_u64(self) -> u64 {
-                self.0
             }
         }
 
@@ -42,7 +38,9 @@ session_id_type!(LayoutNodeId, "layout");
 
 #[cfg(test)]
 mod tests {
-    use super::{LayoutNodeId, RuntimeId, SessionViewId, TerminalInstanceId, WorkspaceNodeId};
+    use chatminal_runtime::{SessionViewId, WorkspaceNodeId};
+
+    use super::{LayoutNodeId, RuntimeId, TerminalInstanceId};
 
     #[test]
     fn ids_format_with_stable_prefixes() {

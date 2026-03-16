@@ -53,10 +53,6 @@ impl SessionWorkspaceHost for DaemonStateHost<'_> {
     fn activate_session(&self, session_id: &str) -> Result<(), String> {
         self.0.session_activate_with_default_size(session_id)
     }
-
-    fn close_session(&self, session_id: &str) -> Result<(), String> {
-        self.0.session_close(session_id)
-    }
 }
 
 // ─── RuntimeSessionHandle impl ─────────────────────────────────────────────
