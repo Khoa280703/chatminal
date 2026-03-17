@@ -59,7 +59,6 @@ mod tabbar;
 mod termwindow;
 mod unicode_names;
 mod uniforms;
-mod update;
 mod utilsprites;
 
 #[cfg(feature = "dhat-heap")]

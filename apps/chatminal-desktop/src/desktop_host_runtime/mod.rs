@@ -904,9 +904,6 @@ pub(crate) async fn spawn_host_runtime_entry(
     Ok((pane, window_id as u64))
 }
 
-pub(crate) fn set_host_banner(banner: Option<String>) {
-    Mux::get().set_banner(banner);
-}
 
 pub(crate) fn add_host_domain(domain: &HostDomainHandle) {
     Mux::get().add_domain(domain);
@@ -933,8 +930,7 @@ pub(crate) fn initialize_host_mux(
         .unwrap_or_else(|| configured_default_workspace_name(config));
     mux.set_active_workspace(&default_workspace_name);
 
-    crate::update::load_last_release_info_and_set_banner();
-
+    // update checker removed — desktop deprecated
     let default_name =
         default_domain_name.unwrap_or(config.default_domain.as_deref().unwrap_or("local"));
     let domain = mux.get_domain_by_name(default_name).ok_or_else(|| {
@@ -965,7 +961,7 @@ pub(crate) fn start_host_activity() -> HostActivityGuard {
 }
 
 pub(crate) fn show_host_configuration_error_message(err: &str) {
-    host_runtime::connui::show_configuration_error_message(err);
+    log::error!("Configuration Error: {}", err);
 }
 
 pub(crate) fn create_serial_domain(serial_domain: config::SerialDomain) -> anyhow::Result<HostDomainHandle> {

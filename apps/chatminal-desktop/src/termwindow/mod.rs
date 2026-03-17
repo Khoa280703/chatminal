@@ -1511,7 +1511,7 @@ impl TermWindow {
             myself.emit_status_event();
         }
 
-        crate::update::start_update_checker();
+        // update checker disabled — desktop deprecated, WezTerm update endpoint removed
         front_end().record_window_binding(window, window_id);
 
         Ok(())
