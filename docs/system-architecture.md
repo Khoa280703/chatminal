@@ -1,11 +1,13 @@
 # System Architecture
 
-Last updated: 2026-03-17
+Last updated: 2026-03-17 (Phase 2 complete)
 
-## Latest changes (Phase 2, 2026-03-17)
+## Latest changes (Phase 2 complete, 2026-03-17)
 - **Phase 2.1 - Type alias consolidation**: 17 Runtime* types (RuntimeSession, RuntimeProfile, etc.) are now **direct type aliases** to `chatminal-protocol` types. Deleted `api/protocol.rs` (431 LOC) conversion boilerplate; moved 5 Store→Protocol From impls to `chatminal-store`.
-- **Phase 2.2 - Documentation**: Added doc comments to `chatminal-terminal-core` and `chatminal-engine-term`.
-- **Phase 1 completions** (recent): OverlayRenderScope isolated; session/terminal vocabulary unified; chatminal-mux deleted.
+- **Phase 2.2 - Engine split fallback removal**: Deleted `split_terminal_handle` + `split_terminal_handle_by_public_id` from `desktop_host_runtime/mod.rs`; removed `HostSplitSource`, `HostRuntimeEntryId`, `HostLayoutNode`, `HostSplitDirection` type aliases; replaced desktop_spawn.rs split fallback (lines 111-131) with `anyhow::bail!` error.
+- **Phase 2.3 - Dead code cleanup**: Removed 4 functions (`active_host_domain_name`, `set_default_host_domain`, `new_headless_connection_ui`, `host_client_domains`); removed 3 type aliases; ~33 LOC cleaned. Note: tab.rs split functions cannot be removed (lua-bridge dependency).
+- **Phase 2.4 - Workspace layout persistence**: Already implemented via `set_string_state`/`get_string_state` with key prefix `workspace_layout:`; mutations auto-save to app_state table.
+- **Phase 2.5 - Documentation**: Added doc comment to window.rs explaining single-Window/single-Tab desktop model; this file updated.
 
 ## Topology
 
@@ -96,6 +98,11 @@ chatminald / chatminal-app
 - `cargo test --manifest-path crates/chatminal-protocol/Cargo.toml -- --test-threads=1`: pass
 - `cargo test --manifest-path apps/chatminal-desktop/Cargo.toml -- --test-threads=1`: pass
 - `cargo test --manifest-path apps/chatminald/Cargo.toml -- --test-threads=1`: pass
+
+## Workspace layout persistence
+- Layout state persisted via `native_api.rs` `set_string_state`/`get_string_state` with key prefix `workspace_layout:`.
+- All mutations (split, close, resize, focus) auto-save to `app_state` table as JSON blob.
+- No separate schema migration needed; key-value store handles layout versioning.
 
 ## Remaining intentional compatibility
 - Engine internals vẫn có `Mux/Tab/Pane` trong `chatminal-host-runtime` và private adapter desktop.

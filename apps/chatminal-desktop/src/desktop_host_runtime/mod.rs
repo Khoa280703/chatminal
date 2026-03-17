@@ -19,7 +19,7 @@ use engine_dynamic::Value;
 use engine_term::TerminalSize;
 use host_runtime::activity::Activity;
 use host_runtime::client::ClientId;
-use host_runtime::domain::{Domain, DomainState, SplitSource};
+use host_runtime::domain::{Domain, DomainState};
 use host_runtime::pane::Pane;
 use host_runtime::window::{Window as MuxWindow, WindowId as EngineWindowId};
 use host_runtime::{Mux, MuxNotification};
@@ -85,9 +85,6 @@ pub(crate) type FrontendClientHandle = Arc<ClientId>;
 pub(crate) type RuntimeNotification = MuxNotification;
 pub(crate) type RuntimeWindow = MuxWindow;
 pub(crate) type RuntimeWindowId = EngineWindowId;
-pub(crate) type RuntimeSplitDirection = host_runtime::tab::SplitDirection;
-pub(crate) type RuntimeSplitRequest = host_runtime::tab::SplitRequest;
-pub(crate) type RuntimeSplitSize = host_runtime::tab::SplitSize;
 pub(crate) type HostMux = Mux;
 pub(crate) use host_runtime::domain::Domain as HostDomain;
 pub(crate) type HostDomainId = host_runtime::domain::DomainId;
@@ -773,10 +770,6 @@ pub(crate) fn active_frontend_client() -> Option<FrontendClientHandle> {
     Mux::get().active_identity()
 }
 
-pub(crate) fn active_host_domain_name() -> String {
-    Mux::get().default_domain().domain_name().to_string()
-}
-
 pub(crate) fn subscribe_frontend_notifications<F>(subscriber: F)
 where
     F: Fn(MuxNotification) -> bool + 'static + Send + Sync,
@@ -857,37 +850,7 @@ pub(crate) async fn spawn_local_shell_runner() -> anyhow::Result<Arc<dyn HostTer
     Ok(pane)
 }
 
-pub(crate) async fn split_terminal_handle(
-    pane_id: HostTerminalHandle,
-    direction: RuntimeSplitRequest,
-    command: Option<CommandBuilder>,
-    command_dir: Option<String>,
-    domain: SpawnSessionDomain,
-) -> anyhow::Result<(Arc<dyn HostTerminal>, TerminalSize)> {
-    Mux::get()
-        .split_pane(
-            pane_id,
-            direction,
-            SplitSource::Spawn {
-                command,
-                command_dir,
-            },
-            domain,
-        )
-        .await
-}
 
-pub(crate) async fn split_terminal_handle_by_public_id(
-    pane_id: u64,
-    direction: RuntimeSplitRequest,
-    command: Option<CommandBuilder>,
-    command_dir: Option<String>,
-    domain: SpawnSessionDomain,
-) -> anyhow::Result<(Arc<dyn HostTerminal>, TerminalSize)> {
-    let pane_id =
-        HostTerminalHandle::try_from(pane_id).map_err(|_| anyhow!("invalid terminal handle {pane_id}"))?;
-    split_terminal_handle(pane_id, direction, command, command_dir, domain).await
-}
 
 pub(crate) async fn spawn_host_runtime_entry_or_window(
     window_id: Option<u64>,
@@ -949,10 +912,6 @@ pub(crate) fn add_host_domain(domain: &HostDomainHandle) {
     Mux::get().add_domain(domain);
 }
 
-pub(crate) fn set_default_host_domain(domain: &HostDomainHandle) {
-    Mux::get().set_default_domain(domain);
-}
-
 pub(crate) fn default_host_domain() -> HostDomainHandle {
     Mux::get().default_domain()
 }
@@ -1003,10 +962,6 @@ pub(crate) fn host_activity_count() -> usize {
 
 pub(crate) fn start_host_activity() -> HostActivityGuard {
     HostActivityGuard(Activity::new())
-}
-
-pub(crate) fn new_headless_connection_ui() -> host_runtime::connui::ConnectionUI {
-    host_runtime::connui::ConnectionUI::new_headless()
 }
 
 pub(crate) fn show_host_configuration_error_message(err: &str) {
@@ -1066,10 +1021,6 @@ pub(crate) fn host_domain_has_panes_in_workspace(domain_id: usize, workspace: Op
         }
     }
     false
-}
-
-pub(crate) fn host_client_domains() -> Vec<HostDomainHandle> {
-    Mux::get().iter_domains()
 }
 
 pub(crate) async fn move_terminal_handle_to_new_runtime(

@@ -1,4 +1,4 @@
-use anyhow::{Context, anyhow, bail};
+use anyhow::{Context, anyhow};
 use crate::chatminal_runtime::DesktopSplitRequest;
 use crate::scripting::guiwin::DesktopWindowId;
 use config::TermConfig;
@@ -108,27 +108,9 @@ pub async fn spawn_command_internal(
                     "session-native terminal split has been removed; use session view split instead"
                 );
             }
-            log::warn!(
-                "engine split fallback triggered for pane_id={:?}",
-                current_pane_id
+            anyhow::bail!(
+                "engine split fallback reached — session_id is None; this is a bug"
             );
-            let activity = crate::chatminal_runtime::start_host_activity();
-            if let Some(pane_id) = current_pane_id {
-                log::trace!("doing split_pane");
-                let (pane, _size) = crate::chatminal_runtime::split_terminal_handle_by_public_id(
-                    pane_id.as_u64(),
-                    direction.into_host_request(),
-                    cmd_builder,
-                    cwd,
-                    spawn.domain,
-                )
-                    .await
-                    .context("split_pane")?;
-                pane.set_config(term_config);
-            } else {
-                bail!("there is no active pane while splitting pane!?");
-            }
-            drop(activity);
         }
         _ => {
             let activity = crate::chatminal_runtime::start_host_activity();

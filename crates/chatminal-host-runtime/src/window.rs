@@ -1,3 +1,9 @@
+//! WezTerm engine window — wraps a `Vec<Tab>`.
+//!
+//! Desktop creates exactly **1 Window with 1 Tab** via `Mux`. Multi-tab and
+//! multi-window methods are retained for daemon/lua-bridge compatibility but
+//! are not exercised by the desktop product layer.
+
 use crate::pane::CloseReason;
 use crate::{Mux, MuxNotification, Tab, TabId};
 use config::GuiPosition;

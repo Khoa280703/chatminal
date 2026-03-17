@@ -49,22 +49,6 @@ pub struct DesktopSplitRequest {
     pub size: DesktopSplitSize,
 }
 
-impl DesktopSplitRequest {
-    pub(crate) fn into_host_request(self) -> RuntimeSplitRequest {
-        RuntimeSplitRequest {
-            direction: match self.direction {
-                DesktopSplitDirection::Horizontal => RuntimeSplitDirection::Horizontal,
-                DesktopSplitDirection::Vertical => RuntimeSplitDirection::Vertical,
-            },
-            target_is_second: self.target_is_second,
-            top_level: self.top_level,
-            size: match self.size {
-                DesktopSplitSize::Cells(size) => RuntimeSplitSize::Cells(size),
-                DesktopSplitSize::Percent(size) => RuntimeSplitSize::Percent(size),
-            },
-        }
-    }
-}
 
 #[derive(Clone, Debug)]
 pub struct DesktopWorkspaceSnapshot {

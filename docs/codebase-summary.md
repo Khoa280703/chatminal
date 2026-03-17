@@ -1,6 +1,6 @@
 # Codebase Summary
 
-Last updated: 2026-03-16
+Last updated: 2026-03-17 (Phase 2 cleanup complete)
 
 ## Runtime baseline
 Chatminal hiện chia làm ba lớp rõ ràng:
@@ -27,14 +27,13 @@ Chatminal hiện chia làm ba lớp rõ ràng:
 ### Desktop private adapter
 - `apps/chatminal-desktop/src/desktop_host_runtime/mod.rs`
   - private adapter boundary duy nhất còn biết host runtime.
+  - Phase 2 cleanup: deleted `split_terminal_handle*`, `HostSplitSource`, `HostRuntimeEntryId`, `HostLayoutNode`, `HostSplitDirection` type aliases; removed 4 dead functions.
 - `apps/chatminal-desktop/src/desktop_host_runtime/session_host.rs`
   - private session host: builds `ChatminalRenderState` trực tiếp từ `session_pane` map; `HostRenderScope` chỉ còn cho overlay compat.
 - `apps/chatminal-desktop/src/desktop_host_runtime/session_pane.rs`
   - terminal pane bridge cho output/input/runtime metadata.
-- `apps/chatminal-desktop/src/desktop_host_runtime/pane.rs`
-  - runtime pane wrapper.
-- `apps/chatminal-desktop/src/desktop_host_runtime/engine_runtime_adapter.rs`
-  - desktop-side bridge sang execution/runtime core.
+- **DELETED** `apps/chatminal-desktop/src/desktop_host_runtime/engine_runtime_adapter.rs` — Phase 2 cleanup (was only 250 LOC, subsumed by session_engine)
+- **DELETED** `apps/chatminal-desktop/src/desktop_host_runtime/pane.rs` — Phase 2 cleanup (528 LOC test-only wrapper, tests refactored)
 
 ### Runtime and execution core
 - `crates/chatminal-runtime/src/state/native_api.rs`
@@ -79,11 +78,14 @@ Chatminal hiện chia làm ba lớp rõ ràng:
 - `cargo test --manifest-path apps/chatminal-desktop/Cargo.toml -- --test-threads=1`: pass
 - `cargo test --manifest-path apps/chatminald/Cargo.toml -- --test-threads=1`: pass
 
-## High-signal improvements (2026-03-16)
-- `OverlayRenderScope` boundary fully isolated: `overlay/mod.rs` no longer references render scope types. Overlay spawning now primitive: `(scope_id: u64, scope_size: TerminalSize)`.
-- Session vocabulary unified: KeyAssignment now uses `ShowSessionNavigator`, `ActivateTerminalByIndex`, `ToggleTerminalZoomState`, `SetTerminalZoomState`. ArgType uses `ActiveTerminal`, `ActiveSession`.
-- `chatminal-mux` crate fully deleted from workspace.
+## High-signal improvements (Phase 2 summary)
+- **Phase 2.1**: 17 Runtime* types unified as chatminal-protocol type aliases; `api/protocol.rs` (431 LOC) deleted; 5 Store→Protocol From impls moved to chatminal-store. Net: -431 LOC conversion boilerplate, zero redundant types at runtime boundary.
+- **Phase 2.2-2.3**: Engine split fallback path fully sealed; `split_terminal_handle*` functions deleted from desktop_host_runtime; 4 dead functions removed; ~33 LOC cleaned; type aliases consolidation (HostSplitSource, HostRuntimeEntryId, HostLayoutNode, HostSplitDirection removed).
+- **Phase 1 completions**: `OverlayRenderScope` boundary fully isolated; session vocabulary unified; 4 SSH/tmux/remote crates deleted; chatminal-mux binary deleted; ~3GB WezTerm reference snapshot deleted.
+- **Phase 2.4**: Workspace layout persistence confirmed via `set_string_state`/`get_string_state` key-value store with auto-save to app_state table.
 
-## Current risk
-- Engine-side lower layer vẫn giữ host primitives; đó là intentional private debt, không còn leak ra product-facing desktop path.
-- Command/config compatibility vẫn phải duy trì translation layer cho upstream-style key assignments.
+## Remaining engineering debt (intentional, post-Phase 2)
+- **Tab split functions**: `tab.rs` split_and_insert/compute_split_size cannot be removed (lua-bridge calls Mux::split_pane → Domain::split_pane → tab). Desktop-only uses WorkspaceLayoutState; daemon/lua still need engine split support.
+- **Engine split at daemon level**: Mux/Tab/Pane still fully present in `chatminal-host-runtime` (intentional lower private layer); daemon may use split via lua-bridge.
+- **Command/config compatibility**: `desktop_commands.rs` still translates upstream `KeyAssignment::*Tab*` for config backward-compat (not exercised by desktop product, only preserved for old configs).
+- **Lower parser duplication**: `chatminal-terminal-core` (vt100-based) vs `chatminal-engine-term` (termwiz-based) — both in codebase; daemon uses core, desktop uses engine-term.
