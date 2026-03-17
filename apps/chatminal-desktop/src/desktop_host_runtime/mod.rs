@@ -852,34 +852,6 @@ pub(crate) async fn spawn_local_shell_runner() -> anyhow::Result<Arc<dyn HostTer
 
 
 
-pub(crate) async fn spawn_host_runtime_entry_or_window(
-    window_id: Option<u64>,
-    domain: SpawnSessionDomain,
-    command: Option<CommandBuilder>,
-    command_dir: Option<String>,
-    size: TerminalSize,
-    current_pane_id: Option<HostTerminalHandle>,
-    workspace: String,
-    position: Option<config::GuiPosition>,
-) -> anyhow::Result<(Arc<HostRenderScope>, Arc<dyn HostTerminal>, EngineWindowId)> {
-    let window_id = window_id
-        .map(EngineWindowId::try_from)
-        .transpose()
-        .map_err(|_| anyhow!("invalid window id"))?;
-    Mux::get()
-        .spawn_tab_or_window(
-            window_id,
-            domain,
-            command,
-            command_dir,
-            size,
-            current_pane_id,
-            workspace,
-            position,
-        )
-        .await
-}
-
 pub(crate) async fn spawn_host_runtime_entry(
     window_id: Option<u64>,
     domain: SpawnSessionDomain,
@@ -890,18 +862,23 @@ pub(crate) async fn spawn_host_runtime_entry(
     workspace: String,
     position: Option<config::GuiPosition>,
 ) -> anyhow::Result<(Arc<dyn HostTerminal>, u64)> {
-    let (_runtime_entry, pane, window_id) = spawn_host_runtime_entry_or_window(
-        window_id,
-        domain,
-        command,
-        command_dir,
-        size,
-        current_pane_id.and_then(|pane_id| HostTerminalHandle::try_from(pane_id).ok()),
-        workspace,
-        position,
-    )
-    .await?;
-    Ok((pane, window_id as u64))
+    let engine_window_id = window_id
+        .map(EngineWindowId::try_from)
+        .transpose()
+        .map_err(|_| anyhow!("invalid window id"))?;
+    let (_runtime_entry, pane, result_window_id) = Mux::get()
+        .spawn_tab_or_window(
+            engine_window_id,
+            domain,
+            command,
+            command_dir,
+            size,
+            current_pane_id.and_then(|pane_id| HostTerminalHandle::try_from(pane_id).ok()),
+            workspace,
+            position,
+        )
+        .await?;
+    Ok((pane, result_window_id as u64))
 }
 
 
@@ -913,43 +890,33 @@ pub(crate) fn default_host_domain() -> HostDomainHandle {
     Mux::get().default_domain()
 }
 
-pub(crate) fn initialize_host_mux(
-    local_domain: Arc<dyn Domain>,
-    config: &ConfigHandle,
-    default_domain_name: Option<&str>,
-    default_workspace_name: Option<&str>,
-) -> anyhow::Result<()> {
-    let mux = Arc::new(Mux::new(Some(local_domain.clone())));
-    Mux::set_mux(&mux);
-    let client_id = Arc::new(ClientId::new());
-    mux.register_client(client_id.clone());
-    mux.replace_identity(Some(client_id));
-
-    let default_workspace_name = default_workspace_name
-        .map(str::to_string)
-        .unwrap_or_else(|| configured_default_workspace_name(config));
-    mux.set_active_workspace(&default_workspace_name);
-
-    // update checker removed — desktop deprecated
-    let default_name =
-        default_domain_name.unwrap_or(config.default_domain.as_deref().unwrap_or("local"));
-    let domain = mux.get_domain_by_name(default_name).ok_or_else(|| {
-        anyhow!(
-            "desired default domain '{}' was not found in host runtime",
-            default_name
-        )
-    })?;
-    mux.set_default_domain(&domain);
-    Ok(())
-}
-
 pub(crate) fn build_initial_host_mux(
     config: &ConfigHandle,
     default_domain_name: Option<&str>,
     default_workspace_name: Option<&str>,
 ) -> anyhow::Result<()> {
-    let domain: HostDomainHandle = Arc::new(host_runtime::domain::LocalDomain::new("local")?);
-    initialize_host_mux(domain, config, default_domain_name, default_workspace_name)
+    let local_domain: HostDomainHandle = Arc::new(host_runtime::domain::LocalDomain::new("local")?);
+    let mux = Arc::new(Mux::new(Some(local_domain)));
+    Mux::set_mux(&mux);
+    let client_id = Arc::new(ClientId::new());
+    mux.register_client(client_id.clone());
+    mux.replace_identity(Some(client_id));
+
+    let workspace = default_workspace_name
+        .map(str::to_string)
+        .unwrap_or_else(|| configured_default_workspace_name(config));
+    mux.set_active_workspace(&workspace);
+
+    let domain_name =
+        default_domain_name.unwrap_or(config.default_domain.as_deref().unwrap_or("local"));
+    let domain = mux.get_domain_by_name(domain_name).ok_or_else(|| {
+        anyhow!(
+            "desired default domain '{}' was not found in host runtime",
+            domain_name
+        )
+    })?;
+    mux.set_default_domain(&domain);
+    Ok(())
 }
 
 pub(crate) fn host_activity_count() -> usize {
