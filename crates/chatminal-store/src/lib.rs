@@ -847,7 +847,7 @@ impl Store {
 
     fn list_profiles_with_conn(&self, conn: &Connection) -> Result<Vec<StoredProfile>, String> {
         let mut stmt = conn
-            .prepare("SELECT id, name FROM profiles ORDER BY updated_at DESC, created_at ASC")
+            .prepare("SELECT id, name FROM profiles ORDER BY created_at ASC, rowid ASC")
             .map_err(|err| format!("prepare list profiles failed: {err}"))?;
         let mut rows = stmt
             .query([])
@@ -874,7 +874,7 @@ impl Store {
     ) -> Result<Vec<StoredSessionSummary>, String> {
         let mut stmt = conn
             .prepare(
-                "SELECT id, profile_id, name, cwd, status, persist_history, last_seq FROM sessions WHERE profile_id = ?1 ORDER BY updated_at DESC, created_at ASC",
+                "SELECT id, profile_id, name, cwd, status, persist_history, last_seq FROM sessions WHERE profile_id = ?1 ORDER BY created_at ASC, rowid ASC",
             )
             .map_err(|err| format!("prepare list sessions failed: {err}"))?;
 
@@ -943,4 +943,56 @@ fn now_millis() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|value| value.as_millis() as u64)
         .unwrap_or(0)
+}
+
+// ─── Store → Protocol conversions ────────────────────────────────────────────
+
+impl From<StoredSessionStatus> for chatminal_protocol::SessionStatus {
+    fn from(value: StoredSessionStatus) -> Self {
+        match value {
+            StoredSessionStatus::Running => Self::Running,
+            StoredSessionStatus::Disconnected => Self::Disconnected,
+        }
+    }
+}
+
+impl From<chatminal_protocol::SessionStatus> for StoredSessionStatus {
+    fn from(value: chatminal_protocol::SessionStatus) -> Self {
+        match value {
+            chatminal_protocol::SessionStatus::Running => Self::Running,
+            chatminal_protocol::SessionStatus::Disconnected => Self::Disconnected,
+        }
+    }
+}
+
+impl From<StoredProfile> for chatminal_protocol::ProfileInfo {
+    fn from(value: StoredProfile) -> Self {
+        Self {
+            profile_id: value.profile_id,
+            name: value.name,
+        }
+    }
+}
+
+impl From<StoredSessionSummary> for chatminal_protocol::SessionInfo {
+    fn from(value: StoredSessionSummary) -> Self {
+        Self {
+            session_id: value.session_id,
+            profile_id: value.profile_id,
+            name: value.name,
+            cwd: value.cwd,
+            status: value.status.into(),
+            persist_history: value.persist_history,
+            seq: value.seq,
+        }
+    }
+}
+
+impl From<StoredSessionSnapshot> for chatminal_protocol::SessionSnapshot {
+    fn from(value: StoredSessionSnapshot) -> Self {
+        Self {
+            content: value.content,
+            seq: value.seq,
+        }
+    }
 }

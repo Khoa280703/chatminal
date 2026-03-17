@@ -9,7 +9,8 @@ use crate::workspace_layout::{WorkspaceLayoutState, WorkspaceSplitAxis};
 use chatminal_store::{Store, StoredSession, StoredSessionSnapshot, StoredSessionStatus};
 
 use crate::api::{
-    RuntimeCreatedSession, RuntimeEvent, RuntimeProfile, RuntimeSessionSnapshot, RuntimeWorkspace,
+    RuntimeCreatedSession, RuntimeEvent, RuntimeProfile, RuntimeSessionLaunchSpec,
+    RuntimeSessionSnapshot, RuntimeWorkspace,
 };
 use crate::config::{DaemonConfig, resolve_session_cwd};
 use crate::metrics::{RuntimeMetrics, RuntimeMetricsSnapshot};
@@ -34,28 +35,12 @@ const WORKSPACE_LAYOUT_PREFIX: &str = "workspace_layout:";
 const DEFAULT_KEEP_ALIVE_ON_CLOSE: bool = true;
 const DEFAULT_START_IN_TRAY: bool = false;
 
-/// Execution status of a session. Owned by `chatminal-runtime`; updated via the desktop adapter.
-/// Uses only primitive types — no import from `chatminal-session-runtime` allowed here.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SessionExecutionStatus {
-    /// Session exists in DaemonState but no PTY has been spawned yet.
-    NotStarted,
-    /// PTY is running; `runtime_id` is the opaque handle from the session engine.
-    Running { runtime_id: u64 },
-    /// PTY was stopped (detached or closed); SessionEntry still present.
-    Stopped,
-}
-
 struct SessionEntry {
     session: StoredSession,
     runtime: Option<RuntimeHandle>,
     live_output: String,
     generation: u64,
     prepend_run_boundary_on_next_output: bool,
-    /// Tracks whether this session's PTY is running. Populated by the desktop adapter; not yet
-    /// synced in Phase 05 (sync wiring deferred to Phase 07 after dependency direction is
-    /// reversed).
-    execution_status: SessionExecutionStatus,
 }
 
 struct SessionSpawnPlan {
@@ -85,7 +70,7 @@ struct StateInner {
 pub struct DaemonState {
     // `DaemonState` owns business/workspace state.
     // Live execution state is delegated to the `execution` adapter (concrete impl in
-    // `desktop_host_runtime`). No `chatminal-session-runtime` types leak into this struct.
+    // `desktop_host_runtime`). No session_engine types leak into this struct.
     inner: Arc<Mutex<StateInner>>,
     events: std_mpsc::SyncSender<SessionEvent>,
     metrics: RuntimeMetrics,
@@ -162,7 +147,6 @@ impl DaemonState {
                         live_output: String::new(),
                         generation: 0,
                         prepend_run_boundary_on_next_output: false,
-                        execution_status: SessionExecutionStatus::NotStarted,
                     },
                 );
             }
@@ -405,19 +389,45 @@ impl DaemonState {
     ) -> Result<(), String> {
         enum Activation {
             Existing(RuntimeHandle, String),
+            Recover(Option<RuntimeHandle>, SessionSpawnPlan),
             Spawn(SessionSpawnPlan),
         }
 
         let activation = {
-            let inner = self
+            let mut inner = self
                 .inner
                 .lock()
                 .map_err(|_| "state lock poisoned".to_string())?;
-            let Some(entry) = inner.sessions.get(session_id) else {
+            let attachment = self.session_runtime_attachment(session_id);
+            let Some(entry) = inner.sessions.get_mut(session_id) else {
                 return Err("session not found".to_string());
             };
             if let Some(runtime) = entry.runtime.clone() {
-                Activation::Existing(runtime, entry.session.profile_id.clone())
+                if attachment.is_some() {
+                    Activation::Existing(runtime, entry.session.profile_id.clone())
+                } else {
+                    log::warn!(
+                        "session_activate: recovering stale runtime handle for session {session_id}"
+                    );
+                    let stale_runtime = entry.runtime.take();
+                    entry.generation = entry.generation.saturating_add(1);
+                    entry.session.status = StoredSessionStatus::Disconnected;
+                    entry.prepend_run_boundary_on_next_output = false;
+                    Activation::Recover(
+                        stale_runtime,
+                        SessionSpawnPlan {
+                            session_id: entry.session.session_id.clone(),
+                            profile_id: entry.session.profile_id.clone(),
+                            expected_active_session_id: None,
+                            expected_generation: entry.generation,
+                            next_generation: entry.generation.saturating_add(1),
+                            shell: entry.session.shell.clone(),
+                            cwd: entry.session.cwd.clone(),
+                            cols,
+                            rows,
+                        },
+                    )
+                }
             } else {
                 Activation::Spawn(SessionSpawnPlan {
                     session_id: entry.session.session_id.clone(),
@@ -449,6 +459,10 @@ impl DaemonState {
                 }
                 inner.set_active_session_and_publish(&profile_id, session_id)?;
                 Ok(())
+            }
+            Activation::Recover(stale_runtime, plan) => {
+                kill_runtime_handle(stale_runtime);
+                self.commit_spawned_session(plan)
             }
             Activation::Spawn(plan) => self.commit_spawned_session(plan),
         }
@@ -493,6 +507,24 @@ impl DaemonState {
         };
 
         Ok(merged.into())
+    }
+
+    pub fn session_launch_spec(
+        &self,
+        session_id: &str,
+    ) -> Result<RuntimeSessionLaunchSpec, String> {
+        let inner = self
+            .inner
+            .lock()
+            .map_err(|_| "state lock poisoned".to_string())?;
+        let Some(entry) = inner.sessions.get(session_id) else {
+            return Err("session not found".to_string());
+        };
+        Ok(RuntimeSessionLaunchSpec {
+            session_id: entry.session.session_id.clone(),
+            shell: entry.session.shell.clone(),
+            cwd: entry.session.cwd.clone(),
+        })
     }
 
     pub fn workspace_layout_load(&self) -> Result<Option<WorkspaceLayoutState>, String> {
@@ -850,7 +882,7 @@ fn snapshot_requires_run_boundary(snapshot: &StoredSessionSnapshot) -> bool {
 }
 
 fn prepend_run_boundary(chunk: &str) -> String {
-    if chunk.is_empty() || chunk.starts_with('\n') || chunk.starts_with('\r') {
+    if chunk.is_empty() || chunk.starts_with('\n') || chunk.starts_with("\r\n") {
         return chunk.to_string();
     }
     format!("\r\n{chunk}")

@@ -1,4 +1,3 @@
-use crate::scripting::guiwin::DesktopWindowId;
 use crate::termwindow::box_model::*;
 use crate::termwindow::modal::Modal;
 use crate::termwindow::render::corners::{
@@ -184,12 +183,11 @@ impl PaneSelector {
                     }
                 }
                 SessionSelectMode::SwapWithActiveKeepFocus | SessionSelectMode::SwapWithActive => {
-                    let swapped_leaf = term_window.chatminal_sidebar.is_enabled()
-                        && term_window.swap_active_with_session_terminal_instance(
-                            &target.pane,
-                            self.mode == SessionSelectMode::SwapWithActiveKeepFocus,
+                    if term_window.chatminal_sidebar.is_enabled() {
+                        log::warn!(
+                            "session-native leaf swap is no longer supported"
                         );
-                    if !swapped_leaf {
+                    } else {
                         let _ = term_window.swap_active_with_terminal_handle_in_active_runtime(
                             target.pane.pane_id() as u64,
                             self.mode == SessionSelectMode::SwapWithActiveKeepFocus,
@@ -198,16 +196,9 @@ impl PaneSelector {
                 }
                 SessionSelectMode::MoveToNewWindow => {
                     if term_window.chatminal_sidebar.is_enabled() {
-                        let moved_leaf =
-                            crate::chatminal_runtime::desktop_move_terminal_handle_to_new_window(
-                                term_window.window_id as DesktopWindowId,
-                                target.pane.pane_id() as u64,
-                            );
-                        if !moved_leaf {
-                            log::warn!(
-                                "session-native move to new window is unavailable for this pane"
-                            );
-                        }
+                        log::warn!(
+                            "session-native move to new window is no longer supported"
+                        );
                     } else {
                         let host_terminal_handle = target.pane.pane_id();
                         promise::spawn::spawn(async move {
@@ -225,16 +216,9 @@ impl PaneSelector {
                 }
                 SessionSelectMode::MoveToNewSession => {
                     if term_window.chatminal_sidebar.is_enabled() {
-                        let moved_leaf =
-                            crate::chatminal_runtime::desktop_move_terminal_handle_to_new_runtime(
-                                term_window.window_id as DesktopWindowId,
-                                target.pane.pane_id() as u64,
-                            );
-                        if !moved_leaf {
-                            log::warn!(
-                                "session-native move to new runtime is unavailable for this pane"
-                            );
-                        }
+                        log::warn!(
+                            "session-native move to new session is no longer supported"
+                        );
                     } else {
                         let host_terminal_handle = target.pane.pane_id();
                         let window_id = term_window.window_id;

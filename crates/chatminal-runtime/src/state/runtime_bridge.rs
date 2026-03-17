@@ -1,11 +1,17 @@
 // Runtime execution adapter — abstraction boundary between `chatminal-runtime`
-// and the actual session execution engine (`chatminal-session-runtime`).
+// and the actual session execution engine (`desktop_host_runtime::session_engine`).
 //
 // `DaemonState` depends only on this trait. The concrete implementation lives in
-// `desktop_host_runtime` (which depends on `chatminal-session-runtime`).
+// `desktop_host_runtime` (which depends on `desktop_host_runtime::session_engine`).
 //
-// Phase 07: this file was rewritten to remove the direct `chatminal-session-runtime`
+// Phase 07: this file was rewritten to remove the direct `desktop_host_runtime::session_engine`
 // dependency. All engine types are hidden behind `RuntimeExecutionAdapter`.
+//
+// ID ownership boundary:
+// - Daemon (`chatminal-runtime`) only needs: `session_id` (String) + `RuntimeId`
+// - Engine/desktop IDs (`PaneId`, `TabId`, `WindowId`, `TerminalInstanceId`) are
+//   desktop-only concerns and MUST NOT leak into this crate.
+//   See `DesktopSessionHost::session_tab_shim` for the desktop-local mapping.
 
 use std::sync::{Arc, Mutex};
 
@@ -114,13 +120,6 @@ impl DaemonState {
         session_id: &str,
         runtime_id: RuntimeId,
     ) -> Result<(), String> {
-        if let Ok(mut inner) = self.inner.lock() {
-            if let Some(entry) = inner.sessions.get_mut(session_id) {
-                entry.execution_status = crate::state::SessionExecutionStatus::Running {
-                    runtime_id: runtime_id.as_u64(),
-                };
-            }
-        }
         self.execution
             .notify_session_activated(self, session_id, runtime_id)
     }
@@ -131,11 +130,6 @@ impl DaemonState {
         runtime_id: RuntimeId,
         lookup_after_close: &RuntimeOwnedSessionLookup,
     ) -> Result<(), String> {
-        if let Ok(mut inner) = self.inner.lock() {
-            if let Some(entry) = inner.sessions.get_mut(session_id) {
-                entry.execution_status = crate::state::SessionExecutionStatus::Stopped;
-            }
-        }
         self.execution
             .notify_session_closed(self, session_id, runtime_id, lookup_after_close)
     }

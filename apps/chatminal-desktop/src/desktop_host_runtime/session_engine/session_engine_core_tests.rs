@@ -15,7 +15,7 @@ fn shell_command(script: &str) -> CommandBuilder {
 
 #[test]
 fn detached_runtime_spawn_registers_runtime_and_layout() {
-    let engine = StatefulSessionEngine::new((), Arc::new(Mutex::new(SessionCoreState::default())));
+    let engine = StatefulSessionEngine::new(Arc::new(Mutex::new(SessionCoreState::default())));
     let events = engine.subscribe();
 
     let state = engine
@@ -30,6 +30,7 @@ fn detached_runtime_spawn_registers_runtime_and_layout() {
                 pixel_height: 0,
                 dpi: 96,
             },
+            None,
         )
         .expect("spawn detached runtime");
     assert_eq!(
@@ -65,7 +66,7 @@ fn detached_runtime_spawn_registers_runtime_and_layout() {
 
 #[test]
 fn detached_runtime_close_cleans_runtime_and_core_state() {
-    let engine = StatefulSessionEngine::new((), Arc::new(Mutex::new(SessionCoreState::default())));
+    let engine = StatefulSessionEngine::new(Arc::new(Mutex::new(SessionCoreState::default())));
     let state = engine
         .spawn_detached_runtime(
             "session-a",
@@ -78,6 +79,7 @@ fn detached_runtime_close_cleans_runtime_and_core_state() {
                 pixel_height: 0,
                 dpi: 96,
             },
+            None,
         )
         .expect("spawn detached runtime");
     let active_terminal_instance = state.snapshot.active_terminal_instance_id.expect("active leaf id");
@@ -101,13 +103,13 @@ fn detached_runtime_close_cleans_runtime_and_core_state() {
 
 #[test]
 fn snapshot_runtime_from_core_returns_none_for_unknown_runtime() {
-    let engine = StatefulSessionEngine::new((), Arc::new(Mutex::new(SessionCoreState::default())));
+    let engine = StatefulSessionEngine::new(Arc::new(Mutex::new(SessionCoreState::default())));
     assert!(engine.snapshot_runtime_from_core(RuntimeId::new(99)).is_none());
 }
 
 #[test]
 fn focus_terminal_instance_native_updates_active_leaf_and_publishes_event() {
-    let engine = StatefulSessionEngine::new((), Arc::new(Mutex::new(SessionCoreState::default())));
+    let engine = StatefulSessionEngine::new(Arc::new(Mutex::new(SessionCoreState::default())));
     let events = engine.subscribe();
 
     let state = engine
@@ -116,6 +118,7 @@ fn focus_terminal_instance_native_updates_active_leaf_and_publishes_event() {
             1,
             shell_command("sleep 1"),
             TerminalSize { rows: 20, cols: 80, pixel_width: 0, pixel_height: 0, dpi: 96 },
+            None,
         )
         .expect("spawn");
 
@@ -143,13 +146,14 @@ fn focus_terminal_instance_native_updates_active_leaf_and_publishes_event() {
 
 #[test]
 fn focus_terminal_instance_native_returns_none_for_unknown_leaf() {
-    let engine = StatefulSessionEngine::new((), Arc::new(Mutex::new(SessionCoreState::default())));
+    let engine = StatefulSessionEngine::new(Arc::new(Mutex::new(SessionCoreState::default())));
     let state = engine
         .spawn_detached_runtime(
             "session-a",
             1,
             shell_command("sleep 1"),
             TerminalSize { rows: 20, cols: 80, pixel_width: 0, pixel_height: 0, dpi: 96 },
+            None,
         )
         .expect("spawn");
     let runtime_id = state.snapshot.runtime_id;
@@ -162,7 +166,7 @@ fn focus_terminal_instance_native_returns_none_for_unknown_leaf() {
 
 #[test]
 fn focus_runtime_native_publishes_runtime_focused_event() {
-    let engine = StatefulSessionEngine::new((), Arc::new(Mutex::new(SessionCoreState::default())));
+    let engine = StatefulSessionEngine::new(Arc::new(Mutex::new(SessionCoreState::default())));
     let events = engine.subscribe();
     let state = engine
         .spawn_detached_runtime(
@@ -170,6 +174,7 @@ fn focus_runtime_native_publishes_runtime_focused_event() {
             1,
             shell_command("sleep 1"),
             TerminalSize { rows: 20, cols: 80, pixel_width: 0, pixel_height: 0, dpi: 96 },
+            None,
         )
         .expect("spawn");
     let _ = events.recv_timeout(Duration::from_secs(1)); // drain RuntimeAttached
@@ -192,7 +197,7 @@ fn focus_runtime_native_publishes_runtime_focused_event() {
 
 #[test]
 fn close_runtime_native_removes_state_and_publishes_closed_event() {
-    let engine = StatefulSessionEngine::new((), Arc::new(Mutex::new(SessionCoreState::default())));
+    let engine = StatefulSessionEngine::new(Arc::new(Mutex::new(SessionCoreState::default())));
     let events = engine.subscribe();
     let state = engine
         .spawn_detached_runtime(
@@ -200,6 +205,7 @@ fn close_runtime_native_removes_state_and_publishes_closed_event() {
             1,
             shell_command("sleep 5"),
             TerminalSize { rows: 20, cols: 80, pixel_width: 0, pixel_height: 0, dpi: 96 },
+            None,
         )
         .expect("spawn");
     let _ = events.recv_timeout(Duration::from_secs(1)); // drain RuntimeAttached
@@ -230,7 +236,7 @@ fn close_runtime_native_removes_state_and_publishes_closed_event() {
 
 #[test]
 fn ensure_session_runtime_native_focuses_existing_runtime_without_spawn() {
-    let engine = StatefulSessionEngine::new((), Arc::new(Mutex::new(SessionCoreState::default())));
+    let engine = StatefulSessionEngine::new(Arc::new(Mutex::new(SessionCoreState::default())));
     let events = engine.subscribe();
 
     // First call spawns new runtime
@@ -267,51 +273,8 @@ fn ensure_session_runtime_native_focuses_existing_runtime_without_spawn() {
 }
 
 #[test]
-fn close_leaf_native_removes_leaf_state_and_closes_last_leaf_runtime() {
-    let engine = StatefulSessionEngine::new((), Arc::new(Mutex::new(SessionCoreState::default())));
-    let events = engine.subscribe();
-
-    let state = engine
-        .spawn_detached_runtime(
-            "session-a",
-            1,
-            shell_command("sleep 5"),
-            TerminalSize {
-                rows: 20,
-                cols: 80,
-                pixel_width: 0,
-                pixel_height: 0,
-                dpi: 96,
-            },
-        )
-        .expect("spawn");
-    let _ = events.recv_timeout(Duration::from_secs(1)); // drain RuntimeAttached
-
-    let runtime_id = state.snapshot.runtime_id;
-    let terminal_instance_id = state.snapshot.active_terminal_instance_id.expect("leaf");
-
-    assert!(engine.close_leaf_native("session-a", runtime_id, terminal_instance_id));
-    assert!(engine.core_state_handle().lock().unwrap().runtime(runtime_id).is_none());
-    assert!(engine.leaf_runtime_registry().runtime(terminal_instance_id).is_none());
-
-    let deadline = std::time::Instant::now() + Duration::from_secs(2);
-    loop {
-        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-        let event = events.recv_timeout(remaining).unwrap();
-        match event {
-            Some(SessionRuntimeEvent::RuntimeClosed {
-                session_id: ref sid,
-                runtime_id: sid2,
-            }) if sid == "session-a" && sid2 == runtime_id => break,
-            Some(_) => continue,
-            None => panic!("timed out waiting for RuntimeClosed event"),
-        }
-    }
-}
-
-#[test]
 fn detached_runtime_output_can_be_replayed_from_registry() {
-    let engine = StatefulSessionEngine::new((), Arc::new(Mutex::new(SessionCoreState::default())));
+    let engine = StatefulSessionEngine::new(Arc::new(Mutex::new(SessionCoreState::default())));
     let state = engine
         .spawn_detached_runtime(
             "session-a",
@@ -324,6 +287,7 @@ fn detached_runtime_output_can_be_replayed_from_registry() {
                 pixel_height: 0,
                 dpi: 96,
             },
+            None,
         )
         .expect("spawn detached runtime");
     let terminal_instance_id = state.snapshot.active_terminal_instance_id.expect("active leaf");

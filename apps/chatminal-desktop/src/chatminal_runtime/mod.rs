@@ -10,23 +10,22 @@ use crate::chatminal_layout::workspace_store::{
 };
 use crate::chatminal_render::ChatminalRenderState;
 use crate::scripting::guiwin::DesktopWindowId;
-use config::keyassignment::{SessionDirection, SpawnSessionDomain};
 use chatminal_runtime::{
     RuntimeCreatedSession, RuntimeEvent, RuntimeProfile, RuntimeSessionSnapshot, RuntimeWorkspace,
 };
+use chatminal_store::Store;
 
-pub(crate) use client::ChatminalRuntimeClient;
-pub(crate) use client::resolve_target_session_id;
+pub use crate::desktop_host_runtime::session_engine::SessionEngineShared;
 pub(crate) use crate::desktop_host_runtime::*;
 pub use chatminal_runtime::{
     RuntimeId, RuntimeSessionBridgeAction as DesktopSessionBridgeAction,
-    RuntimeSessionLookup as DesktopSessionLookup, SessionEngineCapability,
-    SessionGroupId, SessionGroupSnapshot, SessionLayoutTarget,
-    SessionRenderTargetId, SessionRenderTargetSnapshot, SessionTerminalHandle,
-    SessionViewBinding, SessionViewId, SessionWindowBinding, TerminalInstanceId,
+    RuntimeSessionLookup as DesktopSessionLookup, SessionEngineCapability, SessionGroupId,
+    SessionGroupSnapshot, SessionLayoutTarget, SessionRenderTargetId, SessionRenderTargetSnapshot,
+    SessionTerminalHandle, SessionViewBinding, SessionViewId, TerminalInstanceId,
     WorkspaceLayoutNodeKind, WorkspaceLayoutState, WorkspaceNodeId, WorkspaceSplitAxis,
 };
-pub use crate::desktop_host_runtime::session_engine::SessionEngineShared;
+pub(crate) use client::resolve_target_session_id;
+pub(crate) use client::ChatminalRuntimeClient;
 
 pub const DESKTOP_LAYOUT_WORKSPACE_ID: &str = DEFAULT_LAYOUT_WORKSPACE_ID;
 
@@ -80,7 +79,6 @@ pub struct DesktopWorkspaceSubscription {
 
 #[derive(Clone, Debug)]
 pub struct DesktopSessionWindowSnapshot {
-    pub window_binding: SessionWindowBinding,
     pub workspace_snapshot: DesktopWorkspaceSnapshot,
     pub lookup: DesktopSessionLookup,
 }
@@ -101,10 +99,12 @@ pub struct DesktopSidebarProfile {
     pub profile_id: String,
     pub name: String,
     pub is_active: bool,
+    pub is_expanded: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopSidebarSession {
+    pub profile_id: String,
     pub session_id: String,
     pub name: String,
     pub status: String,
@@ -127,12 +127,16 @@ pub struct DesktopSessionRuntimeSummary {
     pub render_target: SessionRenderTargetSnapshot,
     pub view_binding: Option<SessionViewBinding>,
     pub group_snapshot: Option<SessionGroupSnapshot>,
-    pub window_binding: SessionWindowBinding,
     pub capability: SessionEngineCapability,
 }
 
 impl DesktopSessionRuntimeSummary {
-    fn from_session(window_id: DesktopWindowId, workspace_id: &str, session_id: &str, runtime_id: RuntimeId) -> Self {
+    fn from_session(
+        window_id: DesktopWindowId,
+        workspace_id: &str,
+        session_id: &str,
+        runtime_id: RuntimeId,
+    ) -> Self {
         let render_target = desktop_render_state_for_session(window_id, session_id)
             .map(|state| state.render_target.clone())
             .unwrap_or(SessionRenderTargetSnapshot {
@@ -140,7 +144,9 @@ impl DesktopSessionRuntimeSummary {
                 runtime_id,
                 active_terminal_instance_id: None,
             });
-        let view_binding = desktop_session_view_binding(workspace_id, session_id).ok().flatten();
+        let view_binding = desktop_session_view_binding(workspace_id, session_id)
+            .ok()
+            .flatten();
         let group_snapshot = view_binding
             .as_ref()
             .map(desktop_group_snapshot_for_view_binding);
@@ -149,7 +155,6 @@ impl DesktopSessionRuntimeSummary {
             render_target,
             view_binding,
             group_snapshot,
-            window_binding: desktop_window_binding(window_id, workspace_id),
             capability: SessionEngineCapability::desktop_embedded(),
         }
     }
@@ -195,10 +200,18 @@ fn remember_desktop_last_active_session(
 
 fn desktop_focus_layout_session(session_id: &str) {
     let store = DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID);
-    let _ = store.ensure_for_session(session_id);
     if let Some(view_id) = store.view_id_for_session(session_id) {
         let _ = store.focus_view(view_id);
+        return;
     }
+    if let Some(layout) = store.snapshot_or_restore() {
+        let active_view_id = layout.active_view_id;
+        if store.attach_session(active_view_id, session_id).is_some() {
+            let _ = store.focus_view(active_view_id);
+            return;
+        }
+    }
+    let _ = store.ensure_for_session(session_id);
 }
 
 fn desktop_close_layout_session(session_id: &str) -> Option<String> {
@@ -215,9 +228,7 @@ fn desktop_close_layout_session(session_id: &str) -> Option<String> {
         .map(|view| view.session_id.clone())
 }
 
-fn desktop_group_snapshot_for_view_binding(
-    binding: &SessionViewBinding,
-) -> SessionGroupSnapshot {
+fn desktop_group_snapshot_for_view_binding(binding: &SessionViewBinding) -> SessionGroupSnapshot {
     let group_id = binding
         .group_id
         .unwrap_or_else(|| SessionGroupId::new(binding.view_id.as_u64()));
@@ -250,26 +261,6 @@ pub fn desktop_session_view_binding(
     }))
 }
 
-pub fn desktop_window_binding(
-    window_id: DesktopWindowId,
-    workspace_id: &str,
-) -> SessionWindowBinding {
-    let snapshot = load_desktop_workspace_snapshot(workspace_id).ok();
-    let active_session_id = snapshot.as_ref().and_then(DesktopWorkspaceSnapshot::active_session_id);
-    let active_view_id = snapshot.as_ref().and_then(DesktopWorkspaceSnapshot::active_view_id);
-    let active_render_target_id = active_session_id
-        .as_deref()
-        .and_then(|session_id| desktop_render_state_for_session(window_id, session_id))
-        .map(|state| state.render_target_id());
-    SessionWindowBinding {
-        window_id: window_id as u64,
-        workspace_id: workspace_id.to_string(),
-        active_session_id,
-        active_view_id,
-        active_render_target_id,
-    }
-}
-
 fn desktop_terminal_binding_for_session(
     window_id: DesktopWindowId,
     session_id: &str,
@@ -295,12 +286,9 @@ pub fn desktop_session_terminal_binding(
 ) -> Option<DesktopSessionTerminalBinding> {
     let snapshot = load_desktop_workspace_snapshot(DEFAULT_LAYOUT_WORKSPACE_ID).ok()?;
     let active_session_id = snapshot.active_session_id();
-    if let Some(binding) = active_session_id
-        .as_deref()
-        .and_then(|session_id| {
-            desktop_terminal_binding_for_session(window_id, session_id, terminal_handle)
-        })
-    {
+    if let Some(binding) = active_session_id.as_deref().and_then(|session_id| {
+        desktop_terminal_binding_for_session(window_id, session_id, terminal_handle)
+    }) {
         return Some(binding);
     }
     snapshot.workspace.sessions.iter().find_map(|session| {
@@ -310,11 +298,12 @@ pub fn desktop_session_terminal_binding(
 
 impl DesktopWorkspaceSnapshot {
     pub fn active_session_id(&self) -> Option<String> {
-        self.layout
-            .as_ref()
-            .and_then(|layout| layout.view(layout.active_view_id))
-            .map(|view| view.session_id.clone())
-            .or_else(|| self.workspace.active_session_id.clone())
+        self.workspace.active_session_id.clone().or_else(|| {
+            self.layout
+                .as_ref()
+                .and_then(|layout| layout.view(layout.active_view_id))
+                .map(|view| view.session_id.clone())
+        })
     }
 
     pub fn active_view_id(&self) -> Option<SessionViewId> {
@@ -323,10 +312,6 @@ impl DesktopWorkspaceSnapshot {
 }
 
 impl DesktopSessionWindowSnapshot {
-    pub fn active_session_id(&self) -> Option<String> {
-        self.workspace_snapshot.active_session_id()
-    }
-
     pub fn active_view_id(&self) -> Option<SessionViewId> {
         self.workspace_snapshot.active_view_id()
     }
@@ -341,12 +326,28 @@ pub fn desktop_workspace_snapshot_needs_refresh(event: &RuntimeEvent) -> bool {
     )
 }
 
-pub fn load_desktop_sidebar_snapshot(
-    workspace_id: &str,
-) -> Result<DesktopSidebarSnapshot, String> {
+pub fn load_desktop_sidebar_snapshot(workspace_id: &str) -> Result<DesktopSidebarSnapshot, String> {
     let snapshot = load_desktop_workspace_snapshot(workspace_id)?;
     let active_profile_id = snapshot.workspace.active_profile_id.clone();
     let active_session_id = snapshot.active_session_id();
+    let fallback_sessions = snapshot.workspace.sessions.clone();
+    let sessions = load_desktop_sidebar_sessions_from_store(
+        &snapshot.workspace.profiles,
+        active_session_id.as_deref(),
+    )
+    .unwrap_or_else(|err| {
+        log::warn!("sidebar: falling back to workspace sessions because store read failed: {err}");
+        fallback_sessions
+            .into_iter()
+            .map(|session| DesktopSidebarSession {
+                profile_id: session.profile_id,
+                is_active: active_session_id.as_deref() == Some(session.session_id.as_str()),
+                session_id: session.session_id,
+                name: session.name,
+                status: format!("{:?}", session.status).to_lowercase(),
+            })
+            .collect()
+    });
     Ok(DesktopSidebarSnapshot {
         active_profile_id: active_profile_id.clone(),
         active_session_id: active_session_id.clone(),
@@ -356,24 +357,35 @@ pub fn load_desktop_sidebar_snapshot(
             .into_iter()
             .map(|profile| DesktopSidebarProfile {
                 is_active: active_profile_id.as_deref() == Some(profile.profile_id.as_str()),
+                is_expanded: false,
                 profile_id: profile.profile_id,
                 name: profile.name,
             })
             .collect(),
-        sessions: snapshot
-            .workspace
-            .sessions
-            .into_iter()
-            .map(|session| DesktopSidebarSession {
-                is_active: active_session_id.as_deref() == Some(session.session_id.as_str()),
-                session_id: session.session_id,
-                name: session.name,
-                status: format!("{:?}", session.status).to_lowercase(),
-            })
-            .collect(),
+        sessions,
         error: None,
         version: 0,
     })
+}
+
+pub(crate) fn load_desktop_sidebar_sessions_from_store(
+    profiles: &[RuntimeProfile],
+    active_session_id: Option<&str>,
+) -> Result<Vec<DesktopSidebarSession>, String> {
+    let store = Store::initialize_default()?;
+    let mut sessions = Vec::new();
+    for profile in profiles {
+        for session in store.list_sessions_by_profile(&profile.profile_id)? {
+            sessions.push(DesktopSidebarSession {
+                profile_id: session.profile_id,
+                is_active: active_session_id == Some(session.session_id.as_str()),
+                session_id: session.session_id,
+                name: session.name,
+                status: format!("{:?}", session.status).to_lowercase(),
+            });
+        }
+    }
+    Ok(sessions)
 }
 
 impl DesktopWorkspaceSubscription {
@@ -432,7 +444,9 @@ fn desktop_prepare_host_layout(
     size: engine_term::TerminalSize,
 ) -> Option<Arc<DesktopSessionHost>> {
     let host = desktop_session_host(window_id)?;
-    let Some(layout) = DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID).snapshot_or_restore() else {
+    let Some(layout) =
+        DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID).snapshot_or_restore()
+    else {
         return Some(host);
     };
 
@@ -450,8 +464,7 @@ fn desktop_prepare_host_layout(
         if let Some(runtime_id) = desktop_runtime_id_for_session(&active_session_id) {
             let _ = host.focus_runtime(&active_session_id, runtime_id);
         } else {
-            let _ = DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID)
-                .ensure_for_session(&active_session_id);
+            desktop_focus_layout_session(&active_session_id);
         }
     }
 
@@ -489,11 +502,15 @@ pub fn workspace_layout_restore_persisted(
 pub fn workspace_layout_snapshot(
     workspace_id: &str,
 ) -> Result<Option<WorkspaceLayoutState>, String> {
-    embedded_runtime_arc()?.state.workspace_layout_snapshot(workspace_id)
+    embedded_runtime_arc()?
+        .state
+        .workspace_layout_snapshot(workspace_id)
 }
 
 pub fn workspace_layout_remove(workspace_id: &str) -> Result<(), String> {
-    embedded_runtime_arc()?.state.workspace_layout_remove(workspace_id)
+    embedded_runtime_arc()?
+        .state
+        .workspace_layout_remove(workspace_id)
 }
 
 pub fn workspace_layout_replace(
@@ -520,9 +537,12 @@ pub fn workspace_layout_split_view(
     axis: WorkspaceSplitAxis,
     session_id: &str,
 ) -> Result<Option<WorkspaceLayoutState>, String> {
-    embedded_runtime_arc()?
-        .state
-        .workspace_layout_split_view(workspace_id, view_id, axis, session_id)
+    embedded_runtime_arc()?.state.workspace_layout_split_view(
+        workspace_id,
+        view_id,
+        axis,
+        session_id,
+    )
 }
 
 pub fn workspace_layout_attach_session(
@@ -591,47 +611,10 @@ pub fn desktop_session_window_snapshot(
 ) -> Result<DesktopSessionWindowSnapshot, String> {
     let workspace_snapshot = load_desktop_workspace_snapshot(DEFAULT_LAYOUT_WORKSPACE_ID)?;
     let lookup = desktop_collect_session_lookup(window_id);
-    let window_binding = desktop_window_binding(window_id, DEFAULT_LAYOUT_WORKSPACE_ID);
     Ok(DesktopSessionWindowSnapshot {
-        window_binding,
         workspace_snapshot,
         lookup,
     })
-}
-
-pub fn desktop_ordered_session_ids(window_id: DesktopWindowId) -> Vec<String> {
-    let Ok(snapshot) = desktop_session_window_snapshot(window_id) else {
-        return Vec::new();
-    };
-    let workspace_ids: Vec<String> = snapshot
-        .workspace_snapshot
-        .workspace
-        .sessions
-        .iter()
-        .map(|session| session.session_id.clone())
-        .collect();
-    let Some(layout) = snapshot.workspace_snapshot.layout else {
-        return workspace_ids;
-    };
-
-    let mut ordered = Vec::new();
-    for view in layout.views {
-        if workspace_ids
-            .iter()
-            .any(|session_id| session_id == &view.session_id)
-            && !ordered
-                .iter()
-                .any(|session_id| session_id == &view.session_id)
-        {
-            ordered.push(view.session_id);
-        }
-    }
-    for session_id in workspace_ids {
-        if !ordered.iter().any(|existing| existing == &session_id) {
-            ordered.push(session_id);
-        }
-    }
-    ordered
 }
 
 pub fn desktop_last_active_session_id(window_id: DesktopWindowId) -> Option<String> {
@@ -695,8 +678,7 @@ pub fn desktop_session_entry_bindings(
                 is_active: view_id
                     .map(|view_id| Some(view_id) == active_view_id)
                     .unwrap_or_else(|| {
-                        snapshot.lookup.active_session_id.as_deref()
-                            == Some(session_id.as_str())
+                        snapshot.lookup.active_session_id.as_deref() == Some(session_id.as_str())
                     }),
                 is_last_active: snapshot.lookup.last_active_session_id.as_deref()
                     == Some(session_id.as_str()),
@@ -720,14 +702,6 @@ pub fn desktop_session_entry_binding_for_render_target(
     desktop_session_entry_bindings(window_id)
         .into_iter()
         .find(|entry| entry.render_target_id == Some(render_target_id))
-}
-
-pub fn desktop_active_render_target_id(
-    window_id: DesktopWindowId,
-) -> Option<SessionRenderTargetId> {
-    desktop_session_window_snapshot(window_id)
-        .ok()
-        .and_then(|snapshot| snapshot.window_binding.active_render_target_id)
 }
 
 pub fn desktop_workspace_subscribe(
@@ -776,7 +750,9 @@ pub fn read_session_snapshot(
 pub fn runtime_session_attachment(
     session_id: &str,
 ) -> Result<Option<(RuntimeId, TerminalInstanceId)>, String> {
-    Ok(embedded_runtime_arc()?.state.session_runtime_attachment(session_id))
+    Ok(embedded_runtime_arc()?
+        .state
+        .session_runtime_attachment(session_id))
 }
 
 pub fn reconcile_runtime_session_lookup(
@@ -803,15 +779,11 @@ pub fn notify_runtime_session_closed(
 pub fn desktop_collect_session_lookup(window_id: DesktopWindowId) -> DesktopSessionLookup {
     let runtime_ids_by_session = session_engine_shared()
         .and_then(|shared| {
-            shared
-                .core_state()
-                .lock()
-                .ok()
-                .map(|core| {
-                    core.session_runtime_map()
-                        .map(|(session_id, runtime_id)| (session_id.clone(), *runtime_id))
-                        .collect()
-                })
+            shared.core_state().lock().ok().map(|core| {
+                core.session_runtime_map()
+                    .map(|(session_id, runtime_id)| (session_id.clone(), *runtime_id))
+                    .collect()
+            })
         })
         .unwrap_or_default();
     DesktopSessionLookup {
@@ -820,7 +792,6 @@ pub fn desktop_collect_session_lookup(window_id: DesktopWindowId) -> DesktopSess
         runtime_ids_by_session,
     }
 }
-
 
 pub fn desktop_render_state_for_session(
     window_id: DesktopWindowId,
@@ -854,24 +825,24 @@ pub fn desktop_activate_session(
 ) -> Option<DesktopSessionRuntimeSummary> {
     let previous_session_id = desktop_current_active_session_id(window_id);
     let host = desktop_prepare_host_layout(window_id, size)?;
-    if let Some(runtime_id) = preferred_runtime_id.or_else(|| desktop_runtime_id_for_session(session_id)) {
-        let result = host
-            .focus_runtime(session_id, runtime_id)
-            .map(|state| {
-                DesktopSessionRuntimeSummary::from_session(
-                    window_id,
-                    DEFAULT_LAYOUT_WORKSPACE_ID,
-                    session_id,
-                    state.snapshot.runtime_id,
-                )
-            });
+    if let Some(runtime_id) =
+        preferred_runtime_id.or_else(|| desktop_runtime_id_for_session(session_id))
+    {
+        let result = host.focus_runtime(session_id, runtime_id).map(|state| {
+            DesktopSessionRuntimeSummary::from_session(
+                window_id,
+                DEFAULT_LAYOUT_WORKSPACE_ID,
+                session_id,
+                state.snapshot.runtime_id,
+            )
+        });
         if result.is_some() {
             desktop_focus_layout_session(session_id);
             remember_desktop_last_active_session(window_id, previous_session_id, Some(session_id));
         }
         return result;
     }
-    let command = runtime_proxy_command(Some(session_id));
+    let command = native_session_command(session_id).ok()?;
     let result = host
         .ensure_runtime(session_id, 0, command, size)
         .map(|state| {
@@ -894,7 +865,8 @@ pub fn desktop_focus_session_view(
     view_id: SessionViewId,
 ) -> Option<String> {
     let previous_session_id = desktop_current_active_session_id(window_id);
-    let layout = DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID).focus_view(view_id)?;
+    let layout =
+        DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID).focus_view(view_id)?;
     let session_id = layout.view(view_id)?.session_id.clone();
     let host = desktop_session_host(window_id)?;
     if let Some(runtime_id) = desktop_runtime_id_for_session(&session_id) {
@@ -934,18 +906,6 @@ pub fn desktop_detach_session_runtime_and_notify(
     true
 }
 
-#[allow(dead_code)]
-pub fn desktop_remove_session_terminal_instance(
-    window_id: DesktopWindowId,
-    session_id: &str,
-    runtime_id: RuntimeId,
-    terminal_instance_id: TerminalInstanceId,
-) -> bool {
-    desktop_session_host(window_id)
-        .map(|host| host.close_leaf(session_id, runtime_id, terminal_instance_id))
-        .unwrap_or(false)
-}
-
 pub fn desktop_focus_session_terminal_instance(
     window_id: DesktopWindowId,
     session_id: &str,
@@ -983,122 +943,6 @@ pub fn desktop_focus_session_terminal_handle(
     )
 }
 
-pub fn desktop_swap_active_with_terminal_instance(
-    window_id: DesktopWindowId,
-    session_id: &str,
-    terminal_instance_id: TerminalInstanceId,
-    keep_focus: bool,
-) -> bool {
-    desktop_session_host(window_id)
-        .map(|host| host.swap_active_with_terminal_instance(session_id, terminal_instance_id, keep_focus))
-        .unwrap_or(false)
-}
-
-pub fn desktop_swap_active_with_terminal_handle(
-    window_id: DesktopWindowId,
-    terminal_handle: SessionTerminalHandle,
-    keep_focus: bool,
-) -> bool {
-    let Some(binding) = desktop_session_terminal_binding(window_id, terminal_handle) else {
-        return false;
-    };
-    desktop_swap_active_with_terminal_instance(
-        window_id,
-        &binding.session_id,
-        binding.terminal_instance_id,
-        keep_focus,
-    )
-}
-
-pub fn desktop_focus_session_direction(
-    window_id: DesktopWindowId,
-    session_id: &str,
-    direction: SessionDirection,
-) -> Option<DesktopSessionRuntimeSummary> {
-    let previous_session_id = desktop_current_active_session_id(window_id);
-    let result = desktop_session_host(window_id)?
-        .focus_direction(session_id, direction)
-        .map(|state| {
-            DesktopSessionRuntimeSummary::from_session(
-                window_id,
-                DEFAULT_LAYOUT_WORKSPACE_ID,
-                session_id,
-                state.snapshot.runtime_id,
-            )
-        });
-    if result.is_some() {
-        desktop_focus_layout_session(session_id);
-        remember_desktop_last_active_session(window_id, previous_session_id, Some(session_id));
-    }
-    result
-}
-
-#[allow(dead_code)]
-pub fn desktop_close_session_terminal_handle_or_session(
-    window_id: DesktopWindowId,
-    terminal_handle: SessionTerminalHandle,
-) -> bool {
-    let Some(binding) = desktop_session_terminal_binding(window_id, terminal_handle) else {
-        return false;
-    };
-    let leaf_count = desktop_render_state_for_session(window_id, &binding.session_id)
-        .map(|render_state| render_state.panes.len())
-        .unwrap_or(1);
-    if leaf_count <= 1 {
-        // CloseCurrentSession = hard delete: stop PTY + remove layout slot + delete SessionEntry.
-        return desktop_hard_close_session(window_id, &binding.session_id);
-    }
-    if !desktop_remove_session_terminal_instance(
-        window_id,
-        &binding.session_id,
-        binding.runtime_id,
-        binding.terminal_instance_id,
-    ) {
-        return false;
-    }
-    if let Err(err) = notify_runtime_session_activated(&binding.session_id, binding.runtime_id) {
-        log::error!(
-            "failed to notify runtime bridge about session activation after host leaf close: {err}"
-        );
-    }
-    true
-}
-
-/// Hard delete a session: stop PTY + remove layout slot + delete SessionEntry from DaemonState.
-/// This is the `CloseCurrentSession` path. `DetachSession` (future) uses
-/// `desktop_detach_session_runtime_and_notify` instead which keeps the SessionEntry.
-#[allow(dead_code)]
-pub fn desktop_hard_close_session(window_id: DesktopWindowId, session_id: &str) -> bool {
-    let previous_session_id = desktop_current_active_session_id(window_id);
-    // Stop host runtime and remove layout slot first so UI collapses immediately.
-    if let Some(host) = desktop_session_host(window_id) {
-        if let Some(runtime_id) = desktop_runtime_id_for_session(session_id) {
-            host.close_runtime(session_id, runtime_id);
-        }
-    }
-    let promoted_session_id = desktop_close_layout_session(session_id);
-
-    // Hard delete: remove SessionEntry from DaemonState (publishes WorkspaceUpdated event).
-    if let Err(err) = close_runtime_session(session_id) {
-        log::warn!("desktop_hard_close_session: session_close failed for {session_id}: {err}");
-    }
-
-    let lookup_after_close = desktop_collect_session_lookup(window_id);
-    let runtime_id = desktop_runtime_id_for_session(session_id)
-        .unwrap_or_else(|| chatminal_runtime::RuntimeId::new(0));
-    if let Err(err) = notify_runtime_session_closed(session_id, runtime_id, &lookup_after_close) {
-        log::error!("failed to notify runtime bridge about session close: {err}");
-    }
-    remember_desktop_last_active_session(
-        window_id,
-        previous_session_id,
-        promoted_session_id
-            .as_deref()
-            .or(lookup_after_close.active_session_id.as_deref()),
-    );
-    true
-}
-
 pub fn desktop_create_split_session_view(
     window_id: DesktopWindowId,
     request: DesktopSplitRequest,
@@ -1117,8 +961,9 @@ pub fn desktop_create_split_session_view(
         .or_else(|| layout_store.view_id_for_session(&active_session_id))
         .ok_or_else(|| anyhow::anyhow!("no active session view for split view"))?;
 
-    let created = create_runtime_session(None, size.cols.max(20), size.rows.max(5), cwd, Some(true))
-        .map_err(anyhow::Error::msg)?;
+    let created =
+        create_runtime_session(None, size.cols.max(20), size.rows.max(5), cwd, Some(true))
+            .map_err(anyhow::Error::msg)?;
 
     let split = layout_store.split_view(
         active_view_id,
@@ -1139,68 +984,6 @@ pub fn desktop_create_split_session_view(
     Ok(created.session_id)
 }
 
-pub async fn desktop_split_terminal_handle(
-    window_id: DesktopWindowId,
-    terminal_handle: u64,
-    request: DesktopSplitRequest,
-    command: Option<portable_pty::CommandBuilder>,
-    command_dir: Option<String>,
-    domain: SpawnSessionDomain,
-    term_config: Arc<config::TermConfig>,
-) -> anyhow::Result<()> {
-    let host = desktop_session_host(window_id)
-        .ok_or_else(|| anyhow::anyhow!("desktop session host missing"))?;
-    host.split_terminal_handle(
-        terminal_handle,
-        request.into_host_request(),
-        command,
-        command_dir,
-        domain,
-        term_config,
-    )
-    .await
-}
-
-pub fn desktop_sync_session_from_host(
-    window_id: DesktopWindowId,
-    session_id: &str,
-) -> Option<DesktopSessionRuntimeSummary> {
-    let previous_session_id = desktop_current_active_session_id(window_id);
-    let result = desktop_session_host(window_id)?
-        .sync_runtime_from_host(session_id)
-        .map(|state| {
-            DesktopSessionRuntimeSummary::from_session(
-                window_id,
-                DEFAULT_LAYOUT_WORKSPACE_ID,
-                session_id,
-                state.snapshot.runtime_id,
-            )
-        });
-    if result.is_some() {
-        desktop_focus_layout_session(session_id);
-        remember_desktop_last_active_session(window_id, previous_session_id, Some(session_id));
-    }
-    result
-}
-
-pub fn desktop_move_terminal_handle_to_new_window(
-    window_id: DesktopWindowId,
-    terminal_handle: u64,
-) -> bool {
-    desktop_session_host(window_id)
-        .map(|host| host.move_terminal_handle_to_new_window(terminal_handle))
-        .unwrap_or(false)
-}
-
-pub fn desktop_move_terminal_handle_to_new_runtime(
-    window_id: DesktopWindowId,
-    terminal_handle: u64,
-) -> bool {
-    desktop_session_host(window_id)
-        .map(|host| host.move_terminal_handle_to_new_runtime(terminal_handle))
-        .unwrap_or(false)
-}
-
 pub fn desktop_current_active_session_id(window_id: DesktopWindowId) -> Option<String> {
     let _ = window_id;
     load_desktop_workspace_snapshot(DEFAULT_LAYOUT_WORKSPACE_ID)
@@ -1218,12 +1001,14 @@ pub fn desktop_current_active_terminal_handle(
         .iter()
         .find(|pane| pane.is_active)
         .or_else(|| {
-            render_state.active_terminal_instance_id.and_then(|active_terminal_instance_id| {
-                render_state
-                    .panes
-                    .iter()
-                    .find(|pane| pane.terminal_instance_id == active_terminal_instance_id)
-            })
+            render_state
+                .active_terminal_instance_id
+                .and_then(|active_terminal_instance_id| {
+                    render_state
+                        .panes
+                        .iter()
+                        .find(|pane| pane.terminal_instance_id == active_terminal_instance_id)
+                })
         })
         .map(|pane| pane.terminal_handle)
 }

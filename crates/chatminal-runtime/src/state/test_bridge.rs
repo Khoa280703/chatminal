@@ -1,5 +1,5 @@
 // Test-only execution bridge using portable-pty directly.
-// Avoids the chatminal-session-runtime dev-dependency diamond problem.
+// Avoids the session_engine dev-dependency diamond problem.
 // Used by both state/tests.rs and server.rs integration tests.
 
 use std::io::{Read, Write};

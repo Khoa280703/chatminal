@@ -1,11 +1,11 @@
 # System Architecture
 
-Last updated: 2026-03-16
+Last updated: 2026-03-17
 
-## Latest changes (Plan 260313-1618)
-- **OverlayRenderScope boundary**: `overlay/mod.rs` isolated; overlay spawn uses primitives `(scope_id, size)` instead of render-scope types.
-- **Session rename complete**: Tab→Session, Pane→Terminal vocabulary across 25+ files; KeyAssignment variants and ArgType updated.
-- **chatminal-mux deletion**: Mux crate removed entirely from workspace; no references remain in active codebase.
+## Latest changes (Phase 2, 2026-03-17)
+- **Phase 2.1 - Type alias consolidation**: 17 Runtime* types (RuntimeSession, RuntimeProfile, etc.) are now **direct type aliases** to `chatminal-protocol` types. Deleted `api/protocol.rs` (431 LOC) conversion boilerplate; moved 5 Store→Protocol From impls to `chatminal-store`.
+- **Phase 2.2 - Documentation**: Added doc comments to `chatminal-terminal-core` and `chatminal-engine-term`.
+- **Phase 1 completions** (recent): OverlayRenderScope isolated; session/terminal vocabulary unified; chatminal-mux deleted.
 
 ## Topology
 
@@ -72,6 +72,21 @@ chatminald / chatminal-app
 - `crates/chatminal-lua-bridge/*` expose Chatminal-facing session/window/terminal queries.
 - Public APIs `get_host_tab` và `get_host_leaf` đã bị xóa.
 - Public Lua surface dùng `terminal`/`terminal_instance_id` thay cho host-tab/host-leaf ids.
+
+## Type alias consolidation (Phase 2.1)
+17 Runtime boundary types (`RuntimeSessionStatus`, `RuntimeProfile`, `RuntimeSession`, `RuntimeWorkspace`, `RuntimeCreatedSession`, `RuntimeLifecyclePreferences`, `RuntimeSessionSnapshot`, `RuntimeSessionExplorerState`, `RuntimeSessionExplorerEntry`, `RuntimeSessionExplorerFileContent`, `RuntimePtyOutputEvent`, `RuntimePtyExitedEvent`, `RuntimePtyErrorEvent`, `RuntimeSessionUpdatedEvent`, `RuntimeWorkspaceUpdatedEvent`, `RuntimeDaemonHealthEvent`, `RuntimeEvent`) are now **direct type aliases** in `crates/chatminal-runtime/src/api/mod.rs` to their `chatminal-protocol` counterparts.
+
+**Previous structure (pre-Phase 2.1):**
+- Store layer: `StoredSession`, `StoredProfile` (SQLite-specific fields)
+- Protocol layer: `SessionInfo`, `ProfileInfo` (network protocol)
+- Runtime layer: `RuntimeSession`, `RuntimeProfile` (redundant duplicates)
+- Conversion: `api/protocol.rs` (431 LOC) with `From` impls
+
+**Current structure (post-Phase 2.1):**
+- Store layer: `StoredSession`, `StoredProfile` (SQLite-specific, unchanged)
+- Shared: `chatminal-protocol` types (used directly by Runtime via aliases)
+- Conversion: `From` impls for Store→Protocol moved to `chatminal-store` crate
+- **Benefit**: No more type redundancy at runtime boundary; desktop/daemon both use protocol types directly.
 
 ## Verification freeze
 - `cargo check --workspace`: pass

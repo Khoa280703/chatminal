@@ -91,9 +91,13 @@ impl_lua_conversion_dynamic!(UserPaletteEntry);
 fn build_commands(
     gui_window: GuiWin,
     pane: Option<TerminalRef>,
+    session_ui_mode: bool,
     filter_copy_mode: bool,
 ) -> Vec<ExpandedCommand> {
-    let mut commands = CommandDef::actions_for_palette_and_menubar(&config::configuration());
+    let mut commands = CommandDef::actions_for_palette_and_menubar_with_session_ui(
+        &config::configuration(),
+        session_ui_mode,
+    );
 
     match config::run_immediate_with_lua_config(|lua| {
         let mut entries: Vec<UserPaletteEntry> = vec![];
@@ -113,6 +117,11 @@ fn build_commands(
     }) {
         Ok(entries) => {
             for entry in entries {
+                if session_ui_mode
+                    && !crate::desktop_commands::is_supported_in_session_ui(&entry.action)
+                {
+                    continue;
+                }
                 commands.push(ExpandedCommand {
                     brief: entry.brief.into(),
                     doc: match entry.doc {
@@ -231,8 +240,14 @@ impl CommandPalette {
         let pane_ref = term_window
             .active_terminal_instance_or_overlay()
             .map(|pane| TerminalRef(pane.pane_id()));
+        let session_ui_mode = term_window.active_session_id().is_some();
 
-        let commands = build_commands(GuiWin::new(term_window), pane_ref, filter_copy_mode);
+        let commands = build_commands(
+            GuiWin::new(term_window),
+            pane_ref,
+            session_ui_mode,
+            filter_copy_mode,
+        );
 
         Self {
             element: RefCell::new(None),
@@ -260,11 +275,12 @@ impl CommandPalette {
             .expect("to resolve command palette font");
         let metrics = RenderMetrics::with_font_metrics(&font.metrics());
 
-        let top_bar_height = if term_window.show_session_bar && !term_window.config.session_bar_at_bottom {
-            term_window.tab_bar_pixel_height().unwrap()
-        } else {
-            0.
-        };
+        let top_bar_height =
+            if term_window.show_session_bar && !term_window.config.session_bar_at_bottom {
+                term_window.tab_bar_pixel_height().unwrap()
+            } else {
+                0.
+            };
         let (padding_left, padding_top) = term_window.padding_left_top();
         let border = term_window.get_os_border();
         let top_pixel_y = top_bar_height + padding_top + border.top.get() as f32;

@@ -190,7 +190,8 @@ fn snapshot_without_trailing_newline_requires_run_boundary() {
 fn prepend_run_boundary_only_when_chunk_needs_it() {
     assert_eq!(prepend_run_boundary("prompt"), "\r\nprompt");
     assert_eq!(prepend_run_boundary("\nprompt"), "\nprompt");
-    assert_eq!(prepend_run_boundary("\rprompt"), "\rprompt");
+    assert_eq!(prepend_run_boundary("\r\nprompt"), "\r\nprompt");
+    assert_eq!(prepend_run_boundary("\rprompt"), "\r\n\rprompt");
 }
 
 #[test]

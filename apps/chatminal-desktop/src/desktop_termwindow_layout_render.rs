@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::chatminal_layout::workspace_store::{DesktopWorkspaceLayoutStore, DEFAULT_LAYOUT_WORKSPACE_ID};
 use crate::chatminal_render::ChatminalRenderPane;
 use crate::chatminal_runtime::{
     SessionViewId, WorkspaceLayoutNodeKind, WorkspaceLayoutState, WorkspaceNodeId,
@@ -51,15 +52,10 @@ impl crate::TermWindow {
         if !self.chatminal_sidebar.is_enabled() {
             return Vec::new();
         }
-        let Ok(snapshot) = crate::chatminal_runtime::desktop_session_window_snapshot(
-            self.window_id as DesktopWindowId,
-        ) else {
+        let Some(layout) = DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID).snapshot() else {
             return Vec::new();
         };
-        let active_view_id = snapshot.active_view_id();
-        let Some(layout) = snapshot.workspace_snapshot.layout else {
-            return Vec::new();
-        };
+        let active_view_id = Some(layout.active_view_id);
         if layout.views.len() <= 1 {
             return Vec::new();
         }
@@ -205,12 +201,7 @@ impl crate::TermWindow {
         if !self.chatminal_sidebar.is_enabled() {
             return Vec::new();
         }
-        let Ok(snapshot) = crate::chatminal_runtime::desktop_session_window_snapshot(
-            self.window_id as DesktopWindowId,
-        ) else {
-            return Vec::new();
-        };
-        let Some(layout) = snapshot.workspace_snapshot.layout else {
+        let Some(layout) = DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID).snapshot() else {
             return Vec::new();
         };
         if layout.views.len() <= 1 {

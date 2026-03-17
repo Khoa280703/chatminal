@@ -40,6 +40,7 @@ fn registry_spawn_updates_core_state_process_metadata() {
                 pixel_height: 0,
                 dpi: 96,
             },
+            None,
             events_tx,
         )
         .expect("spawn runtime for runtime");
@@ -80,6 +81,7 @@ fn registry_remove_clears_core_state_process_metadata() {
                 pixel_height: 0,
                 dpi: 96,
             },
+            None,
             events_tx,
         )
         .expect("spawn runtime for runtime");

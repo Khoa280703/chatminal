@@ -1,9 +1,7 @@
 //! A Domain represents an instance of a multiplexer.
 //! For example, the gui frontend has its own domain,
 //! and we can connect to a domain hosted by a mux server
-//! that may be local, running "remotely" inside a WSL
-//! container or actually remote, running on the other end
-//! of an ssh session somewhere.
+//! that may be local or running inside a WSL container.
 
 use crate::localpane::LocalPane;
 use crate::pane::{alloc_pane_id, Pane, PaneId};
@@ -71,6 +69,8 @@ pub trait Domain: Downcast + Send + Sync {
         Ok(tab)
     }
 
+    #[deprecated(note = "Use session-native split; engine split retained for daemon compatibility")]
+    #[allow(deprecated)]
     async fn split_pane(
         &self,
         source: SplitSource,
@@ -480,9 +480,6 @@ impl LocalDomain {
             cmd.env("CHATMINAL_UNIX_SOCKET", sock);
         }
         cmd.env("CHATMINAL_PANE", pane_id.to_string());
-        if let Some(agent) = Mux::get().agent.as_ref() {
-            cmd.env("SSH_AUTH_SOCK", agent.path());
-        }
         self.fixup_command(&mut cmd).await?;
         Ok(cmd)
     }

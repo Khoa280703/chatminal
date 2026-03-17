@@ -1,6 +1,5 @@
 use crate::client::{ClientId, ClientInfo};
 use crate::pane::{CachePolicy, Pane, PaneId};
-use crate::ssh_agent::AgentProxy;
 use crate::tab::{SplitRequest, Tab, TabId};
 use crate::window::{Window, WindowId};
 use anyhow::{anyhow, Context, Error};
@@ -40,13 +39,8 @@ pub mod domain;
 pub mod localpane;
 pub mod pane;
 pub mod renderable;
-pub mod ssh;
-pub mod ssh_agent;
 pub mod tab;
 pub mod termwiztermtab;
-pub mod tmux;
-pub mod tmux_commands;
-mod tmux_pty;
 pub mod window;
 
 use crate::activity::Activity;
@@ -119,8 +113,15 @@ pub struct Mux {
     clients: RwLock<HashMap<ClientId, ClientInfo>>,
     identity: RwLock<Option<Arc<ClientId>>>,
     num_panes_by_workspace: RwLock<HashMap<String, usize>>,
+    /// O(1) reverse index: chatminal session_id -> PaneId for fast SessionRef.resolve().
+    /// Only populated for panes carrying "chatminal_session_id" metadata.
+    ///
+    /// DEPRECATED: Desktop callers should use `DesktopSessionHost::session_tab_shim` instead.
+    /// This global index is a daemon-level concern only; engine IDs (PaneId, TabId) are
+    /// desktop-only. Kept for Lua bridge compat (`chatminal-lua-bridge/session.rs`).
+    /// Removal tracked in: localize-id-mapping follow-up.
+    chatminal_session_id_index: RwLock<HashMap<String, PaneId>>,
     main_thread_id: std::thread::ThreadId,
-    agent: Option<AgentProxy>,
 }
 
 const BUFSIZE: usize = 1024 * 1024;
@@ -436,12 +437,6 @@ impl Mux {
             );
         }
 
-        let agent = if config::configuration().mux_enable_ssh_agent {
-            Some(AgentProxy::new())
-        } else {
-            None
-        };
-
         Self {
             tabs: RwLock::new(HashMap::new()),
             panes: RwLock::new(HashMap::new()),
@@ -454,8 +449,8 @@ impl Mux {
             clients: RwLock::new(HashMap::new()),
             identity: RwLock::new(None),
             num_panes_by_workspace: RwLock::new(HashMap::new()),
+            chatminal_session_id_index: RwLock::new(HashMap::new()),
             main_thread_id: std::thread::current().id(),
-            agent,
         }
     }
 
@@ -492,9 +487,6 @@ impl Mux {
     pub fn client_had_input(&self, client_id: &ClientId) {
         if let Some(info) = self.clients.write().get_mut(client_id) {
             info.update_last_input();
-        }
-        if let Some(agent) = &self.agent {
-            agent.update_target();
         }
     }
 
@@ -779,6 +771,14 @@ impl Mux {
         self.tabs.read().get(&tab_id).map(Arc::clone)
     }
 
+    /// O(1) lookup: tab containing the pane indexed under the given chatminal session_id.
+    /// Returns None for SSH/serial/legacy sessions that carry no chatminal session_id.
+    pub fn get_tab_by_chatminal_session_id(&self, session_id: &str) -> Option<Arc<Tab>> {
+        let pane_id = *self.chatminal_session_id_index.read().get(session_id)?;
+        let (_domain_id, _window_id, tab_id) = self.resolve_pane_id(pane_id)?;
+        self.get_tab(tab_id)
+    }
+
     pub fn add_pane(&self, pane: &Arc<dyn Pane>) -> Result<(), Error> {
         if self.panes.read().contains_key(&pane.pane_id()) {
             return Ok(());
@@ -793,6 +793,18 @@ impl Mux {
         pane.set_download_handler(&downloader);
 
         self.panes.write().insert(pane.pane_id(), Arc::clone(pane));
+        // Index pane by chatminal session_id if present for O(1) SessionRef.resolve().
+        {
+            use engine_dynamic::Value;
+            if let Value::Object(obj) = pane.get_metadata() {
+                let key = Value::String("chatminal_session_id".to_string());
+                if let Some(Value::String(session_id)) = obj.get(&key) {
+                    self.chatminal_session_id_index
+                        .write()
+                        .insert(session_id.clone(), pane.pane_id());
+                }
+            }
+        }
         let pane_id = pane.pane_id();
         if let Some(reader) = pane.reader()? {
             let banner = self.banner.read().clone();
@@ -822,6 +834,16 @@ impl Mux {
         let mut changed = false;
         if let Some(pane) = self.panes.write().remove(&pane_id).clone() {
             log::debug!("killing pane {}", pane_id);
+            // Evict from session_id index if this was a chatminal pane.
+            {
+                use engine_dynamic::Value;
+                if let Value::Object(obj) = pane.get_metadata() {
+                    let key = Value::String("chatminal_session_id".to_string());
+                    if let Some(Value::String(session_id)) = obj.get(&key) {
+                        self.chatminal_session_id_index.write().remove(session_id);
+                    }
+                }
+            }
             pane.kill();
             self.notify(MuxNotification::PaneRemoved(pane_id));
             changed = true;
@@ -1233,6 +1255,7 @@ impl Mux {
             other => other,
         };
 
+        #[allow(deprecated)]
         let pane = domain.split_pane(source, tab_id, pane_id, request).await?;
         if let Some(config) = term_config {
             pane.set_config(config);

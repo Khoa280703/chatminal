@@ -30,7 +30,6 @@ members = [
   "crates/chatminal-serde-funcs",
   "crates/chatminal-share-data",
   "crates/chatminal-spawn-funcs",
-  "crates/chatminal-ssh-funcs",
   "crates/chatminal-tabout",
   "crates/chatminal-terminal-core",
   "crates/chatminal-termwiz",
@@ -44,7 +43,6 @@ members = [
   "crates/chatminal-engine-blob-leases",
   "crates/chatminal-engine-cell",
   "crates/chatminal-engine-char-props",
-  "crates/chatminal-engine-client",
   "crates/chatminal-engine-color-types",
   "crates/chatminal-engine-dynamic",
   "crates/chatminal-engine-dynamic-derive",
@@ -52,9 +50,7 @@ members = [
   "crates/chatminal-engine-font",
   "crates/chatminal-engine-gui-subcommands",
   "crates/chatminal-engine-input-types",
-  "crates/chatminal-engine-mux-server-impl",
   "crates/chatminal-engine-open-url",
-  "crates/chatminal-engine-ssh",
   "crates/chatminal-engine-surface",
   "crates/chatminal-engine-term",
   "crates/chatminal-engine-toast-notification",
@@ -68,7 +64,6 @@ members = [
   "vendor/terminal-deps/freetype",
   "vendor/terminal-deps/harfbuzz",
 ]
-exclude = ["third_party/terminal-engine-reference"]
 default-members = [
   "apps/chatminald",
   "apps/chatminal-app",
@@ -255,8 +250,6 @@ socket2 = "0.5"
 spa = "0.3.1"
 spawn-funcs = { package = "chatminal-spawn-funcs", path = "crates/chatminal-spawn-funcs" }
 sqlite-cache = "0.1.4"
-ssh-funcs = { package = "chatminal-ssh-funcs", path = "crates/chatminal-ssh-funcs" }
-ssh2 = "0.9.3"
 starship-battery = "0.10"
 strsim = "0.11"
 syn = "1.0"
@@ -294,7 +287,6 @@ engine-bidi = { package = "chatminal-engine-bidi", path = "crates/chatminal-engi
 engine-blob-leases = { package = "chatminal-engine-blob-leases", path = "crates/chatminal-engine-blob-leases", version = "0.1.1" }
 engine-cell = { package = "chatminal-engine-cell", path = "crates/chatminal-engine-cell" }
 engine-char-props = { package = "chatminal-engine-char-props", path = "crates/chatminal-engine-char-props", default-features = false }
-engine-client = { package = "chatminal-engine-client", path = "crates/chatminal-engine-client" }
 engine-color-types = { package = "chatminal-engine-color-types", path = "crates/chatminal-engine-color-types", version = "0.3", default-features = false }
 engine-config-derive = { package = "chatminal-engine-config-derive", path = "crates/chatminal-engine-config-derive", version = "0.1" }
 engine-dynamic = { package = "chatminal-engine-dynamic", path = "crates/chatminal-engine-dynamic", version = "0.2.1", default-features = false }
@@ -303,9 +295,7 @@ engine-escape-parser = { package = "chatminal-engine-escape-parser", path = "cra
 engine-font = { package = "chatminal-engine-font", path = "crates/chatminal-engine-font" }
 engine-gui-subcommands = { package = "chatminal-engine-gui-subcommands", path = "crates/chatminal-engine-gui-subcommands" }
 engine-input-types = { package = "chatminal-engine-input-types", path = "crates/chatminal-engine-input-types", version = "0.1", default-features = false }
-engine-mux-server-impl = { package = "chatminal-engine-mux-server-impl", path = "crates/chatminal-engine-mux-server-impl" }
 engine-open-url = { package = "chatminal-engine-open-url", path = "crates/chatminal-engine-open-url" }
-engine-ssh = { package = "chatminal-engine-ssh", path = "crates/chatminal-engine-ssh" }
 engine-surface = { package = "chatminal-engine-surface", path = "crates/chatminal-engine-surface" }
 engine-term = { package = "chatminal-engine-term", path = "crates/chatminal-engine-term" }
 engine-toast-notification = { package = "chatminal-engine-toast-notification", path = "crates/chatminal-engine-toast-notification" }

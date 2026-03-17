@@ -1,8 +1,5 @@
 mod domain;
-mod engine_runtime_adapter;
 pub(crate) mod execution_bridge;
-#[cfg(test)]
-mod pane;
 pub(crate) mod session_engine;
 mod session_host;
 mod session_pane;
@@ -28,7 +25,6 @@ use host_runtime::window::{Window as MuxWindow, WindowId as EngineWindowId};
 use host_runtime::{Mux, MuxNotification};
 use portable_pty::CommandBuilder;
 
-pub(crate) use engine_runtime_adapter::DesktopEngineRuntimeAdapter;
 pub(crate) use execution_bridge::DesktopRuntimeExecutionBridge;
 pub(crate) use session_host::{get_or_init_session_host, DesktopSessionHost};
 pub(crate) use session_pane::ChatminalSessionPane;
@@ -96,7 +92,6 @@ pub(crate) type HostMux = Mux;
 pub(crate) use host_runtime::domain::Domain as HostDomain;
 pub(crate) type HostDomainId = host_runtime::domain::DomainId;
 pub(crate) type HostDomainState = host_runtime::domain::DomainState;
-pub(crate) type HostSplitSource = host_runtime::domain::SplitSource;
 pub(crate) use host_runtime::pane::Pane as HostTerminal;
 pub(crate) type HostTerminalHandle = usize;
 pub(crate) type HostCachePolicy = host_runtime::pane::CachePolicy;
@@ -107,9 +102,6 @@ pub(crate) type HostPattern = host_runtime::pane::Pattern;
 pub(crate) type HostRenderableDimensions = host_runtime::renderable::RenderableDimensions;
 pub(crate) type HostStableCursorPosition = host_runtime::renderable::StableCursorPosition;
 pub(crate) type HostRenderScope = host_runtime::tab::Tab;
-pub(crate) type HostRuntimeEntryId = usize;
-pub(crate) type HostLayoutNode = host_runtime::tab::PaneNode;
-pub(crate) type HostSplitDirection = host_runtime::tab::SplitDirection;
 
 pub(crate) use host_runtime::domain::alloc_domain_id as alloc_host_domain_id;
 pub(crate) use host_runtime::pane::alloc_pane_id as alloc_host_terminal_handle;
@@ -208,6 +200,13 @@ pub(crate) fn runtime_client() -> Result<ChatminalRuntimeClient, String> {
     ChatminalRuntimeClient::new(runtime)
 }
 
+pub(crate) fn native_session_command(session_id: &str) -> Result<CommandBuilder, String> {
+    let launch = runtime_client()?.session_launch_spec(session_id)?;
+    let mut command = CommandBuilder::new(launch.shell);
+    command.cwd(launch.cwd);
+    Ok(command)
+}
+
 pub(crate) fn parse_proxy_session_id(builder: &CommandBuilder) -> Option<String> {
     let argv = builder.get_argv();
     if argv.len() < 2 {
@@ -226,11 +225,6 @@ pub(crate) fn parse_proxy_session_id(builder: &CommandBuilder) -> Option<String>
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
         .or(Some(String::new()))
-}
-
-#[cfg(test)]
-pub(crate) fn clamp_preview_lines(value: usize) -> usize {
-    value.clamp(50, 20_000)
 }
 
 pub(crate) fn runtime_proxy_command(session_id: Option<&str>) -> CommandBuilder {
@@ -981,7 +975,6 @@ pub(crate) fn initialize_host_mux(
     mux.set_active_workspace(&default_workspace_name);
 
     crate::update::load_last_release_info_and_set_banner();
-    engine_mux_server_impl::update_mux_domains(config)?;
 
     let default_name =
         default_domain_name.unwrap_or(config.default_domain.as_deref().unwrap_or("local"));
@@ -1018,10 +1011,6 @@ pub(crate) fn new_headless_connection_ui() -> host_runtime::connui::ConnectionUI
 
 pub(crate) fn show_host_configuration_error_message(err: &str) {
     host_runtime::connui::show_configuration_error_message(err);
-}
-
-pub(crate) fn create_remote_ssh_domain(dom: &config::SshDomain) -> anyhow::Result<HostDomainHandle> {
-    Ok(Arc::new(host_runtime::ssh::RemoteSshDomain::with_ssh_domain(dom)?))
 }
 
 pub(crate) fn create_serial_domain(serial_domain: config::SerialDomain) -> anyhow::Result<HostDomainHandle> {

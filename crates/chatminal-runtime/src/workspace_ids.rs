@@ -3,7 +3,7 @@
 // These are "product model" primitive IDs — they cross crate boundaries and must
 // live in `chatminal-runtime` so callers only need one dependency.
 //
-// `LayoutNodeId` stays in `chatminal-session-runtime` (engine-internal only).
+// `LayoutNodeId` stays in `desktop_host_runtime::session_engine` (engine-internal only).
 // `SessionViewId` / `WorkspaceNodeId` are workspace product model → live here.
 
 use std::fmt;

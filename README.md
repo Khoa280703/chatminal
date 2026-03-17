@@ -6,9 +6,7 @@ Chatminal hiện chạy theo mô hình `single-runtime desktop`: cửa sổ mặ
 - Window client mặc định: `apps/chatminal-desktop` (`apps/chatminal-app` chỉ còn là launcher/CLI compatibility)
 - GUI source entry hiện tại: `apps/chatminal-desktop/src`
 - Headless mux host cho engine compatibility: binary `chatminal-mux` trong package `apps/chatminal-desktop`
-- Terminal engine reference pool còn lại: `third_party/terminal-engine-reference` (reference-only; active build/runtime/workspace của Chatminal không còn phụ thuộc trực tiếp vào subtree này)
 - Native vendored deps hiện tại: `vendor/terminal-deps`
-- `third_party/terminal-engine-reference` hiện không còn là workspace standalone được hỗ trợ trong repo này; nó chỉ còn vai trò reference source/history
 - Chatminal Desktop explicit command: `window-desktop`
 - Runtime lõi: `crates/chatminal-runtime`
 - Daemon compatibility host: `apps/chatminald` (bọc `chatminal-runtime` cho CLI/TUI cũ)

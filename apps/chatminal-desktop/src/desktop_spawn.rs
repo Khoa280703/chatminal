@@ -91,7 +91,7 @@ pub async fn spawn_command_internal(
                 Some(id) => id,
                 None => anyhow::bail!("no src window when splitting a pane?"),
             };
-            if let Some(session_id) =
+            if let Some(_session_id) =
                 crate::chatminal_runtime::desktop_current_active_session_id(src_window_id as DesktopWindowId)
             {
                 if can_use_session_view_split {
@@ -104,22 +104,14 @@ pub async fn spawn_command_internal(
                     .context("create_split_session_view")?;
                     return Ok(());
                 }
-                let terminal_handle = current_pane_id
-                    .map(|handle| handle.as_u64())
-                    .ok_or_else(|| anyhow!("active session {session_id} missing active host pane"))?;
-                crate::chatminal_runtime::desktop_split_terminal_handle(
-                    src_window_id as DesktopWindowId,
-                    terminal_handle,
-                    direction,
-                    cmd_builder.clone(),
-                    cwd.clone(),
-                    spawn.domain,
-                    Arc::clone(&term_config),
-                )
-                .await
-                    .context("split session target")?;
-                return Ok(());
+                anyhow::bail!(
+                    "session-native terminal split has been removed; use session view split instead"
+                );
             }
+            log::warn!(
+                "engine split fallback triggered for pane_id={:?}",
+                current_pane_id
+            );
             let activity = crate::chatminal_runtime::start_host_activity();
             if let Some(pane_id) = current_pane_id {
                 log::trace!("doing split_pane");
@@ -133,16 +125,6 @@ pub async fn spawn_command_internal(
                     .await
                     .context("split_pane")?;
                 pane.set_config(term_config);
-                if let Some(session_id) =
-                    crate::chatminal_runtime::desktop_current_active_session_id(
-                        src_window_id as DesktopWindowId,
-                    )
-                {
-                    let _ = crate::chatminal_runtime::desktop_sync_session_from_host(
-                        src_window_id as DesktopWindowId,
-                        &session_id,
-                    );
-                }
             } else {
                 bail!("there is no active pane while splitting pane!?");
             }

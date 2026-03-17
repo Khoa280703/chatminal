@@ -1,10 +1,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use chatminal_runtime::RuntimeSessionSnapshot;
 use chatminal_runtime::{
     RuntimeCreatedSession, RuntimeEvent, RuntimeProfile, RuntimeSubscription, RuntimeWorkspace,
 };
+use chatminal_runtime::{RuntimeSessionLaunchSpec, RuntimeSessionSnapshot};
 
 use crate::desktop_host_runtime::EmbeddedRuntime;
 
@@ -70,6 +70,13 @@ impl ChatminalRuntimeClient {
         self.runtime
             .state
             .session_snapshot_get(session_id, preview_lines)
+    }
+
+    pub(crate) fn session_launch_spec(
+        &self,
+        session_id: &str,
+    ) -> Result<RuntimeSessionLaunchSpec, String> {
+        self.runtime.state.session_launch_spec(session_id)
     }
 
     pub(crate) fn recv_event(&self, timeout: Duration) -> Result<Option<RuntimeEvent>, String> {

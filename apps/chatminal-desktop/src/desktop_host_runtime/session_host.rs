@@ -5,25 +5,19 @@
 // from the session_pane map.
 
 use std::collections::HashMap;
-use std::convert::TryFrom;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use super::session_engine::{
     TerminalInstanceId, SessionEngineShared, SessionRuntimeState, StatefulSessionEngine, RuntimeId,
 };
 use chatminal_terminal_core::TerminalSize as CoreTerminalSize;
-use config::keyassignment::SessionDirection;
-use config::keyassignment::SpawnSessionDomain;
-use config::TermConfig;
 use engine_term::TerminalSize;
 use portable_pty::CommandBuilder;
 
 use super::session_pane::ChatminalSessionPane;
 use super::{
-    DesktopEngineRuntimeAdapter, HostDomainId as DomainId, HostMux,
-    HostTerminal, HostTerminalHandle, HostRenderableDimensions as RenderableDimensions,
-    HostSplitSource as SplitSource,
-    RuntimeSplitRequest as SplitRequest, RuntimeWindowId as EngineWindowId,
+    HostDomainId as DomainId, HostMux, HostRenderScope, HostTerminal,
+    HostRenderableDimensions as RenderableDimensions, RuntimeWindowId as EngineWindowId,
 };
 use crate::chatminal_render::{ChatminalRenderPane, ChatminalRenderState};
 use crate::chatminal_runtime::{SessionRenderTargetId, SessionRenderTargetSnapshot, SessionTerminalHandle};
@@ -37,10 +31,6 @@ static HOST_REGISTRY: OnceLock<Mutex<HashMap<EngineWindowId, Arc<DesktopSessionH
 
 fn host_registry() -> &'static Mutex<HashMap<EngineWindowId, Arc<DesktopSessionHost>>> {
     HOST_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-pub(crate) fn session_host(window_id: EngineWindowId) -> Option<Arc<DesktopSessionHost>> {
-    host_registry().lock().unwrap().get(&window_id).cloned()
 }
 
 pub(crate) fn get_or_init_session_host(
@@ -67,6 +57,8 @@ pub(crate) struct DesktopSessionHost {
     panes: Mutex<HashMap<TerminalInstanceId, Arc<ChatminalSessionPane>>>,
     // session_id → pane (1 session = 1 pane invariant)
     session_pane: Mutex<HashMap<String, Arc<ChatminalSessionPane>>>,
+    // session_id → mux tab_id for the shim tab (desktop-local; replaces Mux global index)
+    session_tab_shim: Mutex<HashMap<String, usize>>,
     // runtime_id → first-party render snapshot for termwindow compatibility
     runtime_render_state: Mutex<HashMap<RuntimeId, ChatminalRenderState>>,
 }
@@ -83,19 +75,13 @@ impl DesktopSessionHost {
             shared,
             panes: Mutex::new(HashMap::new()),
             session_pane: Mutex::new(HashMap::new()),
+            session_tab_shim: Mutex::new(HashMap::new()),
             runtime_render_state: Mutex::new(HashMap::new()),
         }
     }
 
-    fn engine(&self) -> StatefulSessionEngine<()> {
-        StatefulSessionEngine::with_shared((), Arc::clone(&self.shared))
-    }
-
-    fn mux_engine(&self) -> StatefulSessionEngine<DesktopEngineRuntimeAdapter> {
-        StatefulSessionEngine::with_shared(
-            DesktopEngineRuntimeAdapter::new(self.window_id),
-            Arc::clone(&self.shared),
-        )
+    fn engine(&self) -> StatefulSessionEngine {
+        StatefulSessionEngine::with_shared(Arc::clone(&self.shared))
     }
 
     // -----------------------------------------------------------------
@@ -123,7 +109,7 @@ impl DesktopSessionHost {
         size: TerminalSize,
         activate: bool,
     ) -> Option<SessionRuntimeState> {
-        let command = crate::chatminal_runtime::runtime_proxy_command(Some(session_id));
+        let command = super::native_session_command(session_id).ok()?;
         self.ensure_runtime_inner(session_id, 0, command, size, activate)
     }
 
@@ -175,161 +161,11 @@ impl DesktopSessionHost {
         Some(state)
     }
 
-    pub(crate) fn close_leaf(&self, session_id: &str, runtime_id: RuntimeId, terminal_instance_id: TerminalInstanceId) -> bool {
-        let pane_id = self
-            .panes
-            .lock()
-            .unwrap()
-            .get(&terminal_instance_id)
-            .map(|pane| pane.pane_id_value());
-        if !self
-            .engine()
-            .close_leaf_native(session_id, runtime_id, terminal_instance_id)
-        {
-            return false;
-        }
-
-        if let Some(pane_id) = pane_id {
-            HostMux::get().remove_pane(pane_id);
-        }
-
-        if let Some(state) = self.snapshot_runtime_from_host(session_id, runtime_id) {
-            self.sync_render_state_for_runtime(&state);
-        } else if let Some(state) = self.engine().snapshot_runtime_from_core(runtime_id) {
-            self.sync_render_state_for_runtime(&state);
-        } else {
-            self.remove_runtime_resources(runtime_id);
-        }
-
-        true
-    }
-
     /// Close a session runtime attachment and unregister all associated panes/tabs.
     pub(crate) fn close_runtime(&self, session_id: &str, runtime_id: RuntimeId) {
         let _ = session_id;
         self.engine().close_runtime_native(session_id, runtime_id);
         self.remove_runtime_resources(runtime_id);
-    }
-
-    pub(crate) fn sync_runtime_from_host(&self, session_id: &str) -> Option<SessionRuntimeState> {
-        let runtime_id = self.runtime_id_for_session(session_id)?;
-        let state = self.snapshot_runtime_from_host(session_id, runtime_id)?;
-        self.sync_render_state_for_runtime(&state);
-        Some(state)
-    }
-
-    pub(crate) fn focus_direction(
-        &self,
-        session_id: &str,
-        direction: SessionDirection,
-    ) -> Option<SessionRuntimeState> {
-        let state = self
-            .mux_engine()
-            .activate_session_direction(session_id, direction)
-            .map_err(|err| {
-                log::error!(
-                    "session host: activate_session_direction failed for {session_id}: {err}"
-                );
-            })
-            .ok()
-            .flatten()?;
-        self.sync_render_state_for_runtime(&state);
-        Some(state)
-    }
-
-    pub(crate) fn swap_active_with_terminal_instance(
-        &self,
-        session_id: &str,
-        terminal_instance_id: TerminalInstanceId,
-        keep_focus: bool,
-    ) -> bool {
-        let Some(state) = self
-            .mux_engine()
-            .swap_active_with_session_terminal_instance(session_id, terminal_instance_id, keep_focus)
-            .map_err(|err| {
-                log::error!(
-                    "session host: swap_active_with_session_terminal_instance failed for {session_id}: {err}"
-                );
-            })
-            .ok()
-        else {
-            return false;
-        };
-        self.sync_render_state_for_runtime(&state);
-        true
-    }
-
-    pub(crate) fn move_terminal_instance_to_new_window(&self, session_id: &str, terminal_instance_id: TerminalInstanceId) -> bool {
-        self.move_terminal_instance_to_target_window(session_id, terminal_instance_id, None)
-    }
-
-    pub(crate) fn move_terminal_instance_to_new_runtime(&self, session_id: &str, terminal_instance_id: TerminalInstanceId) -> bool {
-        self.move_terminal_instance_to_target_window(session_id, terminal_instance_id, Some(self.window_id))
-    }
-
-    pub async fn split_terminal_instance(
-        &self,
-        session_id: &str,
-        terminal_instance_id: TerminalInstanceId,
-        request: SplitRequest,
-        command: Option<CommandBuilder>,
-        command_dir: Option<String>,
-        domain: SpawnSessionDomain,
-        term_config: Arc<TermConfig>,
-    ) -> anyhow::Result<()> {
-        let Some(terminal_handle) = self.terminal_handle_for_leaf(terminal_instance_id) else {
-            anyhow::bail!("leaf {terminal_instance_id} missing from desktop session host");
-        };
-        let (pane, _size) = HostMux::get()
-            .split_pane(
-                terminal_handle,
-                request,
-                SplitSource::Spawn {
-                    command,
-                    command_dir,
-                },
-                domain,
-            )
-            .await?;
-        pane.set_config(term_config);
-        self.sync_runtime_from_host(session_id)
-            .ok_or_else(|| anyhow::anyhow!("failed to sync session runtime after split"))?;
-        Ok(())
-    }
-
-    // -----------------------------------------------------------------
-    // Active session tracking (Phase 06)
-    // -----------------------------------------------------------------
-
-    fn leaf_count_for_runtime(&self, runtime_id: RuntimeId) -> Option<usize> {
-        self.shared
-            .core_state()
-            .lock()
-            .unwrap()
-            .runtime(runtime_id)
-            .and_then(|runtime| runtime.layout.as_ref().map(|layout| layout.leaves.len()))
-            .or_else(|| {
-                Some(
-                    self.panes
-                        .lock()
-                        .unwrap()
-                        .values()
-                        .filter(|pane| pane.runtime_id_value() == runtime_id)
-                        .count(),
-                )
-            })
-    }
-
-    // -----------------------------------------------------------------
-    // Lookup helpers
-    // -----------------------------------------------------------------
-
-    fn runtime_id_for_session(&self, session_id: &str) -> Option<RuntimeId> {
-        self.shared
-            .core_state()
-            .lock()
-            .unwrap()
-            .runtime_id_for_session(session_id)
     }
 
     pub(crate) fn render_state_for_runtime(&self, runtime_id: RuntimeId) -> Option<ChatminalRenderState> {
@@ -338,52 +174,6 @@ impl DesktopSessionHost {
             .unwrap()
             .get(&runtime_id)
             .cloned()
-    }
-
-    pub async fn split_terminal_handle(
-        &self,
-        terminal_handle: u64,
-        request: SplitRequest,
-        command: Option<CommandBuilder>,
-        command_dir: Option<String>,
-        domain: SpawnSessionDomain,
-        term_config: Arc<TermConfig>,
-    ) -> anyhow::Result<()> {
-        let terminal_handle = HostTerminalHandle::try_from(terminal_handle)
-            .map_err(|_| anyhow::anyhow!("invalid terminal handle {terminal_handle}"))?;
-        let Some((session_id, terminal_instance_id)) = self.terminal_handle_context(terminal_handle) else {
-            anyhow::bail!("terminal handle {terminal_handle} is not a chatminal session pane");
-        };
-        self.split_terminal_instance(
-            &session_id,
-            terminal_instance_id,
-            request,
-            command,
-            command_dir,
-            domain,
-            term_config,
-        )
-        .await
-    }
-
-    pub(crate) fn move_terminal_handle_to_new_window(&self, terminal_handle: u64) -> bool {
-        let Ok(terminal_handle) = HostTerminalHandle::try_from(terminal_handle) else {
-            return false;
-        };
-        let Some((session_id, terminal_instance_id)) = self.terminal_handle_context(terminal_handle) else {
-            return false;
-        };
-        self.move_terminal_instance_to_new_window(&session_id, terminal_instance_id)
-    }
-
-    pub(crate) fn move_terminal_handle_to_new_runtime(&self, terminal_handle: u64) -> bool {
-        let Ok(terminal_handle) = HostTerminalHandle::try_from(terminal_handle) else {
-            return false;
-        };
-        let Some((session_id, terminal_instance_id)) = self.terminal_handle_context(terminal_handle) else {
-            return false;
-        };
-        self.move_terminal_instance_to_new_runtime(&session_id, terminal_instance_id)
     }
 
     // -----------------------------------------------------------------
@@ -430,7 +220,15 @@ impl DesktopSessionHost {
             }
         }
 
-        // Remove panes for leaves no longer in the layout
+        // Capture active pane before dropping panes_guard (avoids double-lock)
+        let active_pane_for_session = panes_guard
+            .get(&layout.active_terminal_instance_id)
+            .cloned();
+
+        // Defer stale-pane cleanup until after we have attached a live tab shim
+        // to the host window. Otherwise the bootstrap pane can be removed first,
+        // making the mux window empty and causing it to be pruned before the
+        // session-native tab is attached.
         let live_terminal_instance_ids: std::collections::HashSet<TerminalInstanceId> =
             layout.leaves.iter().map(|l| l.terminal_instance_id).collect();
         let stale: Vec<TerminalInstanceId> = panes_guard
@@ -438,30 +236,22 @@ impl DesktopSessionHost {
             .copied()
             .filter(|id| !live_terminal_instance_ids.contains(id))
             .collect();
-        for stale_terminal_instance_id in stale {
-            if let Some(stale_pane) = panes_guard.remove(&stale_terminal_instance_id) {
-                HostMux::get().remove_pane(stale_pane.pane_id_value());
-            }
-        }
-
-        // Capture active pane before dropping panes_guard (avoids double-lock)
-        let active_pane_for_session = panes_guard
-            .get(&layout.active_terminal_instance_id)
-            .cloned();
 
         drop(panes_guard);
 
         // Sync session_pane index: 1 session = 1 pane invariant
         if let Some(active_pane) = active_pane_for_session {
             let mut session_pane_guard = self.session_pane.lock().unwrap();
-            if let Some(existing) = session_pane_guard.get(session_id.as_str()) {
-                if existing.pane_id_value() != active_pane.pane_id_value() {
-                    debug_assert!(false, "invariant violated: 1 session = 1 pane for session {:?}", session_id);
-                    log::error!("session host: invariant violated — multiple panes for session {session_id}; skipping overwrite");
-                }
-            } else {
-                session_pane_guard.insert(session_id.to_string(), active_pane.clone());
+            if session_pane_guard
+                .get(session_id.as_str())
+                .is_some_and(|existing| existing.pane_id_value() != active_pane.pane_id_value())
+            {
+                log::warn!(
+                    "session host: replacing stale pane mapping for session {session_id}"
+                );
             }
+            session_pane_guard.insert(session_id.to_string(), active_pane.clone());
+            self.ensure_mux_tab_shim(session_id, &active_pane);
 
             // Build ChatminalRenderState directly from session_pane — no HostRenderScope needed.
             // 1 session = 1 pane invariant: panes has exactly one element; splits = [] (splits are
@@ -497,6 +287,92 @@ impl DesktopSessionHost {
                 .unwrap()
                 .insert(runtime_id, render_state);
         }
+
+        if !stale.is_empty() {
+            let mut panes_guard = self.panes.lock().unwrap();
+            for stale_terminal_instance_id in stale {
+                if let Some(stale_pane) = panes_guard.remove(&stale_terminal_instance_id) {
+                    HostMux::get().remove_pane(stale_pane.pane_id_value());
+                }
+            }
+        }
+    }
+
+    fn ensure_mux_tab_shim(&self, session_id: &str, active_pane: &Arc<ChatminalSessionPane>) {
+        let mux = HostMux::get();
+        let active_pane_id = active_pane.pane_id_value();
+        let title = active_pane.get_title();
+
+        // Desktop-local lookup: use session_tab_shim instead of Mux global index.
+        let existing_tab_id = self.session_tab_shim.lock().unwrap().get(session_id).copied();
+        let existing = existing_tab_id
+            .and_then(|tab_id| mux.get_tab(tab_id))
+            .filter(|tab| mux.window_containing_tab(tab.tab_id()) == Some(self.window_id));
+
+        let tab = match existing {
+            Some(tab) => {
+                let active_matches = tab
+                    .get_active_pane()
+                    .is_some_and(|pane| pane.pane_id() == active_pane_id);
+                if active_matches {
+                    tab
+                } else {
+                    let replacement = Arc::new(HostRenderScope::new(&engine_terminal_size_default()));
+                    replacement.assign_pane(&(active_pane.clone() as Arc<dyn HostTerminal>));
+                    replacement.set_title(&title);
+                    if let Err(err) = mux.add_tab_and_active_pane(&replacement) {
+                        log::warn!(
+                            "session host: failed to register replacement tab shim for session {session_id}: {err}"
+                        );
+                        return;
+                    }
+                    if let Err(err) = mux.add_tab_to_window(&replacement, self.window_id) {
+                        log::warn!(
+                            "session host: failed to attach replacement tab shim for session {session_id} to window {}: {err}",
+                            self.window_id
+                        );
+                        let _ = mux.remove_tab(replacement.tab_id());
+                        return;
+                    }
+                    let replacement_tab_id = replacement.tab_id();
+                    let _ = mux.remove_tab(tab.tab_id());
+                    self.session_tab_shim.lock().unwrap().insert(session_id.to_string(), replacement_tab_id);
+                    replacement
+                }
+            }
+            None => {
+                let tab = Arc::new(HostRenderScope::new(&engine_terminal_size_default()));
+                tab.assign_pane(&(active_pane.clone() as Arc<dyn HostTerminal>));
+                tab.set_title(&title);
+                if let Err(err) = mux.add_tab_and_active_pane(&tab) {
+                    log::warn!(
+                        "session host: failed to register tab shim for session {session_id}: {err}"
+                    );
+                    return;
+                }
+                if let Err(err) = mux.add_tab_to_window(&tab, self.window_id) {
+                    log::warn!(
+                        "session host: failed to attach tab shim for session {session_id} to window {}: {err}",
+                        self.window_id
+                    );
+                    let _ = mux.remove_tab(tab.tab_id());
+                    return;
+                }
+                let new_tab_id = tab.tab_id();
+                self.session_tab_shim.lock().unwrap().insert(session_id.to_string(), new_tab_id);
+                tab
+            }
+        };
+
+        tab.set_title(&title);
+        {
+            let maybe_window = mux.get_window_mut(self.window_id);
+            if let Some(mut window) = maybe_window {
+                if let Some(idx) = window.idx_by_id(tab.tab_id()) {
+                    window.set_active_without_saving(idx);
+                }
+            }
+        }
     }
 
     /// Remove panes and render snapshot for a runtime from all registries.
@@ -514,9 +390,10 @@ impl DesktopSessionHost {
         let mut panes = self.panes.lock().unwrap();
         for terminal_instance_id in stale_terminal_instance_ids {
             if let Some(pane) = panes.remove(&terminal_instance_id) {
-                // Also remove from session_pane index
+                // Also remove from session_pane and session_tab_shim indexes
                 let session_id = pane.session_id_value().to_string();
                 self.session_pane.lock().unwrap().remove(&session_id);
+                self.session_tab_shim.lock().unwrap().remove(&session_id);
                 HostMux::get().remove_pane(pane.pane_id_value());
             }
         }
@@ -527,83 +404,6 @@ impl DesktopSessionHost {
         self.session_pane.lock().unwrap().get(session_id).cloned()
     }
 
-    fn move_terminal_instance_to_target_window(
-        &self,
-        session_id: &str,
-        terminal_instance_id: TerminalInstanceId,
-        target_window_id: Option<EngineWindowId>,
-    ) -> bool {
-        let Some(runtime_id) = self.runtime_id_for_session(session_id) else {
-            return false;
-        };
-        let Some(leaf_count) = self.leaf_count_for_runtime(runtime_id) else {
-            return false;
-        };
-        if leaf_count != 1 {
-            log::warn!(
-                "session host: refusing to move leaf {terminal_instance_id} for session {session_id}; multi-leaf move is not session-native yet"
-            );
-            return false;
-        }
-
-        let Some(terminal_handle) = self
-            .panes
-            .lock()
-            .unwrap()
-            .get(&terminal_instance_id)
-            .map(|pane| pane.pane_id_value())
-        else {
-            return false;
-        };
-
-        let window_id = self.window_id;
-        let session_id = session_id.to_string();
-        promise::spawn::spawn(async move {
-            let mux = HostMux::get();
-            if let Err(err) = mux
-                .move_pane_to_new_tab(terminal_handle, target_window_id, None)
-                .await
-            {
-                log::error!("failed to move session leaf {terminal_instance_id}: {err:#}");
-                return;
-            }
-
-            if let Some(host) = session_host(window_id) {
-                let _ = host.sync_runtime_from_host(&session_id);
-            }
-        })
-        .detach();
-
-        true
-    }
-
-    fn snapshot_runtime_from_host(
-        &self,
-        session_id: &str,
-        runtime_id: RuntimeId,
-    ) -> Option<SessionRuntimeState> {
-        self.mux_engine()
-            .refresh_runtime_state_from_adapter(runtime_id)
-            .ok()
-            .filter(|state| state.snapshot.session_id == session_id)
-    }
-
-    fn terminal_handle_for_leaf(&self, terminal_instance_id: TerminalInstanceId) -> Option<HostTerminalHandle> {
-        self.panes
-            .lock()
-            .unwrap()
-            .get(&terminal_instance_id)
-            .map(|pane| pane.pane_id_value())
-    }
-
-    fn terminal_handle_context(&self, terminal_handle: HostTerminalHandle) -> Option<(String, TerminalInstanceId)> {
-        self.panes
-            .lock()
-            .unwrap()
-            .values()
-            .find(|pane| pane.pane_id_value() == terminal_handle)
-            .map(|pane| (pane.session_id_value().to_string(), pane.terminal_instance_id_value()))
-    }
 }
 
 // ---------------------------------------------------------------------------

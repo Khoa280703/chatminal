@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crate::chatminal_sidebar::{SidebarProfile, SidebarSession, SidebarSnapshot};
 use crate::termwindow::box_model::{
     BorderColor, BoxDimension, Corners, Element, ElementColors, ElementContent, Float, SizedPoly,
@@ -12,19 +14,21 @@ use window::color::LinearRgba;
 
 const RAIL_WIDTH_PX: f32 = 48.0;
 
-fn ordered_sidebar_snapshot(
-    term_window: &crate::TermWindow,
-    mut snapshot: SidebarSnapshot,
-) -> SidebarSnapshot {
-    let ordered_session_ids = term_window.ordered_chatminal_session_ids();
-    let active_session_id = term_window.active_session_id();
+#[derive(Clone)]
+struct SidebarProfileGroup<'a> {
+    profile: &'a SidebarProfile,
+    sessions: Vec<&'a SidebarSession>,
+}
 
-    snapshot.sessions.sort_by_key(|session| {
-        ordered_session_ids
+fn ordered_sidebar_snapshot(mut snapshot: SidebarSnapshot) -> SidebarSnapshot {
+    let active_session_id = snapshot.active_session_id.clone().or_else(|| {
+        snapshot
+            .sessions
             .iter()
-            .position(|session_id| session_id == &session.session_id)
-            .unwrap_or(usize::MAX)
+            .find(|session| session.is_active)
+            .map(|session| session.session_id.clone())
     });
+
     for session in &mut snapshot.sessions {
         session.is_active = active_session_id.as_deref() == Some(session.session_id.as_str());
     }
@@ -39,8 +43,6 @@ impl crate::TermWindow {
         }
         let footer = self.build_chatminal_terminal_footer()?;
         let sidebar = self.build_chatminal_sidebar()?;
-        // Footer rendered first (bottom layer) — full window width
-        // Sidebar rendered last to cover the left portion of footer
         self.append_and_render_overlay(&footer)?;
         self.append_and_render_overlay(&sidebar)
     }
@@ -58,7 +60,7 @@ impl crate::TermWindow {
     fn build_chatminal_sidebar(
         &mut self,
     ) -> anyhow::Result<crate::termwindow::box_model::ComputedElement> {
-        let snapshot = ordered_sidebar_snapshot(self, self.chatminal_sidebar.snapshot());
+        let snapshot = ordered_sidebar_snapshot(self.chatminal_sidebar.snapshot());
         let border = self.get_os_border();
         let sidebar_width = self.chatminal_sidebar_width() as f32;
         let sidebar_height =
@@ -82,6 +84,8 @@ impl crate::TermWindow {
         let hover_bg = LinearRgba::with_components(0.118, 0.118, 0.118, 1.0);
         let offline = LinearRgba::with_components(0.533, 0.533, 0.533, 1.0);
         let error_fg = LinearRgba::with_components(0.92, 0.38, 0.32, 1.0);
+        let tree_line = LinearRgba::with_components(0.18, 0.18, 0.18, 1.0);
+        let badge_bg = LinearRgba::with_components(0.08, 0.08, 0.08, 1.0);
 
         let rail = build_rail(
             &body_font,
@@ -109,6 +113,8 @@ impl crate::TermWindow {
             hover_bg,
             offline,
             error_fg,
+            tree_line,
+            badge_bg,
         );
 
         let root = Element::new(&body_font, ElementContent::Children(vec![rail, body]))
@@ -153,7 +159,7 @@ impl crate::TermWindow {
     fn build_chatminal_terminal_chrome(
         &mut self,
     ) -> anyhow::Result<crate::termwindow::box_model::ComputedElement> {
-        let snapshot = ordered_sidebar_snapshot(self, self.chatminal_sidebar.snapshot());
+        let snapshot = ordered_sidebar_snapshot(self.chatminal_sidebar.snapshot());
         let border = self.get_os_border();
         let x = self.chatminal_sidebar_width() as f32;
         let y = border.top.get() as f32;
@@ -257,23 +263,19 @@ impl crate::TermWindow {
     fn build_chatminal_terminal_footer(
         &mut self,
     ) -> anyhow::Result<crate::termwindow::box_model::ComputedElement> {
-        let snapshot = ordered_sidebar_snapshot(self, self.chatminal_sidebar.snapshot());
+        let snapshot = ordered_sidebar_snapshot(self.chatminal_sidebar.snapshot());
         let border = self.get_os_border();
-        // Span full window width so background fills to right edge;
-        // sidebar renders on top and covers the left portion.
         let x = 0.0;
         let width = self.dimensions.pixel_width as f32;
         let height = self.chatminal_terminal_footer_height();
         let y =
             (self.dimensions.pixel_height as f32 - border.bottom.get() as f32 - height).max(0.0);
-        // Use title_font (Roboto/system UI, ~11-12pt) — smaller than terminal font
         let body_font = self.fonts.title_font()?;
-        // Background matches terminal (#000000), subtle top border only
         let bg = LinearRgba::with_components(0.0, 0.0, 0.0, 1.0);
         let divider = LinearRgba::with_components(0.133, 0.133, 0.133, 1.0);
-        let label = LinearRgba::with_components(0.35, 0.35, 0.35, 1.0); // muted labels
-        let value = LinearRgba::with_components(0.65, 0.65, 0.65, 1.0); // brighter values
-        let sep = LinearRgba::with_components(0.25, 0.25, 0.25, 1.0); // dim pipe separator
+        let label = LinearRgba::with_components(0.35, 0.35, 0.35, 1.0);
+        let value = LinearRgba::with_components(0.65, 0.65, 0.65, 1.0);
+        let sep = LinearRgba::with_components(0.25, 0.25, 0.25, 1.0);
 
         let active_profile = snapshot
             .profiles
@@ -290,7 +292,6 @@ impl crate::TermWindow {
 
         let metrics = self.system_metrics.snapshot();
 
-        // Build inline label+value pairs separated by pipes
         let items: Vec<(&str, String)> = vec![
             (
                 "Session: ",
@@ -321,13 +322,11 @@ impl crate::TermWindow {
             );
         }
 
-        // Inner content row — float right to align status items to the right edge
         let content_row = Element::new(&body_font, ElementContent::Children(inline_parts))
             .display(crate::termwindow::box_model::DisplayType::Block)
             .float(Float::Right)
             .colors(text_colors(value));
 
-        // Outer block fills full terminal width with black background + top border
         let root = Element::new(&body_font, ElementContent::Children(vec![content_row]))
             .display(crate::termwindow::box_model::DisplayType::Block)
             .padding(BoxDimension {
@@ -448,7 +447,10 @@ fn build_body(
     hover_bg: LinearRgba,
     offline: LinearRgba,
     error_fg: LinearRgba,
+    tree_line: LinearRgba,
+    badge_bg: LinearRgba,
 ) -> Element {
+    let groups = grouped_profiles(snapshot);
     let mut children = vec![header_row(
         body_font, title_font, body_width, text, muted, hover_bg,
     )];
@@ -461,21 +463,22 @@ fn build_body(
                 .margin(block_margin(14.0, 0.0))
                 .colors(text_colors(error_fg)),
         );
-    } else if snapshot.profiles.is_empty() {
+    } else if groups.is_empty() {
         children.push(empty_hint(body_font, "No profiles yet", muted));
     } else {
         append_profile_tree(
             &mut children,
             body_font,
             status_font,
-            &snapshot.profiles,
-            &snapshot.sessions,
+            &groups,
             text,
             muted,
             accent,
             session_active_bg,
             hover_bg,
             offline,
+            tree_line,
+            badge_bg,
         );
     }
 
@@ -499,6 +502,27 @@ fn build_body(
             text: text.into(),
         })
         .min_width(Some(Dimension::Pixels(body_width.max(200.0))))
+}
+
+fn grouped_profiles(snapshot: &SidebarSnapshot) -> Vec<SidebarProfileGroup<'_>> {
+    let mut sessions_by_profile: BTreeMap<&str, Vec<&SidebarSession>> = BTreeMap::new();
+    for session in &snapshot.sessions {
+        sessions_by_profile
+            .entry(session.profile_id.as_str())
+            .or_default()
+            .push(session);
+    }
+
+    snapshot
+        .profiles
+        .iter()
+        .map(|profile| SidebarProfileGroup {
+            profile,
+            sessions: sessions_by_profile
+                .remove(profile.profile_id.as_str())
+                .unwrap_or_default(),
+        })
+        .collect()
 }
 
 fn header_row(
@@ -550,141 +574,295 @@ fn append_profile_tree(
     children: &mut Vec<Element>,
     body_font: &std::rc::Rc<engine_font::LoadedFont>,
     status_font: &std::rc::Rc<engine_font::LoadedFont>,
-    profiles: &[SidebarProfile],
-    sessions: &[SidebarSession],
+    groups: &[SidebarProfileGroup<'_>],
     text: LinearRgba,
     muted: LinearRgba,
     accent: LinearRgba,
     session_active_bg: LinearRgba,
     hover_bg: LinearRgba,
     offline: LinearRgba,
+    tree_line: LinearRgba,
+    badge_bg: LinearRgba,
 ) {
-    for profile in profiles {
-        children.push(profile_row(body_font, profile, text, muted, hover_bg));
+    for group in groups {
+        children.push(profile_row(
+            body_font,
+            group.profile,
+            group.sessions.len(),
+            text,
+            muted,
+            hover_bg,
+            badge_bg,
+            tree_line,
+        ));
 
-        if profile.is_active {
-            if sessions.is_empty() {
-                children.push(empty_nested_hint(body_font, "No sessions yet", muted));
-            } else {
-                for session in sessions {
-                    children.push(session_card(
-                        body_font,
-                        session,
-                        text,
-                        muted,
-                        accent,
-                        status_font,
-                        session_active_bg,
-                        hover_bg,
-                        offline,
-                    ));
-                }
-            }
+        if !group.profile.is_expanded {
+            continue;
         }
+
+        if group.sessions.is_empty() {
+            children.push(empty_nested_hint(
+                body_font,
+                "No sessions yet",
+                muted,
+                tree_line,
+            ));
+            continue;
+        }
+
+        children.push(session_branch(
+            body_font,
+            status_font,
+            &group.sessions,
+            text,
+            muted,
+            accent,
+            session_active_bg,
+            hover_bg,
+            offline,
+            tree_line,
+        ));
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn profile_row(
     body_font: &std::rc::Rc<engine_font::LoadedFont>,
     profile: &SidebarProfile,
+    session_count: usize,
     text: LinearRgba,
     muted: LinearRgba,
     hover_bg: LinearRgba,
+    badge_bg: LinearRgba,
+    tree_line: LinearRgba,
 ) -> Element {
-    let marker = if profile.is_active { "v" } else { ">" };
-    let label = format!("{marker} {}", profile.name);
+    let row_bg = if profile.is_active {
+        LinearRgba::with_components(0.075, 0.082, 0.094, 1.0)
+    } else {
+        LinearRgba::TRANSPARENT
+    };
+    let row_border = if profile.is_active {
+        tree_line
+    } else {
+        LinearRgba::TRANSPARENT
+    };
     let fg = if profile.is_active { text } else { muted };
+    let toggle = Element::new(
+        body_font,
+        ElementContent::Text(if profile.is_expanded { "v" } else { ">" }.to_string()),
+    )
+    .display(crate::termwindow::box_model::DisplayType::Inline)
+    .item_type(UIItemType::ChatminalSidebarToggleProfile(
+        profile.profile_id.clone(),
+    ))
+    .padding(BoxDimension {
+        left: Dimension::Pixels(2.0),
+        right: Dimension::Pixels(6.0),
+        top: Dimension::Pixels(0.0),
+        bottom: Dimension::Pixels(0.0),
+    })
+    .colors(text_colors(fg))
+    .hover_colors(Some(text_colors(text)));
 
-    Element::new(body_font, ElementContent::Text(label))
-        .display(crate::termwindow::box_model::DisplayType::Block)
-        .item_type(UIItemType::ChatminalSidebarProfile(
-            profile.profile_id.clone(),
-        ))
+    let label = Element::new(body_font, ElementContent::Text(profile.name.clone()))
+        .display(crate::termwindow::box_model::DisplayType::Inline)
+        .colors(text_colors(fg));
+
+    let count = Element::new(body_font, ElementContent::Text(session_count.to_string()))
+        .display(crate::termwindow::box_model::DisplayType::Inline)
+        .float(Float::Right)
         .padding(BoxDimension {
-            left: Dimension::Pixels(8.0),
-            right: Dimension::Pixels(8.0),
-            top: Dimension::Pixels(6.0),
-            bottom: Dimension::Pixels(6.0),
+            left: Dimension::Pixels(6.0),
+            right: Dimension::Pixels(6.0),
+            top: Dimension::Pixels(0.0),
+            bottom: Dimension::Pixels(0.0),
         })
-        .margin(block_margin(if profile.is_active { 8.0 } else { 3.0 }, 0.0))
-        .colors(filled_colors(LinearRgba::TRANSPARENT, fg))
-        .border_corners(Some(rounded_corners(6.0)))
-        .hover_colors(Some(filled_colors(hover_bg, text)))
+        .border(BoxDimension::new(Dimension::Pixels(1.0)))
+        .border_corners(Some(rounded_corners(999.0)))
+        .colors(ElementColors {
+            border: BorderColor::new(if profile.is_active {
+                row_border
+            } else {
+                tree_line
+            }),
+            bg: badge_bg.into(),
+            text: muted.into(),
+        });
+
+    Element::new(
+        body_font,
+        ElementContent::Children(vec![toggle, label, count]),
+    )
+    .display(crate::termwindow::box_model::DisplayType::Block)
+    .item_type(UIItemType::ChatminalSidebarProfile(
+        profile.profile_id.clone(),
+    ))
+    .padding(BoxDimension {
+        left: Dimension::Pixels(8.0),
+        right: Dimension::Pixels(8.0),
+        top: Dimension::Pixels(7.0),
+        bottom: Dimension::Pixels(7.0),
+    })
+    .margin(block_margin(8.0, 0.0))
+    .border(BoxDimension {
+        left: Dimension::Pixels(1.0),
+        right: Dimension::Pixels(0.0),
+        top: Dimension::Pixels(0.0),
+        bottom: Dimension::Pixels(0.0),
+    })
+    .border_corners(Some(rounded_corners(7.0)))
+    .colors(ElementColors {
+        border: BorderColor::new(row_border),
+        bg: row_bg.into(),
+        text: fg.into(),
+    })
+    .hover_colors(Some(filled_colors(hover_bg, text)))
 }
 
-// Session row styled as a simple tree child item matching Stitch design:
-// "● name (Online)" with colored dot, indented under active profile
 #[allow(clippy::too_many_arguments)]
-fn session_card(
+fn session_branch(
     body_font: &std::rc::Rc<engine_font::LoadedFont>,
+    status_font: &std::rc::Rc<engine_font::LoadedFont>,
+    sessions: &[&SidebarSession],
+    text: LinearRgba,
+    muted: LinearRgba,
+    accent: LinearRgba,
+    session_active_bg: LinearRgba,
+    hover_bg: LinearRgba,
+    offline: LinearRgba,
+    tree_line: LinearRgba,
+) -> Element {
+    let children = sessions
+        .iter()
+        .map(|session| {
+            session_row(
+                body_font,
+                status_font,
+                session,
+                text,
+                muted,
+                accent,
+                session_active_bg,
+                hover_bg,
+                offline,
+            )
+        })
+        .collect();
+
+    Element::new(body_font, ElementContent::Children(children))
+        .display(crate::termwindow::box_model::DisplayType::Block)
+        .margin(BoxDimension {
+            left: Dimension::Pixels(20.0),
+            right: Dimension::Pixels(0.0),
+            top: Dimension::Pixels(2.0),
+            bottom: Dimension::Pixels(0.0),
+        })
+        .padding(BoxDimension {
+            left: Dimension::Pixels(10.0),
+            right: Dimension::Pixels(0.0),
+            top: Dimension::Pixels(0.0),
+            bottom: Dimension::Pixels(4.0),
+        })
+        .border(BoxDimension {
+            left: Dimension::Pixels(1.0),
+            right: Dimension::Pixels(0.0),
+            top: Dimension::Pixels(0.0),
+            bottom: Dimension::Pixels(0.0),
+        })
+        .colors(ElementColors {
+            border: BorderColor::new(tree_line),
+            bg: LinearRgba::TRANSPARENT.into(),
+            text: text.into(),
+        })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn session_row(
+    body_font: &std::rc::Rc<engine_font::LoadedFont>,
+    status_font: &std::rc::Rc<engine_font::LoadedFont>,
     session: &SidebarSession,
     text: LinearRgba,
     muted: LinearRgba,
     accent: LinearRgba,
-    status_font: &std::rc::Rc<engine_font::LoadedFont>,
     session_active_bg: LinearRgba,
     hover_bg: LinearRgba,
     offline: LinearRgba,
 ) -> Element {
     let is_running = session.status == "running";
-    let (status_text, dot_color) = if is_running {
-        ("Online", accent)
-    } else {
-        ("Offline", offline)
-    };
-
-    // Active session: highlighted bg #1f2022, white text; inactive: transparent, gray-400
+    let dot_color = if is_running { accent } else { offline };
+    let status_text = if is_running { "online" } else { "offline" };
     let row_bg = if session.is_active {
         session_active_bg
     } else {
-        LinearRgba::with_components(0.0, 0.0, 0.0, 0.0)
+        LinearRgba::TRANSPARENT
     };
-    let name_color = if session.is_active { text } else { muted };
+    let row_fg = if session.is_active { text } else { muted };
+    let badge_border = if session.is_active { accent } else { offline };
 
-    // Row: "● name" dot then name then "(Online)" status
-    let row = vec![
-        Element::new(body_font, ElementContent::Text("● ".to_string()))
-            .display(crate::termwindow::box_model::DisplayType::Inline)
-            .colors(text_colors(dot_color)),
-        Element::new(body_font, ElementContent::Text(session.name.clone()))
-            .display(crate::termwindow::box_model::DisplayType::Inline)
-            .colors(text_colors(name_color)),
-        Element::new(
-            status_font,
-            ElementContent::Text(format!(" ({})", status_text)),
-        )
+    let status_badge = Element::new(status_font, ElementContent::Text(status_text.to_string()))
         .display(crate::termwindow::box_model::DisplayType::Inline)
-        .colors(text_colors(if is_running {
-            LinearRgba::with_components(0.318, 0.639, 0.318, 0.8)
-        } else {
-            offline
-        })),
-    ];
-
-    Element::new(body_font, ElementContent::Children(row))
-        .display(crate::termwindow::box_model::DisplayType::Block)
-        .item_type(UIItemType::ChatminalSidebarSession(
-            session.session_id.clone(),
-        ))
+        .float(Float::Right)
         .padding(BoxDimension {
-            left: Dimension::Pixels(8.0),
-            right: Dimension::Pixels(8.0),
-            top: Dimension::Pixels(5.0),
-            bottom: Dimension::Pixels(5.0),
-        })
-        .margin(BoxDimension {
-            left: Dimension::Pixels(16.0),
-            right: Dimension::Pixels(0.0),
-            top: Dimension::Pixels(2.0),
+            left: Dimension::Pixels(6.0),
+            right: Dimension::Pixels(6.0),
+            top: Dimension::Pixels(0.0),
             bottom: Dimension::Pixels(0.0),
         })
-        .border_corners(Some(rounded_corners(4.0)))
+        .border(BoxDimension::new(Dimension::Pixels(1.0)))
+        .border_corners(Some(rounded_corners(999.0)))
         .colors(ElementColors {
-            border: BorderColor::default(),
-            bg: row_bg.into(),
-            text: name_color.into(),
+            border: BorderColor::new(badge_border),
+            bg: LinearRgba::with_components(0.05, 0.05, 0.05, 1.0).into(),
+            text: badge_border.into(),
+        });
+
+    let dot = Element::new(body_font, ElementContent::Text("o".to_string()))
+        .display(crate::termwindow::box_model::DisplayType::Inline)
+        .padding(BoxDimension {
+            left: Dimension::Pixels(0.0),
+            right: Dimension::Pixels(8.0),
+            top: Dimension::Pixels(0.0),
+            bottom: Dimension::Pixels(0.0),
         })
-        .hover_colors(Some(filled_colors(hover_bg, text)))
+        .colors(text_colors(dot_color));
+
+    let label = Element::new(body_font, ElementContent::Text(session.name.clone()))
+        .display(crate::termwindow::box_model::DisplayType::Inline)
+        .colors(text_colors(row_fg));
+
+    Element::new(
+        body_font,
+        ElementContent::Children(vec![status_badge, dot, label]),
+    )
+    .display(crate::termwindow::box_model::DisplayType::Block)
+    .item_type(UIItemType::ChatminalSidebarSession(
+        session.session_id.clone(),
+    ))
+    .padding(BoxDimension {
+        left: Dimension::Pixels(8.0),
+        right: Dimension::Pixels(8.0),
+        top: Dimension::Pixels(6.0),
+        bottom: Dimension::Pixels(6.0),
+    })
+    .margin(BoxDimension {
+        left: Dimension::Pixels(0.0),
+        right: Dimension::Pixels(0.0),
+        top: Dimension::Pixels(2.0),
+        bottom: Dimension::Pixels(0.0),
+    })
+    .border(BoxDimension {
+        left: Dimension::Pixels(if session.is_active { 2.0 } else { 0.0 }),
+        right: Dimension::Pixels(0.0),
+        top: Dimension::Pixels(0.0),
+        bottom: Dimension::Pixels(0.0),
+    })
+    .border_corners(Some(rounded_corners(6.0)))
+    .colors(ElementColors {
+        border: BorderColor::new(accent),
+        bg: row_bg.into(),
+        text: row_fg.into(),
+    })
+    .hover_colors(Some(filled_colors(hover_bg, text)))
 }
 
 #[allow(dead_code)]
@@ -869,16 +1047,33 @@ fn empty_nested_hint(
     body_font: &std::rc::Rc<engine_font::LoadedFont>,
     label: &str,
     muted_fg: LinearRgba,
+    tree_line: LinearRgba,
 ) -> Element {
     Element::new(body_font, ElementContent::Text(label.to_string()))
         .display(crate::termwindow::box_model::DisplayType::Block)
         .margin(BoxDimension {
-            left: Dimension::Pixels(14.0),
+            left: Dimension::Pixels(20.0),
             right: Dimension::Pixels(0.0),
             top: Dimension::Pixels(2.0),
             bottom: Dimension::Pixels(6.0),
         })
-        .colors(text_colors(muted_fg))
+        .padding(BoxDimension {
+            left: Dimension::Pixels(10.0),
+            right: Dimension::Pixels(0.0),
+            top: Dimension::Pixels(4.0),
+            bottom: Dimension::Pixels(0.0),
+        })
+        .border(BoxDimension {
+            left: Dimension::Pixels(1.0),
+            right: Dimension::Pixels(0.0),
+            top: Dimension::Pixels(0.0),
+            bottom: Dimension::Pixels(0.0),
+        })
+        .colors(ElementColors {
+            border: BorderColor::new(tree_line),
+            bg: LinearRgba::TRANSPARENT.into(),
+            text: muted_fg.into(),
+        })
 }
 
 fn section_divider(
@@ -901,7 +1096,6 @@ fn section_divider(
         })
 }
 
-// Spacer that pushes bottom group toward the end of the rail
 fn rail_spacer(body_font: &std::rc::Rc<engine_font::LoadedFont>, height: f32) -> Element {
     Element::new(body_font, ElementContent::Text(String::new()))
         .display(crate::termwindow::box_model::DisplayType::Block)

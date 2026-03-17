@@ -159,7 +159,7 @@ fn compute_tab_title(
                 tab.active_terminal_instance
                     .as_ref()
                     .map(|pane| pane.title.clone())
-                    .unwrap_or_else(|| " no pane ".to_string())
+                    .unwrap_or_else(|| " no session view ".to_string())
             } else {
                 tab.entry_title.clone()
             };

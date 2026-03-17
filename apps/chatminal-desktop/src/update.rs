@@ -181,11 +181,7 @@ fn update_checker() {
 
     std::thread::sleep(if force_ui { initial_interval } else { delay });
 
-    let my_sock = config::RUNTIME_DIR.join(format!("gui-sock-{}", unsafe { libc::getpid() }));
-
     loop {
-        let socks = engine_client::discovery::discover_gui_socks();
-
         if configuration().check_for_updates {
             if let Ok(latest) = get_latest_release_info() {
                 schedule_set_banner_from_release_info(&latest);
@@ -199,7 +195,7 @@ fn update_checker() {
 
                     let url = release_notes_url(&latest);
 
-                    if force_ui || socks.is_empty() || socks[0] == my_sock {
+                    if force_ui {
                         persistent_toast_notification_with_click_to_open_url(
                             "Chatminal Update Available",
                             "Click to see what's new",

@@ -1,10 +1,31 @@
 impl TermWindow {
     pub(crate) fn active_terminal_handle(&self) -> Option<u64> {
         if self.chatminal_sidebar.is_enabled() {
-            return crate::chatminal_runtime::desktop_current_active_terminal_handle(
-                self.window_id as DesktopWindowId,
-            )
-            .map(|handle| handle.as_u64());
+            return self
+                .active_session_id()
+                .as_deref()
+                .and_then(|session_id| {
+                    crate::chatminal_runtime::desktop_render_state_for_session(
+                        self.window_id as DesktopWindowId,
+                        session_id,
+                    )
+                })
+                .and_then(|render_state| {
+                    render_state
+                        .panes
+                        .iter()
+                        .find(|pane| pane.is_active)
+                        .or_else(|| {
+                            render_state.active_terminal_instance_id.and_then(
+                                |active_terminal_instance_id| {
+                                    render_state.panes.iter().find(|pane| {
+                                        pane.terminal_instance_id == active_terminal_instance_id
+                                    })
+                                },
+                            )
+                        })
+                        .map(|pane| pane.terminal_handle.as_u64())
+                });
         }
         self.active_terminal_instance_from_active_render_target()
             .map(|pane| pane.pane_id() as u64)
@@ -137,21 +158,6 @@ impl TermWindow {
 
     fn focus_terminal_handle(&self, pane: &Arc<dyn OverlayPane>) -> bool {
         crate::chatminal_runtime::focus_terminal_handle(pane.pane_id())
-    }
-
-    fn swap_active_with_session_terminal_instance(
-        &self,
-        pane: &Arc<dyn OverlayPane>,
-        keep_focus: bool,
-    ) -> bool {
-        if !self.chatminal_sidebar.is_enabled() {
-            return false;
-        }
-        crate::chatminal_runtime::desktop_swap_active_with_terminal_handle(
-            self.window_id as DesktopWindowId,
-            crate::chatminal_runtime::SessionTerminalHandle::new(pane.pane_id() as u64),
-            keep_focus,
-        )
     }
 
     fn resolve_public_terminal_instance(&self, public_id: u64) -> Option<Arc<dyn OverlayPane>> {
@@ -372,11 +378,8 @@ impl TermWindow {
         keep_focus: bool,
     ) -> bool {
         if self.chatminal_sidebar.is_enabled() {
-            return self
-                .resolve_terminal_handle(terminal_handle)
-                .ok()
-                .map(|pane| self.swap_active_with_session_terminal_instance(&pane, keep_focus))
-                .unwrap_or(false);
+            let _ = (terminal_handle, keep_focus);
+            return false;
         }
         let Some(render_scope_id) = self.active_render_scope_id() else {
             return false;
@@ -424,15 +427,8 @@ impl TermWindow {
 
     fn activate_terminal_direction_in_active_render_target(&self, direction: SessionDirection) -> bool {
         if self.chatminal_sidebar.is_enabled() {
-            let Some(session_id) = self.active_session_id() else {
-                return false;
-            };
-            return crate::chatminal_runtime::desktop_focus_session_direction(
-                self.window_id as DesktopWindowId,
-                &session_id,
-                direction,
-            )
-            .is_some();
+            let _ = direction;
+            return false;
         }
         let Some(render_scope_id) = self.active_render_scope_id() else {
             return false;

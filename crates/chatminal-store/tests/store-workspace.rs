@@ -356,3 +356,78 @@ fn session_explorer_state_roundtrip_and_session_delete_cleanup() {
 
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn profiles_keep_creation_order_after_updates() {
+    let temp = TempDb::new();
+    let store = Store::initialize(&temp.path).expect("initialize store");
+
+    let first = store
+        .create_profile(Some("Alpha".to_string()))
+        .expect("create first profile");
+    let second = store
+        .create_profile(Some("Beta".to_string()))
+        .expect("create second profile");
+
+    store
+        .rename_profile(&first.profile_id, "Alpha Renamed")
+        .expect("rename first profile");
+
+    let workspace = store.load_workspace().expect("load workspace");
+    let created_profiles: Vec<_> = workspace
+        .profiles
+        .into_iter()
+        .filter(|profile| profile.profile_id == first.profile_id || profile.profile_id == second.profile_id)
+        .collect();
+
+    assert_eq!(created_profiles.len(), 2);
+    assert_eq!(created_profiles[0].profile_id, first.profile_id);
+    assert_eq!(created_profiles[1].profile_id, second.profile_id);
+}
+
+#[test]
+fn sessions_keep_creation_order_after_runtime_updates() {
+    let temp = TempDb::new();
+    let store = Store::initialize(&temp.path).expect("initialize store");
+    let active_profile_id = store
+        .load_workspace()
+        .expect("load workspace")
+        .active_profile_id;
+
+    let first = store
+        .create_session(
+            &active_profile_id,
+            Some("First".to_string()),
+            "/tmp".to_string(),
+            "/bin/bash".to_string(),
+            true,
+        )
+        .expect("create first session");
+    let second = store
+        .create_session(
+            &active_profile_id,
+            Some("Second".to_string()),
+            "/tmp".to_string(),
+            "/bin/bash".to_string(),
+            true,
+        )
+        .expect("create second session");
+
+    store
+        .set_session_status(&first.session_id, StoredSessionStatus::Running)
+        .expect("update first session status");
+    store
+        .update_session_seq(&first.session_id, 42)
+        .expect("update first session seq");
+
+    let workspace = store.load_workspace().expect("load workspace");
+    let created_sessions: Vec<_> = workspace
+        .sessions
+        .into_iter()
+        .filter(|session| session.session_id == first.session_id || session.session_id == second.session_id)
+        .collect();
+
+    assert_eq!(created_sessions.len(), 2);
+    assert_eq!(created_sessions[0].session_id, first.session_id);
+    assert_eq!(created_sessions[1].session_id, second.session_id);
+}

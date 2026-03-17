@@ -5,13 +5,16 @@ use luahelper::mlua::Value;
 use luahelper::{from_lua, to_lua};
 use std::sync::Arc;
 
-#[derive(Clone, Copy, Debug)]
-pub struct SessionRef(pub TabId);
+/// Chatminal session handle for Lua scripts.
+/// Identity is the chatminal session_id string — SSH/serial sessions are not represented here.
+#[derive(Clone, Debug)]
+pub struct SessionRef(pub String);
 
 impl SessionRef {
+    /// Resolve to the underlying engine Tab via Mux lookup by chatminal session_id.
     pub fn resolve<'a>(&self, mux: &'a Arc<Mux>) -> mlua::Result<Arc<Tab>> {
-        mux.get_tab(self.0)
-            .ok_or_else(|| mlua::Error::external(format!("session handle {} not found in runtime", self.0)))
+        mux.get_tab_by_chatminal_session_id(&self.0)
+            .ok_or_else(|| mlua::Error::external(format!("session '{}' not found in runtime", self.0)))
     }
 }
 
@@ -20,10 +23,9 @@ impl UserData for SessionRef {
         methods.add_meta_method(mlua::MetaMethod::ToString, |_, _this, _: ()| {
             Ok(format!("SessionRef(pid:{})", unsafe { libc::getpid() }))
         });
+        // O(1): session_id is the identity itself — no lookup needed.
         methods.add_method("session_id", |_, this, _: ()| {
-            let mux = get_mux()?;
-            let tab = this.resolve(&mux)?;
-            Ok(session_id_for_tab(&tab))
+            Ok(this.0.clone())
         });
         methods.add_method("active_terminal_instance_id", |_, this, _: ()| {
             let mux = get_mux()?;
@@ -34,16 +36,12 @@ impl UserData for SessionRef {
         });
         methods.add_method("window", |_, this, _: ()| {
             let mux = get_mux()?;
-            for window_id in mux.iter_windows() {
-                if let Some(window) = mux.get_window(window_id) {
-                    for tab in window.iter() {
-                        if tab.tab_id() == this.0 {
-                            return Ok(Some(WindowRef(window_id)));
-                        }
-                    }
-                }
-            }
-            Ok(None)
+            let tab = this.resolve(&mux)?;
+            // resolve_pane_id gives us the window_id without scanning all windows.
+            Ok(tab
+                .get_active_pane()
+                .and_then(|pane| mux.resolve_pane_id(pane.pane_id()))
+                .map(|(_domain_id, window_id, _tab_id)| WindowRef(window_id)))
         });
         methods.add_method("get_title", |_, this, _: ()| {
             let mux = get_mux()?;
@@ -146,7 +144,7 @@ impl UserData for SessionRef {
             let tab = this.resolve(&mux)?;
 
             let pane = tab.get_active_pane().ok_or_else(|| {
-                mlua::Error::external(format!("session {} has no active terminal", this.0))
+                mlua::Error::external(format!("session '{}' has no active terminal", this.0))
             })?;
 
             let (_domain_id, window_id, tab_id) =
@@ -158,7 +156,7 @@ impl UserData for SessionRef {
                     mlua::Error::external(format!("window {window_id} not found"))
                 })?;
                 let tab_idx = window.idx_by_id(tab_id).ok_or_else(|| {
-                    mlua::Error::external(format!("session handle {tab_id} is not attached to window {window_id}"))
+                    mlua::Error::external(format!("session '{}' is not attached to window {window_id}", this.0))
                 })?;
                 window.save_and_then_set_active(tab_idx);
             }

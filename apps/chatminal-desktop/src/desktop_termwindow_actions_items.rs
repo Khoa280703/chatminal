@@ -223,22 +223,7 @@ impl TermWindow {
                 con.hide_application();
             }
             QuitApplication => {
-                let config = &self.config;
-                log::info!("QuitApplication over here (window)");
-
-                match config.window_close_confirmation {
-                    WindowCloseConfirmation::NeverPrompt => {
-                        let con = Connection::get().expect("call on gui thread");
-                        con.terminate_message_loop();
-                    }
-                    WindowCloseConfirmation::AlwaysPrompt => {
-                        if !self.spawn_overlay_on_active_render_scope(move |_tab_id, term| {
-                            confirm_quit_program(term)
-                        }) {
-                            anyhow::bail!("no active tab!?");
-                        }
-                    }
-                }
+                self.request_quit_application()?;
             }
             SelectTextAtMouseCursor(mode) => self.select_text_at_mouse_cursor(*mode, pane),
             ExtendSelectionToMouseCursor(mode) => {
@@ -390,17 +375,7 @@ impl TermWindow {
             }
             ActivateSessionDirection(direction) => {
                 if !self.active_runtime_has_overlay() {
-                    let active_session_id = self.active_session_id();
-                    let focused_leaf = self.chatminal_sidebar.is_enabled()
-                        && active_session_id
-                            .and_then(|session_id| {
-                                crate::chatminal_runtime::desktop_focus_session_direction(
-                                    self.window_id as DesktopWindowId,
-                                    &session_id,
-                                    *direction,
-                                )
-                            })
-                            .is_some();
+                    let focused_leaf = self.chatminal_sidebar.is_enabled();
                     if !focused_leaf {
                         let _ = self.activate_terminal_direction_in_active_render_target(*direction);
                     }

@@ -136,9 +136,9 @@ impl UserData for TerminalRef {
         });
         methods.add_method("session", |_, this, _: ()| {
             let mux = get_mux()?;
-            Ok(mux
-                .resolve_pane_id(this.0)
-                .map(|(_domain_id, _window_id, tab_id)| SessionRef(tab_id)))
+            let pane = this.resolve(&mux)?;
+            // Returns None for SSH/serial panes that have no chatminal session_id.
+            Ok(pane_session_id(&pane).map(SessionRef))
         });
 
         methods.add_method("get_title", |_, this, _: ()| {
@@ -389,7 +389,10 @@ impl UserData for TerminalRef {
                 .await
                 .map_err(|e| mlua::Error::external(format!("{:#?}", e)))?;
 
-            Ok((SessionRef(tab.tab_id()), WindowRef(window)))
+            let session_ref = make_session_ref(&tab).ok_or_else(|| {
+                mlua::Error::external("moved session has no chatminal session_id")
+            })?;
+            Ok((session_ref, WindowRef(window)))
         });
 
         methods.add_async_method(
@@ -401,7 +404,10 @@ impl UserData for TerminalRef {
                     .await
                     .map_err(|e| mlua::Error::external(format!("{:#?}", e)))?;
 
-                Ok((SessionRef(tab.tab_id()), WindowRef(window)))
+                let session_ref = make_session_ref(&tab).ok_or_else(|| {
+                    mlua::Error::external("moved session has no chatminal session_id")
+                })?;
+                Ok((session_ref, WindowRef(window)))
             },
         );
 

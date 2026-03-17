@@ -1,8 +1,8 @@
-// Workspace layout product model — moved from `chatminal-session-runtime` (Phase 07).
+// Workspace layout product model — moved from `desktop_host_runtime::session_engine` (Phase 07).
 //
 // These types are UI/product model (split views, workspace tree) — NOT execution engine
 // internals. They live here so `chatminal-runtime` is the single source of truth for
-// workspace state without depending on `chatminal-session-runtime`.
+// workspace state without depending on `desktop_host_runtime::session_engine`.
 
 use std::collections::HashSet;
 

@@ -23,6 +23,8 @@ use super::session_engine::{
 use chatminal_terminal_core::TerminalSize;
 use portable_pty::CommandBuilder;
 
+use crate::chatminal_runtime::read_session_snapshot;
+
 const EXECUTION_EVENT_POLL_TIMEOUT: Duration = Duration::from_millis(50);
 
 // ─── session event bus ──────────────────────────────────────────────────────
@@ -37,7 +39,7 @@ impl SessionEventBus for DesktopSessionEventBus {
 }
 
 // ─── DaemonStateHost newtype ────────────────────────────────────────────────
-// Orphan rule: SessionWorkspaceHost is from chatminal-session-runtime and
+// Orphan rule: SessionWorkspaceHost is from desktop_host_runtime::session_engine and
 // DaemonState is from chatminal-runtime — neither is defined here. Use a newtype.
 
 struct DaemonStateHost<'a>(&'a DaemonState);
@@ -117,7 +119,7 @@ impl RuntimeSessionHandleTrait for DesktopSessionHandle {
         if self.closed {
             return;
         }
-        let engine = StatefulSessionEngine::with_shared((), Arc::clone(&self.shared));
+        let engine = StatefulSessionEngine::with_shared(Arc::clone(&self.shared));
         let _ = engine.close_detached_runtime(self.runtime_id);
         self.closed = true;
     }
@@ -195,7 +197,11 @@ impl RuntimeExecutionAdapter for DesktopRuntimeExecutionBridge {
     ) -> Result<Arc<Mutex<dyn RuntimeSessionHandleTrait>>, String> {
         let mut command = CommandBuilder::new(shell);
         command.cwd(cwd);
-        let engine = StatefulSessionEngine::with_shared((), Arc::clone(&self.shared));
+        let initial_scrollback = read_session_snapshot(session_id, Some(usize::MAX))
+            .map(|snapshot| snapshot.content)
+            .ok()
+            .filter(|content| !content.is_empty());
+        let engine = StatefulSessionEngine::with_shared(Arc::clone(&self.shared));
         let state = engine.spawn_detached_runtime(
             session_id.to_string(),
             generation,
@@ -207,6 +213,7 @@ impl RuntimeExecutionAdapter for DesktopRuntimeExecutionBridge {
                 pixel_height: 0,
                 dpi: 96,
             },
+            initial_scrollback,
         )?;
         let terminal_instance_id = state
             .snapshot

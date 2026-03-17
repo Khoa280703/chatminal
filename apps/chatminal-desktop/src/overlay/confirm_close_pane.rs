@@ -3,7 +3,7 @@ use crate::chatminal_runtime::overlay_compat::OverlayTerminal;
 
 pub fn confirm_close_tab(tab_id: u64, mut term: OverlayTerminal) -> anyhow::Result<()> {
     if confirm::run_confirmation(
-        "🛑 Really kill this tab and all contained panes?",
+        "🛑 Really close this session layout and all contained session views?",
         &mut term,
     )? {
         promise::spawn::spawn_into_main_thread(async move {
@@ -17,7 +17,7 @@ pub fn confirm_close_tab(tab_id: u64, mut term: OverlayTerminal) -> anyhow::Resu
 
 pub fn confirm_close_window(mut term: OverlayTerminal, window_id: u64) -> anyhow::Result<()> {
     if confirm::run_confirmation(
-        "🛑 Really kill this window and all contained tabs and panes?",
+        "🛑 Really close this window and all contained session layouts?",
         &mut term,
     )? {
         promise::spawn::spawn_into_main_thread(async move {

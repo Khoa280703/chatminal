@@ -1,15 +1,14 @@
+use crate::chatminal_runtime::overlay_compat::{
+    OverlayPane, OverlayWithPaneLines as WithPaneLines,
+};
 use crate::desktop_termwindow_types::{TerminalSplit, TerminalSplitDirection};
 use crate::tabbar::SessionBarItem;
 use crate::termwindow::{
-    DesktopWindowId, GuiWin, MouseCapture, ScrollHit, TermWindowNotif, UIItem,
-    UIItemType, TMB,
+    DesktopWindowId, GuiWin, MouseCapture, ScrollHit, TermWindowNotif, UIItem, UIItemType, TMB,
 };
 use ::window::{
     MouseButtons as WMB, MouseCursor, MouseEvent, MouseEventKind as WMEK, MousePress,
     WindowDecorations, WindowOps, WindowState,
-};
-use crate::chatminal_runtime::overlay_compat::{
-    OverlayPane, OverlayWithPaneLines as WithPaneLines,
 };
 use chatminal_lua_bridge::TerminalRef;
 use config::keyassignment::{KeyAssignment, MouseEventTrigger};
@@ -45,6 +44,7 @@ impl super::TermWindow {
             | UIItemType::CloseSession(_)
             | UIItemType::ChatminalSidebarBackground
             | UIItemType::ChatminalSidebarCreateProfile
+            | UIItemType::ChatminalSidebarToggleProfile(_)
             | UIItemType::ChatminalSidebarProfile(_)
             | UIItemType::ChatminalSidebarCreateSession
             | UIItemType::ChatminalSidebarSession(_)
@@ -62,6 +62,7 @@ impl super::TermWindow {
             | UIItemType::CloseSession(_)
             | UIItemType::ChatminalSidebarBackground
             | UIItemType::ChatminalSidebarCreateProfile
+            | UIItemType::ChatminalSidebarToggleProfile(_)
             | UIItemType::ChatminalSidebarProfile(_)
             | UIItemType::ChatminalSidebarCreateSession
             | UIItemType::ChatminalSidebarSession(_)
@@ -275,12 +276,8 @@ impl super::TermWindow {
         context: &dyn WindowOps,
     ) {
         let delta = match split.direction {
-            TerminalSplitDirection::Horizontal => {
-                (x as isize).saturating_sub(split.left as isize)
-            }
-            TerminalSplitDirection::Vertical => {
-                (y as isize).saturating_sub(split.top as isize)
-            }
+            TerminalSplitDirection::Horizontal => (x as isize).saturating_sub(split.left as isize),
+            TerminalSplitDirection::Vertical => (y as isize).saturating_sub(split.top as isize),
         };
 
         if delta != 0 {
@@ -413,6 +410,9 @@ impl super::TermWindow {
             UIItemType::ChatminalSidebarCreateProfile => {
                 self.mouse_event_chatminal_sidebar_create_profile(event, context);
             }
+            UIItemType::ChatminalSidebarToggleProfile(profile_id) => {
+                self.mouse_event_chatminal_sidebar_toggle_profile(&profile_id, event, context);
+            }
             UIItemType::ChatminalSidebarProfile(profile_id) => {
                 self.mouse_event_chatminal_sidebar_profile(&profile_id, event, context);
             }
@@ -444,6 +444,18 @@ impl super::TermWindow {
     ) {
         if let WMEK::Press(MousePress::Left) = event.kind {
             self.switch_chatminal_profile(profile_id);
+        }
+        context.set_cursor(Some(MouseCursor::Arrow));
+    }
+
+    fn mouse_event_chatminal_sidebar_toggle_profile(
+        &mut self,
+        profile_id: &str,
+        event: MouseEvent,
+        context: &dyn WindowOps,
+    ) {
+        if let WMEK::Press(MousePress::Left) = event.kind {
+            self.toggle_chatminal_profile_expanded(profile_id);
         }
         context.set_cursor(Some(MouseCursor::Arrow));
     }
@@ -519,7 +531,9 @@ impl super::TermWindow {
             None => return,
         };
         let action = match button {
-            MousePress::Left => Some(crate::desktop_mouse_actions::primary_runtime_entry_button_action()),
+            MousePress::Left => {
+                Some(crate::desktop_mouse_actions::primary_runtime_entry_button_action())
+            }
             MousePress::Right => Some(KeyAssignment::ShowLauncher),
             MousePress::Middle => None,
         };
@@ -575,9 +589,7 @@ impl super::TermWindow {
     ) {
         match event.kind {
             WMEK::Press(MousePress::Left) => match item {
-                SessionBarItem::RuntimeEntry {
-                    entry_idx, ..
-                } => {
+                SessionBarItem::RuntimeEntry { entry_idx, .. } => {
                     if self.is_session_ui_mode() {
                         return;
                     }
@@ -588,8 +600,8 @@ impl super::TermWindow {
                     view_id,
                     ..
                 } => {
-                        if let Some(view_id) = view_id {
-                            if let Some(focused_session_id) =
+                    if let Some(view_id) = view_id {
+                        if let Some(focused_session_id) =
                             crate::chatminal_runtime::desktop_focus_session_view(
                                 self.window_id as DesktopWindowId,
                                 view_id,
@@ -648,9 +660,7 @@ impl super::TermWindow {
                 }
             },
             WMEK::Press(MousePress::Middle) => match item {
-                SessionBarItem::RuntimeEntry {
-                    entry_idx, ..
-                } => {
+                SessionBarItem::RuntimeEntry { entry_idx, .. } => {
                     if self.is_session_ui_mode() {
                         return;
                     }
@@ -830,7 +840,8 @@ impl super::TermWindow {
                         WMEK::Press(_) => {
                             let mut focused_leaf = false;
                             if self.chatminal_sidebar.is_enabled() {
-                                focused_leaf = self.focus_active_session_terminal_instance(&pos.pane);
+                                focused_leaf =
+                                    self.focus_active_session_terminal_instance(&pos.pane);
                             }
                             if !focused_leaf {
                                 self.focus_terminal_handle(&pos.pane);
@@ -843,7 +854,8 @@ impl super::TermWindow {
                             if self.config.pane_focus_follows_mouse {
                                 let mut focused_leaf = false;
                                 if self.chatminal_sidebar.is_enabled() {
-                                    focused_leaf = self.focus_active_session_terminal_instance(&pos.pane);
+                                    focused_leaf =
+                                        self.focus_active_session_terminal_instance(&pos.pane);
                                 }
                                 if !focused_leaf {
                                     self.focus_terminal_handle(&pos.pane);

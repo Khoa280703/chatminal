@@ -40,6 +40,7 @@ pub struct LauncherArgs {
     flags: LauncherFlags,
     domains: Vec<LauncherDomainEntry>,
     tabs: Vec<LauncherTabEntry>,
+    session_ui_mode: bool,
     pane_id: u64,
     domain_id_of_current_tab: usize,
     title: String,
@@ -75,6 +76,8 @@ impl LauncherArgs {
         } else {
             vec![]
         };
+        let session_ui_mode =
+            crate::chatminal_runtime::desktop_current_active_session_id(window_id).is_some();
 
         let domains = if flags.contains(LauncherFlags::DOMAINS) {
             crate::chatminal_runtime::host_launcher_domains().await
@@ -86,6 +89,7 @@ impl LauncherArgs {
             flags,
             domains,
             tabs,
+            session_ui_mode,
             pane_id,
             domain_id_of_current_tab,
             title: title.to_string(),
@@ -226,6 +230,9 @@ impl LauncherState {
         for tab in &args.tabs {
             self.entries.push(Entry {
                 label: match tab.pane_count {
+                    Some(pane_count) if args.session_ui_mode => {
+                        format!("{}. {pane_count} session views", tab.title)
+                    }
                     Some(pane_count) => format!("{}. {pane_count} terminal instances", tab.title),
                     None => format!("{}.", tab.title),
                 },
@@ -240,6 +247,11 @@ impl LauncherState {
             for cmd in commands {
                 if crate::desktop_commands::is_session_bar_switching_key_assignment(&cmd.action) {
                     // Filter out some noisy, repetitive entries
+                    continue;
+                }
+                if args.session_ui_mode
+                    && !crate::desktop_commands::is_supported_in_session_ui(&cmd.action)
+                {
                     continue;
                 }
                 self.entries.push(Entry {
@@ -259,6 +271,11 @@ impl LauncherState {
                 if crate::desktop_commands::is_session_bar_switching_key_assignment(&entry.action)
                 {
                     // Filter out some noisy, repetitive entries
+                    continue;
+                }
+                if args.session_ui_mode
+                    && !crate::desktop_commands::is_supported_in_session_ui(&entry.action)
+                {
                     continue;
                 }
                 if key_entries

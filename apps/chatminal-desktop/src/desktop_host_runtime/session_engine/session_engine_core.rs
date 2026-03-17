@@ -6,7 +6,7 @@ use super::{
     StatefulSessionEngine, RuntimeId,
 };
 
-impl<A> StatefulSessionEngine<A> {
+impl StatefulSessionEngine {
     /// Build a `SessionRuntimeState` snapshot purely from `SessionCoreState`.
     /// Returns `None` if the runtime is not registered in core state.
     pub fn snapshot_runtime_from_core(&self, runtime_id: RuntimeId) -> Option<SessionRuntimeState> {
@@ -95,46 +95,6 @@ impl<A> StatefulSessionEngine<A> {
         removed
     }
 
-    /// Close a single leaf natively: removes the terminal instance runtime from core state.
-    /// If the closed leaf was the active leaf, active_terminal_instance_id is cleared.
-    /// Returns `true` if the leaf existed.
-    pub fn close_leaf_native(
-        &self,
-        session_id: &str,
-        runtime_id: RuntimeId,
-        terminal_instance_id: TerminalInstanceId,
-    ) -> bool {
-        let removed = self
-            .leaf_runtime_registry()
-            .remove_for_runtime(&self.core_state_handle(), runtime_id, terminal_instance_id)
-            .is_some();
-        if removed {
-            let core_handle = self.core_state_handle();
-            let mut core = core_handle.lock().unwrap();
-            if let Some(runtime) = core.runtime_mut(runtime_id) {
-                if let Some(layout) = runtime.layout.as_mut() {
-                    if let Some(updated_layout) = layout.remove_terminal_instance(terminal_instance_id) {
-                        runtime.active_terminal_instance_id = Some(updated_layout.active_terminal_instance_id);
-                        *layout = updated_layout;
-                    } else {
-                        runtime.layout = None;
-                        runtime.active_terminal_instance_id = None;
-                    }
-                }
-            }
-            // If no leaves remain, close the entire runtime
-            let is_empty = core
-                .runtime(runtime_id)
-                .map(|s| s.leaves.is_empty())
-                .unwrap_or(true);
-            drop(core);
-            if is_empty {
-                self.close_runtime_native(session_id, runtime_id);
-            }
-        }
-        removed
-    }
-
     /// Ensure a session runtime exists. If it already exists in core state, focus it
     /// natively and return the snapshot. If not, spawn a new detached runtime and
     /// return the initial snapshot. The caller must listen for `RuntimeAttached` to
@@ -161,7 +121,7 @@ impl<A> StatefulSessionEngine<A> {
         }
 
         // No existing runtime - spawn a new one (native path)
-        self.spawn_detached_runtime(session_id, generation, command, size)
+        self.spawn_detached_runtime(session_id, generation, command, size, None)
     }
 
     pub fn spawn_detached_runtime(
@@ -170,6 +130,7 @@ impl<A> StatefulSessionEngine<A> {
         generation: u64,
         command: CommandBuilder,
         size: TerminalSize,
+        initial_scrollback: Option<String>,
     ) -> Result<SessionRuntimeState, String> {
         let session_id = session_id.into();
         let runtime_id = self.core_id_allocator().next_runtime_id();
@@ -194,6 +155,7 @@ impl<A> StatefulSessionEngine<A> {
             terminal_instance_id,
             command,
             size,
+            initial_scrollback,
             self.leaf_runtime_events_tx(),
         )?;
         self.event_hub()

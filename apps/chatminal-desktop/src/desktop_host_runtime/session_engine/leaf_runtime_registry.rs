@@ -33,6 +33,7 @@ impl TerminalInstanceRuntimeRegistry {
         terminal_instance_id: TerminalInstanceId,
         command: CommandBuilder,
         size: TerminalSize,
+        initial_scrollback: Option<String>,
         events: std_mpsc::SyncSender<TerminalInstanceRuntimeEvent>,
     ) -> Result<Arc<TerminalInstanceRuntime>, String> {
         if self.runtimes.lock().unwrap().contains_key(&terminal_instance_id) {
@@ -45,6 +46,7 @@ impl TerminalInstanceRuntimeRegistry {
             terminal_instance_id,
             command,
             size,
+            initial_scrollback,
         };
         let runtime = Arc::new(TerminalInstanceRuntime::spawn(spawn.clone(), events)?);
         core_state

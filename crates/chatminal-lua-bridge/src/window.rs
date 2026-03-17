@@ -65,9 +65,10 @@ impl UserData for WindowRef {
         methods.add_method("sessions", |_, this, _: ()| {
             let mux = get_mux()?;
             let window = this.resolve(&mux)?;
+            // Only chatminal sessions; SSH/serial tabs return None from make_session_ref.
             Ok(window
                 .iter()
-                .map(|tab| SessionRef(tab.tab_id()))
+                .filter_map(|tab| make_session_ref(tab))
                 .collect::<Vec<SessionRef>>())
         });
         methods.add_method("sessions_with_info", |lua, this, _: ()| {
@@ -75,37 +76,40 @@ impl UserData for WindowRef {
             let window = this.resolve(&mux)?;
             let result = lua.create_table()?;
             let active_idx = window.get_active_idx();
-            for (index, tab) in window.iter().enumerate() {
+            // out_index tracks position in the filtered (chatminal-only) list.
+            // info.index matches this filtered position so Lua consumers see consistent indexing.
+            let mut out_index = 0usize;
+            for (raw_idx, tab) in window.iter().enumerate() {
+                // Skip non-chatminal sessions (SSH/serial have no session_id).
+                let Some(session_ref) = make_session_ref(tab) else { continue };
                 let info = SessionInfo {
-                    index,
-                    is_active: index == active_idx,
+                    index: out_index,
+                    is_active: raw_idx == active_idx,
                 };
                 let info = luahelper::dynamic_to_lua_value(lua, info.to_dynamic())?;
-                match &info {
-                    LuaValue::Table(t) => {
-                        t.set("session", SessionRef(tab.tab_id()))?;
-                        t.set("session_id", session_id_for_tab(tab))?;
-                        t.set(
-                            "active_terminal_instance_id",
-                            tab.get_active_pane()
-                                .and_then(|pane| pane_terminal_instance_id(&pane)),
-                        )?;
-                    }
-                    _ => {}
+                if let LuaValue::Table(t) = &info {
+                    t.set("session_id", session_ref.0.clone())?;
+                    t.set("session", session_ref)?;
+                    t.set(
+                        "active_terminal_instance_id",
+                        tab.get_active_pane()
+                            .and_then(|pane| pane_terminal_instance_id(&pane)),
+                    )?;
                 }
-                result.set(index + 1, info)?;
+                out_index += 1;
+                result.set(out_index, info)?;
             }
             Ok(result)
         });
         methods.add_method("active_session", |_, this, _: ()| {
             let mux = get_mux()?;
             let window = this.resolve(&mux)?;
-            Ok(window.get_active().map(|tab| SessionRef(tab.tab_id())))
+            Ok(window.get_active().and_then(|tab| make_session_ref(tab)))
         });
         methods.add_method("active_session_id", |_, this, _: ()| {
             let mux = get_mux()?;
             let window = this.resolve(&mux)?;
-            Ok(window.get_active().and_then(|tab| session_id_for_tab(tab)))
+            Ok(window.get_active().and_then(|tab| make_session_ref(tab)).map(|s| s.0))
         });
         methods.add_method("active_terminal", |_, this, _: ()| {
             let mux = get_mux()?;

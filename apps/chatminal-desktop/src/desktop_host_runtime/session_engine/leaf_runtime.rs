@@ -23,6 +23,7 @@ pub struct TerminalInstanceRuntimeSpawn {
     pub terminal_instance_id: TerminalInstanceId,
     pub command: CommandBuilder,
     pub size: TerminalSize,
+    pub initial_scrollback: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -98,6 +99,14 @@ impl TerminalInstanceRuntime {
             Box::new(std::io::sink()),
         )));
         let output_history = Arc::new(Mutex::new(Vec::new()));
+        if let Some(scrollback) = spawn
+            .initial_scrollback
+            .as_ref()
+            .filter(|value| !value.is_empty())
+        {
+            terminal.lock().unwrap().advance_bytes(scrollback.as_bytes());
+            output_history.lock().unwrap().push(scrollback.clone());
+        }
         let reader = pair
             .master
             .try_clone_reader()

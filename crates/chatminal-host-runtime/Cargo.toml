@@ -49,7 +49,6 @@ textwrap.workspace = true
 thiserror.workspace = true
 url.workspace = true
 engine-dynamic.workspace = true
-engine-ssh.workspace = true
 engine-term = { workspace=true, features=["use_serde"] }
 
 [target."cfg(windows)".dependencies]

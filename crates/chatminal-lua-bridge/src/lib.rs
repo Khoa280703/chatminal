@@ -7,7 +7,7 @@ use luahelper::impl_lua_conversion_dynamic;
 use mlua::UserDataRef;
 use host_runtime::domain::{DomainId, SplitSource};
 use host_runtime::pane::Pane;
-use host_runtime::tab::{SplitDirection, SplitRequest, SplitSize, Tab, TabId};
+use host_runtime::tab::{SplitDirection, SplitRequest, SplitSize, Tab};
 use host_runtime::window::{Window, WindowId};
 use host_runtime::Mux;
 use portable_pty::CommandBuilder;
@@ -67,6 +67,12 @@ pub(crate) fn session_id_for_tab(tab: &Arc<Tab>) -> Option<String> {
     tab.iter_panes()
         .into_iter()
         .find_map(|pos| pane_session_id(&pos.pane))
+}
+
+/// Construct a SessionRef from a Tab if it has a chatminal session_id.
+/// Returns None for SSH/serial/legacy sessions — Option A: chatminal sessions only.
+pub(crate) fn make_session_ref(tab: &Arc<Tab>) -> Option<SessionRef> {
+    session_id_for_tab(tab).map(SessionRef)
 }
 
 pub fn register(lua: &Lua) -> anyhow::Result<()> {
@@ -196,7 +202,7 @@ pub fn register(lua: &Lua) -> anyhow::Result<()> {
             let mut sessions = vec![];
             for window_id in mux.iter_windows() {
                 if let Some(window) = mux.get_window(window_id) {
-                    sessions.extend(window.iter().map(|tab| SessionRef(tab.tab_id())));
+                    sessions.extend(window.iter().filter_map(|tab| make_session_ref(tab)));
                 }
             }
             Ok(sessions)
@@ -210,7 +216,7 @@ pub fn register(lua: &Lua) -> anyhow::Result<()> {
             let mut sessions = vec![];
             for window_id in mux.iter_windows() {
                 if let Some(window) = mux.get_window(window_id) {
-                    sessions.extend(window.iter().map(|tab| SessionRef(tab.tab_id())));
+                    sessions.extend(window.iter().filter_map(|tab| make_session_ref(tab)));
                 }
             }
             Ok(sessions)
@@ -317,11 +323,10 @@ impl SpawnWindow {
             .await
             .map_err(|e| mlua::Error::external(format!("{:#?}", e)))?;
 
-        Ok((
-            SessionRef(tab.tab_id()),
-            TerminalRef(pane.pane_id()),
-            WindowRef(window_id),
-        ))
+        let session_ref = make_session_ref(&tab).ok_or_else(|| {
+            mlua::Error::external("spawned session has no chatminal session_id (non-chatminal domain?)")
+        })?;
+        Ok((session_ref, TerminalRef(pane.pane_id()), WindowRef(window_id)))
     }
 }
 
@@ -368,11 +373,10 @@ impl SpawnSession {
             .await
             .map_err(|e| mlua::Error::external(format!("{:#?}", e)))?;
 
-        Ok((
-            SessionRef(tab.tab_id()),
-            TerminalRef(pane.pane_id()),
-            WindowRef(window_id),
-        ))
+        let session_ref = make_session_ref(&tab).ok_or_else(|| {
+            mlua::Error::external("spawned session has no chatminal session_id (non-chatminal domain?)")
+        })?;
+        Ok((session_ref, TerminalRef(pane.pane_id()), WindowRef(window_id)))
     }
 }
 

@@ -1,13 +1,8 @@
 #![allow(clippy::range_plus_one)]
 use super::renderstate::*;
 use super::utilsprites::RenderMetrics;
-use crate::chatminal_sidebar::ChatminalSidebar;
-use crate::colorease::ColorEase;
-use crate::frontend::{front_end, try_front_end};
-use crate::inputmap::InputMap;
-use crate::overlay::{
-    confirm_close_window, confirm_quit_program, launcher, start_overlay,
-    CopyModeParams, CopyOverlay, LauncherArgs, LauncherFlags, QuickSelectOverlay,
+use crate::chatminal_layout::workspace_store::{
+    DesktopWorkspaceLayoutStore, DEFAULT_LAYOUT_WORKSPACE_ID,
 };
 use crate::chatminal_runtime::overlay_compat::{
     OverlayAssignmentResult as PerformAssignmentResult, OverlayCachePolicy as CachePolicy,
@@ -15,9 +10,18 @@ use crate::chatminal_runtime::overlay_compat::{
     RenderableDimensions,
 };
 use crate::chatminal_runtime::{
-    DesktopSessionBridgeAction, RuntimeId, RuntimeNotification, RuntimeWindow,
-    RuntimeWindowId, SessionViewId, TerminalInstanceId,
-    RuntimeWindowId as EngineWindowId,
+    DesktopSessionBridgeAction, RuntimeId, RuntimeNotification, RuntimeWindow, RuntimeWindowId,
+    RuntimeWindowId as EngineWindowId, SessionViewId, TerminalInstanceId,
+};
+use crate::chatminal_sidebar::ChatminalSidebar;
+use crate::colorease::ColorEase;
+use crate::desktop_overlay_actions::show_close_runtime_entry_overlay;
+use crate::desktop_termwindow_types::{TerminalPaneLayout, TerminalSplit, TerminalUiKey};
+use crate::frontend::{front_end, try_front_end};
+use crate::inputmap::InputMap;
+use crate::overlay::{
+    confirm_close_window, confirm_quit_program, launcher, start_overlay, CopyModeParams,
+    CopyOverlay, LauncherArgs, LauncherFlags, QuickSelectOverlay,
 };
 use crate::resize_increment_calculator::ResizeIncrementCalculator;
 use crate::scripting::guiwin::DesktopWindowId;
@@ -36,16 +40,14 @@ use crate::termwindow::render::{
     CachedLineState, LineQuadCacheKey, LineQuadCacheValue, LineToEleShapeCacheKey,
     LineToElementShapeItem,
 };
-use crate::desktop_overlay_actions::show_close_runtime_entry_overlay;
-use crate::desktop_termwindow_types::{TerminalPaneLayout, TerminalSplit, TerminalUiKey};
 use crate::termwindow::webgpu::WebGpuState;
 use ::engine_term::input::{ClickPosition, MouseButton as TMB};
 use ::window::*;
 use anyhow::{anyhow, ensure, Context};
 use chatminal_runtime::RuntimeWorkspace;
 use config::keyassignment::{
-    Confirmation, KeyAssignment, LauncherActionArgs, SessionDirection, Pattern, PromptInputLine,
-    QuickSelectArguments, RotationDirection, SpawnCommand, SplitSize,
+    Confirmation, KeyAssignment, LauncherActionArgs, Pattern, PromptInputLine,
+    QuickSelectArguments, RotationDirection, SessionDirection, SpawnCommand, SplitSize,
 };
 use config::window::WindowLevel;
 use config::{
@@ -188,6 +190,7 @@ pub enum UIItemType {
     Split(TerminalSplit),
     ChatminalSidebarBackground,
     ChatminalSidebarCreateProfile,
+    ChatminalSidebarToggleProfile(String),
     ChatminalSidebarProfile(String),
     ChatminalSidebarCreateSession,
     ChatminalSidebarSession(String),
@@ -267,8 +270,12 @@ impl UserData for SessionEntryInformation {
         fields.add_field_method_get("entry_index", |_, this| Ok(this.entry_index));
         fields.add_field_method_get("is_active", |_, this| Ok(this.is_active));
         fields.add_field_method_get("is_last_active", |_, this| Ok(this.is_last_active));
-        fields.add_field_method_get("active_terminal_instance", |_, this| Ok(this.active_terminal_instance.clone()));
-        fields.add_field_method_get("terminal_instances", |_, this| Ok(this.terminal_instances.clone()));
+        fields.add_field_method_get("active_terminal_instance", |_, this| {
+            Ok(this.active_terminal_instance.clone())
+        });
+        fields.add_field_method_get("terminal_instances", |_, this| {
+            Ok(this.terminal_instances.clone())
+        });
         fields.add_field_method_get("window_id", |_, this| Ok(this.window_id));
         fields.add_field_method_get("entry_title", |_, this| Ok(this.entry_title.clone()));
         fields.add_field_method_get("session_id", |_, this| Ok(this.session_id.clone()));
@@ -301,14 +308,21 @@ pub struct TerminalInstanceInformation {
 
 impl TerminalInstanceInformation {
     fn resolved_pane(&self) -> Option<Arc<dyn OverlayPane>> {
-        crate::chatminal_runtime::resolve_public_pane(self.host_terminal_handle, self.terminal_instance_id)
+        crate::chatminal_runtime::resolve_public_pane(
+            self.host_terminal_handle,
+            self.terminal_instance_id,
+        )
     }
 }
 
 impl UserData for TerminalInstanceInformation {
     fn add_fields<'lua, F: UserDataFields<'lua, Self>>(fields: &mut F) {
-        fields.add_field_method_get("host_terminal_handle", |_, this| Ok(this.host_terminal_handle));
-        fields.add_field_method_get("terminal_instance_id", |_, this| Ok(this.terminal_instance_id));
+        fields.add_field_method_get("host_terminal_handle", |_, this| {
+            Ok(this.host_terminal_handle)
+        });
+        fields.add_field_method_get("terminal_instance_id", |_, this| {
+            Ok(this.terminal_instance_id)
+        });
         fields.add_field_method_get("terminal_index", |_, this| Ok(this.terminal_index));
         fields.add_field_method_get("is_active", |_, this| Ok(this.is_active));
         fields.add_field_method_get("is_zoomed", |_, this| Ok(this.is_zoomed));
@@ -561,6 +575,7 @@ impl TermWindow {
         self.chatminal_sidebar.start_background_sync();
         self.chatminal_sidebar_seen_version = self.chatminal_sidebar.version();
         self.chatminal_sidebar_poll_started = true;
+        self.ensure_chatminal_active_session_runtime();
         self.schedule_chatminal_sidebar_tick();
     }
 
@@ -587,11 +602,30 @@ impl TermWindow {
         let version = self.chatminal_sidebar.version();
         if version != self.chatminal_sidebar_seen_version {
             self.chatminal_sidebar_seen_version = version;
+            self.ensure_chatminal_active_session_runtime();
             if let Some(window) = self.window.as_ref() {
                 window.invalidate();
             }
         }
         self.schedule_chatminal_sidebar_tick();
+    }
+
+    fn ensure_chatminal_active_session_runtime(&mut self) {
+        if !self.chatminal_sidebar.is_enabled() {
+            return;
+        }
+        let Some(session_id) = self.active_session_id() else {
+            return;
+        };
+        if crate::chatminal_runtime::desktop_render_state_for_session(
+            self.window_id as DesktopWindowId,
+            &session_id,
+        )
+        .is_some()
+        {
+            return;
+        }
+        self.activate_chatminal_session_target(&session_id, None);
     }
 
     fn initialize_metrics_tick(&mut self) {
@@ -627,17 +661,37 @@ impl TermWindow {
     }
 
     fn ordered_chatminal_session_ids(&self) -> Vec<String> {
-        let ordered =
-            crate::chatminal_runtime::desktop_ordered_session_ids(self.window_id as DesktopWindowId);
-        if !ordered.is_empty() {
-            return ordered;
-        }
-        self.chatminal_sidebar
-            .snapshot()
+        let snapshot = self.chatminal_sidebar.snapshot();
+        let workspace_ids: Vec<String> = snapshot
             .sessions
-            .into_iter()
-            .map(|session| session.session_id)
-            .collect()
+            .iter()
+            .map(|session| session.session_id.clone())
+            .collect();
+        if workspace_ids.is_empty() {
+            return workspace_ids;
+        }
+        let Some(layout) = self.chatminal_workspace_layout_snapshot() else {
+            return workspace_ids;
+        };
+
+        let mut ordered = Vec::new();
+        for view in layout.views {
+            if workspace_ids
+                .iter()
+                .any(|session_id| session_id == &view.session_id)
+                && !ordered
+                    .iter()
+                    .any(|session_id| session_id == &view.session_id)
+            {
+                ordered.push(view.session_id);
+            }
+        }
+        for session_id in workspace_ids {
+            if !ordered.iter().any(|existing| existing == &session_id) {
+                ordered.push(session_id);
+            }
+        }
+        ordered
     }
 
     fn activate_chatminal_session_index(&mut self, session_idx: isize) -> anyhow::Result<()> {
@@ -695,11 +749,9 @@ impl TermWindow {
     }
 
     fn activate_last_chatminal_session(&mut self) -> anyhow::Result<()> {
-        let Some(session_id) =
-            crate::chatminal_runtime::desktop_last_active_session_id(
-                self.window_id as DesktopWindowId,
-            )
-        else {
+        let Some(session_id) = crate::chatminal_runtime::desktop_last_active_session_id(
+            self.window_id as DesktopWindowId,
+        ) else {
             return Ok(());
         };
         self.switch_chatminal_session(&session_id);
@@ -736,8 +788,12 @@ impl TermWindow {
         let window_id = self.window_id as DesktopWindowId;
         let size = self.terminal_size;
 
-        let runtime_state =
-            crate::chatminal_runtime::desktop_activate_session(window_id, session_id, preferred_runtime_id, size);
+        let runtime_state = crate::chatminal_runtime::desktop_activate_session(
+            window_id,
+            session_id,
+            preferred_runtime_id,
+            size,
+        );
 
         if let Some(state) = runtime_state {
             if let Err(err) = crate::chatminal_runtime::notify_runtime_session_activated(
@@ -756,10 +812,16 @@ impl TermWindow {
 
     fn active_render_scope_id(&self) -> Option<u64> {
         if self.chatminal_sidebar.is_enabled() {
-            return crate::chatminal_runtime::desktop_active_render_target_id(
-                self.window_id as DesktopWindowId,
-            )
-            .map(|id| id.as_u64());
+            return self
+                .active_session_id()
+                .as_deref()
+                .and_then(|session_id| {
+                    crate::chatminal_runtime::desktop_render_state_for_session(
+                        self.window_id as DesktopWindowId,
+                        session_id,
+                    )
+                })
+                .map(|state| state.render_target_id().as_u64());
         }
         crate::chatminal_runtime::host_active_render_scope_id(self.window_id)
     }
@@ -768,23 +830,38 @@ impl TermWindow {
         if !self.chatminal_sidebar.is_enabled() {
             return None;
         }
-        crate::chatminal_runtime::desktop_session_window_snapshot(
-            self.window_id as DesktopWindowId,
-        )
-        .ok()
-        .and_then(|snapshot| snapshot.active_session_id())
+        let snapshot = self.chatminal_sidebar.snapshot();
+        if let Some(session_id) = snapshot.active_session_id.clone() {
+            return Some(session_id);
+        }
+        if let Some(session_id) = snapshot
+            .sessions
+            .iter()
+            .find(|session| session.is_active)
+            .map(|session| session.session_id.clone())
+        {
+            return Some(session_id);
+        }
+        if let Some(layout) = self.chatminal_workspace_layout_snapshot() {
+            if let Some(view) = layout.view(layout.active_view_id) {
+                return Some(view.session_id.clone());
+            }
+        }
+        None
     }
 
     pub(crate) fn active_view_id(&self) -> Option<u64> {
         if !self.chatminal_sidebar.is_enabled() {
             return None;
         }
-        crate::chatminal_runtime::desktop_session_window_snapshot(
-            self.window_id as DesktopWindowId,
-        )
-        .ok()
-        .and_then(|snapshot| snapshot.active_view_id())
-        .map(|view_id| view_id.as_u64())
+        self.chatminal_workspace_layout_snapshot()
+            .map(|layout| layout.active_view_id.as_u64())
+    }
+
+    fn chatminal_workspace_layout_snapshot(
+        &self,
+    ) -> Option<crate::chatminal_runtime::WorkspaceLayoutState> {
+        DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID).snapshot()
     }
 
     fn sync_active_chatminal_session_from_mux(&mut self) {
@@ -807,8 +884,7 @@ impl TermWindow {
                 return;
             }
         };
-        let DesktopSessionBridgeAction::FocusSession { session_id } = action
-        else {
+        let DesktopSessionBridgeAction::FocusSession { session_id } = action else {
             return;
         };
         self.activate_chatminal_session_target(&session_id, None);
@@ -821,8 +897,7 @@ impl TermWindow {
         let Some(entry) = crate::chatminal_runtime::desktop_session_entry_binding_for_render_target(
             self.window_id as DesktopWindowId,
             crate::chatminal_runtime::SessionRenderTargetId::new(render_target_id),
-        )
-        else {
+        ) else {
             return false;
         };
         self.close_chatminal_view_or_session_by_id(&entry.session_id)
@@ -834,11 +909,12 @@ impl TermWindow {
         reason: CloseReason,
     ) -> bool {
         if self.chatminal_sidebar.is_enabled() {
-            let session_id = crate::chatminal_runtime::desktop_session_entry_binding_for_render_target(
-                self.window_id as DesktopWindowId,
-                crate::chatminal_runtime::SessionRenderTargetId::new(render_target_id),
-            )
-            .map(|entry| entry.session_id);
+            let session_id =
+                crate::chatminal_runtime::desktop_session_entry_binding_for_render_target(
+                    self.window_id as DesktopWindowId,
+                    crate::chatminal_runtime::SessionRenderTargetId::new(render_target_id),
+                )
+                .map(|entry| entry.session_id);
             return session_id
                 .and_then(|session_id| {
                     crate::chatminal_runtime::desktop_pane_for_session(
@@ -907,10 +983,9 @@ impl TermWindow {
     }
 
     fn close_chatminal_view_or_session_by_id(&mut self, session_id: &str) -> bool {
-        let can_close_view_only =
-            crate::chatminal_runtime::desktop_can_close_view_only(
-                self.window_id as DesktopWindowId,
-            );
+        let can_close_view_only = crate::chatminal_runtime::desktop_can_close_view_only(
+            self.window_id as DesktopWindowId,
+        );
 
         if can_close_view_only {
             return self.close_chatminal_view_by_id(session_id);
@@ -929,16 +1004,31 @@ impl TermWindow {
             .as_deref()
             == Some(profile_id)
         {
+            self.chatminal_sidebar.ensure_profile_expanded(profile_id);
+            if let Some(window) = self.window.as_ref() {
+                window.invalidate();
+            }
             return;
         }
 
         match self.chatminal_sidebar.switch_profile(profile_id) {
             Ok(workspace) => {
                 self.apply_chatminal_profile_workspace(workspace);
+                self.chatminal_sidebar.ensure_profile_expanded(profile_id);
             }
             Err(err) => {
                 log::error!("failed to switch sidebar profile {profile_id}: {err}");
             }
+        }
+    }
+
+    fn toggle_chatminal_profile_expanded(&mut self, profile_id: &str) {
+        if !self.chatminal_sidebar.is_enabled() {
+            return;
+        }
+        self.chatminal_sidebar.toggle_profile_expanded(profile_id);
+        if let Some(window) = self.window.as_ref() {
+            window.invalidate();
         }
     }
 
@@ -969,7 +1059,46 @@ impl TermWindow {
         }
     }
 
+    fn request_quit_application(&mut self) -> anyhow::Result<()> {
+        let config = &self.config;
+        log::info!("QuitApplication over here (window)");
+
+        let should_prompt = !self.chatminal_sidebar.is_enabled()
+            && matches!(
+                config.window_close_confirmation,
+                WindowCloseConfirmation::AlwaysPrompt
+            );
+
+        if should_prompt {
+            if !self.spawn_overlay_on_active_render_scope(move |_tab_id, term| {
+                confirm_quit_program(term)
+            }) {
+                anyhow::bail!("no active tab!?");
+            }
+        } else {
+            if self.chatminal_sidebar.is_enabled() {
+                if let Some(window) = self.window.as_ref() {
+                    front_end().forget_known_window(window);
+                    window.close();
+                }
+            }
+            let con = Connection::get().expect("call on gui thread");
+            con.terminate_message_loop();
+        }
+
+        Ok(())
+    }
+
     fn close_requested(&mut self, window: &Window) {
+        if self.chatminal_sidebar.is_enabled() {
+            if let Err(err) = self.request_quit_application() {
+                log::error!("failed to quit application from close request: {err:#}");
+                let con = Connection::get().expect("call on gui thread");
+                con.terminate_message_loop();
+            }
+            return;
+        }
+
         match self.config.window_close_confirmation {
             WindowCloseConfirmation::NeverPrompt => {
                 // Immediately kill the tabs and allow the window to close
@@ -1289,10 +1418,9 @@ impl TermWindow {
         let mut y = None;
         let mut origin = GeometryOrigin::default();
 
-        if let Some(position) = crate::chatminal_runtime::host_window_initial_position(
-            engine_window_id,
-        )
-            .or_else(|| POSITION.lock().unwrap().take())
+        if let Some(position) =
+            crate::chatminal_runtime::host_window_initial_position(engine_window_id)
+                .or_else(|| POSITION.lock().unwrap().take())
         {
             x.replace(position.x);
             y.replace(position.y);
@@ -1680,7 +1808,8 @@ impl TermWindow {
             } => {
                 let pane_id = pane_id
                     .map(|pane_id| {
-                        TerminalUiKey::try_from(pane_id).map_err(|_| anyhow!("invalid pane id {pane_id}"))
+                        TerminalUiKey::try_from(pane_id)
+                            .map_err(|_| anyhow!("invalid pane id {pane_id}"))
                     })
                     .transpose()?;
                 self.cancel_overlay_for_render_scope(render_target_id, pane_id);
@@ -1852,7 +1981,12 @@ impl TermWindow {
             .terminal_ui_state_by_handle
             .borrow()
             .iter()
-            .filter_map(|(_, state)| state.overlay.as_ref().map(|overlay| overlay.pane.pane_id() as u64))
+            .filter_map(|(_, state)| {
+                state
+                    .overlay
+                    .as_ref()
+                    .map(|overlay| overlay.pane.pane_id() as u64)
+            })
             .collect::<Vec<_>>();
 
         for pane_id in overlay_panes_to_cancel {
@@ -2055,12 +2189,12 @@ impl TermWindow {
             self.window_id as DesktopWindowId,
             crate::chatminal_runtime::SessionTerminalHandle::new(host_terminal_handle),
         )
-            .map(|binding| binding.terminal_instance_id.as_u64())
-            .or_else(|| {
-                pane_metadata_terminal_instance_id(&*pos.pane)
-                    .map(|terminal_instance_id| terminal_instance_id.as_u64())
-            })
-            .unwrap_or(host_terminal_handle);
+        .map(|binding| binding.terminal_instance_id.as_u64())
+        .or_else(|| {
+            pane_metadata_terminal_instance_id(&*pos.pane)
+                .map(|terminal_instance_id| terminal_instance_id.as_u64())
+        })
+        .unwrap_or(host_terminal_handle);
         TerminalInstanceInformation {
             host_terminal_handle,
             terminal_instance_id,
@@ -2085,22 +2219,23 @@ impl TermWindow {
             let entry_bindings = crate::chatminal_runtime::desktop_session_entry_bindings(
                 self.window_id as DesktopWindowId,
             );
-            let leaves_by_session: HashMap<String, Vec<TerminalInstanceInformation>> = entry_bindings
-                .iter()
-                .filter_map(|entry| {
-                    let panes = self.positioned_panes_for_session(&entry.session_id);
-                    if panes.is_empty() {
-                        return None;
-                    }
-                    Some((
-                        entry.session_id.clone(),
-                        panes
-                            .iter()
-                            .map(|pane| self.positioned_pane_to_terminal_instance_info(pane))
-                            .collect(),
-                    ))
-                })
-                .collect();
+            let leaves_by_session: HashMap<String, Vec<TerminalInstanceInformation>> =
+                entry_bindings
+                    .iter()
+                    .filter_map(|entry| {
+                        let panes = self.positioned_panes_for_session(&entry.session_id);
+                        if panes.is_empty() {
+                            return None;
+                        }
+                        Some((
+                            entry.session_id.clone(),
+                            panes
+                                .iter()
+                                .map(|pane| self.positioned_pane_to_terminal_instance_info(pane))
+                                .collect(),
+                        ))
+                    })
+                    .collect();
 
             return entry_bindings
                 .into_iter()
@@ -2109,7 +2244,10 @@ impl TermWindow {
                         .get(&entry.session_id)
                         .cloned()
                         .unwrap_or_default();
-                    let active_terminal_instance = terminal_instances.iter().find(|leaf| leaf.is_active).cloned();
+                    let active_terminal_instance = terminal_instances
+                        .iter()
+                        .find(|leaf| leaf.is_active)
+                        .cloned();
 
                     SessionEntryInformation {
                         entry_index: entry.entry_index,
@@ -2150,7 +2288,10 @@ impl TermWindow {
                             .unwrap_or(false),
                         window_id: self.window_id as DesktopWindowId,
                         entry_title: tab.get_title(),
-                        active_terminal_instance: terminal_instances.iter().find(|leaf| leaf.is_active).cloned(),
+                        active_terminal_instance: terminal_instances
+                            .iter()
+                            .find(|leaf| leaf.is_active)
+                            .cloned(),
                         terminal_instances,
                         session_id: None,
                         view_id: None,
@@ -2168,7 +2309,10 @@ impl TermWindow {
             .collect()
     }
 
-    fn get_positioned_panes_for_render_scope(&self, render_target_id: u64) -> Vec<TerminalPaneLayout> {
+    fn get_positioned_panes_for_render_scope(
+        &self,
+        render_target_id: u64,
+    ) -> Vec<TerminalPaneLayout> {
         let Some(size) = self.render_scope_size(render_target_id) else {
             return vec![];
         };
@@ -2187,13 +2331,21 @@ impl TermWindow {
                 pane,
             }]
         } else {
-            let mut panes = crate::desktop_host_runtime::host_overlay_pane_layouts_by_id(render_target_id);
+            let mut panes =
+                crate::desktop_host_runtime::host_overlay_pane_layouts_by_id(render_target_id);
             for p in &mut panes {
-                if let Some(overlay) = self.terminal_ui_state(p.pane.pane_id() as u64).overlay.as_ref() {
+                if let Some(overlay) = self
+                    .terminal_ui_state(p.pane.pane_id() as u64)
+                    .overlay
+                    .as_ref()
+                {
                     p.pane = Arc::clone(&overlay.pane);
                 }
             }
-            panes.into_iter().map(TerminalPaneLayout::from_mux).collect()
+            panes
+                .into_iter()
+                .map(TerminalPaneLayout::from_mux)
+                .collect()
         }
     }
 

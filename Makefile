@@ -11,11 +11,17 @@ HEIGHT ?= 32
 SIDEBAR_WIDTH ?= 20
 PREVIEW_LINES ?= 120
 PREVIEW_CHARS ?= 200
+DEFAULT_DATA_DIR := $(HOME)/Library/Application Support/chatminal
+DEFAULT_CACHE_DIR := $(HOME)/Library/Caches/chatminal
+DEFAULT_LOG_DIR := $(HOME)/Library/Logs/chatminal
+FALLBACK_LOCAL_DATA_DIR := $(HOME)/.local/share/chatminal
 
-.PHONY: help clean-socket daemon daemon-reset dashboard window attach workspace sessions create activate bootstrap-terminal-deps verify-third-party-reference-only check check-desktop test smoke-window bench-rtt bench-phase02 fidelity-smoke fidelity-matrix-smoke fidelity-matrix-smoke-relaxed fidelity-input-ime-smoke phase06-killswitch-verify phase08-killswitch-verify soak-smoke release-dry-run
+.PHONY: help clean clean-data clean-socket daemon daemon-reset dashboard window attach workspace sessions create activate bootstrap-terminal-deps verify-third-party-reference-only check check-desktop test smoke-window bench-rtt bench-phase02 fidelity-smoke fidelity-matrix-smoke fidelity-matrix-smoke-relaxed fidelity-input-ime-smoke phase06-killswitch-verify phase08-killswitch-verify soak-smoke release-dry-run
 
 help:
 	@echo "Chatminal shortcuts:"
+	@echo "  make clean-data                             # Kill Chatminal processes and remove local app data/cache/logs"
+	@echo "  make clean                                  # Alias of clean-data"
 	@echo "  make daemon                                 # Run daemon"
 	@echo "  make daemon-reset                           # Kill old daemon, clean socket, run daemon"
 	@echo "  make dashboard                              # Run TUI dashboard"
@@ -46,6 +52,17 @@ help:
 	@echo "  SOCKET=$(SOCKET)"
 	@echo "  WIDTH=$(WIDTH) HEIGHT=$(HEIGHT) SIDEBAR_WIDTH=$(SIDEBAR_WIDTH)"
 	@echo "  PREVIEW_LINES=$(PREVIEW_LINES) PREVIEW_CHARS=$(PREVIEW_CHARS)"
+
+clean: clean-data
+
+clean-data:
+	-pkill -f 'chatminal-desktop|chatminald|chatminal-app|chatminal-mux' || true
+	-rm -f $(SOCKET)
+	@if [ -n "$$CHATMINAL_DATA_DIR" ]; then \
+		echo "Removing CHATMINAL_DATA_DIR=$$CHATMINAL_DATA_DIR"; \
+		rm -rf "$$CHATMINAL_DATA_DIR"; \
+	fi
+	-rm -rf "$(DEFAULT_DATA_DIR)" "$(DEFAULT_CACHE_DIR)" "$(DEFAULT_LOG_DIR)" "$(FALLBACK_LOCAL_DATA_DIR)"
 
 clean-socket:
 	rm -f $(SOCKET)

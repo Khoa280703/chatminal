@@ -737,7 +737,7 @@ impl Tab {
     /// the right/bottom pane of the newly created split to the provided Pane
     /// instance.  Returns the resultant index of the newly inserted pane.
     /// Both the split and the inserted pane will be resized.
-    pub fn split_and_insert(
+    pub(crate) fn split_and_insert(
         &self,
         pane_index: usize,
         request: SplitRequest,
