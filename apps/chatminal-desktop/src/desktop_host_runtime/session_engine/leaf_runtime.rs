@@ -9,7 +9,8 @@ use portable_pty::{Child, CommandBuilder, MasterPty, native_pty_system};
 
 use super::leaf_runtime_command::prepare_leaf_command;
 use super::leaf_runtime_threads::{
-    command_label, spawn_reader_loop, spawn_waiter_loop, spawn_writer_loop, to_pty_size,
+    command_label, sanitize_zsh_prompt_spacer, spawn_reader_loop, spawn_waiter_loop,
+    spawn_writer_loop, to_pty_size,
 };
 use super::{TerminalInstanceId, TerminalInstanceProcessState, RuntimeId};
 
@@ -104,8 +105,12 @@ impl TerminalInstanceRuntime {
             .as_ref()
             .filter(|value| !value.is_empty())
         {
-            terminal.lock().unwrap().advance_bytes(scrollback.as_bytes());
-            output_history.lock().unwrap().push(scrollback.clone());
+            let sanitized = sanitize_zsh_prompt_spacer(scrollback.as_bytes());
+            terminal.lock().unwrap().advance_bytes(&sanitized);
+            output_history
+                .lock()
+                .unwrap()
+                .push(String::from_utf8_lossy(&sanitized).to_string());
         }
         let reader = pair
             .master

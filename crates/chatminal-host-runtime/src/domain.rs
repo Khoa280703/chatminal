@@ -69,7 +69,7 @@ pub trait Domain: Downcast + Send + Sync {
         Ok(tab)
     }
 
-    #[deprecated(note = "Use session-native split; engine split retained for daemon compatibility")]
+    #[deprecated(note = "Use session-native split; engine split retained for runtime compatibility")]
     #[allow(deprecated)]
     async fn split_pane(
         &self,

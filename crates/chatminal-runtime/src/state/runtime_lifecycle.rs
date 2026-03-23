@@ -3,12 +3,11 @@ use std::sync::mpsc as std_mpsc;
 use chatminal_store::{StoredSession, StoredSessionStatus};
 
 use super::{
-    DaemonState, SessionEntry, SessionSpawnPlan, StateInner, kill_runtime_handle, now_millis,
-    runtime_bridge::RuntimeHandle, snapshot_requires_run_boundary,
+    RuntimeState, SessionEntry, SessionSpawnPlan, StateInner, kill_runtime_handle, now_millis,
+    runtime_bridge::RuntimeHandle, snapshot_requires_run_boundary, snapshot_trailing_fragment,
 };
 use crate::api::{
-    RuntimeDaemonHealthEvent, RuntimeEvent, RuntimeSessionStatus, RuntimeSessionUpdatedEvent,
-    RuntimeWorkspaceUpdatedEvent,
+    RuntimeEvent, RuntimeSessionStatus, RuntimeSessionUpdatedEvent, RuntimeWorkspaceUpdatedEvent,
 };
 
 enum SpawnCommitOutcome {
@@ -24,7 +23,7 @@ pub(super) struct DisconnectOptions {
     pub bump_generation: bool,
 }
 
-impl DaemonState {
+impl RuntimeState {
     pub(super) fn ensure_active_session_runtime(&self) -> Result<(), String> {
         let (store, cols, rows) = {
             let inner = self
@@ -143,16 +142,20 @@ impl DaemonState {
                         SpawnCommitOutcome::Stale
                     }
                     Some(_) => {
-                        let prepend_run_boundary_on_next_output = inner
+                        let snapshot = inner
                             .store
                             .session_snapshot(&plan.session_id, 1)
-                            .map(|snapshot| snapshot_requires_run_boundary(&snapshot))?;
+                            .map_err(|err| err.to_string())?;
+                        let prepend_run_boundary_on_next_output =
+                            snapshot_requires_run_boundary(&snapshot);
+                        let restored_trailing_fragment = snapshot_trailing_fragment(&snapshot);
                         if let Some(entry) = inner.sessions.get_mut(&plan.session_id) {
                             entry.generation = plan.next_generation;
                             entry.runtime = Some(runtime.clone());
                             entry.session.status = StoredSessionStatus::Running;
                             entry.prepend_run_boundary_on_next_output =
                                 prepend_run_boundary_on_next_output;
+                            entry.restored_trailing_fragment = restored_trailing_fragment;
                         }
                         inner
                             .store
@@ -192,6 +195,7 @@ impl StateInner {
                 live_output: String::new(),
                 generation: 0,
                 prepend_run_boundary_on_next_output: false,
+                restored_trailing_fragment: None,
             },
         );
         self.set_active_session_and_publish(&session.profile_id, &session.session_id)
@@ -303,20 +307,6 @@ impl StateInner {
         }
     }
 
-    pub(super) fn broadcast_daemon_health(&mut self) {
-        let running_sessions = self
-            .sessions
-            .values()
-            .filter(|entry| entry.runtime.is_some())
-            .count() as u64;
-        self.broadcast_event(RuntimeEvent::DaemonHealth(RuntimeDaemonHealthEvent {
-            connected_clients: (self.protocol_clients.len() + self.subscribers.len()) as u64,
-            session_count: self.sessions.len() as u64,
-            running_sessions,
-            ts: now_millis(),
-        }));
-    }
-
     pub(super) fn close_profile_runtimes(&mut self, profile_id: &str) {
         let target_ids: Vec<String> = self
             .sessions
@@ -342,13 +332,13 @@ impl StateInner {
     }
 
     pub(super) fn broadcast_event(&mut self, event: RuntimeEvent) {
+        self.metrics.inc_broadcast_frames_total();
         self.subscribers
             .retain(|_, tx| match tx.try_send(event.clone()) {
                 Ok(_) => true,
                 Err(std_mpsc::TrySendError::Full(_)) => false,
                 Err(std_mpsc::TrySendError::Disconnected(_)) => false,
             });
-        self.protocol_clients.broadcast_event(&event, &self.metrics);
     }
 }
 
@@ -364,6 +354,7 @@ fn disconnect_session_entry(
         entry.live_output.clear();
     }
     entry.prepend_run_boundary_on_next_output = false;
+    entry.restored_trailing_fragment = None;
     entry.session.status = StoredSessionStatus::Disconnected;
     entry.runtime.take()
 }

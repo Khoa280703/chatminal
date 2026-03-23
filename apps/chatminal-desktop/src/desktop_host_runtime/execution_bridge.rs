@@ -12,7 +12,7 @@ use std::time::Duration;
 use chatminal_runtime::workspace_ids::{RuntimeId, TerminalInstanceId};
 use chatminal_runtime::workspace_layout::WorkspaceLayoutRegistry;
 use chatminal_runtime::{
-    DaemonState, InputWriteStats, RuntimeExecutionAdapter, RuntimeSessionBridgeAction,
+    RuntimeState, InputWriteStats, RuntimeExecutionAdapter, RuntimeSessionBridgeAction,
     RuntimeSessionHandleTrait, RuntimeSessionLookup, WriteInputError,
 };
 use super::session_engine::{
@@ -38,13 +38,13 @@ impl SessionEventBus for DesktopSessionEventBus {
     }
 }
 
-// ─── DaemonStateHost newtype ────────────────────────────────────────────────
+// ─── RuntimeStateHost newtype ───────────────────────────────────────────────
 // Orphan rule: SessionWorkspaceHost is from desktop_host_runtime::session_engine and
-// DaemonState is from chatminal-runtime — neither is defined here. Use a newtype.
+// RuntimeState is from chatminal-runtime — neither is defined here. Use a newtype.
 
-struct DaemonStateHost<'a>(&'a DaemonState);
+struct RuntimeStateHost<'a>(&'a RuntimeState);
 
-impl SessionWorkspaceHost for DaemonStateHost<'_> {
+impl SessionWorkspaceHost for RuntimeStateHost<'_> {
     fn active_session_id(&self) -> Option<String> {
         self.0
             .workspace_load_passive()
@@ -138,7 +138,7 @@ impl RuntimeSessionHandleTrait for DesktopSessionHandle {
 pub(crate) struct DesktopRuntimeExecutionBridge {
     shared: Arc<SessionEngineShared>,
     workspace_layouts: Arc<Mutex<WorkspaceLayoutRegistry>>,
-    /// Populated by `connect_session_events` called from `DaemonState::new`.
+    /// Populated by `connect_session_events` called from `RuntimeState::new`.
     events_tx: OnceLock<std_mpsc::SyncSender<chatminal_runtime::SessionEvent>>,
 }
 
@@ -242,11 +242,11 @@ impl RuntimeExecutionAdapter for DesktopRuntimeExecutionBridge {
 
     fn reconcile_session_lookup(
         &self,
-        host: &DaemonState,
+        host: &RuntimeState,
         lookup: &RuntimeSessionLookup,
     ) -> Result<RuntimeSessionBridgeAction, String> {
         let bus = DesktopSessionEventBus;
-        Ok(match SessionRuntimeBridge::new(&DaemonStateHost(host), &bus)
+        Ok(match SessionRuntimeBridge::new(&RuntimeStateHost(host), &bus)
             .reconcile_session_lookup(&into_execution_lookup(lookup))?
         {
             SessionBridgeAction::Noop => RuntimeSessionBridgeAction::Noop,
@@ -258,23 +258,24 @@ impl RuntimeExecutionAdapter for DesktopRuntimeExecutionBridge {
 
     fn notify_session_activated(
         &self,
-        host: &DaemonState,
+        host: &RuntimeState,
         session_id: &str,
         runtime_id: RuntimeId,
     ) -> Result<(), String> {
         let bus = DesktopSessionEventBus;
-        SessionRuntimeBridge::new(&DaemonStateHost(host), &bus).on_session_activated(session_id, runtime_id)
+        SessionRuntimeBridge::new(&RuntimeStateHost(host), &bus)
+            .on_session_activated(session_id, runtime_id)
     }
 
     fn notify_session_closed(
         &self,
-        host: &DaemonState,
+        host: &RuntimeState,
         session_id: &str,
         runtime_id: RuntimeId,
         lookup_after_close: &RuntimeSessionLookup,
     ) -> Result<(), String> {
         let bus = DesktopSessionEventBus;
-        SessionRuntimeBridge::new(&DaemonStateHost(host), &bus).on_session_closed(
+        SessionRuntimeBridge::new(&RuntimeStateHost(host), &bus).on_session_closed(
             session_id,
             runtime_id,
             &into_execution_lookup(lookup_after_close),

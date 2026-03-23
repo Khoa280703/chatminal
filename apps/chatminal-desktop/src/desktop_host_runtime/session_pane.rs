@@ -21,6 +21,7 @@ use engine_term::{
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
 use rangeset::RangeSet;
 use termwiz::escape::Action;
+use termwiz::escape::parser::Parser as EscapeParser;
 use termwiz::input::KeyboardEncoding;
 use termwiz::surface::{Line, SequenceNo};
 use url::Url;
@@ -89,6 +90,7 @@ pub(crate) struct ChatminalSessionPane {
     runtime_id: RuntimeId,
     terminal_instance_id: TerminalInstanceId,
     shared: Arc<SessionEngineShared>,
+    parser: Mutex<EscapeParser>,
     terminal: Mutex<Terminal>,
     writer: Mutex<SessionPaneWriter>,
     dead: Mutex<bool>,
@@ -112,6 +114,7 @@ impl ChatminalSessionPane {
             runtime_id,
             terminal_instance_id,
             shared,
+            parser: Mutex::new(EscapeParser::new()),
             terminal: Mutex::new(Terminal::new(
                 size,
                 Arc::new(TermConfig::new()),
@@ -197,12 +200,13 @@ impl ChatminalSessionPane {
     }
 
     fn apply_output(&self, message: &str) {
-        let mut parser = termwiz::escape::parser::Parser::new();
-        let mut actions = vec![Action::CSI(termwiz::escape::csi::CSI::Sgr(
-            termwiz::escape::csi::Sgr::Reset,
-        ))];
-        parser.parse(message.as_bytes(), |action| actions.push(action));
-        self.terminal.lock().perform_actions(actions);
+        let actions = {
+            let mut parser = self.parser.lock();
+            parse_output_actions(&mut parser, message.as_bytes())
+        };
+        if !actions.is_empty() {
+            self.terminal.lock().perform_actions(actions);
+        }
     }
 
     pub(crate) fn pane_id_value(&self) -> HostTerminalHandle {
@@ -219,6 +223,35 @@ impl ChatminalSessionPane {
 
     pub(crate) fn session_id_value(&self) -> &str {
         &self.session_id
+    }
+}
+
+fn parse_output_actions(parser: &mut EscapeParser, bytes: &[u8]) -> Vec<Action> {
+    let mut actions = Vec::new();
+    parser.parse(bytes, |action| actions.push(action));
+    actions
+}
+
+#[cfg(test)]
+mod parser_tests {
+    use super::parse_output_actions;
+    use termwiz::escape::Action;
+    use termwiz::escape::csi::{CSI, Sgr};
+    use termwiz::escape::parser::Parser as EscapeParser;
+
+    #[test]
+    fn parser_state_survives_across_split_escape_chunks() {
+        let mut parser = EscapeParser::new();
+
+        let first = parse_output_actions(&mut parser, b"\x1b[3");
+        let second = parse_output_actions(&mut parser, b"1mhi");
+
+        assert!(first.is_empty());
+        assert!(matches!(second.first(), Some(Action::CSI(CSI::Sgr(Sgr::Foreground(_))))));
+        assert!(
+            second.iter().any(|action| matches!(action, Action::Print('h')))
+                || second.iter().any(|action| matches!(action, Action::PrintString(s) if s == "hi"))
+        );
     }
 }
 

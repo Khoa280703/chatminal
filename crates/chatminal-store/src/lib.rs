@@ -78,7 +78,7 @@ impl Store {
         let data_dir = default_data_dir()?;
         std::fs::create_dir_all(&data_dir)
             .map_err(|err| format!("create data directory failed: {err}"))?;
-        let db_path = data_dir.join("chatminald.db");
+        let db_path = data_dir.join("chatminal.db");
         Self::initialize(db_path)
     }
 
@@ -137,9 +137,10 @@ impl Store {
             name,
         };
         let now = now_millis() as i64;
+        let sort_order = self.next_profile_sort_order_with_conn(&conn)? as i64;
         conn.execute(
-            "INSERT INTO profiles (id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
-            params![&profile.profile_id, &profile.name, now, now],
+            "INSERT INTO profiles (id, name, sort_order, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![&profile.profile_id, &profile.name, sort_order, now, now],
         )
         .map_err(|err| format!("create profile failed: {err}"))?;
         Ok(profile)
@@ -427,6 +428,7 @@ impl Store {
         shell: String,
         persist_history: bool,
     ) -> Result<StoredSession, String> {
+        let conn = self.open_connection()?;
         let session_id = Uuid::new_v4().to_string();
         let trimmed_name = name
             .as_deref()
@@ -446,7 +448,26 @@ impl Store {
             seq: 0,
         };
 
-        self.upsert_session(&stored)?;
+        let sort_order = self.next_session_sort_order_with_conn(&conn, profile_id)? as i64;
+        let now = now_millis() as i64;
+        conn.execute(
+            r#"INSERT INTO sessions (id, profile_id, name, cwd, shell, status, persist_history, last_seq, sort_order, created_at, updated_at)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"#,
+            params![
+                &stored.session_id,
+                &stored.profile_id,
+                &stored.name,
+                &stored.cwd,
+                &stored.shell,
+                status_to_db(&stored.status),
+                if stored.persist_history { 1 } else { 0 },
+                stored.seq as i64,
+                sort_order,
+                now,
+                now
+            ],
+        )
+        .map_err(|err| format!("create session failed: {err}"))?;
         Ok(stored)
     }
 
@@ -589,6 +610,79 @@ impl Store {
 
         tx.commit()
             .map_err(|err| format!("commit delete session failed: {err}"))?;
+        Ok(())
+    }
+
+    pub fn move_session_to_profile(
+        &self,
+        session_id: &str,
+        target_profile_id: &str,
+        target_index: Option<usize>,
+    ) -> Result<(), String> {
+        let mut conn = self.open_connection()?;
+        let tx = conn
+            .transaction()
+            .map_err(|err| format!("open move session transaction failed: {err}"))?;
+
+        let source_profile_id: String = tx
+            .query_row(
+                "SELECT profile_id FROM sessions WHERE id = ?1",
+                params![session_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|err| format!("load source profile failed: {err}"))?
+            .ok_or_else(|| "session not found".to_string())?;
+
+        let target_exists: i64 = tx
+            .query_row(
+                "SELECT COUNT(1) FROM profiles WHERE id = ?1",
+                params![target_profile_id],
+                |row| row.get(0),
+            )
+            .map_err(|err| format!("validate target profile failed: {err}"))?;
+        if target_exists == 0 {
+            return Err("target profile not found".to_string());
+        }
+
+        let mut source_ids = self.session_ids_by_profile_with_conn(&tx, &source_profile_id)?;
+        let source_index = source_ids
+            .iter()
+            .position(|id| id == session_id)
+            .ok_or_else(|| "session not found in source profile".to_string())?;
+        source_ids.remove(source_index);
+
+        let now = now_millis() as i64;
+        if source_profile_id == target_profile_id {
+            let insert_at = target_index.unwrap_or(source_ids.len()).min(source_ids.len());
+            source_ids.insert(insert_at, session_id.to_string());
+            self.resequence_sessions_for_profile_with_conn(&tx, &source_profile_id, &source_ids)?;
+        } else {
+            let mut target_ids = self.session_ids_by_profile_with_conn(&tx, target_profile_id)?;
+            let insert_at = target_index.unwrap_or(target_ids.len()).min(target_ids.len());
+            target_ids.insert(insert_at, session_id.to_string());
+
+            tx.execute(
+                "UPDATE sessions SET profile_id = ?1, updated_at = ?2 WHERE id = ?3",
+                params![target_profile_id, now, session_id],
+            )
+            .map_err(|err| format!("move session profile failed: {err}"))?;
+
+            self.resequence_sessions_for_profile_with_conn(&tx, &source_profile_id, &source_ids)?;
+            self.resequence_sessions_for_profile_with_conn(&tx, target_profile_id, &target_ids)?;
+
+            if self.active_session_with_conn(&tx, &source_profile_id)?.as_deref() == Some(session_id)
+            {
+                self.set_active_session_with_conn(
+                    &tx,
+                    &source_profile_id,
+                    source_ids.first().map(|value| value.as_str()),
+                )?;
+            }
+        }
+
+        tx.commit()
+            .map_err(|err| format!("commit move session failed: {err}"))?;
         Ok(())
     }
 
@@ -780,6 +874,7 @@ impl Store {
         let conn = self.open_connection()?;
         conn.execute_batch(schema::INIT_SQL)
             .map_err(|err| format!("initialize schema failed: {err}"))?;
+        self.migrate_sort_order_columns(&conn)?;
         Ok(())
     }
 
@@ -795,7 +890,7 @@ impl Store {
         let default_id = Uuid::new_v4().to_string();
         let now = now_millis() as i64;
         conn.execute(
-            "INSERT INTO profiles (id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO profiles (id, name, sort_order, created_at, updated_at) VALUES (?1, ?2, 0, ?3, ?4)",
             params![&default_id, DEFAULT_PROFILE_NAME, now, now],
         )
         .map_err(|err| format!("create default profile failed: {err}"))?;
@@ -831,6 +926,28 @@ impl Store {
             .map_err(|err| format!("load active session failed: {err}"))
     }
 
+    fn set_active_session_with_conn(
+        &self,
+        conn: &Connection,
+        profile_id: &str,
+        session_id: Option<&str>,
+    ) -> Result<(), String> {
+        let key = format!("{ACTIVE_SESSION_PREFIX}{profile_id}");
+        match session_id {
+            Some(value) => conn
+                .execute(
+                    "INSERT INTO app_state (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    params![key, value],
+                )
+                .map(|_| ())
+                .map_err(|err| format!("set active session failed: {err}")),
+            None => conn
+                .execute("DELETE FROM app_state WHERE key = ?1", params![key])
+                .map(|_| ())
+                .map_err(|err| format!("clear active session failed: {err}")),
+        }
+    }
+
     fn get_string_state_with_conn(
         &self,
         conn: &Connection,
@@ -847,7 +964,7 @@ impl Store {
 
     fn list_profiles_with_conn(&self, conn: &Connection) -> Result<Vec<StoredProfile>, String> {
         let mut stmt = conn
-            .prepare("SELECT id, name FROM profiles ORDER BY created_at ASC, rowid ASC")
+            .prepare("SELECT id, name FROM profiles ORDER BY sort_order ASC, created_at ASC, rowid ASC")
             .map_err(|err| format!("prepare list profiles failed: {err}"))?;
         let mut rows = stmt
             .query([])
@@ -874,7 +991,7 @@ impl Store {
     ) -> Result<Vec<StoredSessionSummary>, String> {
         let mut stmt = conn
             .prepare(
-                "SELECT id, profile_id, name, cwd, status, persist_history, last_seq FROM sessions WHERE profile_id = ?1 ORDER BY created_at ASC, rowid ASC",
+                "SELECT id, profile_id, name, cwd, status, persist_history, last_seq FROM sessions WHERE profile_id = ?1 ORDER BY sort_order ASC, created_at ASC, rowid ASC",
             )
             .map_err(|err| format!("prepare list sessions failed: {err}"))?;
 
@@ -899,6 +1016,141 @@ impl Store {
         }
 
         Ok(sessions)
+    }
+
+    fn migrate_sort_order_columns(&self, conn: &Connection) -> Result<(), String> {
+        let mut migrated_profiles = false;
+        let mut migrated_sessions = false;
+
+        if !self.column_exists(conn, "profiles", "sort_order")? {
+            conn.execute(
+                "ALTER TABLE profiles ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
+                [],
+            )
+            .map_err(|err| format!("add profiles.sort_order failed: {err}"))?;
+            migrated_profiles = true;
+        }
+
+        if !self.column_exists(conn, "sessions", "sort_order")? {
+            conn.execute(
+                "ALTER TABLE sessions ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
+                [],
+            )
+            .map_err(|err| format!("add sessions.sort_order failed: {err}"))?;
+            migrated_sessions = true;
+        }
+
+        if migrated_profiles {
+            self.normalize_profile_sort_order(conn)?;
+        }
+        if migrated_sessions {
+            self.normalize_session_sort_order(conn)?;
+        }
+
+        Ok(())
+    }
+
+    fn column_exists(&self, conn: &Connection, table: &str, column: &str) -> Result<bool, String> {
+        let mut stmt = conn
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .map_err(|err| format!("prepare table_info for {table} failed: {err}"))?;
+        let mut rows = stmt
+            .query([])
+            .map_err(|err| format!("query table_info for {table} failed: {err}"))?;
+        while let Some(row) = rows
+            .next()
+            .map_err(|err| format!("read table_info for {table} failed: {err}"))?
+        {
+            let name = row.get::<_, String>(1).unwrap_or_default();
+            if name == column {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    fn normalize_profile_sort_order(&self, conn: &Connection) -> Result<(), String> {
+        let mut stmt = conn
+            .prepare("SELECT id FROM profiles ORDER BY created_at ASC, rowid ASC")
+            .map_err(|err| format!("prepare normalize profiles failed: {err}"))?;
+        let ids = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|err| format!("query normalize profiles failed: {err}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|err| format!("collect normalize profiles failed: {err}"))?;
+
+        for (index, profile_id) in ids.iter().enumerate() {
+            conn.execute(
+                "UPDATE profiles SET sort_order = ?1 WHERE id = ?2",
+                params![index as i64, profile_id],
+            )
+            .map_err(|err| format!("normalize profile sort order failed: {err}"))?;
+        }
+        Ok(())
+    }
+
+    fn normalize_session_sort_order(&self, conn: &Connection) -> Result<(), String> {
+        for profile in self.list_profiles_with_conn(conn)? {
+            let ids = self.session_ids_by_profile_with_conn(conn, &profile.profile_id)?;
+            self.resequence_sessions_for_profile_with_conn(conn, &profile.profile_id, &ids)?;
+        }
+        Ok(())
+    }
+
+    fn next_profile_sort_order_with_conn(&self, conn: &Connection) -> Result<u64, String> {
+        conn.query_row(
+            "SELECT COALESCE(MAX(sort_order) + 1, 0) FROM profiles",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|value| value.max(0) as u64)
+        .map_err(|err| format!("compute next profile sort order failed: {err}"))
+    }
+
+    fn next_session_sort_order_with_conn(
+        &self,
+        conn: &Connection,
+        profile_id: &str,
+    ) -> Result<u64, String> {
+        conn.query_row(
+            "SELECT COALESCE(MAX(sort_order) + 1, 0) FROM sessions WHERE profile_id = ?1",
+            params![profile_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|value| value.max(0) as u64)
+        .map_err(|err| format!("compute next session sort order failed: {err}"))
+    }
+
+    fn session_ids_by_profile_with_conn(
+        &self,
+        conn: &Connection,
+        profile_id: &str,
+    ) -> Result<Vec<String>, String> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id FROM sessions WHERE profile_id = ?1 ORDER BY sort_order ASC, created_at ASC, rowid ASC",
+            )
+            .map_err(|err| format!("prepare session id list failed: {err}"))?;
+        stmt.query_map(params![profile_id], |row| row.get::<_, String>(0))
+            .map_err(|err| format!("query session id list failed: {err}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|err| format!("collect session id list failed: {err}"))
+    }
+
+    fn resequence_sessions_for_profile_with_conn(
+        &self,
+        conn: &Connection,
+        profile_id: &str,
+        session_ids: &[String],
+    ) -> Result<(), String> {
+        for (index, current_session_id) in session_ids.iter().enumerate() {
+            conn.execute(
+                "UPDATE sessions SET profile_id = ?1, sort_order = ?2, updated_at = ?3 WHERE id = ?4",
+                params![profile_id, index as i64, now_millis() as i64, current_session_id],
+            )
+            .map_err(|err| format!("resequence sessions failed: {err}"))?;
+        }
+        Ok(())
     }
 }
 
@@ -943,56 +1195,4 @@ fn now_millis() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|value| value.as_millis() as u64)
         .unwrap_or(0)
-}
-
-// ─── Store → Protocol conversions ────────────────────────────────────────────
-
-impl From<StoredSessionStatus> for chatminal_protocol::SessionStatus {
-    fn from(value: StoredSessionStatus) -> Self {
-        match value {
-            StoredSessionStatus::Running => Self::Running,
-            StoredSessionStatus::Disconnected => Self::Disconnected,
-        }
-    }
-}
-
-impl From<chatminal_protocol::SessionStatus> for StoredSessionStatus {
-    fn from(value: chatminal_protocol::SessionStatus) -> Self {
-        match value {
-            chatminal_protocol::SessionStatus::Running => Self::Running,
-            chatminal_protocol::SessionStatus::Disconnected => Self::Disconnected,
-        }
-    }
-}
-
-impl From<StoredProfile> for chatminal_protocol::ProfileInfo {
-    fn from(value: StoredProfile) -> Self {
-        Self {
-            profile_id: value.profile_id,
-            name: value.name,
-        }
-    }
-}
-
-impl From<StoredSessionSummary> for chatminal_protocol::SessionInfo {
-    fn from(value: StoredSessionSummary) -> Self {
-        Self {
-            session_id: value.session_id,
-            profile_id: value.profile_id,
-            name: value.name,
-            cwd: value.cwd,
-            status: value.status.into(),
-            persist_history: value.persist_history,
-            seq: value.seq,
-        }
-    }
-}
-
-impl From<StoredSessionSnapshot> for chatminal_protocol::SessionSnapshot {
-    fn from(value: StoredSessionSnapshot) -> Self {
-        Self {
-            content: value.content,
-            seq: value.seq,
-        }
-    }
 }

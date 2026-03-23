@@ -1,10 +1,10 @@
-//! Lightweight terminal type definitions shared by daemon and desktop.
+//! Lightweight terminal type definitions shared by runtime host and desktop.
 //!
 //! Provides [`TerminalSize`], [`CursorPosition`], [`ScreenLine`], and the
 //! [`TerminalConfiguration`] trait. Zero heavy dependencies (no termwiz).
 //!
 //! Counterpart: `chatminal-engine-term` provides the full termwiz-based terminal
-//! emulator used by the desktop GUI. Daemon code should depend on this crate only.
+//! emulator used by the desktop GUI. Runtime host code should depend on this crate only.
 
 use std::ops::Range;
 use std::sync::Arc;

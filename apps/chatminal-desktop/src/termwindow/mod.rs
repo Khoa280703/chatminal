@@ -190,7 +190,6 @@ pub enum UIItemType {
     Split(TerminalSplit),
     ChatminalSidebarBackground,
     ChatminalSidebarCreateProfile,
-    ChatminalSidebarToggleProfile(String),
     ChatminalSidebarProfile(String),
     ChatminalSidebarCreateSession,
     ChatminalSidebarSession(String),
@@ -548,7 +547,14 @@ impl TermWindow {
         ) as f32
     }
 
-    fn should_show_session_bar_for_count(config: &ConfigHandle, num_tabs: usize) -> bool {
+    fn should_show_session_bar_for_count(
+        config: &ConfigHandle,
+        num_tabs: usize,
+        sidebar_enabled: bool,
+    ) -> bool {
+        if sidebar_enabled {
+            return false;
+        }
         if num_tabs <= 1 {
             config.enable_session_bar && !config.hide_session_bar_if_only_one_session
         } else {
@@ -625,7 +631,7 @@ impl TermWindow {
         {
             return;
         }
-        self.activate_chatminal_session_target(&session_id, None);
+        let _ = self.activate_chatminal_session_target(&session_id, None);
     }
 
     fn initialize_metrics_tick(&mut self) {
@@ -766,6 +772,22 @@ impl TermWindow {
         if !self.chatminal_sidebar.is_enabled() {
             return;
         }
+        let sidebar_snapshot = self.chatminal_sidebar.snapshot();
+        let target_profile_id = sidebar_snapshot
+            .sessions
+            .iter()
+            .find(|session| session.session_id == session_id)
+            .map(|session| session.profile_id.clone());
+        if let Some(profile_id) = target_profile_id.as_deref() {
+            if sidebar_snapshot.active_profile_id.as_deref() != Some(profile_id) {
+                if let Err(err) = self.chatminal_sidebar.switch_profile(profile_id) {
+                    log::error!(
+                        "failed to sync active profile {profile_id} for session {session_id}: {err}"
+                    );
+                    return;
+                }
+            }
+        }
         if let Err(err) = self.chatminal_sidebar.activate_session(
             session_id,
             self.terminal_size.cols.max(20),
@@ -775,14 +797,19 @@ impl TermWindow {
             return;
         }
 
-        self.activate_chatminal_session_target(session_id, preferred_runtime_id);
+        if self
+            .activate_chatminal_session_target(session_id, preferred_runtime_id)
+            .is_some()
+        {
+            self.chatminal_sidebar.set_active_session_local(session_id);
+        }
     }
 
     fn activate_chatminal_session_target(
         &mut self,
         session_id: &str,
         preferred_runtime_id: Option<RuntimeId>,
-    ) {
+    ) -> Option<crate::chatminal_runtime::DesktopSessionRuntimeSummary> {
         // Session-native path (Phase 04): route entirely through DesktopSessionHost,
         // without touching the legacy global runtime lookup on the active flow.
         let window_id = self.window_id as DesktopWindowId;
@@ -805,9 +832,10 @@ impl TermWindow {
             if let Some(window) = self.window.as_ref() {
                 window.invalidate();
             }
-            return;
+            return Some(state);
         }
         log::error!("failed to activate session-native target for session {session_id}");
+        None
     }
 
     fn active_render_scope_id(&self) -> Option<u64> {
@@ -887,7 +915,7 @@ impl TermWindow {
         let DesktopSessionBridgeAction::FocusSession { session_id } = action else {
             return;
         };
-        self.activate_chatminal_session_target(&session_id, None);
+        let _ = self.activate_chatminal_session_target(&session_id, None);
     }
 
     fn close_chatminal_session_for_render_scope(&mut self, render_target_id: u64) -> bool {
@@ -1004,17 +1032,12 @@ impl TermWindow {
             .as_deref()
             == Some(profile_id)
         {
-            self.chatminal_sidebar.ensure_profile_expanded(profile_id);
-            if let Some(window) = self.window.as_ref() {
-                window.invalidate();
-            }
             return;
         }
 
         match self.chatminal_sidebar.switch_profile(profile_id) {
             Ok(workspace) => {
                 self.apply_chatminal_profile_workspace(workspace);
-                self.chatminal_sidebar.ensure_profile_expanded(profile_id);
             }
             Err(err) => {
                 log::error!("failed to switch sidebar profile {profile_id}: {err}");
@@ -1022,7 +1045,7 @@ impl TermWindow {
         }
     }
 
-    fn toggle_chatminal_profile_expanded(&mut self, profile_id: &str) {
+    fn toggle_chatminal_profile(&mut self, profile_id: &str) {
         if !self.chatminal_sidebar.is_enabled() {
             return;
         }
@@ -1220,7 +1243,8 @@ impl TermWindow {
 
         // Initially we have only a single tab, so take that into account
         // for the tab bar state.
-        let show_session_bar = Self::should_show_session_bar_for_count(&config, 1);
+        let show_session_bar =
+            Self::should_show_session_bar_for_count(&config, 1, chatminal_sidebar.is_enabled());
         let tab_bar_height = if show_session_bar {
             Self::tab_bar_pixel_height_impl(&config, &fontconfig, &render_metrics)? as usize
         } else {

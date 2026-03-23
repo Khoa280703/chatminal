@@ -26,9 +26,11 @@ pub struct UnixDomain {
     pub no_serve_automatically: bool,
 
     /// If we decide that we need to start the server, the command to run
-    /// to set that up. The default is to spawn `chatminald`, but it can
-    /// be useful to set this to eg: `wsl -e chatminald` to start up
-    /// a unix domain inside a wsl container.
+    /// to set that up.
+    ///
+    /// Desktop-only Chatminal no longer provides a default compatibility
+    /// runtime host for this path, so this must be configured explicitly for
+    /// legacy unix-domain usage.
     pub serve_command: Option<Vec<String>>,
 
     /// Instead of directly connecting to `socket_path`,
@@ -114,15 +116,9 @@ impl UnixDomain {
     pub fn serve_command(&self) -> anyhow::Result<Vec<OsString>> {
         match self.serve_command.as_ref() {
             Some(cmd) => Ok(cmd.iter().map(Into::into).collect()),
-            None => Ok(vec![
-                std::env::current_exe()?
-                    .with_file_name(if cfg!(windows) {
-                        "chatminald.exe"
-                    } else {
-                        "chatminald"
-                    })
-                    .into_os_string(),
-            ]),
+            None => anyhow::bail!(
+                "UnixDomain::serve_command requires explicit configuration in desktop-only Chatminal"
+            ),
         }
     }
 }
@@ -132,21 +128,11 @@ mod tests {
     use super::UnixDomain;
 
     #[test]
-    fn default_serve_command_uses_chatminald_binary() {
-        let command = UnixDomain::default().serve_command().unwrap();
-        let binary = command
-            .first()
-            .and_then(|value| std::path::Path::new(value).file_name())
-            .and_then(|value| value.to_str())
-            .unwrap();
-
-        let expected = if cfg!(windows) {
-            "chatminald.exe"
-        } else {
-            "chatminald"
-        };
-
-        assert_eq!(binary, expected);
-        assert_eq!(command.len(), 1);
+    fn default_serve_command_requires_explicit_configuration() {
+        let err = UnixDomain::default().serve_command().expect_err("missing serve command");
+        assert!(
+            err.to_string()
+                .contains("requires explicit configuration")
+        );
     }
 }

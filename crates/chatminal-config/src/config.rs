@@ -3,7 +3,7 @@ use crate::bell::{AudibleBell, EasingFunction, VisualBell};
 use crate::color::{
     ColorSchemeFile, HsbTransform, Palette, SrgbaTuple, SessionBarStyle, WindowFrameConfig,
 };
-use crate::daemon::DaemonOptions;
+use crate::runtime_options::RuntimeOptions;
 use crate::exec_domain::ExecDomain;
 use crate::font::{
     AllowSquareGlyphOverflow, DisplayPixelGeometry, FontLocatorSelection, FontRasterizerSelection,
@@ -447,7 +447,7 @@ pub struct Config {
     pub disable_default_mouse_bindings: bool,
 
     #[dynamic(default)]
-    pub daemon_options: DaemonOptions,
+    pub runtime_options: RuntimeOptions,
 
     #[dynamic(default)]
     pub send_composed_key_when_left_alt_is_pressed: bool,

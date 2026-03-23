@@ -185,7 +185,11 @@ impl TermWindow {
         self.palette.take();
 
         let num_runtime_entries = self.get_session_entry_information().len();
-        self.show_session_bar = Self::should_show_session_bar_for_count(&config, num_runtime_entries);
+        self.show_session_bar = Self::should_show_session_bar_for_count(
+            &config,
+            num_runtime_entries,
+            self.chatminal_sidebar.is_enabled(),
+        );
         *self.cursor_blink_state.borrow_mut() = ColorEase::new(
             config.cursor_blink_rate,
             config.cursor_blink_ease_in,
@@ -524,7 +528,11 @@ impl TermWindow {
         if let Some(window) = self.window.as_ref() {
             window.set_title(&title);
 
-            let show_session_bar = Self::should_show_session_bar_for_count(&self.config, num_tabs);
+            let show_session_bar = Self::should_show_session_bar_for_count(
+                &self.config,
+                num_tabs,
+                self.chatminal_sidebar.is_enabled(),
+            );
 
             // If the number of tabs changed and caused the tab bar to
             // hide/show, then we'll need to resize things.  It is simplest

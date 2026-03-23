@@ -1,22 +1,20 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc;
 use std::time::Duration;
 
-use chatminal_protocol::{ClientFrame, Request, Response, ServerBody};
 use crate::workspace_ids::SessionViewId;
 use crate::workspace_layout::{WorkspaceLayoutState, WorkspaceSplitAxis};
 use chatminal_store::{Store, StoredSessionStatus};
 
 use crate::api::{RuntimeEvent, RuntimeSessionBridgeAction, RuntimeSessionLookup};
-use crate::config::DaemonConfig;
+use crate::config::RuntimeConfig;
 use crate::session::SessionEvent;
 
 use super::explorer_utils::{normalize_relative_path, resolve_explorer_target};
 use super::test_bridge::make_test_bridge;
 use super::{
-    DaemonState, SessionSpawnPlan, prepend_run_boundary, snapshot_requires_run_boundary,
-    trim_live_output,
+    RuntimeState, SessionSpawnPlan, prepend_run_boundary, snapshot_requires_run_boundary,
+    snapshot_trailing_fragment, trim_live_output,
 };
 
 struct TempDb {
@@ -27,7 +25,7 @@ impl TempDb {
     fn new() -> Self {
         static NEXT_TEMP_DB_ID: AtomicU64 = AtomicU64::new(1);
         let path = std::env::temp_dir().join(format!(
-            "chatminald-state-test-{}-{}-{}.db",
+            "chatminal-state-test-{}-{}-{}.db",
             std::process::id(),
             NEXT_TEMP_DB_ID.fetch_add(1, Ordering::Relaxed),
             std::time::SystemTime::now()
@@ -45,7 +43,7 @@ impl Drop for TempDb {
     }
 }
 
-fn create_state_with_session() -> (DaemonState, String, TempDb) {
+fn create_state_with_session() -> (RuntimeState, String, TempDb) {
     let db = TempDb::new();
     let store = Store::initialize(&db.path).expect("initialize test store");
     let active_profile_id = store
@@ -65,9 +63,9 @@ fn create_state_with_session() -> (DaemonState, String, TempDb) {
         .set_active_session(&active_profile_id, Some(&session.session_id))
         .expect("set active session");
 
-    let config = DaemonConfig {
+    let config = RuntimeConfig {
         endpoint: format!(
-            "/tmp/chatminald-state-{}-{}.sock",
+            "/tmp/chatminal-state-{}-{}.sock",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -82,11 +80,11 @@ fn create_state_with_session() -> (DaemonState, String, TempDb) {
         health_interval_ms: 1_000,
     };
     let bridge = make_test_bridge();
-    let state = DaemonState::new(config, store, bridge).expect("create daemon state");
+    let state = RuntimeState::new(config, store, bridge).expect("create runtime state");
     (state, session.session_id, db)
 }
 
-fn create_state_with_two_sessions() -> (DaemonState, String, String, TempDb) {
+fn create_state_with_two_sessions() -> (RuntimeState, String, String, TempDb) {
     let db = TempDb::new();
     let store = Store::initialize(&db.path).expect("initialize test store");
     let active_profile_id = store
@@ -115,9 +113,9 @@ fn create_state_with_two_sessions() -> (DaemonState, String, String, TempDb) {
         .set_active_session(&active_profile_id, Some(&session_a.session_id))
         .expect("set active session");
 
-    let config = DaemonConfig {
+    let config = RuntimeConfig {
         endpoint: format!(
-            "/tmp/chatminald-state-two-{}-{}.sock",
+            "/tmp/chatminal-state-two-{}-{}.sock",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -132,28 +130,8 @@ fn create_state_with_two_sessions() -> (DaemonState, String, String, TempDb) {
         health_interval_ms: 1_000,
     };
     let bridge = make_test_bridge();
-    let state = DaemonState::new(config, store, bridge).expect("create daemon state");
+    let state = RuntimeState::new(config, store, bridge).expect("create runtime state");
     (state, session_a.session_id, session_b.session_id, db)
-}
-
-fn request_ok(state: &DaemonState, request: Request) -> Response {
-    let frame = state.handle_request(ClientFrame {
-        id: "test-request".to_string(),
-        request,
-    });
-    match frame.body {
-        ServerBody::Response {
-            ok: true,
-            response: Some(response),
-            ..
-        } => response,
-        ServerBody::Response {
-            ok: false,
-            error: Some(error),
-            ..
-        } => panic!("request failed unexpectedly: {error}"),
-        other => panic!("unexpected frame body: {other:?}"),
-    }
 }
 
 #[test]
@@ -184,6 +162,24 @@ fn snapshot_without_trailing_newline_requires_run_boundary() {
             seq: 1,
         }
     ));
+}
+
+#[test]
+fn snapshot_trailing_fragment_returns_only_unterminated_tail() {
+    assert_eq!(
+        snapshot_trailing_fragment(&chatminal_store::StoredSessionSnapshot {
+            content: "line-1\nkhoa2807@host ~ % ".to_string(),
+            seq: 2,
+        }),
+        Some("khoa2807@host ~ % ".to_string())
+    );
+    assert_eq!(
+        snapshot_trailing_fragment(&chatminal_store::StoredSessionSnapshot {
+            content: "line-1\nline-2\n".to_string(),
+            seq: 2,
+        }),
+        None
+    );
 }
 
 #[test]
@@ -265,39 +261,26 @@ fn lifecycle_preferences_default_values() {
 }
 
 #[test]
-fn metrics_snapshot_tracks_requests_and_errors() {
-    let (state, _session_id, _db) = create_state_with_session();
-
-    let _ = request_ok(&state, Request::Ping);
-    let error_frame = state.handle_request(ClientFrame {
-        id: "invalid-request".to_string(),
-        request: Request::SessionInputWrite {
-            session_id: "missing-session".to_string(),
-            data: "echo test".to_string(),
-        },
+fn metrics_snapshot_tracks_session_events() {
+    let (state, session_id, _db) = create_state_with_session();
+    state.apply_session_event(SessionEvent::Output {
+        session_id,
+        generation: 0,
+        chunk: "hello\n".to_string(),
+        ts: 1,
     });
-    match error_frame.body {
-        ServerBody::Response { ok: false, .. } => {}
-        other => panic!("expected error response frame, got {other:?}"),
-    }
 
     let snapshot = state.metrics_snapshot();
-    assert!(snapshot.requests_total >= 2);
-    assert!(snapshot.request_errors_total >= 1);
+    assert!(snapshot.session_events_total >= 1);
 }
 
 #[test]
-fn metrics_snapshot_tracks_dropped_clients_on_full_queue() {
+fn metrics_snapshot_tracks_runtime_broadcasts() {
     let (state, _session_id, _db) = create_state_with_session();
-    let (tx, _rx) = mpsc::sync_channel(1);
-    state.register_client(42, tx);
-
-    state.broadcast_daemon_health();
-    state.broadcast_daemon_health();
+    let _ = state.profile_create(Some("Metrics".to_string()));
 
     let snapshot = state.metrics_snapshot();
-    assert!(snapshot.broadcast_frames_total >= 2);
-    assert!(snapshot.dropped_clients_full_total >= 1);
+    assert!(snapshot.broadcast_frames_total >= 1);
 }
 
 #[test]
@@ -319,6 +302,7 @@ fn native_workspace_load_passive_returns_runtime_snapshot() {
 #[test]
 fn workspace_layout_roundtrip_persists_for_active_profile() {
     let (state, session_a, session_b, _db) = create_state_with_two_sessions();
+    let workspace_id = "desktop-main";
     let mut layout = WorkspaceLayoutState::new_single(session_a.clone());
     layout
         .split_view(
@@ -328,10 +312,12 @@ fn workspace_layout_roundtrip_persists_for_active_profile() {
         )
         .expect("split layout");
 
-    state.workspace_layout_save(&layout).expect("save layout");
+    state
+        .workspace_layout_save(workspace_id, &layout)
+        .expect("save layout");
 
     let loaded = state
-        .workspace_layout_load()
+        .workspace_layout_load(workspace_id)
         .expect("load layout")
         .expect("layout exists");
     assert_eq!(loaded, layout);
@@ -340,6 +326,7 @@ fn workspace_layout_roundtrip_persists_for_active_profile() {
 #[test]
 fn workspace_layout_restore_persisted_populates_runtime_registry() {
     let (state, session_a, session_b, _db) = create_state_with_two_sessions();
+    let workspace_id = "desktop-main";
     let mut layout = WorkspaceLayoutState::new_single(session_a.clone());
     layout
         .split_view(
@@ -348,23 +335,25 @@ fn workspace_layout_restore_persisted_populates_runtime_registry() {
             session_b.clone(),
         )
         .expect("split layout");
-    state.workspace_layout_save(&layout).expect("save layout");
+    state
+        .workspace_layout_save(workspace_id, &layout)
+        .expect("save layout");
 
     assert_eq!(
         state
-            .workspace_layout_snapshot("desktop-main")
+            .workspace_layout_snapshot(workspace_id)
             .expect("snapshot before restore"),
         None
     );
 
     let restored = state
-        .workspace_layout_restore_persisted("desktop-main")
+        .workspace_layout_restore_persisted(workspace_id)
         .expect("restore persisted layout")
         .expect("restored layout");
     assert_eq!(restored, layout);
     assert_eq!(
         state
-            .workspace_layout_snapshot("desktop-main")
+            .workspace_layout_snapshot(workspace_id)
             .expect("snapshot after restore"),
         Some(layout)
     );
@@ -412,6 +401,7 @@ fn workspace_layout_facade_mutations_update_runtime_registry() {
 #[test]
 fn workspace_layout_load_prunes_sessions_missing_from_profile() {
     let (state, session_a, session_b, _db) = create_state_with_two_sessions();
+    let workspace_id = "desktop-main";
     let mut layout = WorkspaceLayoutState::new_single(session_a.clone());
     layout
         .split_view(
@@ -420,11 +410,13 @@ fn workspace_layout_load_prunes_sessions_missing_from_profile() {
             session_b.clone(),
         )
         .expect("split layout");
-    state.workspace_layout_save(&layout).expect("save layout");
+    state
+        .workspace_layout_save(workspace_id, &layout)
+        .expect("save layout");
     state.session_close(&session_b).expect("close session b");
 
     let loaded = state
-        .workspace_layout_load()
+        .workspace_layout_load(workspace_id)
         .expect("load pruned layout")
         .expect("layout exists");
     assert_eq!(loaded.views.len(), 1);
@@ -432,19 +424,41 @@ fn workspace_layout_load_prunes_sessions_missing_from_profile() {
 }
 
 #[test]
-fn native_subscription_receives_daemon_health_event() {
+fn session_move_to_profile_updates_runtime_state_without_touching_ui_contract() {
+    let (state, session_a, _session_b, _db) = create_state_with_two_sessions();
+    let target = state.profile_create(Some("Work".to_string())).expect("create profile");
+
+    let moved = state
+        .session_move_to_profile(&session_a, &target.profile_id, Some(0))
+        .expect("move session");
+
+    let active_profile_id = moved
+        .active_profile_id
+        .clone()
+        .expect("active profile id after move");
+    assert!(moved.sessions.iter().all(|session| session.profile_id == active_profile_id));
+    assert!(moved.sessions.iter().all(|session| session.session_id != session_a));
+
+    let launch = state
+        .session_launch_spec(&session_a)
+        .expect("load moved session launch spec");
+    assert_eq!(launch.session_id, session_a);
+}
+
+#[test]
+fn native_subscription_receives_workspace_updated_event() {
     let (state, _session_id, _db) = create_state_with_session();
     let subscription = state.subscribe().expect("subscribe runtime events");
 
-    state.broadcast_daemon_health();
+    let _ = state.profile_create(Some("Workspace".to_string()));
 
     let event = subscription
         .recv_timeout(Duration::from_secs(1))
         .expect("receive event")
         .expect("event payload");
     match event {
-        RuntimeEvent::DaemonHealth(value) => {
-            assert!(value.session_count >= 1);
+        RuntimeEvent::WorkspaceUpdated(value) => {
+            assert!(value.profile_count >= 2);
         }
         other => panic!("unexpected runtime event: {other:?}"),
     }
@@ -505,11 +519,7 @@ fn lifecycle_preferences_partial_update_keeps_other_key() {
 fn workspace_load_auto_connects_active_session_runtime() {
     let (state, session_id, _db) = create_state_with_session();
 
-    let response = request_ok(&state, Request::WorkspaceLoad);
-    let workspace = match response {
-        Response::Workspace(value) => value,
-        other => panic!("unexpected response: {other:?}"),
-    };
+    let workspace = state.workspace_load().expect("workspace load");
     assert_eq!(
         workspace.active_session_id.as_deref(),
         Some(session_id.as_str())
@@ -525,18 +535,14 @@ fn workspace_load_auto_connects_active_session_runtime() {
         assert_eq!(entry.session.status, StoredSessionStatus::Running);
     }
 
-    let _ = request_ok(&state, Request::AppShutdown);
+    state.app_shutdown();
 }
 
 #[test]
 fn workspace_load_passive_keeps_active_session_disconnected() {
     let (state, session_id, _db) = create_state_with_session();
 
-    let response = request_ok(&state, Request::WorkspaceLoadPassive);
-    let workspace = match response {
-        Response::Workspace(value) => value,
-        other => panic!("unexpected response: {other:?}"),
-    };
+    let workspace = state.workspace_load_passive().expect("workspace load passive");
     assert_eq!(
         workspace.active_session_id.as_deref(),
         Some(session_id.as_str())
@@ -585,14 +591,9 @@ fn session_activate_increments_generation_on_each_spawn() {
             .generation
     };
 
-    let _ = request_ok(
-        &state,
-        Request::SessionActivate {
-            session_id: session_id.clone(),
-            cols: 120,
-            rows: 32,
-        },
-    );
+    state
+        .session_activate(&session_id, 120, 32)
+        .expect("activate session");
     let generation_after_first = {
         let inner = state.inner.lock().expect("lock state");
         inner
@@ -603,20 +604,12 @@ fn session_activate_increments_generation_on_each_spawn() {
     };
     assert_eq!(generation_after_first, generation_before.saturating_add(1));
 
-    let _ = request_ok(
-        &state,
-        Request::SessionHistoryClear {
-            session_id: session_id.clone(),
-        },
-    );
-    let _ = request_ok(
-        &state,
-        Request::SessionActivate {
-            session_id: session_id.clone(),
-            cols: 120,
-            rows: 32,
-        },
-    );
+    state
+        .session_history_clear(&session_id)
+        .expect("clear session history");
+    state
+        .session_activate(&session_id, 120, 32)
+        .expect("activate session again");
     let generation_after_second = {
         let inner = state.inner.lock().expect("lock state");
         inner
@@ -627,7 +620,7 @@ fn session_activate_increments_generation_on_each_spawn() {
     };
     assert!(generation_after_second > generation_after_first);
 
-    let _ = request_ok(&state, Request::AppShutdown);
+    state.app_shutdown();
 }
 
 #[test]
@@ -667,14 +660,9 @@ fn session_create_spawn_failure_does_not_change_active_session() {
 fn session_activate_resizes_existing_runtime() {
     let (state, session_id, _db) = create_state_with_session();
 
-    let _ = request_ok(
-        &state,
-        Request::SessionActivate {
-            session_id: session_id.clone(),
-            cols: 80,
-            rows: 24,
-        },
-    );
+    state
+        .session_activate(&session_id, 80, 24)
+        .expect("activate session");
 
     let initial_size = {
         let inner = state.inner.lock().expect("lock state");
@@ -691,14 +679,9 @@ fn session_activate_resizes_existing_runtime() {
     };
     assert_eq!(initial_size, (80, 24));
 
-    let _ = request_ok(
-        &state,
-        Request::SessionActivate {
-            session_id: session_id.clone(),
-            cols: 132,
-            rows: 43,
-        },
-    );
+    state
+        .session_activate(&session_id, 132, 43)
+        .expect("resize session");
 
     let resized_size = {
         let inner = state.inner.lock().expect("lock state");
@@ -715,7 +698,7 @@ fn session_activate_resizes_existing_runtime() {
     };
     assert_eq!(resized_size, (132, 43));
 
-    let _ = request_ok(&state, Request::AppShutdown);
+    state.app_shutdown();
 }
 
 #[test]
@@ -785,21 +768,12 @@ fn stale_workspace_spawn_plan_cannot_restore_old_active_session() {
 fn session_history_clear_disconnects_runtime_and_resets_snapshot() {
     let (state, session_id, _db) = create_state_with_session();
 
-    let _ = request_ok(
-        &state,
-        Request::SessionActivate {
-            session_id: session_id.clone(),
-            cols: 120,
-            rows: 32,
-        },
-    );
-    let _ = request_ok(
-        &state,
-        Request::SessionSetPersist {
-            session_id: session_id.clone(),
-            persist_history: true,
-        },
-    );
+    state
+        .session_activate(&session_id, 120, 32)
+        .expect("activate session");
+    state
+        .session_set_persist(&session_id, true)
+        .expect("enable persist history");
 
     state.apply_session_event(SessionEvent::Output {
         session_id: session_id.clone(),
@@ -808,12 +782,9 @@ fn session_history_clear_disconnects_runtime_and_resets_snapshot() {
         ts: 11,
     });
 
-    let _ = request_ok(
-        &state,
-        Request::SessionHistoryClear {
-            session_id: session_id.clone(),
-        },
-    );
+    state
+        .session_history_clear(&session_id)
+        .expect("clear session history");
 
     let inner = state.inner.lock().expect("lock state");
     let entry = inner
@@ -846,13 +817,9 @@ fn session_set_persist_flushes_live_output_into_store_snapshot() {
         entry.session.persist_history = false;
     }
 
-    let _ = request_ok(
-        &state,
-        Request::SessionSetPersist {
-            session_id: session_id.clone(),
-            persist_history: true,
-        },
-    );
+    state
+        .session_set_persist(&session_id, true)
+        .expect("enable persist history");
 
     let inner = state.inner.lock().expect("lock state");
     let entry = inner
@@ -899,6 +866,7 @@ fn first_output_after_respawn_is_separated_from_prompt_only_snapshot() {
         entry.runtime = None;
         entry.session.status = StoredSessionStatus::Disconnected;
         entry.prepend_run_boundary_on_next_output = true;
+        entry.restored_trailing_fragment = Some("khoa2807@host ~ % ".to_string());
     }
 
     state.apply_session_event(SessionEvent::Output {
@@ -913,7 +881,55 @@ fn first_output_after_respawn_is_separated_from_prompt_only_snapshot() {
         .store
         .session_snapshot(&session_id, 100)
         .expect("load snapshot");
-    assert_eq!(snapshot.content, "khoa2807@host ~ % \r\nkhoa2807@host ~ % ");
+    assert_eq!(snapshot.content, "khoa2807@host ~ % ");
+}
+
+#[test]
+fn first_distinct_output_after_respawn_still_starts_on_new_line() {
+    let (state, session_id, _db) = create_state_with_session();
+    {
+        let mut inner = state.inner.lock().expect("lock state");
+        let entry = inner
+            .sessions
+            .get_mut(&session_id)
+            .expect("session entry exists");
+        entry.session.persist_history = true;
+        entry.session.status = StoredSessionStatus::Running;
+    }
+
+    state.apply_session_event(SessionEvent::Output {
+        session_id: session_id.clone(),
+        generation: 0,
+        chunk: "khoa2807@host ~ % ".to_string(),
+        ts: 1,
+    });
+
+    {
+        let mut inner = state.inner.lock().expect("lock state");
+        let entry = inner
+            .sessions
+            .get_mut(&session_id)
+            .expect("session entry exists");
+        entry.generation = 1;
+        entry.runtime = None;
+        entry.session.status = StoredSessionStatus::Disconnected;
+        entry.prepend_run_boundary_on_next_output = true;
+        entry.restored_trailing_fragment = Some("khoa2807@host ~ % ".to_string());
+    }
+
+    state.apply_session_event(SessionEvent::Output {
+        session_id: session_id.clone(),
+        generation: 1,
+        chunk: "command output\n".to_string(),
+        ts: 2,
+    });
+
+    let inner = state.inner.lock().expect("lock state");
+    let snapshot = inner
+        .store
+        .session_snapshot(&session_id, 100)
+        .expect("load snapshot");
+    assert_eq!(snapshot.content, "khoa2807@host ~ % \r\ncommand output\n");
 }
 
 #[test]
@@ -961,26 +977,18 @@ fn persisted_history_applies_line_retention_limit() {
 #[test]
 fn clear_history_generation_gate_ignores_old_output_after_reset() {
     let (state, session_id, _db) = create_state_with_session();
-    let _ = request_ok(
-        &state,
-        Request::SessionActivate {
-            session_id: session_id.clone(),
-            cols: 120,
-            rows: 32,
-        },
-    );
+    state
+        .session_activate(&session_id, 120, 32)
+        .expect("activate session");
     state.apply_session_event(SessionEvent::Output {
         session_id: session_id.clone(),
         generation: 1,
         chunk: "before-clear\n".to_string(),
         ts: 1,
     });
-    let _ = request_ok(
-        &state,
-        Request::SessionHistoryClear {
-            session_id: session_id.clone(),
-        },
-    );
+    state
+        .session_history_clear(&session_id)
+        .expect("clear session history");
 
     state.apply_session_event(SessionEvent::Output {
         session_id: session_id.clone(),
@@ -1008,14 +1016,9 @@ fn clear_history_generation_gate_ignores_old_output_after_reset() {
 fn workspace_history_clear_all_resets_all_sessions() {
     let (state, session_a, session_b, _db) = create_state_with_two_sessions();
     for session_id in [&session_a, &session_b] {
-        let _ = request_ok(
-            &state,
-            Request::SessionActivate {
-                session_id: session_id.to_string(),
-                cols: 120,
-                rows: 32,
-            },
-        );
+        state
+            .session_activate(session_id, 120, 32)
+            .expect("activate session");
         state.apply_session_event(SessionEvent::Output {
             session_id: session_id.to_string(),
             generation: 1,
@@ -1024,7 +1027,9 @@ fn workspace_history_clear_all_resets_all_sessions() {
         });
     }
 
-    let _ = request_ok(&state, Request::WorkspaceHistoryClearAll);
+    state
+        .workspace_history_clear_all()
+        .expect("clear workspace history");
     let inner = state.inner.lock().expect("lock state");
     for session_id in [&session_a, &session_b] {
         let entry = inner
@@ -1062,7 +1067,7 @@ fn resolve_explorer_target_handles_symlink_alias_and_blocks_escape() {
     use std::os::unix::fs::symlink;
 
     let base = std::env::temp_dir().join(format!(
-        "chatminald-explorer-symlink-{}-{}",
+        "chatminal-explorer-symlink-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

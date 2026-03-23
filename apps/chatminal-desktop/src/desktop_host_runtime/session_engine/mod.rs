@@ -1,6 +1,6 @@
 // Session execution engine (inlined from former chatminal-session-runtime crate, Phase 08).
 // All execution engine code lives here under desktop_host_runtime::session_engine.
-// Only desktop_host_runtime and chatminald may depend on this module.
+// Only desktop_host_runtime and explicit legacy compatibility hosts may depend on this module.
 
 mod leaf_runtime;
 mod leaf_runtime_command;

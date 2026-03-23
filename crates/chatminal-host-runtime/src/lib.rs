@@ -116,7 +116,7 @@ pub struct Mux {
     /// Only populated for panes carrying "chatminal_session_id" metadata.
     ///
     /// DEPRECATED: Desktop callers should use `DesktopSessionHost::session_tab_shim` instead.
-    /// This global index is a daemon-level concern only; engine IDs (PaneId, TabId) are
+    /// This global index is a runtime-host concern only; engine IDs (PaneId, TabId) are
     /// desktop-only. Kept for Lua bridge compat (`chatminal-lua-bridge/session.rs`).
     /// Removal tracked in: localize-id-mapping follow-up.
     chatminal_session_id_index: RwLock<HashMap<String, PaneId>>,

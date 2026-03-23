@@ -1,6 +1,6 @@
 // Test-only execution bridge using portable-pty directly.
 // Avoids the session_engine dev-dependency diamond problem.
-// Used by both state/tests.rs and server.rs integration tests.
+// Used by runtime unit tests that exercise native session execution.
 
 use std::io::{Read, Write};
 use std::sync::mpsc;
@@ -13,7 +13,7 @@ use crate::session::{InputWriteStats, SessionEvent, WriteInputError};
 use crate::state::runtime_bridge::{RuntimeExecutionAdapter, RuntimeHandle, RuntimeSessionHandleTrait};
 use crate::workspace_ids::{RuntimeId, TerminalInstanceId};
 use crate::workspace_layout::WorkspaceLayoutRegistry;
-use crate::DaemonState;
+use crate::RuntimeState;
 
 // ─── TestSessionHandle ───────────────────────────────────────────────────────
 // Wraps master in Mutex to satisfy Sync bound on RuntimeSessionHandleTrait.
@@ -168,7 +168,7 @@ impl RuntimeExecutionAdapter for TestExecutionBridge {
 
     fn reconcile_session_lookup(
         &self,
-        host: &DaemonState,
+        host: &RuntimeState,
         lookup: &RuntimeSessionLookup,
     ) -> Result<RuntimeSessionBridgeAction, String> {
         let workspace_active = host
@@ -187,7 +187,7 @@ impl RuntimeExecutionAdapter for TestExecutionBridge {
 
     fn notify_session_activated(
         &self,
-        _host: &DaemonState,
+        _host: &RuntimeState,
         _session_id: &str,
         _runtime_id: RuntimeId,
     ) -> Result<(), String> {
@@ -196,7 +196,7 @@ impl RuntimeExecutionAdapter for TestExecutionBridge {
 
     fn notify_session_closed(
         &self,
-        _host: &DaemonState,
+        _host: &RuntimeState,
         _session_id: &str,
         _runtime_id: RuntimeId,
         _lookup_after_close: &RuntimeSessionLookup,

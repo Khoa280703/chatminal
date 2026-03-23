@@ -1,6 +1,10 @@
 use std::collections::HashMap;
 
 use crate::workspace_ids::{RuntimeId, SessionViewId, TerminalInstanceId};
+use chatminal_store::{
+    StoredProfile, StoredSessionExplorerState, StoredSessionSnapshot, StoredSessionStatus,
+    StoredSessionSummary,
+};
 use serde::{Deserialize, Serialize};
 
 macro_rules! runtime_boundary_id_type {
@@ -33,27 +37,129 @@ runtime_boundary_id_type!(SessionRenderTargetId, "render-target");
 runtime_boundary_id_type!(SessionTerminalHandle, "terminal-handle");
 runtime_boundary_id_type!(SessionGroupId, "group");
 
-// ─── Protocol type aliases (17 types unified with chatminal-protocol) ────────
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeSessionStatus {
+    Running,
+    Disconnected,
+}
 
-pub type RuntimeSessionStatus = chatminal_protocol::SessionStatus;
-pub type RuntimeProfile = chatminal_protocol::ProfileInfo;
-pub type RuntimeSession = chatminal_protocol::SessionInfo;
-pub type RuntimeWorkspace = chatminal_protocol::WorkspaceState;
-pub type RuntimeCreatedSession = chatminal_protocol::CreateSessionResponse;
-pub type RuntimeLifecyclePreferences = chatminal_protocol::LifecyclePreferences;
-pub type RuntimeSessionSnapshot = chatminal_protocol::SessionSnapshot;
-pub type RuntimeSessionExplorerState = chatminal_protocol::SessionExplorerState;
-pub type RuntimeSessionExplorerEntry = chatminal_protocol::SessionExplorerEntry;
-pub type RuntimeSessionExplorerFileContent = chatminal_protocol::SessionExplorerFileContent;
-pub type RuntimePtyOutputEvent = chatminal_protocol::PtyOutputEvent;
-pub type RuntimePtyExitedEvent = chatminal_protocol::PtyExitedEvent;
-pub type RuntimePtyErrorEvent = chatminal_protocol::PtyErrorEvent;
-pub type RuntimeSessionUpdatedEvent = chatminal_protocol::SessionUpdatedEvent;
-pub type RuntimeWorkspaceUpdatedEvent = chatminal_protocol::WorkspaceUpdatedEvent;
-pub type RuntimeDaemonHealthEvent = chatminal_protocol::DaemonHealthEvent;
-pub type RuntimeEvent = chatminal_protocol::Event;
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuntimeProfile {
+    pub profile_id: String,
+    pub name: String,
+}
 
-// ─── Runtime-unique types (no protocol counterpart) ──────────────────────────
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuntimeSession {
+    pub session_id: String,
+    pub profile_id: String,
+    pub name: String,
+    pub cwd: String,
+    pub status: RuntimeSessionStatus,
+    pub persist_history: bool,
+    pub seq: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuntimeWorkspace {
+    pub profiles: Vec<RuntimeProfile>,
+    pub active_profile_id: Option<String>,
+    pub sessions: Vec<RuntimeSession>,
+    pub active_session_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuntimeCreatedSession {
+    pub session_id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuntimeLifecyclePreferences {
+    pub keep_alive_on_close: bool,
+    pub start_in_tray: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuntimeSessionSnapshot {
+    pub content: String,
+    pub seq: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuntimeSessionExplorerState {
+    pub session_id: String,
+    pub root_path: Option<String>,
+    pub current_dir: String,
+    pub selected_path: Option<String>,
+    pub open_file_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuntimeSessionExplorerEntry {
+    pub name: String,
+    pub relative_path: String,
+    pub is_dir: bool,
+    pub size: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuntimeSessionExplorerFileContent {
+    pub relative_path: String,
+    pub content: String,
+    pub truncated: bool,
+    pub byte_len: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuntimePtyOutputEvent {
+    pub session_id: String,
+    pub chunk: String,
+    pub seq: u64,
+    pub ts: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuntimePtyExitedEvent {
+    pub session_id: String,
+    pub exit_code: Option<i32>,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuntimePtyErrorEvent {
+    pub session_id: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuntimeSessionUpdatedEvent {
+    pub session_id: String,
+    pub status: RuntimeSessionStatus,
+    pub seq: u64,
+    pub persist_history: bool,
+    pub ts: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuntimeWorkspaceUpdatedEvent {
+    pub active_profile_id: Option<String>,
+    pub active_session_id: Option<String>,
+    pub profile_count: u64,
+    pub session_count: u64,
+    pub ts: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", content = "payload", rename_all = "snake_case")]
+pub enum RuntimeEvent {
+    PtyOutput(RuntimePtyOutputEvent),
+    PtyExited(RuntimePtyExitedEvent),
+    PtyError(RuntimePtyErrorEvent),
+    SessionUpdated(RuntimeSessionUpdatedEvent),
+    WorkspaceUpdated(RuntimeWorkspaceUpdatedEvent),
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeSessionLaunchSpec {
@@ -133,13 +239,86 @@ pub enum RuntimeSessionBridgeAction {
     FocusSession { session_id: String },
 }
 
+impl From<StoredSessionStatus> for RuntimeSessionStatus {
+    fn from(value: StoredSessionStatus) -> Self {
+        match value {
+            StoredSessionStatus::Running => Self::Running,
+            StoredSessionStatus::Disconnected => Self::Disconnected,
+        }
+    }
+}
+
+impl From<RuntimeSessionStatus> for StoredSessionStatus {
+    fn from(value: RuntimeSessionStatus) -> Self {
+        match value {
+            RuntimeSessionStatus::Running => Self::Running,
+            RuntimeSessionStatus::Disconnected => Self::Disconnected,
+        }
+    }
+}
+
+impl From<StoredProfile> for RuntimeProfile {
+    fn from(value: StoredProfile) -> Self {
+        Self {
+            profile_id: value.profile_id,
+            name: value.name,
+        }
+    }
+}
+
+impl From<StoredSessionSummary> for RuntimeSession {
+    fn from(value: StoredSessionSummary) -> Self {
+        Self {
+            session_id: value.session_id,
+            profile_id: value.profile_id,
+            name: value.name,
+            cwd: value.cwd,
+            status: value.status.into(),
+            persist_history: value.persist_history,
+            seq: value.seq,
+        }
+    }
+}
+
+impl From<StoredSessionSnapshot> for RuntimeSessionSnapshot {
+    fn from(value: StoredSessionSnapshot) -> Self {
+        Self {
+            content: value.content,
+            seq: value.seq,
+        }
+    }
+}
+
+impl From<Option<StoredSessionExplorerState>> for RuntimeSessionExplorerState {
+    fn from(value: Option<StoredSessionExplorerState>) -> Self {
+        match value {
+            Some(state) => Self {
+                session_id: state.session_id,
+                root_path: Some(state.root_path),
+                current_dir: state.current_dir,
+                selected_path: state.selected_path,
+                open_file_path: state.open_file_path,
+            },
+            None => Self {
+                session_id: String::new(),
+                root_path: None,
+                current_dir: String::new(),
+                selected_path: None,
+                open_file_path: None,
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        SessionEngineCapability, SessionGroupId, SessionGroupSnapshot, SessionLayoutTarget,
-        SessionRenderTargetId, SessionRenderTargetSnapshot, SessionTerminalHandle,
-        SessionViewBinding, SessionWindowBinding,
+        RuntimeProfile, RuntimeSession, RuntimeSessionStatus, SessionEngineCapability,
+        SessionGroupId, SessionGroupSnapshot, SessionLayoutTarget, SessionRenderTargetId,
+        SessionRenderTargetSnapshot, SessionTerminalHandle, SessionViewBinding,
+        SessionWindowBinding,
     };
+    use chatminal_store::{StoredProfile, StoredSessionStatus, StoredSessionSummary};
 
     #[test]
     fn boundary_ids_use_stable_prefixes() {
@@ -182,5 +361,26 @@ mod tests {
         assert_eq!(view_binding.group_id, Some(group.group_id));
         assert_eq!(window.active_render_target_id, Some(render_target.render_target_id));
         assert!(capability.supports_session_view_split);
+    }
+
+    #[test]
+    fn store_conversions_stay_runtime_native() {
+        let profile = RuntimeProfile::from(StoredProfile {
+            profile_id: "profile-a".to_string(),
+            name: "Default".to_string(),
+        });
+        let session = RuntimeSession::from(StoredSessionSummary {
+            session_id: "session-a".to_string(),
+            profile_id: "profile-a".to_string(),
+            name: "Shell".to_string(),
+            cwd: "/tmp".to_string(),
+            status: StoredSessionStatus::Running,
+            persist_history: true,
+            seq: 7,
+        });
+
+        assert_eq!(profile.profile_id, "profile-a");
+        assert_eq!(session.status, RuntimeSessionStatus::Running);
+        assert!(session.persist_history);
     }
 }

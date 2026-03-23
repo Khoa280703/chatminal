@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
-pub struct DaemonConfig {
+pub struct RuntimeConfig {
     pub endpoint: String,
     pub default_shell: String,
     pub default_preview_lines: usize,
@@ -11,7 +11,7 @@ pub struct DaemonConfig {
     pub health_interval_ms: u64,
 }
 
-impl DaemonConfig {
+impl RuntimeConfig {
     pub fn from_env() -> Result<Self, String> {
         Ok(Self {
             endpoint: resolve_endpoint()?,
@@ -46,7 +46,7 @@ impl DaemonConfig {
 }
 
 fn resolve_endpoint() -> Result<String, String> {
-    if let Ok(raw) = std::env::var("CHATMINAL_DAEMON_ENDPOINT") {
+    if let Ok(raw) = std::env::var("CHATMINAL_RUNTIME_ENDPOINT") {
         let trimmed = raw.trim();
         if !trimmed.is_empty() {
             return Ok(trimmed.to_string());
@@ -61,16 +61,16 @@ fn resolve_endpoint() -> Result<String, String> {
     std::fs::create_dir_all(&base).map_err(|err| format!("create data directory failed: {err}"))?;
 
     let socket_name = if cfg!(target_os = "macos") {
-        "chatminald.sock"
+        "chatminal.sock"
     } else {
-        "chatminald-linux.sock"
+        "chatminal-linux.sock"
     };
     Ok(base.join(socket_name).display().to_string())
 }
 
 fn default_windows_pipe_endpoint() -> String {
     let suffix = resolve_windows_pipe_suffix();
-    format!(r"\\.\pipe\chatminald-{suffix}")
+    format!(r"\\.\pipe\chatminal-{suffix}")
 }
 
 const WINDOWS_PIPE_SUFFIX_MAX_LEN: usize = 64;
@@ -236,20 +236,20 @@ mod tests {
 
     #[test]
     fn default_terminal_size_has_valid_bounds() {
-        let config = DaemonConfig::from_env().expect("load config");
+        let config = RuntimeConfig::from_env().expect("load config");
         assert!(config.default_cols >= 20);
         assert!(config.default_rows >= 5);
     }
 
     #[test]
     fn max_scrollback_line_retention_has_valid_bounds() {
-        let config = DaemonConfig::from_env().expect("load config");
+        let config = RuntimeConfig::from_env().expect("load config");
         assert!((100..=20_000).contains(&config.max_scrollback_lines_per_session));
     }
 
     #[test]
     fn health_interval_has_valid_bounds() {
-        let config = DaemonConfig::from_env().expect("load config");
+        let config = RuntimeConfig::from_env().expect("load config");
         assert!((1_000..=60_000).contains(&config.health_interval_ms));
     }
 
@@ -262,6 +262,6 @@ mod tests {
     #[test]
     fn default_windows_pipe_endpoint_uses_safe_suffix_or_default() {
         let endpoint = default_windows_pipe_endpoint();
-        assert!(endpoint.starts_with(r"\\.\pipe\chatminald-"));
+        assert!(endpoint.starts_with(r"\\.\pipe\chatminal-"));
     }
 }

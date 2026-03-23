@@ -2,6 +2,7 @@ pub const INIT_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS profiles (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
@@ -15,12 +16,15 @@ CREATE TABLE IF NOT EXISTS sessions (
     status TEXT NOT NULL,
     persist_history INTEGER NOT NULL DEFAULT 0,
     last_seq INTEGER NOT NULL DEFAULT 0,
+    sort_order INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE
 );
 
+CREATE INDEX IF NOT EXISTS idx_profiles_sort_order ON profiles(sort_order);
 CREATE INDEX IF NOT EXISTS idx_sessions_profile_id ON sessions(profile_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_profile_sort_order ON sessions(profile_id, sort_order);
 
 CREATE TABLE IF NOT EXISTS scrollback_chunks (
     session_id TEXT NOT NULL,

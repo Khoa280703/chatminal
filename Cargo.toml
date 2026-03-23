@@ -1,7 +1,5 @@
 [workspace]
 members = [
-  "apps/chatminald",
-  "apps/chatminal-app",
   "apps/chatminal-desktop",
   "crates/chatminal-runtime",
   "crates/chatminal-async-ossl",
@@ -55,7 +53,6 @@ members = [
   "crates/chatminal-engine-term",
   "crates/chatminal-engine-toast-notification",
   "crates/chatminal-engine-uds",
-  "crates/chatminal-protocol",
   "crates/chatminal-store",
   "crates/chatminal-window",
   "crates/chatminal-window-funcs",
@@ -65,10 +62,9 @@ members = [
   "vendor/terminal-deps/harfbuzz",
 ]
 default-members = [
-  "apps/chatminald",
-  "apps/chatminal-app",
+  "apps/chatminal-desktop",
+  "crates/chatminal-runtime",
   "crates/chatminal-terminal-core",
-  "crates/chatminal-protocol",
   "crates/chatminal-store",
 ]
 resolver = "2"

@@ -9,28 +9,27 @@
 pub mod api;
 pub mod config;
 pub mod metrics;
-pub mod server;
 pub mod session;
 pub mod state;
-pub mod transport;
 pub mod workspace_ids;
 pub mod workspace_layout;
 
 pub use api::{
-    RuntimeCreatedSession, RuntimeDaemonHealthEvent, RuntimeEvent, RuntimeLifecyclePreferences,
-    RuntimeProfile, RuntimePtyErrorEvent, RuntimePtyExitedEvent, RuntimePtyOutputEvent,
-    RuntimeSession, RuntimeSessionBridgeAction, RuntimeSessionLaunchSpec, RuntimeSessionLookup,
-    RuntimeSessionExplorerEntry, RuntimeSessionExplorerFileContent,
-    RuntimeSessionExplorerState, RuntimeSessionSnapshot, RuntimeSessionStatus,
-    RuntimeSessionUpdatedEvent, RuntimeWorkspace, RuntimeWorkspaceUpdatedEvent,
-    SessionEngineCapability, SessionGroupId, SessionGroupSnapshot, SessionLayoutTarget,
-    SessionRenderTargetId, SessionRenderTargetSnapshot, SessionTerminalHandle,
-    SessionViewBinding, SessionWindowBinding,
+    RuntimeCreatedSession, RuntimeEvent, RuntimeLifecyclePreferences, RuntimeProfile,
+    RuntimePtyErrorEvent, RuntimePtyExitedEvent, RuntimePtyOutputEvent, RuntimeSession,
+    RuntimeSessionBridgeAction, RuntimeSessionExplorerEntry,
+    RuntimeSessionExplorerFileContent, RuntimeSessionExplorerState,
+    RuntimeSessionLaunchSpec, RuntimeSessionLookup, RuntimeSessionSnapshot,
+    RuntimeSessionStatus, RuntimeSessionUpdatedEvent, RuntimeWorkspace,
+    RuntimeWorkspaceUpdatedEvent, SessionEngineCapability, SessionGroupId,
+    SessionGroupSnapshot, SessionLayoutTarget, SessionRenderTargetId,
+    SessionRenderTargetSnapshot, SessionTerminalHandle, SessionViewBinding,
+    SessionWindowBinding,
 };
-pub use config::{DaemonConfig, resolve_session_cwd};
+pub use config::{RuntimeConfig, resolve_session_cwd};
 pub use metrics::{RuntimeMetrics, RuntimeMetricsSnapshot};
 pub use session::{InputWriteStats, SessionEvent, WriteInputError};
-pub use state::{DaemonState, RuntimeSubscription};
+pub use state::{RuntimeState, RuntimeSubscription};
 pub use state::runtime_bridge::{RuntimeExecutionAdapter, RuntimeSessionHandleTrait};
 pub use workspace_ids::{RuntimeId, SessionViewId, TerminalInstanceId, WorkspaceNodeId};
 pub use workspace_layout::{

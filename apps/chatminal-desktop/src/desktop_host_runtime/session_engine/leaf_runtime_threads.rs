@@ -21,8 +21,9 @@ pub(crate) fn spawn_reader_loop(
             match reader.read(&mut buffer) {
                 Ok(0) => break,
                 Ok(read) => {
-                    terminal.lock().unwrap().advance_bytes(&buffer[..read]);
-                    let chunk = String::from_utf8_lossy(&buffer[..read]).to_string();
+                    let sanitized = sanitize_zsh_prompt_spacer(&buffer[..read]);
+                    terminal.lock().unwrap().advance_bytes(&sanitized);
+                    let chunk = String::from_utf8_lossy(&sanitized).to_string();
                     output_history.lock().unwrap().push(chunk.clone());
                     let _ = events.send(TerminalInstanceRuntimeEvent::Output {
                         session_id: spawn.session_id.clone(),
@@ -110,4 +111,53 @@ pub(crate) fn command_label(command: &CommandBuilder) -> Option<String> {
         .get_argv()
         .first()
         .map(|value| value.to_string_lossy().to_string())
+}
+
+pub(crate) fn sanitize_zsh_prompt_spacer(bytes: &[u8]) -> Vec<u8> {
+    const PREFIX: &[u8] = b"\x1b[1m\x1b[7m%\x1b[27m\x1b[1m\x1b[0m";
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if bytes[i..].starts_with(PREFIX) {
+            let mut j = i + PREFIX.len();
+            while j < bytes.len() && bytes[j] == b' ' {
+                j += 1;
+            }
+            if bytes.get(j) == Some(&b'\r') {
+                j += 1;
+                if bytes.get(j) == Some(&b' ') {
+                    j += 1;
+                }
+                if bytes.get(j) == Some(&b'\r') {
+                    i = j + 1;
+                    continue;
+                }
+            }
+        }
+
+        out.push(bytes[i]);
+        i += 1;
+    }
+
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_zsh_prompt_spacer;
+
+    #[test]
+    fn strips_zsh_prompt_spacer_artifact() {
+        let raw = b"\x1b[1m\x1b[7m%\x1b[27m\x1b[1m\x1b[0m     \r \r\x1b[0muser@host % ";
+        let sanitized = sanitize_zsh_prompt_spacer(raw);
+        assert_eq!(sanitized, b"\x1b[0muser@host % ");
+    }
+
+    #[test]
+    fn keeps_normal_prompt_output_untouched() {
+        let raw = b"\r\r\x1b[0m\x1b[27m\x1b[24m\x1b[Juser@host % ";
+        let sanitized = sanitize_zsh_prompt_spacer(raw);
+        assert_eq!(sanitized, raw);
+    }
 }

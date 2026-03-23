@@ -10,12 +10,8 @@ use crate::api::{
 };
 
 impl StateInner {
-    fn active_workspace_layout_key(&self) -> Result<String, String> {
-        let workspace = self.store.load_workspace()?;
-        Ok(format!(
-            "{WORKSPACE_LAYOUT_PREFIX}{}",
-            workspace.active_profile_id
-        ))
+    fn workspace_layout_key(&self, workspace_id: &str) -> String {
+        format!("{WORKSPACE_LAYOUT_PREFIX}{workspace_id}")
     }
 
     pub(super) fn load_workspace_snapshot(&self) -> Result<RuntimeWorkspace, String> {
@@ -58,6 +54,21 @@ impl StateInner {
         }
         self.store.set_active_profile(profile_id)?;
         self.publish_workspace_updated();
+        self.load_workspace_snapshot()
+    }
+
+    pub(super) fn session_move_to_profile(
+        &mut self,
+        session_id: &str,
+        profile_id: &str,
+        target_index: Option<usize>,
+    ) -> Result<RuntimeWorkspace, String> {
+        self.store
+            .move_session_to_profile(session_id, profile_id, target_index)?;
+        if let Some(entry) = self.sessions.get_mut(session_id) {
+            entry.session.profile_id = profile_id.to_string();
+        }
+        self.publish_session_and_workspace_updated(session_id);
         self.load_workspace_snapshot()
     }
 
@@ -135,19 +146,18 @@ impl StateInner {
         Ok(())
     }
 
-    pub(super) fn workspace_layout_load(&self) -> Result<Option<WorkspaceLayoutState>, String> {
-        let workspace = self.store.load_workspace()?;
-        let key = format!("{WORKSPACE_LAYOUT_PREFIX}{}", workspace.active_profile_id);
+    pub(super) fn workspace_layout_load(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Option<WorkspaceLayoutState>, String> {
+        let key = self.workspace_layout_key(workspace_id);
         let Some(raw) = self.store.get_string_state(&key)? else {
             return Ok(None);
         };
 
         let mut layout = serde_json::from_str::<WorkspaceLayoutState>(&raw)
             .map_err(|err| format!("parse workspace layout failed: {err}"))?;
-        let valid_sessions = workspace
-            .sessions
-            .iter()
-            .map(|session| session.session_id.as_str());
+        let valid_sessions = self.sessions.keys().map(|session_id| session_id.as_str());
         if !layout.retain_sessions(valid_sessions) {
             self.store.clear_state(&key)?;
             return Ok(None);
@@ -164,16 +174,17 @@ impl StateInner {
 
     pub(super) fn workspace_layout_save(
         &self,
+        workspace_id: &str,
         layout: &WorkspaceLayoutState,
     ) -> Result<(), String> {
-        let key = self.active_workspace_layout_key()?;
+        let key = self.workspace_layout_key(workspace_id);
         let value = serde_json::to_string(layout)
             .map_err(|err| format!("serialize workspace layout failed: {err}"))?;
         self.store.set_string_state(&key, &value)
     }
 
-    pub(super) fn workspace_layout_clear(&self) -> Result<(), String> {
-        let key = self.active_workspace_layout_key()?;
+    pub(super) fn workspace_layout_clear(&self, workspace_id: &str) -> Result<(), String> {
+        let key = self.workspace_layout_key(workspace_id);
         self.store.clear_state(&key)
     }
 

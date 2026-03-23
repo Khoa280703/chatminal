@@ -11,7 +11,7 @@ use std::sync::OnceLock;
 
 use anyhow::anyhow;
 use session_engine::TerminalInstanceId;
-use chatminal_runtime::DaemonState;
+use chatminal_runtime::RuntimeState;
 use crate::chatminal_runtime::ChatminalRuntimeClient;
 use config::keyassignment::{RotationDirection, SessionDirection, SpawnSessionDomain};
 use config::ConfigHandle;
@@ -77,7 +77,7 @@ pub(crate) mod overlay_compat {
 }
 
 pub(crate) struct EmbeddedRuntime {
-    pub(crate) state: DaemonState,
+    pub(crate) state: RuntimeState,
     bridge: Arc<DesktopRuntimeExecutionBridge>,
 }
 
@@ -155,7 +155,7 @@ impl EmbeddedRuntime {
 
         let bridge = Arc::new(DesktopRuntimeExecutionBridge::new());
         let bridge_dyn: Arc<dyn chatminal_runtime::RuntimeExecutionAdapter> = Arc::clone(&bridge) as _;
-        let (state, _config) = DaemonState::initialize_default(bridge_dyn)?;
+        let (state, _config) = RuntimeState::initialize_default(bridge_dyn)?;
         let runtime = Arc::new(Self { state, bridge });
         let _ = EMBEDDED_RUNTIME.set(runtime);
         EMBEDDED_RUNTIME

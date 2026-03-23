@@ -83,7 +83,6 @@ pub struct DesktopSidebarProfile {
     pub profile_id: String,
     pub name: String,
     pub is_active: bool,
-    pub is_expanded: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -341,7 +340,6 @@ pub fn load_desktop_sidebar_snapshot(workspace_id: &str) -> Result<DesktopSideba
             .into_iter()
             .map(|profile| DesktopSidebarProfile {
                 is_active: active_profile_id.as_deref() == Some(profile.profile_id.as_str()),
-                is_expanded: false,
                 profile_id: profile.profile_id,
                 name: profile.name,
             })
@@ -457,12 +455,16 @@ fn desktop_prepare_host_layout(
 
 #[cfg(test)]
 pub fn workspace_layout_save(layout: &WorkspaceLayoutState) -> Result<(), String> {
-    embedded_runtime_arc()?.state.workspace_layout_save(layout)
+    embedded_runtime_arc()?
+        .state
+        .workspace_layout_save(DEFAULT_LAYOUT_WORKSPACE_ID, layout)
 }
 
 #[cfg(test)]
 pub fn workspace_layout_clear() -> Result<(), String> {
-    embedded_runtime_arc()?.state.workspace_layout_clear()
+    embedded_runtime_arc()?
+        .state
+        .workspace_layout_clear(DEFAULT_LAYOUT_WORKSPACE_ID)
 }
 
 #[cfg(test)]
@@ -713,6 +715,15 @@ pub fn create_runtime_session(
 
 pub fn close_runtime_session(session_id: &str) -> Result<(), String> {
     runtime_client()?.session_close(session_id)
+}
+
+#[allow(dead_code)]
+pub fn move_runtime_session_to_profile(
+    session_id: &str,
+    profile_id: &str,
+    target_index: Option<usize>,
+) -> Result<RuntimeWorkspace, String> {
+    runtime_client()?.session_move_to_profile(session_id, profile_id, target_index)
 }
 
 pub fn switch_runtime_profile(profile_id: &str) -> Result<RuntimeWorkspace, String> {

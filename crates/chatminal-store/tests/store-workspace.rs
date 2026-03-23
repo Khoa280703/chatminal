@@ -431,3 +431,68 @@ fn sessions_keep_creation_order_after_runtime_updates() {
     assert_eq!(created_sessions[0].session_id, first.session_id);
     assert_eq!(created_sessions[1].session_id, second.session_id);
 }
+
+#[test]
+fn move_session_to_profile_reparents_without_losing_order_contract() {
+    let temp = TempDb::new();
+    let store = Store::initialize(&temp.path).expect("initialize store");
+    let default_profile_id = store
+        .load_workspace()
+        .expect("load workspace")
+        .active_profile_id;
+    let target_profile = store
+        .create_profile(Some("Work".to_string()))
+        .expect("create target profile");
+
+    let first = store
+        .create_session(
+            &default_profile_id,
+            Some("First".to_string()),
+            "/tmp".to_string(),
+            "/bin/bash".to_string(),
+            true,
+        )
+        .expect("create first");
+    let second = store
+        .create_session(
+            &default_profile_id,
+            Some("Second".to_string()),
+            "/tmp".to_string(),
+            "/bin/bash".to_string(),
+            true,
+        )
+        .expect("create second");
+    let target_existing = store
+        .create_session(
+            &target_profile.profile_id,
+            Some("Target".to_string()),
+            "/tmp".to_string(),
+            "/bin/bash".to_string(),
+            true,
+        )
+        .expect("create target session");
+
+    store
+        .set_active_session(&default_profile_id, Some(&second.session_id))
+        .expect("set source active session");
+
+    store
+        .move_session_to_profile(&second.session_id, &target_profile.profile_id, Some(0))
+        .expect("move session");
+
+    let source_sessions = store
+        .list_sessions_by_profile(&default_profile_id)
+        .expect("list source sessions");
+    let target_sessions = store
+        .list_sessions_by_profile(&target_profile.profile_id)
+        .expect("list target sessions");
+    let workspace = store.load_workspace().expect("reload workspace");
+
+    assert_eq!(source_sessions.len(), 1);
+    assert_eq!(source_sessions[0].session_id, first.session_id);
+    assert_eq!(target_sessions.len(), 2);
+    assert_eq!(target_sessions[0].session_id, second.session_id);
+    assert_eq!(target_sessions[1].session_id, target_existing.session_id);
+    assert_eq!(workspace.active_profile_id, default_profile_id);
+    assert_eq!(workspace.active_session_id.as_deref(), Some(first.session_id.as_str()));
+}

@@ -1,12 +1,12 @@
 use chatminal_store::StoredSessionStatus;
 
-use super::{DaemonState, prepend_run_boundary, trim_live_output};
+use super::{RuntimeState, prepend_run_boundary, trim_live_output};
 use crate::api::{
     RuntimeEvent, RuntimePtyErrorEvent, RuntimePtyExitedEvent, RuntimePtyOutputEvent,
 };
 use crate::session::SessionEvent;
 
-impl DaemonState {
+impl RuntimeState {
     pub(super) fn apply_session_event(&self, event: SessionEvent) {
         self.metrics.inc_session_events_total();
         let mut inner = match self.inner.lock() {
@@ -30,8 +30,18 @@ impl DaemonState {
                         return;
                     }
                     if entry.prepend_run_boundary_on_next_output && !output_chunk.is_empty() {
+                        let duplicate_restored_fragment = entry
+                            .restored_trailing_fragment
+                            .as_deref()
+                            == Some(output_chunk.as_str());
                         output_chunk = prepend_run_boundary(&output_chunk);
                         entry.prepend_run_boundary_on_next_output = false;
+                        entry.restored_trailing_fragment = None;
+                        if duplicate_restored_fragment {
+                            return;
+                        }
+                    } else if !output_chunk.is_empty() {
+                        entry.restored_trailing_fragment = None;
                     }
                     entry.session.seq += 1;
                     entry.session.status = StoredSessionStatus::Running;

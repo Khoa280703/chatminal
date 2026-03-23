@@ -25,6 +25,38 @@ use termwiz::hyperlink::Hyperlink;
 use termwiz::surface::Line;
 
 impl super::TermWindow {
+    fn handle_chatminal_sidebar_wheel(
+        &mut self,
+        event: &MouseEvent,
+        context: &dyn WindowOps,
+    ) -> bool {
+        if !self.chatminal_sidebar.is_enabled() {
+            return false;
+        }
+        let WMEK::VertWheel(amount) = event.kind else {
+            return false;
+        };
+        let border = self.get_os_border();
+        let sidebar_width = self.chatminal_sidebar_width() as isize;
+        let sidebar_bottom =
+            (self.dimensions.pixel_height as f32 - border.bottom.get() as f32).max(0.0) as isize;
+        let inside_sidebar = event.coords.x >= 0
+            && event.coords.x < sidebar_width
+            && event.coords.y >= border.top.get() as isize
+            && event.coords.y < sidebar_bottom;
+        if !inside_sidebar {
+            return false;
+        }
+
+        if amount != 0 {
+            let delta = -(amount as f32) * self.render_metrics.cell_size.height as f32;
+            if self.chatminal_sidebar.scroll_pixels(delta) {
+                context.invalidate();
+            }
+        }
+        true
+    }
+
     fn resolve_ui_item(&self, event: &MouseEvent) -> Option<UIItem> {
         let x = event.coords.x;
         let y = event.coords.y;
@@ -44,7 +76,6 @@ impl super::TermWindow {
             | UIItemType::CloseSession(_)
             | UIItemType::ChatminalSidebarBackground
             | UIItemType::ChatminalSidebarCreateProfile
-            | UIItemType::ChatminalSidebarToggleProfile(_)
             | UIItemType::ChatminalSidebarProfile(_)
             | UIItemType::ChatminalSidebarCreateSession
             | UIItemType::ChatminalSidebarSession(_)
@@ -62,7 +93,6 @@ impl super::TermWindow {
             | UIItemType::CloseSession(_)
             | UIItemType::ChatminalSidebarBackground
             | UIItemType::ChatminalSidebarCreateProfile
-            | UIItemType::ChatminalSidebarToggleProfile(_)
             | UIItemType::ChatminalSidebarProfile(_)
             | UIItemType::ChatminalSidebarCreateSession
             | UIItemType::ChatminalSidebarSession(_)
@@ -75,12 +105,12 @@ impl super::TermWindow {
 
     pub fn mouse_event_impl(&mut self, event: MouseEvent, context: &dyn WindowOps) {
         log::trace!("{:?}", event);
-        let pane = match self.active_terminal_instance_or_overlay() {
-            Some(pane) => pane,
-            None => return,
-        };
+        let pane = self.active_terminal_instance_or_overlay();
 
         self.current_mouse_event.replace(event.clone());
+        if self.handle_chatminal_sidebar_wheel(&event, context) {
+            return;
+        }
 
         let border = self.get_os_border();
 
@@ -106,7 +136,7 @@ impl super::TermWindow {
             .sub((padding_left + border.left.get() as f32) as isize)
             .max(0) as f32)
             / self.render_metrics.cell_size.width as f32;
-        let x = if !pane.is_mouse_grabbed() {
+        let x = if !pane.as_ref().is_some_and(|pane| pane.is_mouse_grabbed()) {
             // Round the x coordinate so that we're a bit more forgiving of
             // the horizontal position when selecting cells
             x.round()
@@ -240,18 +270,20 @@ impl super::TermWindow {
             self.current_mouse_capture,
             None | Some(MouseCapture::TerminalPane(_))
         ) {
-            self.mouse_event_terminal(
-                pane,
-                ClickPosition {
-                    column: x,
-                    row: y,
-                    x_pixel_offset,
-                    y_pixel_offset,
-                },
-                event,
-                context,
-                capture_mouse,
-            );
+            if let Some(pane) = pane {
+                self.mouse_event_terminal(
+                    pane,
+                    ClickPosition {
+                        column: x,
+                        row: y,
+                        x_pixel_offset,
+                        y_pixel_offset,
+                    },
+                    event,
+                    context,
+                    capture_mouse,
+                );
+            }
         }
 
         if prior_ui_item != ui_item {
@@ -376,7 +408,7 @@ impl super::TermWindow {
     fn mouse_event_ui_item(
         &mut self,
         item: UIItem,
-        pane: Arc<dyn OverlayPane>,
+        pane: Option<Arc<dyn OverlayPane>>,
         _y: i64,
         event: MouseEvent,
         context: &dyn WindowOps,
@@ -387,13 +419,19 @@ impl super::TermWindow {
                 self.mouse_event_session_bar(item, event, context);
             }
             UIItemType::AboveScrollThumb => {
-                self.mouse_event_above_scroll_thumb(item, pane, event, context);
+                if let Some(pane) = pane {
+                    self.mouse_event_above_scroll_thumb(item, pane, event, context);
+                }
             }
             UIItemType::ScrollThumb => {
-                self.mouse_event_scroll_thumb(item, pane, event, context);
+                if let Some(pane) = pane {
+                    self.mouse_event_scroll_thumb(item, pane, event, context);
+                }
             }
             UIItemType::BelowScrollThumb => {
-                self.mouse_event_below_scroll_thumb(item, pane, event, context);
+                if let Some(pane) = pane {
+                    self.mouse_event_below_scroll_thumb(item, pane, event, context);
+                }
             }
             UIItemType::Split(split) => {
                 self.mouse_event_split(item, split, event, context);
@@ -409,9 +447,6 @@ impl super::TermWindow {
             }
             UIItemType::ChatminalSidebarCreateProfile => {
                 self.mouse_event_chatminal_sidebar_create_profile(event, context);
-            }
-            UIItemType::ChatminalSidebarToggleProfile(profile_id) => {
-                self.mouse_event_chatminal_sidebar_toggle_profile(&profile_id, event, context);
             }
             UIItemType::ChatminalSidebarProfile(profile_id) => {
                 self.mouse_event_chatminal_sidebar_profile(&profile_id, event, context);
@@ -443,19 +478,7 @@ impl super::TermWindow {
         context: &dyn WindowOps,
     ) {
         if let WMEK::Press(MousePress::Left) = event.kind {
-            self.switch_chatminal_profile(profile_id);
-        }
-        context.set_cursor(Some(MouseCursor::Arrow));
-    }
-
-    fn mouse_event_chatminal_sidebar_toggle_profile(
-        &mut self,
-        profile_id: &str,
-        event: MouseEvent,
-        context: &dyn WindowOps,
-    ) {
-        if let WMEK::Press(MousePress::Left) = event.kind {
-            self.toggle_chatminal_profile_expanded(profile_id);
+            self.toggle_chatminal_profile(profile_id);
         }
         context.set_cursor(Some(MouseCursor::Arrow));
     }

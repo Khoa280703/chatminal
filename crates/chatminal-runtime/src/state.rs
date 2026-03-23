@@ -12,15 +12,13 @@ use crate::api::{
     RuntimeCreatedSession, RuntimeEvent, RuntimeProfile, RuntimeSessionLaunchSpec,
     RuntimeSessionSnapshot, RuntimeWorkspace,
 };
-use crate::config::{DaemonConfig, resolve_session_cwd};
+use crate::config::{RuntimeConfig, resolve_session_cwd};
 use crate::metrics::{RuntimeMetrics, RuntimeMetricsSnapshot};
 use crate::session::{SessionEvent, WriteInputError};
 use crate::state::runtime_bridge::{RuntimeExecutionAdapter, RuntimeHandle};
 
 mod explorer_utils;
 mod native_api;
-mod protocol_adapter;
-mod protocol_clients;
 pub mod runtime_bridge;
 mod runtime_lifecycle;
 mod session_event_processor;
@@ -41,6 +39,7 @@ struct SessionEntry {
     live_output: String,
     generation: u64,
     prepend_run_boundary_on_next_output: bool,
+    restored_trailing_fragment: Option<String>,
 }
 
 struct SessionSpawnPlan {
@@ -56,35 +55,33 @@ struct SessionSpawnPlan {
 }
 
 struct StateInner {
-    config: DaemonConfig,
+    config: RuntimeConfig,
     store: Store,
     metrics: RuntimeMetrics,
     sessions: HashMap<String, SessionEntry>,
-    protocol_clients: protocol_clients::ProtocolClients,
     subscribers: HashMap<u64, std_mpsc::SyncSender<RuntimeEvent>>,
     next_subscriber_id: u64,
     shutdown_requested: bool,
 }
 
 #[derive(Clone)]
-pub struct DaemonState {
-    // `DaemonState` owns business/workspace state.
+pub struct RuntimeState {
+    // `RuntimeState` owns business/workspace state.
     // Live execution state is delegated to the `execution` adapter (concrete impl in
     // `desktop_host_runtime`). No session_engine types leak into this struct.
     inner: Arc<Mutex<StateInner>>,
-    events: std_mpsc::SyncSender<SessionEvent>,
     metrics: RuntimeMetrics,
     execution: Arc<dyn RuntimeExecutionAdapter>,
 }
 
 pub struct RuntimeSubscription {
-    state: DaemonState,
+    state: RuntimeState,
     subscriber_id: u64,
     rx: std_mpsc::Receiver<RuntimeEvent>,
 }
 
 impl RuntimeSubscription {
-    fn new(state: DaemonState, subscriber_id: u64, rx: std_mpsc::Receiver<RuntimeEvent>) -> Self {
+    fn new(state: RuntimeState, subscriber_id: u64, rx: std_mpsc::Receiver<RuntimeEvent>) -> Self {
         Self {
             state,
             subscriber_id,
@@ -109,18 +106,18 @@ impl Drop for RuntimeSubscription {
     }
 }
 
-impl DaemonState {
+impl RuntimeState {
     pub fn initialize_default(
         execution: Arc<dyn RuntimeExecutionAdapter>,
-    ) -> Result<(Self, DaemonConfig), String> {
-        let config = DaemonConfig::from_env()?;
+    ) -> Result<(Self, RuntimeConfig), String> {
+        let config = RuntimeConfig::from_env()?;
         let store = Store::initialize_default()?;
         let state = Self::new(config.clone(), store, execution)?;
         Ok((state, config))
     }
 
     pub fn new(
-        config: DaemonConfig,
+        config: RuntimeConfig,
         store: Store,
         execution: Arc<dyn RuntimeExecutionAdapter>,
     ) -> Result<Self, String> {
@@ -147,6 +144,7 @@ impl DaemonState {
                         live_output: String::new(),
                         generation: 0,
                         prepend_run_boundary_on_next_output: false,
+                        restored_trailing_fragment: None,
                     },
                 );
             }
@@ -163,12 +161,10 @@ impl DaemonState {
                 store,
                 metrics: metrics.clone(),
                 sessions,
-                protocol_clients: protocol_clients::ProtocolClients::new(),
                 subscribers: HashMap::new(),
                 next_subscriber_id: 1,
                 shutdown_requested: false,
             })),
-            events: events_tx.clone(),
             metrics,
             execution,
         };
@@ -219,30 +215,8 @@ impl DaemonState {
             .unwrap_or(5_000)
     }
 
-    pub fn broadcast_daemon_health(&self) {
-        if let Ok(mut inner) = self.inner.lock() {
-            inner.broadcast_daemon_health();
-        }
-    }
-
     pub fn metrics_snapshot(&self) -> RuntimeMetricsSnapshot {
         self.metrics.snapshot()
-    }
-
-    pub fn log_runtime_metrics(&self) {
-        let snapshot = self.metrics_snapshot();
-        log::info!(
-            "runtime-metrics requests_total={} request_errors_total={} session_events_total={} broadcast_frames_total={} dropped_clients_full_total={} dropped_clients_disconnected_total={} input_queue_full_total={} input_retry_total={} input_drop_total={}",
-            snapshot.requests_total,
-            snapshot.request_errors_total,
-            snapshot.session_events_total,
-            snapshot.broadcast_frames_total,
-            snapshot.dropped_clients_full_total,
-            snapshot.dropped_clients_disconnected_total,
-            snapshot.input_queue_full_total,
-            snapshot.input_retry_total,
-            snapshot.input_drop_total
-        );
     }
 
     pub fn workspace_load(&self) -> Result<RuntimeWorkspace, String> {
@@ -310,6 +284,19 @@ impl DaemonState {
             .lock()
             .map_err(|_| "state lock poisoned".to_string())?;
         inner.profile_switch(profile_id)
+    }
+
+    pub fn session_move_to_profile(
+        &self,
+        session_id: &str,
+        profile_id: &str,
+        target_index: Option<usize>,
+    ) -> Result<RuntimeWorkspace, String> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|_| "state lock poisoned".to_string())?;
+        inner.session_move_to_profile(session_id, profile_id, target_index)
     }
 
     pub fn session_create(
@@ -413,6 +400,7 @@ impl DaemonState {
                     entry.generation = entry.generation.saturating_add(1);
                     entry.session.status = StoredSessionStatus::Disconnected;
                     entry.prepend_run_boundary_on_next_output = false;
+                    entry.restored_trailing_fragment = None;
                     Activation::Recover(
                         stale_runtime,
                         SessionSpawnPlan {
@@ -473,40 +461,11 @@ impl DaemonState {
         session_id: &str,
         preview_lines: Option<usize>,
     ) -> Result<RuntimeSessionSnapshot, String> {
-        let (store, default_preview_lines, live_overlay) = {
-            let inner = self
-                .inner
-                .lock()
-                .map_err(|_| "state lock poisoned".to_string())?;
-            let Some(entry) = inner.sessions.get(session_id) else {
-                return Err("session not found".to_string());
-            };
-
-            let live_overlay = if entry.live_output.is_empty() || entry.session.persist_history {
-                None
-            } else {
-                Some((entry.live_output.clone(), entry.session.seq))
-            };
-
-            (
-                inner.store.clone(),
-                inner.config.default_preview_lines,
-                live_overlay,
-            )
-        };
-
-        let from_store =
-            store.session_snapshot(session_id, preview_lines.unwrap_or(default_preview_lines))?;
-        let merged = if let Some((live_output, seq)) = live_overlay {
-            StoredSessionSnapshot {
-                content: format!("{}{}", from_store.content, live_output),
-                seq: seq.max(from_store.seq),
-            }
-        } else {
-            from_store
-        };
-
-        Ok(merged.into())
+        let inner = self
+            .inner
+            .lock()
+            .map_err(|_| "state lock poisoned".to_string())?;
+        inner.session_snapshot_get(session_id, preview_lines)
     }
 
     pub fn session_launch_spec(
@@ -527,35 +486,147 @@ impl DaemonState {
         })
     }
 
-    pub fn workspace_layout_load(&self) -> Result<Option<WorkspaceLayoutState>, String> {
-        let inner = self
+    pub fn session_set_persist(
+        &self,
+        session_id: &str,
+        persist_history: bool,
+    ) -> Result<(), String> {
+        let mut inner = self
             .inner
             .lock()
             .map_err(|_| "state lock poisoned".to_string())?;
-        inner.workspace_layout_load()
+        inner.session_set_persist(session_id, persist_history)
     }
 
-    pub fn workspace_layout_save(&self, layout: &WorkspaceLayoutState) -> Result<(), String> {
+    pub fn get_lifecycle_preferences(&self) -> Result<crate::api::RuntimeLifecyclePreferences, String> {
         let inner = self
             .inner
             .lock()
             .map_err(|_| "state lock poisoned".to_string())?;
-        inner.workspace_layout_save(layout)
+        inner.get_lifecycle_preferences()
     }
 
-    pub fn workspace_layout_clear(&self) -> Result<(), String> {
+    pub fn set_lifecycle_preferences(
+        &self,
+        keep_alive_on_close: Option<bool>,
+        start_in_tray: Option<bool>,
+    ) -> Result<crate::api::RuntimeLifecyclePreferences, String> {
         let inner = self
             .inner
             .lock()
             .map_err(|_| "state lock poisoned".to_string())?;
-        inner.workspace_layout_clear()
+        inner.set_lifecycle_preferences(keep_alive_on_close, start_in_tray)
+    }
+
+    pub fn profile_delete(&self, profile_id: &str) -> Result<RuntimeWorkspace, String> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|_| "state lock poisoned".to_string())?;
+        inner.store.delete_profile(profile_id)?;
+        inner.close_profile_runtimes(profile_id);
+        inner.publish_workspace_updated();
+        inner.load_workspace_snapshot()
+    }
+
+    pub fn session_explorer_state_get(
+        &self,
+        session_id: &str,
+    ) -> Result<crate::api::RuntimeSessionExplorerState, String> {
+        let inner = self
+            .inner
+            .lock()
+            .map_err(|_| "state lock poisoned".to_string())?;
+        inner.get_session_explorer_state(session_id)
+    }
+
+    pub fn session_explorer_root_set(
+        &self,
+        session_id: &str,
+        root_path: &str,
+    ) -> Result<crate::api::RuntimeSessionExplorerState, String> {
+        let inner = self
+            .inner
+            .lock()
+            .map_err(|_| "state lock poisoned".to_string())?;
+        inner.set_session_explorer_root(session_id, root_path)
+    }
+
+    pub fn session_explorer_state_update(
+        &self,
+        session_id: &str,
+        current_dir: &str,
+        selected_path: Option<&str>,
+        open_file_path: Option<&str>,
+    ) -> Result<crate::api::RuntimeSessionExplorerState, String> {
+        let inner = self
+            .inner
+            .lock()
+            .map_err(|_| "state lock poisoned".to_string())?;
+        inner.update_session_explorer_state(session_id, current_dir, selected_path, open_file_path)
+    }
+
+    pub fn session_explorer_list(
+        &self,
+        session_id: &str,
+        relative_path: Option<&str>,
+    ) -> Result<Vec<crate::api::RuntimeSessionExplorerEntry>, String> {
+        let inner = self
+            .inner
+            .lock()
+            .map_err(|_| "state lock poisoned".to_string())?;
+        inner.list_session_explorer_entries(session_id, relative_path)
+    }
+
+    pub fn session_explorer_read_file(
+        &self,
+        session_id: &str,
+        relative_path: &str,
+        max_bytes: Option<usize>,
+    ) -> Result<crate::api::RuntimeSessionExplorerFileContent, String> {
+        let inner = self
+            .inner
+            .lock()
+            .map_err(|_| "state lock poisoned".to_string())?;
+        inner.read_session_explorer_file(session_id, relative_path, max_bytes)
+    }
+
+    pub fn workspace_layout_load(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Option<WorkspaceLayoutState>, String> {
+        let inner = self
+            .inner
+            .lock()
+            .map_err(|_| "state lock poisoned".to_string())?;
+        inner.workspace_layout_load(workspace_id)
+    }
+
+    pub fn workspace_layout_save(
+        &self,
+        workspace_id: &str,
+        layout: &WorkspaceLayoutState,
+    ) -> Result<(), String> {
+        let inner = self
+            .inner
+            .lock()
+            .map_err(|_| "state lock poisoned".to_string())?;
+        inner.workspace_layout_save(workspace_id, layout)
+    }
+
+    pub fn workspace_layout_clear(&self, workspace_id: &str) -> Result<(), String> {
+        let inner = self
+            .inner
+            .lock()
+            .map_err(|_| "state lock poisoned".to_string())?;
+        inner.workspace_layout_clear(workspace_id)
     }
 
     pub fn workspace_layout_restore_persisted(
         &self,
         workspace_id: &str,
     ) -> Result<Option<WorkspaceLayoutState>, String> {
-        let persisted = self.workspace_layout_load()?;
+        let persisted = self.workspace_layout_load(workspace_id)?;
         let layouts = self.execution.workspace_layouts();
         let mut layouts = layouts
             .lock()
@@ -585,7 +656,7 @@ impl DaemonState {
             .lock()
             .map_err(|_| "workspace layout lock poisoned".to_string())?
             .remove_layout(workspace_id);
-        self.workspace_layout_clear()
+        self.workspace_layout_clear(workspace_id)
     }
 
     pub fn workspace_layout_replace(
@@ -600,7 +671,7 @@ impl DaemonState {
                 .map_err(|_| "workspace layout lock poisoned".to_string())?
                 .replace_layout(workspace_id.to_string(), layout)
         };
-        self.workspace_layout_save(&layout)?;
+        self.workspace_layout_save(workspace_id, &layout)?;
         Ok(layout)
     }
 
@@ -619,7 +690,7 @@ impl DaemonState {
                 .ensure_session_view(workspace_id, session_id.to_string())
                 .unwrap_or(layout)
         };
-        self.workspace_layout_save(&layout)?;
+        self.workspace_layout_save(workspace_id, &layout)?;
         Ok(layout)
     }
 
@@ -638,7 +709,7 @@ impl DaemonState {
                 .split_view(workspace_id, view_id, axis, session_id.to_string())
         };
         if let Some(layout_ref) = layout.as_ref() {
-            self.workspace_layout_save(layout_ref)?;
+            self.workspace_layout_save(workspace_id, layout_ref)?;
         }
         Ok(layout)
     }
@@ -657,7 +728,7 @@ impl DaemonState {
                 .attach_session(workspace_id, view_id, session_id.to_string())
         };
         if let Some(layout_ref) = layout.as_ref() {
-            self.workspace_layout_save(layout_ref)?;
+            self.workspace_layout_save(workspace_id, layout_ref)?;
         }
         Ok(layout)
     }
@@ -675,7 +746,7 @@ impl DaemonState {
                 .focus_view(workspace_id, view_id)
         };
         if let Some(layout_ref) = layout.as_ref() {
-            self.workspace_layout_save(layout_ref)?;
+            self.workspace_layout_save(workspace_id, layout_ref)?;
         }
         Ok(layout)
     }
@@ -693,7 +764,7 @@ impl DaemonState {
                 .close_view(workspace_id, view_id)
         };
         if let Some(layout_ref) = layout.as_ref() {
-            self.workspace_layout_save(layout_ref)?;
+            self.workspace_layout_save(workspace_id, layout_ref)?;
         }
         Ok(layout)
     }
@@ -712,7 +783,7 @@ impl DaemonState {
                 .resize_split(workspace_id, node_id, ratio)
         };
         if let Some(layout_ref) = layout.as_ref() {
-            self.workspace_layout_save(layout_ref)?;
+            self.workspace_layout_save(workspace_id, layout_ref)?;
         }
         Ok(layout)
     }
@@ -879,6 +950,20 @@ fn snapshot_requires_run_boundary(snapshot: &StoredSessionSnapshot) -> bool {
     !snapshot.content.is_empty()
         && !snapshot.content.ends_with('\n')
         && !snapshot.content.ends_with('\r')
+}
+
+fn snapshot_trailing_fragment(snapshot: &StoredSessionSnapshot) -> Option<String> {
+    if !snapshot_requires_run_boundary(snapshot) {
+        return None;
+    }
+
+    let cut = snapshot
+        .content
+        .rfind(['\n', '\r'])
+        .map(|index| index.saturating_add(1))
+        .unwrap_or(0);
+    let fragment = snapshot.content[cut..].to_string();
+    (!fragment.is_empty()).then_some(fragment)
 }
 
 fn prepend_run_boundary(chunk: &str) -> String {

@@ -506,7 +506,11 @@ impl super::TermWindow {
             dpi: size.dpi,
         };
 
-        let show_session_bar = Self::should_show_session_bar_for_count(&config, 1);
+        let show_session_bar = Self::should_show_session_bar_for_count(
+            &config,
+            1,
+            self.chatminal_sidebar.is_enabled(),
+        );
         let tab_bar_height = if show_session_bar {
             self.tab_bar_pixel_height()? as usize
         } else {

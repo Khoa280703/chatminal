@@ -1,14 +1,14 @@
 // Runtime execution adapter — abstraction boundary between `chatminal-runtime`
 // and the actual session execution engine (`desktop_host_runtime::session_engine`).
 //
-// `DaemonState` depends only on this trait. The concrete implementation lives in
+// `RuntimeState` depends only on this trait. The concrete implementation lives in
 // `desktop_host_runtime` (which depends on `desktop_host_runtime::session_engine`).
 //
 // Phase 07: this file was rewritten to remove the direct `desktop_host_runtime::session_engine`
 // dependency. All engine types are hidden behind `RuntimeExecutionAdapter`.
 //
 // ID ownership boundary:
-// - Daemon (`chatminal-runtime`) only needs: `session_id` (String) + `RuntimeId`
+// - Runtime (`chatminal-runtime`) only needs: `session_id` (String) + `RuntimeId`
 // - Engine/desktop IDs (`PaneId`, `TabId`, `WindowId`, `TerminalInstanceId`) are
 //   desktop-only concerns and MUST NOT leak into this crate.
 //   See `DesktopSessionHost::session_tab_shim` for the desktop-local mapping.
@@ -20,7 +20,7 @@ use crate::session::{InputWriteStats, WriteInputError};
 use crate::workspace_ids::{RuntimeId, TerminalInstanceId};
 use crate::workspace_layout::WorkspaceLayoutRegistry;
 
-use super::{DaemonState, StateInner};
+use super::{RuntimeState, StateInner};
 
 // ─── handle ────────────────────────────────────────────────────────────────
 
@@ -37,13 +37,13 @@ pub trait RuntimeSessionHandleTrait: Send + Sync + std::fmt::Debug {
 
 // ─── execution adapter trait ────────────────────────────────────────────────
 
-/// Adapter between `DaemonState` and the session execution engine.
+/// Adapter between `RuntimeState` and the session execution engine.
 ///
 /// This trait is implemented by `DesktopRuntimeExecutionBridge` in
 /// `desktop_host_runtime`. It is the only gateway through which
 /// `chatminal-runtime` reaches session engine internals.
 pub trait RuntimeExecutionAdapter: Send + Sync + std::fmt::Debug {
-    /// Called by `DaemonState::new` to give the adapter a sender it can use to
+    /// Called by `RuntimeState::new` to give the adapter a sender it can use to
     /// forward PTY output events back into the state event loop.
     fn connect_session_events(
         &self,
@@ -70,14 +70,14 @@ pub trait RuntimeExecutionAdapter: Send + Sync + std::fmt::Debug {
     /// Reconcile the desktop session lookup with the runtime's authoritative state.
     fn reconcile_session_lookup(
         &self,
-        host: &DaemonState,
+        host: &RuntimeState,
         lookup: &RuntimeOwnedSessionLookup,
     ) -> Result<RuntimeSessionBridgeAction, String>;
 
     /// Notify the engine that a session was activated.
     fn notify_session_activated(
         &self,
-        host: &DaemonState,
+        host: &RuntimeState,
         session_id: &str,
         runtime_id: RuntimeId,
     ) -> Result<(), String>;
@@ -85,16 +85,16 @@ pub trait RuntimeExecutionAdapter: Send + Sync + std::fmt::Debug {
     /// Notify the engine that a session was closed.
     fn notify_session_closed(
         &self,
-        host: &DaemonState,
+        host: &RuntimeState,
         session_id: &str,
         runtime_id: RuntimeId,
         lookup_after_close: &RuntimeOwnedSessionLookup,
     ) -> Result<(), String>;
 }
 
-// ─── DaemonState impl ──────────────────────────────────────────────────────
+// ─── RuntimeState impl ──────────────────────────────────────────────────────
 
-impl DaemonState {
+impl RuntimeState {
     pub(super) fn spawn_runtime_handle(
         &self,
         session_id: &str,

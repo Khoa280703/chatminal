@@ -54,6 +54,18 @@ impl ChatminalRuntimeClient {
             .session_create(name, cols, rows, cwd, persist_history)
     }
 
+    #[allow(dead_code)]
+    pub(crate) fn session_move_to_profile(
+        &self,
+        session_id: &str,
+        profile_id: &str,
+        target_index: Option<usize>,
+    ) -> Result<RuntimeWorkspace, String> {
+        self.runtime
+            .state
+            .session_move_to_profile(session_id, profile_id, target_index)
+    }
+
     pub(crate) fn profile_switch(&self, profile_id: &str) -> Result<RuntimeWorkspace, String> {
         self.runtime.state.profile_switch(profile_id)
     }
