@@ -190,6 +190,99 @@ enum OnlyKeyBindings {
 }
 
 impl super::TermWindow {
+    fn process_chatminal_sidebar_inline_rename_window_key(
+        &mut self,
+        window_key: &KeyEvent,
+        context: &dyn WindowOps,
+    ) -> bool {
+        if !window_key.key_is_down {
+            return false;
+        }
+
+        let key = self.win_key_code_to_termwiz_key_code(&window_key.key);
+        self.process_chatminal_sidebar_inline_rename_key(
+            &key,
+            window_key.modifiers.remove_positional_mods(),
+            context,
+        )
+    }
+
+    fn process_chatminal_sidebar_inline_rename_text(
+        &mut self,
+        text: &str,
+        raw_modifiers: Modifiers,
+        context: &dyn WindowOps,
+    ) -> bool {
+        if !matches!(raw_modifiers, Modifiers::NONE | Modifiers::SHIFT) {
+            return false;
+        }
+
+        let mut changed = false;
+        for c in text.chars() {
+            if c.is_control() {
+                continue;
+            }
+            if self.chatminal_sidebar.inline_rename_push(c) {
+                changed = true;
+            }
+        }
+
+        if changed {
+            context.invalidate();
+        }
+        changed
+    }
+
+    fn process_chatminal_sidebar_inline_rename_key(
+        &mut self,
+        key: &Key,
+        raw_modifiers: Modifiers,
+        context: &dyn WindowOps,
+    ) -> bool {
+        if !self.chatminal_sidebar.is_enabled()
+            || self.chatminal_sidebar.inline_rename_state().is_none()
+        {
+            return false;
+        }
+
+        match key {
+            Key::Code(::termwiz::input::KeyCode::Escape) => {
+                if self.chatminal_sidebar.inline_rename_cancel() {
+                    context.invalidate();
+                }
+                true
+            }
+            Key::Code(::termwiz::input::KeyCode::Enter) => {
+                if let Some((session_id, input)) = self.chatminal_sidebar.inline_rename_commit() {
+                    self.rename_chatminal_session(&session_id, &input);
+                }
+                context.invalidate();
+                true
+            }
+            Key::Code(::termwiz::input::KeyCode::Backspace) if raw_modifiers == Modifiers::NONE => {
+                if self.chatminal_sidebar.inline_rename_backspace() {
+                    context.invalidate();
+                }
+                true
+            }
+            Key::Code(::termwiz::input::KeyCode::Char('u')) if raw_modifiers == Modifiers::CTRL => {
+                if self.chatminal_sidebar.inline_rename_clear() {
+                    context.invalidate();
+                }
+                true
+            }
+            Key::Code(::termwiz::input::KeyCode::Char(c)) => self
+                .process_chatminal_sidebar_inline_rename_text(
+                    &c.to_string(),
+                    raw_modifiers,
+                    context,
+                ),
+            Key::Composed(text) => self
+                .process_chatminal_sidebar_inline_rename_text(text, raw_modifiers, context),
+            _ => false,
+        }
+    }
+
     fn encode_win32_input(&self, pane: &Arc<dyn OverlayPane>, key: &KeyEvent) -> Option<String> {
         if !self.config.allow_win32_input_mode
             || pane.get_keyboard_encoding() != KeyboardEncoding::Win32
@@ -275,6 +368,16 @@ impl super::TermWindow {
         }
 
         if is_down {
+            let termwiz_key = self.win_key_code_to_termwiz_key_code(keycode);
+            if only_key_bindings == OnlyKeyBindings::No
+                && self.process_chatminal_sidebar_inline_rename_key(
+                    &termwiz_key,
+                    raw_modifiers.remove_positional_mods(),
+                    context,
+                )
+            {
+                return true;
+            }
             if only_key_bindings == OnlyKeyBindings::No {
                 if let Some(modal) = self.get_modal() {
                     if let Key::Code(term_key) = self.win_key_code_to_termwiz_key_code(keycode) {
@@ -437,6 +540,23 @@ impl super::TermWindow {
     }
 
     pub fn raw_key_event_impl(&mut self, key: RawKeyEvent, context: &dyn WindowOps) {
+        if self.chatminal_sidebar.inline_rename_state().is_some() {
+            if key.key_is_down {
+                let mapped = self.win_key_code_to_termwiz_key_code(&key.key);
+                if self.process_chatminal_sidebar_inline_rename_key(
+                    &mapped,
+                    key.modifiers.remove_positional_mods(),
+                    context,
+                ) {
+                    key.set_handled();
+                    return;
+                }
+            }
+            if !key.key_is_down {
+                key.set_handled();
+                return;
+            }
+        }
         // The leader key is a kind of modal modifier key.
         // It is allowed to be active for up to the leader timeout duration,
         // after which it auto-deactivates.
@@ -652,6 +772,14 @@ impl super::TermWindow {
             window_key.key_is_down,
             Some(&window_key),
         ) {
+            return;
+        }
+
+        if self.chatminal_sidebar.inline_rename_state().is_some() {
+            self.process_chatminal_sidebar_inline_rename_window_key(&window_key, context);
+            if window_key.key_is_down {
+                self.key_table_state.pop_until_unknown();
+            }
             return;
         }
 

@@ -1,6 +1,6 @@
+use crate::chatminal_runtime::overlay_compat::OverlayTerminal;
 use crate::scripting::guiwin::GuiWin;
 use config::keyassignment::{Confirmation, KeyAssignment};
-use crate::chatminal_runtime::overlay_compat::OverlayTerminal;
 use std::rc::Rc;
 use termwiz::cell::AttributeChange;
 use termwiz::color::ColorAttribute;

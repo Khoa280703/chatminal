@@ -15,18 +15,10 @@ impl crate::TermWindow {
         let foreground = palette.split.to_linear();
         let cell_width = self.render_metrics.cell_size.width as f32;
         let cell_height = self.render_metrics.cell_size.height as f32;
+        let grid_origin = self.terminal_grid_origin();
 
-        let border = self.get_os_border();
-        let first_row_offset = if self.show_session_bar && !self.config.session_bar_at_bottom {
-            self.tab_bar_pixel_height()?
-        } else {
-            0.
-        } + border.top.get() as f32;
-
-        let (padding_left, padding_top) = self.padding_left_top();
-
-        let pos_y = split.top as f32 * cell_height + first_row_offset + padding_top;
-        let pos_x = split.left as f32 * cell_width + padding_left + border.left.get() as f32;
+        let pos_y = split.top as f32 * cell_height + grid_origin.y;
+        let pos_x = split.left as f32 * cell_width + grid_origin.x;
 
         if split.direction == TerminalSplitDirection::Horizontal {
             self.filled_rectangle(
@@ -41,13 +33,9 @@ impl crate::TermWindow {
                 foreground,
             )?;
             self.ui_items.push(UIItem {
-                x: border.left.get() as usize
-                    + padding_left as usize
-                    + (split.left * cell_width as usize),
+                x: grid_origin.x as usize + (split.left * cell_width as usize),
                 width: cell_width as usize,
-                y: padding_top as usize
-                    + first_row_offset as usize
-                    + split.top * cell_height as usize,
+                y: grid_origin.y as usize + split.top * cell_height as usize,
                 height: split.size * cell_height as usize,
                 item_type: UIItemType::Split(split.clone()),
             });
@@ -64,13 +52,9 @@ impl crate::TermWindow {
                 foreground,
             )?;
             self.ui_items.push(UIItem {
-                x: border.left.get() as usize
-                    + padding_left as usize
-                    + (split.left * cell_width as usize),
+                x: grid_origin.x as usize + (split.left * cell_width as usize),
                 width: split.size * cell_width as usize,
-                y: padding_top as usize
-                    + first_row_offset as usize
-                    + split.top * cell_height as usize,
+                y: grid_origin.y as usize + split.top * cell_height as usize,
                 height: cell_height as usize,
                 item_type: UIItemType::Split(split.clone()),
             });

@@ -2,8 +2,8 @@ use chatminal_terminal_core::TerminalSize;
 use portable_pty::CommandBuilder;
 
 use super::{
-    TerminalInstanceId, SessionEventBus, SessionLayoutSnapshot, SessionRuntimeEvent, SessionRuntimeState,
-    StatefulSessionEngine, RuntimeId,
+    RuntimeId, SessionEventBus, SessionLayoutSnapshot, SessionRuntimeEvent, SessionRuntimeState,
+    StatefulSessionEngine, TerminalInstanceId,
 };
 
 impl StatefulSessionEngine {
@@ -41,11 +41,12 @@ impl StatefulSessionEngine {
             }
             runtime.active_terminal_instance_id = Some(terminal_instance_id);
         }
-        self.event_hub().publish(SessionRuntimeEvent::TerminalInstanceFocused {
-            session_id: session_id.to_string(),
-            runtime_id,
-            terminal_instance_id,
-        });
+        self.event_hub()
+            .publish(SessionRuntimeEvent::TerminalInstanceFocused {
+                session_id: session_id.to_string(),
+                runtime_id,
+                terminal_instance_id,
+            });
         self.snapshot_runtime_from_core(runtime_id)
     }
 
@@ -56,10 +57,11 @@ impl StatefulSessionEngine {
         session_id: &str,
         runtime_id: RuntimeId,
     ) -> Option<SessionRuntimeState> {
-        self.event_hub().publish(SessionRuntimeEvent::RuntimeFocused {
-            session_id: session_id.to_string(),
-            runtime_id,
-        });
+        self.event_hub()
+            .publish(SessionRuntimeEvent::RuntimeFocused {
+                session_id: session_id.to_string(),
+                runtime_id,
+            });
         self.snapshot_runtime_from_core(runtime_id)
     }
 
@@ -87,10 +89,11 @@ impl StatefulSessionEngine {
             .remove_runtime(runtime_id)
             .is_some();
         if removed {
-            self.event_hub().publish(SessionRuntimeEvent::RuntimeClosed {
-                session_id: session_id.to_string(),
-                runtime_id,
-            });
+            self.event_hub()
+                .publish(SessionRuntimeEvent::RuntimeClosed {
+                    session_id: session_id.to_string(),
+                    runtime_id,
+                });
         }
         removed
     }

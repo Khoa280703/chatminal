@@ -125,8 +125,10 @@ impl UserData for GuiWin {
                 let (tx, rx) = smol::channel::bounded(1);
                 this.window
                     .notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                        tx.try_send(term_window.selection_text_for_terminal_handle(terminal_handle))
-                            .ok();
+                        tx.try_send(
+                            term_window.selection_text_for_terminal_handle(terminal_handle),
+                        )
+                        .ok();
                     })));
                 let text = rx
                     .recv()
@@ -196,8 +198,10 @@ impl UserData for GuiWin {
                 this.window
                     .notify(TermWindowNotif::Apply(Box::new(move |term_window| {
                         tx.try_send(
-                            term_window
-                                .perform_assignment_for_terminal_handle(terminal_handle, &assignment),
+                            term_window.perform_assignment_for_terminal_handle(
+                                terminal_handle,
+                                &assignment,
+                            ),
                         )
                         .ok();
                     })));
@@ -223,8 +227,10 @@ impl UserData for GuiWin {
                 this.window
                     .notify(TermWindowNotif::Apply(Box::new(move |term_window| {
                         tx.try_send(
-                            term_window
-                                .perform_assignment_for_terminal_handle(terminal_handle, &assignment),
+                            term_window.perform_assignment_for_terminal_handle(
+                                terminal_handle,
+                                &assignment,
+                            ),
                         )
                         .ok();
                     })));
@@ -355,8 +361,10 @@ impl UserData for GuiWin {
                 let (tx, rx) = smol::channel::bounded(1);
                 this.window
                     .notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                        tx.try_send(term_window.selection_escapes_for_terminal_handle(terminal_handle))
-                            .ok();
+                        tx.try_send(
+                            term_window.selection_escapes_for_terminal_handle(terminal_handle),
+                        )
+                        .ok();
                     })));
                 let result = rx.recv().await.map_err(mlua::Error::external)?;
                 result.map_err(mlua::Error::external)

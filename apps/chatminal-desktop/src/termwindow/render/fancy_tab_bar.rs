@@ -1,5 +1,5 @@
 use crate::customglyph::*;
-use crate::tabbar::{SessionBarItem, SessionBarEntry};
+use crate::tabbar::{SessionBarEntry, SessionBarItem};
 use crate::termwindow::box_model::*;
 use crate::termwindow::render::corners::*;
 
@@ -117,23 +117,25 @@ impl crate::TermWindow {
             let active_tab = colors.active_tab();
 
             match item.item {
-                SessionBarItem::RightStatus | SessionBarItem::LeftStatus | SessionBarItem::None => element
-                    .item_type(UIItemType::SessionBar(SessionBarItem::None))
-                    .line_height(Some(1.75))
-                    .margin(BoxDimension {
-                        left: Dimension::Cells(0.),
-                        right: Dimension::Cells(0.),
-                        top: Dimension::Cells(0.0),
-                        bottom: Dimension::Cells(0.),
-                    })
-                    .padding(BoxDimension {
-                        left: Dimension::Cells(0.5),
-                        right: Dimension::Cells(0.),
-                        top: Dimension::Cells(0.),
-                        bottom: Dimension::Cells(0.),
-                    })
-                    .border(BoxDimension::new(Dimension::Pixels(0.)))
-                    .colors(bar_colors.clone()),
+                SessionBarItem::RightStatus | SessionBarItem::LeftStatus | SessionBarItem::None => {
+                    element
+                        .item_type(UIItemType::SessionBar(SessionBarItem::None))
+                        .line_height(Some(1.75))
+                        .margin(BoxDimension {
+                            left: Dimension::Cells(0.),
+                            right: Dimension::Cells(0.),
+                            top: Dimension::Cells(0.0),
+                            bottom: Dimension::Cells(0.),
+                        })
+                        .padding(BoxDimension {
+                            left: Dimension::Cells(0.5),
+                            right: Dimension::Cells(0.),
+                            top: Dimension::Cells(0.),
+                            bottom: Dimension::Cells(0.),
+                        })
+                        .border(BoxDimension::new(Dimension::Pixels(0.)))
+                        .colors(bar_colors.clone())
+                }
                 SessionBarItem::NewSessionButton => Element::new(
                     &font,
                     ElementContent::Poly {
@@ -170,7 +172,8 @@ impl crate::TermWindow {
                     bg: new_tab_hover.bg_color.to_linear().into(),
                     text: new_tab_hover.fg_color.to_linear().into(),
                 })),
-                SessionBarItem::RuntimeEntry { active, .. } | SessionBarItem::Session { active, .. }
+                SessionBarItem::RuntimeEntry { active, .. }
+                | SessionBarItem::Session { active, .. }
                     if active =>
                 {
                     element
@@ -360,7 +363,9 @@ impl crate::TermWindow {
         for item in items {
             match item.item {
                 SessionBarItem::LeftStatus => left_status.push(item_to_elem(item)),
-                SessionBarItem::None | SessionBarItem::RightStatus => right_eles.push(item_to_elem(item)),
+                SessionBarItem::None | SessionBarItem::RightStatus => {
+                    right_eles.push(item_to_elem(item))
+                }
                 SessionBarItem::WindowButton(_) => {
                     if self.config.integrated_title_button_alignment
                         == IntegratedTitleButtonAlignment::Left
@@ -370,24 +375,18 @@ impl crate::TermWindow {
                         right_eles.push(item_to_elem(item))
                     }
                 }
-                SessionBarItem::RuntimeEntry {
-                    entry_idx,
-                    active,
-                } => {
+                SessionBarItem::RuntimeEntry { entry_idx, active } => {
                     let mut elem = item_to_elem(item);
                     elem.max_width = Some(Dimension::Pixels(max_tab_width));
                     elem.min_width = Some(Dimension::Pixels(max_tab_width));
                     elem.content = match elem.content {
                         ElementContent::Text(_) => unreachable!(),
+                        ElementContent::Cells(cells) => ElementContent::Cells(cells),
                         ElementContent::Poly { .. } => unreachable!(),
                         ElementContent::Children(mut kids) => {
                             if self.config.show_close_tab_button_in_tabs {
                                 kids.push(make_x_button(
-                                    &font,
-                                    &metrics,
-                                    &colors,
-                                    entry_idx,
-                                    active,
+                                    &font, &metrics, &colors, entry_idx, active,
                                 ));
                             }
                             ElementContent::Children(kids)
@@ -405,6 +404,7 @@ impl crate::TermWindow {
                     elem.min_width = Some(Dimension::Pixels(max_tab_width));
                     elem.content = match elem.content {
                         ElementContent::Text(_) => unreachable!(),
+                        ElementContent::Cells(cells) => ElementContent::Cells(cells),
                         ElementContent::Poly { .. } => unreachable!(),
                         ElementContent::Children(mut kids) => {
                             if self.config.show_close_tab_button_in_tabs {

@@ -75,6 +75,7 @@ rangeset = { workspace = true }
 ratelim = { workspace = true }
 rayon = { version = "1.10" }
 regex = { version = "1" }
+resvg = { version = "0.45", default-features = false }
 serde = { version = "1.0", default-features = false, features = ["rc", "derive"] }
 sysinfo = { version = "0.32", default-features = false, features = ["system"] }
 serde_json = { version = "1.0" }
@@ -88,6 +89,7 @@ termwiz = { workspace = true }
 textwrap = { version = "0.16" }
 thiserror = { version = "1.0" }
 tiny-skia = { version = "0.11" }
+usvg = { version = "0.45" }
 umask = { workspace = true }
 unicode-normalization = { version = "0.1.24" }
 unicode-segmentation = { version = "1.12" }

@@ -75,25 +75,23 @@ pub(crate) fn spawn_waiter_loop(
     events: std_mpsc::SyncSender<TerminalInstanceRuntimeEvent>,
     child: Arc<Mutex<Box<dyn Child + Send + Sync>>>,
 ) {
-    thread::spawn(move || {
-        loop {
-            let status = child
-                .lock()
-                .ok()
-                .and_then(|mut guard| guard.try_wait().ok())
-                .flatten();
-            if let Some(status) = status {
-                let _ = events.send(TerminalInstanceRuntimeEvent::Exited {
-                    session_id: spawn.session_id,
-                    generation: spawn.generation,
-                    runtime_id: spawn.runtime_id,
-                    terminal_instance_id: spawn.terminal_instance_id,
-                    exit_code: Some(status.exit_code() as i32),
-                });
-                break;
-            }
-            thread::sleep(std::time::Duration::from_millis(120));
+    thread::spawn(move || loop {
+        let status = child
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.try_wait().ok())
+            .flatten();
+        if let Some(status) = status {
+            let _ = events.send(TerminalInstanceRuntimeEvent::Exited {
+                session_id: spawn.session_id,
+                generation: spawn.generation,
+                runtime_id: spawn.runtime_id,
+                terminal_instance_id: spawn.terminal_instance_id,
+                exit_code: Some(status.exit_code() as i32),
+            });
+            break;
         }
+        thread::sleep(std::time::Duration::from_millis(120));
     });
 }
 

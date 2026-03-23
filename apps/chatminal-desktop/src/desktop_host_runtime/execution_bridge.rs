@@ -9,16 +9,16 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 
-use chatminal_runtime::workspace_ids::{RuntimeId, TerminalInstanceId};
-use chatminal_runtime::workspace_layout::WorkspaceLayoutRegistry;
-use chatminal_runtime::{
-    RuntimeState, InputWriteStats, RuntimeExecutionAdapter, RuntimeSessionBridgeAction,
-    RuntimeSessionHandleTrait, RuntimeSessionLookup, WriteInputError,
-};
 use super::session_engine::{
     SessionBridgeAction, SessionCoreState, SessionEngineShared, SessionEventBus,
     SessionRuntimeBridge, SessionRuntimeEvent, SessionRuntimeLookup, SessionWorkspaceHost,
     StatefulSessionEngine,
+};
+use chatminal_runtime::workspace_ids::{RuntimeId, TerminalInstanceId};
+use chatminal_runtime::workspace_layout::WorkspaceLayoutRegistry;
+use chatminal_runtime::{
+    InputWriteStats, RuntimeExecutionAdapter, RuntimeSessionBridgeAction,
+    RuntimeSessionHandleTrait, RuntimeSessionLookup, RuntimeState, WriteInputError,
 };
 use chatminal_terminal_core::TerminalSize;
 use portable_pty::CommandBuilder;
@@ -168,19 +168,17 @@ impl RuntimeExecutionAdapter for DesktopRuntimeExecutionBridge {
         // OnceLock: only set once — safe in multi-threaded context.
         let _ = self.events_tx.set(events_tx.clone());
         let subscription = self.shared.subscribe();
-        thread::spawn(move || {
-            loop {
-                match subscription.recv_timeout(EXECUTION_EVENT_POLL_TIMEOUT) {
-                    Ok(Some(event)) => {
-                        if let Some(mapped) = map_execution_event(event) {
-                            let _ = events_tx.send(mapped);
-                        }
+        thread::spawn(move || loop {
+            match subscription.recv_timeout(EXECUTION_EVENT_POLL_TIMEOUT) {
+                Ok(Some(event)) => {
+                    if let Some(mapped) = map_execution_event(event) {
+                        let _ = events_tx.send(mapped);
                     }
-                    Ok(None) => {}
-                    Err(err) => {
-                        log::warn!("desktop execution bridge stopped: {err}");
-                        break;
-                    }
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    log::warn!("desktop execution bridge stopped: {err}");
+                    break;
                 }
             }
         });
@@ -215,10 +213,9 @@ impl RuntimeExecutionAdapter for DesktopRuntimeExecutionBridge {
             },
             initial_scrollback,
         )?;
-        let terminal_instance_id = state
-            .snapshot
-            .active_terminal_instance_id
-            .ok_or_else(|| "spawned session runtime missing active terminal instance".to_string())?;
+        let terminal_instance_id = state.snapshot.active_terminal_instance_id.ok_or_else(|| {
+            "spawned session runtime missing active terminal instance".to_string()
+        })?;
         Ok(Arc::new(Mutex::new(DesktopSessionHandle::new(
             Arc::clone(&self.shared),
             state.snapshot.runtime_id,
@@ -246,14 +243,16 @@ impl RuntimeExecutionAdapter for DesktopRuntimeExecutionBridge {
         lookup: &RuntimeSessionLookup,
     ) -> Result<RuntimeSessionBridgeAction, String> {
         let bus = DesktopSessionEventBus;
-        Ok(match SessionRuntimeBridge::new(&RuntimeStateHost(host), &bus)
-            .reconcile_session_lookup(&into_execution_lookup(lookup))?
-        {
-            SessionBridgeAction::Noop => RuntimeSessionBridgeAction::Noop,
-            SessionBridgeAction::FocusSession { session_id } => {
-                RuntimeSessionBridgeAction::FocusSession { session_id }
-            }
-        })
+        Ok(
+            match SessionRuntimeBridge::new(&RuntimeStateHost(host), &bus)
+                .reconcile_session_lookup(&into_execution_lookup(lookup))?
+            {
+                SessionBridgeAction::Noop => RuntimeSessionBridgeAction::Noop,
+                SessionBridgeAction::FocusSession { session_id } => {
+                    RuntimeSessionBridgeAction::FocusSession { session_id }
+                }
+            },
+        )
     }
 
     fn notify_session_activated(
@@ -291,9 +290,7 @@ fn into_execution_lookup(lookup: &RuntimeSessionLookup) -> SessionRuntimeLookup 
     }
 }
 
-fn map_execution_event(
-    event: SessionRuntimeEvent,
-) -> Option<chatminal_runtime::SessionEvent> {
+fn map_execution_event(event: SessionRuntimeEvent) -> Option<chatminal_runtime::SessionEvent> {
     use chatminal_runtime::SessionEvent;
     match event {
         SessionRuntimeEvent::TerminalInstanceOutput {

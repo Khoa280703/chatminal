@@ -2,12 +2,13 @@
 use crate::color::LinearRgba;
 use crate::customglyph::{BlockKey, Poly};
 use crate::glyphcache::CachedGlyph;
-use crate::quad::{QuadImpl, QuadTrait, TripleLayerQuadAllocator, TripleLayerQuadAllocatorTrait};
+use crate::quad::{
+    HeapQuadAllocator, QuadImpl, QuadTrait, TripleLayerQuadAllocator, TripleLayerQuadAllocatorTrait,
+};
 use crate::termwindow::{
     ColorEase, MouseCapture, RenderState, TermWindowNotif, UIItem, UIItemType,
 };
 use crate::utilsprites::RenderMetrics;
-use ::window::{RectF, WindowOps};
 use anyhow::anyhow;
 use config::{Dimension, DimensionContext};
 use engine_font::units::PixelUnit;
@@ -19,6 +20,7 @@ use std::rc::Rc;
 use termwiz::cell::{grapheme_column_width, Presentation};
 use termwiz::surface::Line;
 use window::bitmaps::atlas::Sprite;
+use window::{RectF, WindowOps};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerticalAlign {
@@ -392,6 +394,7 @@ impl Element {
 #[derive(Debug, Clone)]
 pub enum ElementContent {
     Text(String),
+    Cells(Vec<ElementCell>),
     Children(Vec<Element>),
     Poly { line_width: isize, poly: SizedPoly },
 }
@@ -684,6 +687,46 @@ impl super::TermWindow {
                     content: ComputedElementContent::Text(computed_cells),
                 })
             }
+            ElementContent::Cells(cells) => {
+                let pixel_width = cells.iter().fold(0.0, |acc, cell| {
+                    acc + match cell {
+                        ElementCell::Sprite(sprite) => sprite.coords.width() as f32,
+                        ElementCell::Glyph(glyph) => glyph.x_advance.get() as f32,
+                    }
+                });
+                let content_height = cells.iter().fold(context.height.pixel_cell, |acc, cell| {
+                    acc.max(match cell {
+                        ElementCell::Sprite(sprite) => sprite.coords.height() as f32,
+                        ElementCell::Glyph(glyph) => glyph
+                            .texture
+                            .as_ref()
+                            .map(|texture| texture.coords.size.height as f32 * glyph.scale as f32)
+                            .unwrap_or(context.height.pixel_cell),
+                    })
+                });
+                let content_rect = euclid::rect(
+                    0.0,
+                    0.0,
+                    pixel_width.max(min_width),
+                    content_height.max(min_height),
+                );
+                let rects = element.compute_rects(context, content_rect);
+
+                Ok(ComputedElement {
+                    item_type: element.item_type.clone(),
+                    zindex: element.zindex + context.zindex,
+                    baseline: context.height.pixel_cell,
+                    border,
+                    border_corners,
+                    colors: element.colors.clone(),
+                    hover_colors: element.hover_colors.clone(),
+                    bounds: rects.bounds,
+                    border_rect: rects.border_rect,
+                    padding: rects.padding,
+                    content_rect: rects.content_rect,
+                    content: ComputedElementContent::Text(cells.clone()),
+                })
+            }
             ElementContent::Children(kids) => {
                 let mut block_pixel_width: f32 = 0.;
                 let mut block_pixel_height: f32 = 0.;
@@ -829,9 +872,26 @@ impl super::TermWindow {
         gl_state: &RenderState,
         inherited_colors: Option<&ElementColors>,
     ) -> anyhow::Result<()> {
-        let layer = gl_state.layer_for_zindex(element.zindex)?;
-        let mut layers = layer.quad_allocator();
+        self.render_element_impl(element, gl_state, inherited_colors, None)
+    }
 
+    pub fn render_element_clipped<'a>(
+        &self,
+        element: &ComputedElement,
+        gl_state: &RenderState,
+        inherited_colors: Option<&ElementColors>,
+        clip_rect: RectF,
+    ) -> anyhow::Result<()> {
+        self.render_element_impl(element, gl_state, inherited_colors, Some(clip_rect))
+    }
+
+    fn render_element_impl<'a>(
+        &self,
+        element: &ComputedElement,
+        gl_state: &RenderState,
+        inherited_colors: Option<&ElementColors>,
+        clip_rect: Option<RectF>,
+    ) -> anyhow::Result<()> {
         let colors = match &element.hover_colors {
             Some(hc) => {
                 let hovering =
@@ -855,7 +915,46 @@ impl super::TermWindow {
             None => &element.colors,
         };
 
-        self.render_element_background(element, colors, &mut layers, inherited_colors)?;
+        if let Some(clip_rect) = clip_rect {
+            let mut heap = HeapQuadAllocator::default();
+            {
+                let mut layers = TripleLayerQuadAllocator::Heap(&mut heap);
+                self.render_element_background(element, colors, &mut layers, inherited_colors)?;
+                self.render_element_content(element, colors, &mut layers, inherited_colors)?;
+            }
+            let centered_clip_rect = euclid::rect(
+                clip_rect.min_x() - self.dimensions.pixel_width as f32 / 2.0,
+                clip_rect.min_y() - self.dimensions.pixel_height as f32 / 2.0,
+                clip_rect.width(),
+                clip_rect.height(),
+            );
+            heap.clip_to_rect(centered_clip_rect);
+            let layer = gl_state.layer_for_zindex(element.zindex)?;
+            let mut layers = layer.quad_allocator();
+            heap.apply_to(&mut layers)?;
+        } else {
+            let layer = gl_state.layer_for_zindex(element.zindex)?;
+            let mut layers = layer.quad_allocator();
+            self.render_element_background(element, colors, &mut layers, inherited_colors)?;
+            self.render_element_content(element, colors, &mut layers, inherited_colors)?;
+        }
+
+        if let ComputedElementContent::Children(kids) = &element.content {
+            for kid in kids {
+                self.render_element_impl(kid, gl_state, Some(colors), clip_rect)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn render_element_content<'a>(
+        &self,
+        element: &ComputedElement,
+        colors: &ElementColors,
+        layers: &mut TripleLayerQuadAllocator,
+        inherited_colors: Option<&ElementColors>,
+    ) -> anyhow::Result<()> {
         let left = self.dimensions.pixel_width as f32 / -2.0;
         let top = self.dimensions.pixel_height as f32 / -2.0;
         match &element.content {
@@ -919,17 +1018,10 @@ impl super::TermWindow {
                     }
                 }
             }
-            ComputedElementContent::Children(kids) => {
-                drop(layers);
-
-                for kid in kids {
-                    self.render_element(kid, gl_state, Some(colors))?;
-                }
-            }
             ComputedElementContent::Poly { poly, line_width } => {
                 if element.content_rect.width() >= poly.width {
                     let mut quad = self.poly_quad(
-                        &mut layers,
+                        layers,
                         1,
                         element.content_rect.origin,
                         poly.poly,
@@ -940,8 +1032,8 @@ impl super::TermWindow {
                     self.resolve_text(colors, inherited_colors).apply(&mut quad);
                 }
             }
+            ComputedElementContent::Children(_) => {}
         }
-
         Ok(())
     }
 

@@ -1,8 +1,8 @@
-use anyhow::{Context, anyhow};
 use crate::chatminal_runtime::DesktopSplitRequest;
 use crate::scripting::guiwin::DesktopWindowId;
-use config::TermConfig;
+use anyhow::{anyhow, Context};
 use config::keyassignment::SpawnCommand;
+use config::TermConfig;
 use engine_term::TerminalSize;
 use portable_pty::CommandBuilder;
 use std::sync::Arc;
@@ -91,9 +91,9 @@ pub async fn spawn_command_internal(
                 Some(id) => id,
                 None => anyhow::bail!("no src window when splitting a pane?"),
             };
-            if let Some(_session_id) =
-                crate::chatminal_runtime::desktop_current_active_session_id(src_window_id as DesktopWindowId)
-            {
+            if let Some(_session_id) = crate::chatminal_runtime::desktop_current_active_session_id(
+                src_window_id as DesktopWindowId,
+            ) {
                 if can_use_session_view_split {
                     crate::chatminal_runtime::desktop_create_split_session_view(
                         src_window_id as DesktopWindowId,
@@ -108,9 +108,7 @@ pub async fn spawn_command_internal(
                     "session-native terminal split has been removed; use session view split instead"
                 );
             }
-            anyhow::bail!(
-                "engine split fallback reached — session_id is None; this is a bug"
-            );
+            anyhow::bail!("engine split fallback reached — session_id is None; this is a bug");
         }
         _ => {
             let activity = crate::chatminal_runtime::start_host_activity();
@@ -128,8 +126,8 @@ pub async fn spawn_command_internal(
                 workspace,
                 spawn.position,
             )
-                .await
-                .context("spawn_tab_or_window")?;
+            .await
+            .context("spawn_tab_or_window")?;
 
             // If it was created in this window, it copies our handlers.
             // Otherwise, we'll pick them up when we later respond to

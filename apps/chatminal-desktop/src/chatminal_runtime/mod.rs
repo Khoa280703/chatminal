@@ -49,7 +49,6 @@ pub struct DesktopSplitRequest {
     pub size: DesktopSplitSize,
 }
 
-
 #[derive(Clone, Debug)]
 pub struct DesktopWorkspaceSnapshot {
     pub workspace: RuntimeWorkspace,
@@ -724,6 +723,10 @@ pub fn move_runtime_session_to_profile(
     target_index: Option<usize>,
 ) -> Result<RuntimeWorkspace, String> {
     runtime_client()?.session_move_to_profile(session_id, profile_id, target_index)
+}
+
+pub fn rename_runtime_session(session_id: &str, name: &str) -> Result<RuntimeWorkspace, String> {
+    runtime_client()?.session_rename(session_id, name)
 }
 
 pub fn switch_runtime_profile(profile_id: &str) -> Result<RuntimeWorkspace, String> {

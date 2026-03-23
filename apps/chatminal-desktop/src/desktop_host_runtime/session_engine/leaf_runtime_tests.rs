@@ -4,8 +4,8 @@ use std::time::{Duration, Instant};
 use chatminal_terminal_core::{ScreenLine, TerminalSize};
 use portable_pty::CommandBuilder;
 
+use super::super::{RuntimeId, TerminalInstanceId};
 use super::{TerminalInstanceRuntime, TerminalInstanceRuntimeEvent, TerminalInstanceRuntimeSpawn};
-use super::super::{TerminalInstanceId, RuntimeId};
 
 fn shell_command(script: &str) -> CommandBuilder {
     let mut command = CommandBuilder::new("/bin/sh");
@@ -39,7 +39,7 @@ fn leaf_runtime_captures_output_into_terminal_state() {
         runtime_spawn("printf 'terminal-instance-runtime-smoke'"),
         events_tx,
     )
-        .expect("spawn terminal instance runtime");
+    .expect("spawn terminal instance runtime");
 
     let started = Instant::now();
     let mut saw_output = false;
@@ -63,14 +63,16 @@ fn leaf_runtime_captures_output_into_terminal_state() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(rendered.contains("terminal-instance-runtime-smoke"));
-    assert!(runtime.replay_output().contains("terminal-instance-runtime-smoke"));
+    assert!(runtime
+        .replay_output()
+        .contains("terminal-instance-runtime-smoke"));
 }
 
 #[test]
 fn leaf_runtime_resize_updates_terminal_snapshot() {
     let (events_tx, _events_rx) = mpsc::sync_channel(32);
-    let runtime =
-        TerminalInstanceRuntime::spawn(runtime_spawn("sleep 1"), events_tx).expect("spawn sleeping runtime");
+    let runtime = TerminalInstanceRuntime::spawn(runtime_spawn("sleep 1"), events_tx)
+        .expect("spawn sleeping runtime");
     runtime
         .resize(TerminalSize {
             rows: 30,

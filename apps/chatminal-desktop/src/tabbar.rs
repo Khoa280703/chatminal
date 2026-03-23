@@ -1,5 +1,5 @@
-use crate::termwindow::{TerminalInstanceInformation, SessionEntryInformation, UIItem, UIItemType};
 use crate::chatminal_runtime::SessionViewId;
+use crate::termwindow::{SessionEntryInformation, TerminalInstanceInformation, UIItem, UIItemType};
 use config::{ConfigHandle, SessionBarColors};
 use engine_term::{Line, Progress};
 use finl_unicode::grapheme_clusters::Graphemes;
@@ -165,7 +165,11 @@ fn compute_tab_title(
             };
 
             if let Some(pane) = &tab.active_terminal_instance {
-                let classic_spacing = if config.use_fancy_session_bar { "" } else { " " };
+                let classic_spacing = if config.use_fancy_session_bar {
+                    ""
+                } else {
+                    " "
+                };
                 if config.show_session_index_in_session_bar {
                     let index = format!(
                         "{classic_spacing}{}: ",
@@ -283,8 +287,10 @@ impl SessionBarState {
             default_cell_hover.clone(),
         );
 
-        let window_maximize =
-            parse_status_text(&config.session_bar_style.window_maximize, default_cell.clone());
+        let window_maximize = parse_status_text(
+            &config.session_bar_style.window_maximize,
+            default_cell.clone(),
+        );
         let window_maximize_hover = parse_status_text(
             &config.session_bar_style.window_maximize_hover,
             default_cell_hover.clone(),
@@ -520,10 +526,7 @@ impl SessionBarState {
                     view_id: tab_info[entry_idx].view_id,
                     active,
                 },
-                None => SessionBarItem::RuntimeEntry {
-                    entry_idx,
-                    active,
-                },
+                None => SessionBarItem::RuntimeEntry { entry_idx, active },
             };
 
             items.push(SessionBarEntry {
@@ -563,8 +566,10 @@ impl SessionBarState {
             && config.integrated_title_button_style != IntegratedTitleButtonStyle::MacOsNative
             && config.integrated_title_button_alignment == IntegratedTitleButtonAlignment::Right
         {
-            let window_hide =
-                parse_status_text(&config.session_bar_style.window_hide, CellAttributes::default());
+            let window_hide = parse_status_text(
+                &config.session_bar_style.window_hide,
+                CellAttributes::default(),
+            );
             let window_hide_hover = parse_status_text(
                 &config.session_bar_style.window_hide_hover,
                 CellAttributes::default(),

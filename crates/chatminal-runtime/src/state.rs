@@ -299,6 +299,14 @@ impl RuntimeState {
         inner.session_move_to_profile(session_id, profile_id, target_index)
     }
 
+    pub fn session_rename(&self, session_id: &str, name: &str) -> Result<RuntimeWorkspace, String> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|_| "state lock poisoned".to_string())?;
+        inner.session_rename(session_id, name)
+    }
+
     pub fn session_create(
         &self,
         name: Option<String>,

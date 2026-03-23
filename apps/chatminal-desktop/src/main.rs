@@ -6,17 +6,17 @@ use crate::customglyph::BlockKey;
 use crate::glyphcache::GlyphCache;
 use crate::utilsprites::RenderMetrics;
 use ::window::*;
-use anyhow::{Context, anyhow};
+use anyhow::{anyhow, Context};
+use chatminal_lua_bridge::DomainRef;
 use clap::builder::ValueParser;
 use clap::{Parser, ValueHint};
 use config::keyassignment::{SpawnCommand, SpawnSessionDomain};
 use config::{ConfigHandle, SerialDomain};
 use engine_bidi::Direction;
-use engine_font::FontConfiguration;
 use engine_font::shaper::PresentationWidth;
+use engine_font::FontConfiguration;
 use engine_gui_subcommands::*;
 use engine_toast_notification::*;
-use chatminal_lua_bridge::DomainRef;
 use portable_pty::cmdbuilder::CommandBuilder;
 use std::borrow::Cow;
 use std::env::current_dir;
@@ -28,22 +28,23 @@ use termwiz::surface::{Line, SEQ_ZERO};
 use unicode_normalization::UnicodeNormalization;
 
 mod chatminal_layout;
-mod chatminal_runtime;
 mod chatminal_render;
+mod chatminal_runtime;
+mod chatminal_sidebar;
+mod colorease;
+mod commands;
+mod customglyph;
 mod desktop_commands;
 mod desktop_host_runtime;
 mod desktop_mouse_actions;
 mod desktop_overlay_actions;
 mod desktop_spawn;
 mod desktop_termwindow_types;
-mod chatminal_sidebar;
-mod colorease;
-mod commands;
-mod customglyph;
 mod download;
 mod frontend;
 mod glyphcache;
 mod inputmap;
+mod lucide_icons;
 mod overlay;
 mod quad;
 mod renderstate;
@@ -51,8 +52,8 @@ mod resize_increment_calculator;
 mod scripting;
 mod scrollbar;
 mod selection;
-mod shell_bounds;
 mod shapecache;
+mod shell_bounds;
 mod spawn;
 mod stats;
 mod system_metrics;
@@ -67,7 +68,7 @@ mod utilsprites;
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
 pub use selection::SelectionMode;
-pub use termwindow::{ICON_DATA, TermWindow, set_window_class, set_window_position};
+pub use termwindow::{set_window_class, set_window_position, TermWindow, ICON_DATA};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -185,10 +186,7 @@ fn have_panes_in_domain_and_ws(
     domain: &chatminal_runtime::HostDomainHandle,
     workspace: &Option<String>,
 ) -> bool {
-    chatminal_runtime::host_domain_has_panes_in_workspace(
-        domain.domain_id(),
-        workspace.as_deref(),
-    )
+    chatminal_runtime::host_domain_has_panes_in_workspace(domain.domain_id(), workspace.as_deref())
 }
 
 async fn spawn_tab_in_domain_if_mux_is_empty(
@@ -826,7 +824,10 @@ fn run() -> anyhow::Result<()> {
             .iter()
             .any(|(name, _)| name.eq_ignore_ascii_case("show_session_index_in_session_bar"))
         {
-            config_overrides.push(("show_session_index_in_session_bar".to_string(), "false".to_string()));
+            config_overrides.push((
+                "show_session_index_in_session_bar".to_string(),
+                "false".to_string(),
+            ));
         }
     }
 

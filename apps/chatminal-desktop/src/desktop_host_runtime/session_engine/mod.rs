@@ -20,9 +20,7 @@ mod session_snapshot;
 mod workspace_host;
 
 pub use runtime_bridge::{SessionBridgeAction, SessionRuntimeBridge};
-pub use session_core_state::{
-    SessionCoreState, TerminalInstanceProcessState,
-};
+pub use session_core_state::{SessionCoreState, TerminalInstanceProcessState};
 pub use session_engine::StatefulSessionEngine;
 pub use session_engine_shared::SessionEngineShared;
 pub use session_event_bus::{SessionEventBus, SessionEventSubscription, SessionRuntimeEvent};

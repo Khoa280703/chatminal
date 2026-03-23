@@ -1,8 +1,7 @@
 use std::convert::TryFrom;
 
 use crate::chatminal_runtime::overlay_compat::{
-    OverlayPane, OverlayPaneHandle, OverlayPaneLayout, OverlaySplitDirection,
-    OverlaySplitLayout,
+    OverlayPane, OverlayPaneHandle, OverlayPaneLayout, OverlaySplitDirection, OverlaySplitLayout,
 };
 
 pub type TerminalUiKey = u64;

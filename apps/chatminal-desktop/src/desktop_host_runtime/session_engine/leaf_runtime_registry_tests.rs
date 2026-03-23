@@ -4,8 +4,10 @@ use std::sync::{Arc, Mutex};
 use chatminal_terminal_core::TerminalSize;
 use portable_pty::CommandBuilder;
 
+use super::super::{
+    LayoutNodeId, RuntimeId, SessionCoreState, SessionLayoutSnapshot, TerminalInstanceId,
+};
 use super::TerminalInstanceRuntimeRegistry;
-use super::super::{LayoutNodeId, TerminalInstanceId, SessionCoreState, SessionLayoutSnapshot, RuntimeId};
 
 fn shell_command(script: &str) -> CommandBuilder {
     let mut command = CommandBuilder::new("/bin/sh");
@@ -20,7 +22,11 @@ fn registry_spawn_updates_core_state_process_metadata() {
     core_state.lock().unwrap().sync_runtime_layout(
         "session-a",
         RuntimeId::new(7),
-        &SessionLayoutSnapshot::single_terminal_instance(LayoutNodeId::new(1), TerminalInstanceId::new(11), None),
+        &SessionLayoutSnapshot::single_terminal_instance(
+            LayoutNodeId::new(1),
+            TerminalInstanceId::new(11),
+            None,
+        ),
     );
     let registry = TerminalInstanceRuntimeRegistry::default();
     let (events_tx, _events_rx) = mpsc::sync_channel(32);
@@ -61,7 +67,11 @@ fn registry_remove_clears_core_state_process_metadata() {
     core_state.lock().unwrap().sync_runtime_layout(
         "session-a",
         RuntimeId::new(7),
-        &SessionLayoutSnapshot::single_terminal_instance(LayoutNodeId::new(1), TerminalInstanceId::new(11), None),
+        &SessionLayoutSnapshot::single_terminal_instance(
+            LayoutNodeId::new(1),
+            TerminalInstanceId::new(11),
+            None,
+        ),
     );
     let registry = TerminalInstanceRuntimeRegistry::default();
     let (events_tx, _events_rx) = mpsc::sync_channel(32);

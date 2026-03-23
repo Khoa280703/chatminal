@@ -353,50 +353,33 @@ impl crate::TermWindow {
     }
 
     pub fn padding_left_top(&self) -> (f32, f32) {
-        let h_context = DimensionContext {
-            dpi: self.dimensions.dpi as f32,
-            pixel_max: self.terminal_size.pixel_width as f32,
-            pixel_cell: self.render_metrics.cell_size.width as f32,
-        };
-        let v_context = DimensionContext {
-            dpi: self.dimensions.dpi as f32,
-            pixel_max: self.terminal_size.pixel_height as f32,
-            pixel_cell: self.render_metrics.cell_size.height as f32,
-        };
-
-        let padding_left = self
-            .config
-            .window_padding
-            .left
-            .evaluate_as_pixels(h_context)
-            + self.chatminal_sidebar_width() as f32;
-        let padding_right = self.config.window_padding.right;
-        let padding_top = self.config.window_padding.top.evaluate_as_pixels(v_context)
-            + self.chatminal_terminal_chrome_height();
-        let padding_bottom = self
-            .config
-            .window_padding
-            .bottom
-            .evaluate_as_pixels(v_context)
-            + self.chatminal_terminal_footer_height();
+        let sb = self.shell_bounds();
+        let shell_padding = crate::termwindow::resize::shell_window_padding_for_dimensions(
+            &self.config,
+            &self.render_metrics,
+            &self.dimensions,
+            self.chatminal_sidebar_width(),
+            self.terminal_size.pixel_width,
+            self.terminal_size.pixel_height,
+        );
+        let padding_left = shell_padding.left as f32;
+        let padding_right = shell_padding.right as f32;
+        let padding_top = shell_padding.top as f32;
+        let padding_bottom = shell_padding.bottom as f32;
 
         let horizontal_gap = self.dimensions.pixel_width as f32
             - self.terminal_size.pixel_width as f32
             - padding_left
-            - if self.show_scroll_bar && padding_right.is_zero() {
-                h_context.pixel_cell
-            } else {
-                padding_right.evaluate_as_pixels(h_context)
-            };
+            - padding_right
+            - sb.border_left
+            - sb.border_right;
         let vertical_gap = self.dimensions.pixel_height as f32
             - self.terminal_size.pixel_height as f32
             - padding_top
             - padding_bottom
-            - if self.show_session_bar {
-                self.tab_bar_pixel_height().unwrap_or(0.)
-            } else {
-                0.
-            };
+            - sb.border_top
+            - sb.border_bottom
+            - sb.session_bar_height;
         let left_gap = match self.config.window_content_alignment.horizontal {
             HorizontalWindowContentAlignment::Left => 0.,
             HorizontalWindowContentAlignment::Center => (horizontal_gap / 2.).round(),

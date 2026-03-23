@@ -2,10 +2,6 @@ use super::utilsprites::RenderMetrics;
 use crate::customglyph::*;
 use crate::renderstate::RenderContext;
 use crate::termwindow::render::paint::AllowImage;
-use ::window::bitmaps::atlas::{Atlas, OutOfTextureSpace, Sprite};
-use ::window::bitmaps::{BitmapImage, Image, ImageTexture, Texture2d};
-use ::window::color::SrgbaPixel;
-use ::window::{Point, Rect};
 use anyhow::Context;
 use config::{AllowSquareGlyphOverflow, TextStyle};
 use engine_blob_leases::{BlobLease, BlobManager, BoxedReader};
@@ -23,12 +19,16 @@ use std::collections::HashMap;
 use std::io::Seek;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TryRecvError, sync_channel};
+use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender, TryRecvError};
 use std::sync::{Arc, LazyLock, MutexGuard};
 use std::time::{Duration, Instant};
 use termwiz::color::RgbColor;
 use termwiz::image::{ImageData, ImageDataType};
 use termwiz::surface::CursorShape;
+use window::bitmaps::atlas::{Atlas, OutOfTextureSpace, Sprite};
+use window::bitmaps::{BitmapImage, Image, ImageTexture, Texture2d};
+use window::color::SrgbaPixel;
+use window::{Point, Rect};
 
 static FRAME_ERROR_REPORTED: AtomicBool = AtomicBool::new(false);
 
@@ -562,6 +562,7 @@ pub struct GlyphCache {
     pub fonts: Rc<FontConfiguration>,
     pub image_cache: LfuCache<[u8; 32], DecodedImage>,
     frame_cache: HashMap<[u8; 32], Sprite>,
+    icon_sprites: HashMap<String, Sprite>,
     line_glyphs: HashMap<LineKey, Sprite>,
     pub block_glyphs: HashMap<SizedBlockKey, Sprite>,
     pub cursor_glyphs: HashMap<(Option<CursorShape>, u8), Sprite>,
@@ -584,6 +585,7 @@ impl GlyphCache {
                 &fonts.config(),
             ),
             frame_cache: HashMap::new(),
+            icon_sprites: HashMap::new(),
             atlas,
             line_glyphs: HashMap::new(),
             block_glyphs: HashMap::new(),
@@ -613,6 +615,7 @@ impl GlyphCache {
                 &fonts.config(),
             ),
             frame_cache: HashMap::new(),
+            icon_sprites: HashMap::new(),
             atlas,
             line_glyphs: HashMap::new(),
             block_glyphs: HashMap::new(),
@@ -624,6 +627,26 @@ impl GlyphCache {
 }
 
 impl GlyphCache {
+    pub fn cached_named_sprite(
+        &mut self,
+        name: &str,
+        width: usize,
+        height: usize,
+        rgba: &[u8],
+    ) -> anyhow::Result<Sprite> {
+        if let Some(sprite) = self.icon_sprites.get(name) {
+            return Ok(sprite.clone());
+        }
+
+        let image = Image::with_rgba32(width, height, width * 4, rgba);
+        let sprite = self
+            .atlas
+            .allocate(&image)
+            .context("atlas.allocate icon sprite")?;
+        self.icon_sprites.insert(name.to_string(), sprite.clone());
+        Ok(sprite)
+    }
+
     /// Resolve a glyph from the cache, rendering the glyph on-demand if
     /// the cache doesn't already hold the desired glyph.
     pub fn cached_glyph(

@@ -25,6 +25,42 @@ use termwiz::hyperlink::Hyperlink;
 use termwiz::surface::Line;
 
 impl super::TermWindow {
+    fn is_secondary_click_event(event: &MouseEvent) -> bool {
+        matches!(
+            event.kind,
+            WMEK::Press(MousePress::Right) | WMEK::Release(MousePress::Right)
+        ) || event.mouse_buttons.contains(WMB::RIGHT)
+            || (matches!(
+                event.kind,
+                WMEK::Press(MousePress::Left) | WMEK::Release(MousePress::Left)
+            ) && event.modifiers.contains(window::Modifiers::CTRL))
+    }
+
+    fn resolve_sidebar_resize_item(&self, event: &MouseEvent) -> Option<UIItem> {
+        if !self.chatminal_sidebar.is_enabled() {
+            return None;
+        }
+
+        let sb = self.shell_bounds();
+        if !sb.shell_enabled || sb.sidebar_width <= 0.0 {
+            return None;
+        }
+
+        const RESIZE_HANDLE_HALF_WIDTH_PX: isize = 4;
+
+        let edge_x = (sb.sidebar_x + sb.sidebar_width).round() as isize;
+        let item = UIItem {
+            x: edge_x
+                .saturating_sub(RESIZE_HANDLE_HALF_WIDTH_PX)
+                .max(0) as usize,
+            y: sb.sidebar_y.max(0.0).round() as usize,
+            width: (RESIZE_HANDLE_HALF_WIDTH_PX * 2) as usize,
+            height: sb.sidebar_height.max(0.0).round() as usize,
+            item_type: UIItemType::ChatminalSidebarResizeHandle,
+        };
+        item.hit_test(event.coords.x, event.coords.y).then_some(item)
+    }
+
     fn handle_chatminal_sidebar_wheel(
         &mut self,
         event: &MouseEvent,
@@ -50,7 +86,22 @@ impl super::TermWindow {
         true
     }
 
+    fn dismiss_chatminal_sidebar_context_menu(&mut self, context: &dyn WindowOps) {
+        if self.chatminal_sidebar.close_session_context_menu() {
+            context.invalidate();
+        }
+    }
+
+    fn cancel_chatminal_sidebar_inline_rename(&mut self, context: &dyn WindowOps) {
+        if self.chatminal_sidebar.inline_rename_cancel() {
+            context.invalidate();
+        }
+    }
+
     fn resolve_ui_item(&self, event: &MouseEvent) -> Option<UIItem> {
+        if let Some(item) = self.resolve_sidebar_resize_item(event) {
+            return Some(item);
+        }
         let x = event.coords.x;
         let y = event.coords.y;
         self.ui_items
@@ -68,10 +119,15 @@ impl super::TermWindow {
             UIItemType::CloseSessionEntry(_)
             | UIItemType::CloseSession(_)
             | UIItemType::ChatminalSidebarBackground
+            | UIItemType::ChatminalSidebarResizeHandle
+            | UIItemType::ChatminalSidebarSettings
             | UIItemType::ChatminalSidebarCreateProfile
             | UIItemType::ChatminalSidebarProfile(_)
             | UIItemType::ChatminalSidebarCreateSession
             | UIItemType::ChatminalSidebarSession(_)
+            | UIItemType::ChatminalSidebarSessionMenu
+            | UIItemType::ChatminalSidebarSessionMenuRename(_)
+            | UIItemType::ChatminalSidebarSessionMenuDelete(_)
             | UIItemType::AboveScrollThumb
             | UIItemType::BelowScrollThumb
             | UIItemType::ScrollThumb
@@ -85,10 +141,15 @@ impl super::TermWindow {
             UIItemType::CloseSessionEntry(_)
             | UIItemType::CloseSession(_)
             | UIItemType::ChatminalSidebarBackground
+            | UIItemType::ChatminalSidebarResizeHandle
+            | UIItemType::ChatminalSidebarSettings
             | UIItemType::ChatminalSidebarCreateProfile
             | UIItemType::ChatminalSidebarProfile(_)
             | UIItemType::ChatminalSidebarCreateSession
             | UIItemType::ChatminalSidebarSession(_)
+            | UIItemType::ChatminalSidebarSessionMenu
+            | UIItemType::ChatminalSidebarSessionMenuRename(_)
+            | UIItemType::ChatminalSidebarSessionMenuDelete(_)
             | UIItemType::AboveScrollThumb
             | UIItemType::BelowScrollThumb
             | UIItemType::ScrollThumb
@@ -105,28 +166,19 @@ impl super::TermWindow {
             return;
         }
 
-        let border = self.get_os_border();
-
-        let first_line_offset = if self.show_session_bar && !self.config.session_bar_at_bottom {
-            self.tab_bar_pixel_height().unwrap_or(0.) as isize
-        } else {
-            0
-        } + border.top.get() as isize;
-
-        let (padding_left, padding_top) = self.padding_left_top();
+        let grid_origin = self.terminal_grid_origin();
 
         let y = (event
             .coords
             .y
-            .sub(padding_top as isize)
-            .sub(first_line_offset)
+            .sub(grid_origin.y as isize)
             .max(0)
             / self.render_metrics.cell_size.height) as i64;
 
         let x = (event
             .coords
             .x
-            .sub((padding_left + border.left.get() as f32) as isize)
+            .sub(grid_origin.x as isize)
             .max(0) as f32)
             / self.render_metrics.cell_size.width as f32;
         let x = if !pane.as_ref().is_some_and(|pane| pane.is_mouse_grabbed()) {
@@ -141,8 +193,7 @@ impl super::TermWindow {
         let mut y_pixel_offset = event
             .coords
             .y
-            .sub(padding_top as isize)
-            .sub(first_line_offset);
+            .sub(grid_origin.y as isize);
         if y > 0 {
             y_pixel_offset = y_pixel_offset.max(0) % self.render_metrics.cell_size.height;
         }
@@ -150,7 +201,7 @@ impl super::TermWindow {
         let mut x_pixel_offset = event
             .coords
             .x
-            .sub((padding_left + border.left.get() as f32) as isize);
+            .sub(grid_origin.x as isize);
         if x > 0 {
             x_pixel_offset = x_pixel_offset.max(0) % self.render_metrics.cell_size.width;
         }
@@ -263,6 +314,9 @@ impl super::TermWindow {
             self.current_mouse_capture,
             None | Some(MouseCapture::TerminalPane(_))
         ) {
+            if capture_mouse {
+                self.dismiss_chatminal_sidebar_context_menu(context);
+            }
             if let Some(pane) = pane {
                 self.mouse_event_terminal(
                     pane,
@@ -339,19 +393,14 @@ impl super::TermWindow {
         let dims = pane.get_dimensions();
         let current_viewport = self.get_viewport(pane.pane_id() as u64);
 
-        let tab_bar_height = if self.show_session_bar {
+        let tab_bar_height = if self.show_session_bar && self.config.session_bar_at_bottom {
             self.tab_bar_pixel_height().unwrap_or(0.)
         } else {
             0.
         };
-        let (top_bar_height, bottom_bar_height) = if self.config.session_bar_at_bottom {
-            (0.0, tab_bar_height)
-        } else {
-            (tab_bar_height, 0.0)
-        };
 
         let border = self.get_os_border();
-        let y_offset = top_bar_height + border.top.get() as f32;
+        let y_offset = self.shell_bounds().content_y;
 
         let from_top = start_event.coords.y.saturating_sub(item.y as isize);
         let effective_thumb_top = event
@@ -367,12 +416,34 @@ impl super::TermWindow {
             &*pane,
             current_viewport,
             self.dimensions.pixel_height.saturating_sub(
-                y_offset as usize + border.bottom.get() + bottom_bar_height as usize,
+                y_offset as usize + border.bottom.get() + tab_bar_height as usize,
             ),
             self.min_scroll_bar_height() as usize,
         );
         self.set_viewport(pane.pane_id() as u64, Some(row), dims);
         context.invalidate();
+        self.dragging.replace((item, start_event));
+    }
+
+    fn drag_chatminal_sidebar_resize_handle(
+        &mut self,
+        item: UIItem,
+        start_event: MouseEvent,
+        event: MouseEvent,
+        context: &dyn WindowOps,
+    ) {
+        let requested_width_px = event.coords.x.max(0) as f32;
+        if self.chatminal_sidebar.set_width_pixels(
+            requested_width_px,
+            self.dimensions.pixel_width,
+            self.dimensions.dpi,
+        ) {
+            if let Some(window) = self.window.clone() {
+                let dimensions = self.dimensions;
+                self.apply_dimensions(&dimensions, None, &window);
+            }
+            context.invalidate();
+        }
         self.dragging.replace((item, start_event));
     }
 
@@ -391,6 +462,9 @@ impl super::TermWindow {
             }
             UIItemType::ScrollThumb => {
                 self.drag_scroll_thumb(item, start_event, event, context);
+            }
+            UIItemType::ChatminalSidebarResizeHandle => {
+                self.drag_chatminal_sidebar_resize_handle(item, start_event, event, context);
             }
             _ => {
                 log::error!("drag not implemented for {:?}", item);
@@ -436,7 +510,13 @@ impl super::TermWindow {
                 self.mouse_event_close_session(&session_id, event, context);
             }
             UIItemType::ChatminalSidebarBackground => {
-                context.set_cursor(Some(MouseCursor::Arrow));
+                self.mouse_event_chatminal_sidebar_background(event, context);
+            }
+            UIItemType::ChatminalSidebarResizeHandle => {
+                self.mouse_event_chatminal_sidebar_resize_handle(item, event, context);
+            }
+            UIItemType::ChatminalSidebarSettings => {
+                self.mouse_event_chatminal_sidebar_settings(event, context);
             }
             UIItemType::ChatminalSidebarCreateProfile => {
                 self.mouse_event_chatminal_sidebar_create_profile(event, context);
@@ -450,7 +530,28 @@ impl super::TermWindow {
             UIItemType::ChatminalSidebarSession(session_id) => {
                 self.mouse_event_chatminal_sidebar_session(&session_id, event, context);
             }
+            UIItemType::ChatminalSidebarSessionMenu => {
+                self.mouse_event_chatminal_sidebar_session_menu(event, context);
+            }
+            UIItemType::ChatminalSidebarSessionMenuRename(session_id) => {
+                self.mouse_event_chatminal_sidebar_session_menu_rename(&session_id, event, context);
+            }
+            UIItemType::ChatminalSidebarSessionMenuDelete(session_id) => {
+                self.mouse_event_chatminal_sidebar_session_menu_delete(&session_id, event, context);
+            }
         }
+    }
+
+    fn mouse_event_chatminal_sidebar_background(
+        &mut self,
+        event: MouseEvent,
+        context: &dyn WindowOps,
+    ) {
+        if matches!(event.kind, WMEK::Press(_) | WMEK::Release(_)) {
+            self.dismiss_chatminal_sidebar_context_menu(context);
+            self.cancel_chatminal_sidebar_inline_rename(context);
+        }
+        context.set_cursor(Some(MouseCursor::Arrow));
     }
 
     fn mouse_event_chatminal_sidebar_create_profile(
@@ -458,8 +559,36 @@ impl super::TermWindow {
         event: MouseEvent,
         context: &dyn WindowOps,
     ) {
+        if matches!(event.kind, WMEK::Press(_) | WMEK::Release(_)) {
+            self.dismiss_chatminal_sidebar_context_menu(context);
+            self.cancel_chatminal_sidebar_inline_rename(context);
+        }
         if let WMEK::Press(MousePress::Left) = event.kind {
             self.create_chatminal_profile();
+        }
+        context.set_cursor(Some(MouseCursor::Arrow));
+    }
+
+    fn mouse_event_chatminal_sidebar_resize_handle(
+        &mut self,
+        item: UIItem,
+        event: MouseEvent,
+        context: &dyn WindowOps,
+    ) {
+        if let WMEK::Press(MousePress::Left) = event.kind {
+            self.dragging.replace((item, event));
+        }
+        context.set_cursor(Some(MouseCursor::SizeLeftRight));
+    }
+
+    fn mouse_event_chatminal_sidebar_settings(
+        &mut self,
+        event: MouseEvent,
+        context: &dyn WindowOps,
+    ) {
+        if matches!(event.kind, WMEK::Press(_) | WMEK::Release(_)) {
+            self.dismiss_chatminal_sidebar_context_menu(context);
+            self.cancel_chatminal_sidebar_inline_rename(context);
         }
         context.set_cursor(Some(MouseCursor::Arrow));
     }
@@ -470,6 +599,10 @@ impl super::TermWindow {
         event: MouseEvent,
         context: &dyn WindowOps,
     ) {
+        if matches!(event.kind, WMEK::Press(_) | WMEK::Release(_)) {
+            self.dismiss_chatminal_sidebar_context_menu(context);
+            self.cancel_chatminal_sidebar_inline_rename(context);
+        }
         if let WMEK::Press(MousePress::Left) = event.kind {
             self.toggle_chatminal_profile(profile_id);
         }
@@ -481,6 +614,10 @@ impl super::TermWindow {
         event: MouseEvent,
         context: &dyn WindowOps,
     ) {
+        if matches!(event.kind, WMEK::Press(_) | WMEK::Release(_)) {
+            self.dismiss_chatminal_sidebar_context_menu(context);
+            self.cancel_chatminal_sidebar_inline_rename(context);
+        }
         if let WMEK::Press(MousePress::Left) = event.kind {
             self.create_chatminal_session();
         }
@@ -493,8 +630,82 @@ impl super::TermWindow {
         event: MouseEvent,
         context: &dyn WindowOps,
     ) {
-        if let WMEK::Press(MousePress::Left) = event.kind {
-            self.switch_chatminal_session(session_id);
+        if Self::is_secondary_click_event(&event) {
+            if matches!(event.kind, WMEK::Release(MousePress::Right) | WMEK::Release(MousePress::Left))
+                && self.chatminal_sidebar.open_session_context_menu(
+                    session_id,
+                    event.coords.x as f32,
+                    event.coords.y as f32,
+                )
+            {
+                self.chatminal_sidebar.inline_rename_cancel();
+                context.invalidate();
+            }
+            context.set_cursor(Some(MouseCursor::Arrow));
+            return;
+        }
+
+        if matches!(event.kind, WMEK::Press(_) | WMEK::Release(_)) {
+            self.dismiss_chatminal_sidebar_context_menu(context);
+            self.cancel_chatminal_sidebar_inline_rename(context);
+        }
+        match event.kind {
+            WMEK::Press(MousePress::Left) => {
+                self.switch_chatminal_session(session_id);
+            }
+            _ => {}
+        }
+        context.set_cursor(Some(MouseCursor::Arrow));
+    }
+
+    fn mouse_event_chatminal_sidebar_session_menu(
+        &mut self,
+        event: MouseEvent,
+        context: &dyn WindowOps,
+    ) {
+        if Self::is_secondary_click_event(&event) {
+            self.dismiss_chatminal_sidebar_context_menu(context);
+            self.cancel_chatminal_sidebar_inline_rename(context);
+        }
+        context.set_cursor(Some(MouseCursor::Arrow));
+    }
+
+    fn mouse_event_chatminal_sidebar_session_menu_rename(
+        &mut self,
+        session_id: &str,
+        event: MouseEvent,
+        context: &dyn WindowOps,
+    ) {
+        if let WMEK::Release(MousePress::Left) = event.kind {
+            let Some(window) = self.window.as_ref().cloned() else {
+                context.set_cursor(Some(MouseCursor::Arrow));
+                return;
+            };
+            let session_id = session_id.to_string();
+            self.dismiss_chatminal_sidebar_context_menu(context);
+            window.notify(TermWindowNotif::Apply(Box::new(move |term_window| {
+                term_window.prompt_rename_chatminal_session(&session_id);
+            })));
+        }
+        context.set_cursor(Some(MouseCursor::Arrow));
+    }
+
+    fn mouse_event_chatminal_sidebar_session_menu_delete(
+        &mut self,
+        session_id: &str,
+        event: MouseEvent,
+        context: &dyn WindowOps,
+    ) {
+        if let WMEK::Release(MousePress::Left) = event.kind {
+            let Some(window) = self.window.as_ref().cloned() else {
+                context.set_cursor(Some(MouseCursor::Arrow));
+                return;
+            };
+            let session_id = session_id.to_string();
+            self.dismiss_chatminal_sidebar_context_menu(context);
+            window.notify(TermWindowNotif::Apply(Box::new(move |term_window| {
+                term_window.confirm_delete_chatminal_session(&session_id);
+            })));
         }
         context.set_cursor(Some(MouseCursor::Arrow));
     }

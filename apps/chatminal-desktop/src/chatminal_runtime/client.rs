@@ -66,6 +66,14 @@ impl ChatminalRuntimeClient {
             .session_move_to_profile(session_id, profile_id, target_index)
     }
 
+    pub(crate) fn session_rename(
+        &self,
+        session_id: &str,
+        name: &str,
+    ) -> Result<RuntimeWorkspace, String> {
+        self.runtime.state.session_rename(session_id, name)
+    }
+
     pub(crate) fn profile_switch(&self, profile_id: &str) -> Result<RuntimeWorkspace, String> {
         self.runtime.state.profile_switch(profile_id)
     }

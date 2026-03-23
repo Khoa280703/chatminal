@@ -1,6 +1,6 @@
 use std::collections::{BTreeSet, HashMap};
 
-use super::{TerminalInstanceId, SessionLayoutSnapshot, RuntimeId};
+use super::{RuntimeId, SessionLayoutSnapshot, TerminalInstanceId};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TerminalInstanceProcessState {
@@ -41,10 +41,14 @@ impl SessionRuntimeRecord {
         self.active_terminal_instance_id = Some(layout.active_terminal_instance_id);
         self.layout = Some(layout.clone());
 
-        let live_terminal_instance_ids: BTreeSet<_> =
-            layout.leaves.iter().map(|leaf| leaf.terminal_instance_id).collect();
-        self.leaves
-            .retain(|terminal_instance_id, _| live_terminal_instance_ids.contains(terminal_instance_id));
+        let live_terminal_instance_ids: BTreeSet<_> = layout
+            .leaves
+            .iter()
+            .map(|leaf| leaf.terminal_instance_id)
+            .collect();
+        self.leaves.retain(|terminal_instance_id, _| {
+            live_terminal_instance_ids.contains(terminal_instance_id)
+        });
         for leaf in &layout.leaves {
             self.leaves
                 .entry(leaf.terminal_instance_id)
@@ -55,7 +59,11 @@ impl SessionRuntimeRecord {
         }
     }
 
-    pub fn set_leaf_process(&mut self, terminal_instance_id: TerminalInstanceId, process: TerminalInstanceProcessState) {
+    pub fn set_leaf_process(
+        &mut self,
+        terminal_instance_id: TerminalInstanceId,
+        process: TerminalInstanceProcessState,
+    ) {
         self.leaves
             .entry(terminal_instance_id)
             .or_insert_with(|| TerminalInstanceRuntimeState {
@@ -64,7 +72,6 @@ impl SessionRuntimeRecord {
             })
             .process = Some(process);
     }
-
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -107,10 +114,7 @@ impl SessionCoreState {
         self.runtimes.get(&runtime_id)
     }
 
-    pub fn runtime_mut(
-        &mut self,
-        runtime_id: RuntimeId,
-    ) -> Option<&mut SessionRuntimeRecord> {
+    pub fn runtime_mut(&mut self, runtime_id: RuntimeId) -> Option<&mut SessionRuntimeRecord> {
         self.runtimes.get_mut(&runtime_id)
     }
 
@@ -130,7 +134,7 @@ impl SessionCoreState {
 mod tests {
     use super::super::{LayoutNodeId, RuntimeId, SessionLayoutSnapshot, TerminalInstanceId};
 
-    use super::{TerminalInstanceProcessState, SessionCoreState, SessionRuntimeRecord};
+    use super::{SessionCoreState, SessionRuntimeRecord, TerminalInstanceProcessState};
 
     #[test]
     fn sync_layout_tracks_active_leaf_and_prunes_stale_leaves() {
@@ -149,7 +153,10 @@ mod tests {
         ));
 
         assert_eq!(runtime.root_layout_node_id, Some(LayoutNodeId::new(11)));
-        assert_eq!(runtime.active_terminal_instance_id, Some(TerminalInstanceId::new(33)));
+        assert_eq!(
+            runtime.active_terminal_instance_id,
+            Some(TerminalInstanceId::new(33))
+        );
         assert_eq!(
             runtime
                 .layout

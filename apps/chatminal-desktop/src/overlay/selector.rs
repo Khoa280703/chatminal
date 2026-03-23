@@ -1,8 +1,8 @@
+use crate::chatminal_runtime::overlay_compat::OverlayTerminal;
 use crate::overlay::quickselect;
 use crate::scripting::guiwin::GuiWin;
 use config::configuration;
 use config::keyassignment::{InputSelector, InputSelectorEntry, KeyAssignment};
-use crate::chatminal_runtime::overlay_compat::OverlayTerminal;
 use nucleo_matcher::pattern::Pattern;
 use nucleo_matcher::{Matcher, Utf32Str};
 use rayon::prelude::*;
@@ -42,14 +42,14 @@ struct SelectorState {
     top_row: usize,
     filter_term: String,
     filtered_entries: Vec<InputSelectorEntry>,
-    pane_id: u64,
-    window: GuiWin,
     filtering: bool,
     always_fuzzy: bool,
     args: InputSelector,
-    event_name: String,
     selection: String,
     labels: Vec<String>,
+    event_name: String,
+    window: GuiWin,
+    pane_id: u64,
 }
 
 impl SelectorState {
@@ -203,11 +203,10 @@ impl SelectorState {
         term.render(&changes)
     }
 
-    fn trigger_event(&self, entry: Option<InputSelectorEntry>) {
+    fn trigger_event(&mut self, entry: Option<InputSelectorEntry>) {
         let name = self.event_name.clone();
         let window = self.window.clone();
         let pane_id = self.pane_id;
-
         promise::spawn::spawn_into_main_thread(async move {
             trampoline(name, window, pane_id, entry);
             anyhow::Result::<()>::Ok(())
@@ -215,7 +214,7 @@ impl SelectorState {
         .detach();
     }
 
-    fn launch(&self, active_idx: usize) -> bool {
+    fn launch(&mut self, active_idx: usize) -> bool {
         if let Some(entry) = self.filtered_entries.get(active_idx).cloned() {
             self.trigger_event(Some(entry));
             true
@@ -430,15 +429,15 @@ pub fn selector(
     let mut state = SelectorState {
         active_idx: 0,
         max_items: 0,
-        pane_id,
         top_row: 0,
         filter_term: String::new(),
         filtered_entries: vec![],
-        window,
         filtering: args.fuzzy,
         always_fuzzy: args.fuzzy,
         args,
         event_name,
+        window,
+        pane_id,
         selection: String::new(),
         labels: vec![],
     };

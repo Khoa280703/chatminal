@@ -81,7 +81,10 @@ mod tests {
         );
 
         assert_eq!(layout.root_layout_node_id, LayoutNodeId::new(11));
-        assert_eq!(layout.active_terminal_instance_id, TerminalInstanceId::new(22));
+        assert_eq!(
+            layout.active_terminal_instance_id,
+            TerminalInstanceId::new(22)
+        );
         assert_eq!(layout.leaves.len(), 1);
         assert_eq!(layout.nodes.len(), 1);
         assert!(layout.leaf(TerminalInstanceId::new(22)).is_some());

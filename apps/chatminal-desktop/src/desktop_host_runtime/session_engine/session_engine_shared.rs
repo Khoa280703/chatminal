@@ -40,26 +40,30 @@ impl SessionEngineShared {
                         runtime_id,
                         terminal_instance_id,
                         chunk,
-                    } => event_hub_for_thread.publish(SessionRuntimeEvent::TerminalInstanceOutput {
-                        session_id,
-                        generation,
-                        runtime_id,
-                        terminal_instance_id,
-                        chunk,
-                    }),
+                    } => {
+                        event_hub_for_thread.publish(SessionRuntimeEvent::TerminalInstanceOutput {
+                            session_id,
+                            generation,
+                            runtime_id,
+                            terminal_instance_id,
+                            chunk,
+                        })
+                    }
                     TerminalInstanceRuntimeEvent::Exited {
                         session_id,
                         generation,
                         runtime_id,
                         terminal_instance_id,
                         exit_code,
-                    } => event_hub_for_thread.publish(SessionRuntimeEvent::TerminalInstanceExited {
-                        session_id,
-                        generation,
-                        runtime_id,
-                        terminal_instance_id,
-                        exit_code,
-                    }),
+                    } => {
+                        event_hub_for_thread.publish(SessionRuntimeEvent::TerminalInstanceExited {
+                            session_id,
+                            generation,
+                            runtime_id,
+                            terminal_instance_id,
+                            exit_code,
+                        })
+                    }
                     TerminalInstanceRuntimeEvent::Error {
                         session_id,
                         generation,
@@ -107,7 +111,9 @@ impl SessionEngineShared {
         Arc::clone(&self.event_hub)
     }
 
-    pub(crate) fn leaf_runtime_events_tx(&self) -> std_mpsc::SyncSender<TerminalInstanceRuntimeEvent> {
+    pub(crate) fn leaf_runtime_events_tx(
+        &self,
+    ) -> std_mpsc::SyncSender<TerminalInstanceRuntimeEvent> {
         self.leaf_runtime_events_tx.clone()
     }
 

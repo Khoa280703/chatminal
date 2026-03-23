@@ -1,6 +1,7 @@
+use crate::chatminal_runtime::{
+    host_domain_menu_entries, host_workspace_name, host_workspace_names,
+};
 use crate::inputmap::InputMap;
-use crate::chatminal_runtime::{host_domain_menu_entries, host_workspace_name, host_workspace_names};
-use KeyAssignment::*;
 use config::keyassignment::*;
 use config::window::WindowLevel;
 use config::{ConfigHandle, DeferredKeyCode};
@@ -9,6 +10,7 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::convert::TryFrom;
 use window::{KeyCode, Modifiers};
+use KeyAssignment::*;
 
 // Compatibility translation layer for upstream-style command/config names.
 // Product-facing desktop code should consume SessionBarAssignment and other
@@ -41,10 +43,12 @@ pub fn session_bar_assignment_for_key_assignment(
     assignment: &KeyAssignment,
 ) -> Option<SessionBarAssignment> {
     match assignment {
-        KeyAssignment::ActivateSessionRelative(delta) => Some(SessionBarAssignment::ActivateRelative {
-            delta: *delta,
-            wrap: true,
-        }),
+        KeyAssignment::ActivateSessionRelative(delta) => {
+            Some(SessionBarAssignment::ActivateRelative {
+                delta: *delta,
+                wrap: true,
+            })
+        }
         KeyAssignment::ActivateSessionRelativeNoWrap(delta) => {
             Some(SessionBarAssignment::ActivateRelative {
                 delta: *delta,
@@ -80,8 +84,7 @@ pub fn is_supported_in_session_ui(assignment: &KeyAssignment) -> bool {
     !matches!(
         assignment,
         KeyAssignment::SessionSelect(SessionSelectArguments {
-            mode:
-                SessionSelectMode::SwapWithActive
+            mode: SessionSelectMode::SwapWithActive
                 | SessionSelectMode::SwapWithActiveKeepFocus
                 | SessionSelectMode::MoveToNewSession
                 | SessionSelectMode::MoveToNewWindow,
@@ -487,8 +490,10 @@ impl CommandDef {
             }
         };
 
-        let mut commands =
-            Self::actions_for_palette_and_menubar_with_session_ui(config, session_ui_mode_for_menubar());
+        let mut commands = Self::actions_for_palette_and_menubar_with_session_ui(
+            config,
+            session_ui_mode_for_menubar(),
+        );
         commands.retain(|cmd| !cmd.menubar.is_empty());
 
         // Prefer to put the menus in this order
@@ -2202,13 +2207,12 @@ mod tests {
 
     #[test]
     fn session_ui_filter_rejects_layout_only_actions() {
-        assert!(!is_supported_in_session_ui(&KeyAssignment::AdjustSplitSize(
-            SessionDirection::Left,
-            1,
-        )));
-        assert!(!is_supported_in_session_ui(&KeyAssignment::ActivateSessionDirection(
-            SessionDirection::Left,
-        )));
+        assert!(!is_supported_in_session_ui(
+            &KeyAssignment::AdjustSplitSize(SessionDirection::Left, 1,)
+        ));
+        assert!(!is_supported_in_session_ui(
+            &KeyAssignment::ActivateSessionDirection(SessionDirection::Left,)
+        ));
         assert!(!is_supported_in_session_ui(&KeyAssignment::RotatePanes(
             RotationDirection::Clockwise,
         )));
@@ -2219,7 +2223,9 @@ mod tests {
         assert!(is_supported_in_session_ui(&KeyAssignment::SpawnSession(
             SpawnSessionDomain::CurrentSessionDomain,
         )));
-        assert!(is_supported_in_session_ui(&KeyAssignment::ActivateSession(0)));
+        assert!(is_supported_in_session_ui(&KeyAssignment::ActivateSession(
+            0
+        )));
     }
 
     #[test]

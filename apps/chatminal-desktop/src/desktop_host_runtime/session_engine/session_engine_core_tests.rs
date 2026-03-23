@@ -4,7 +4,9 @@ use std::time::Duration;
 use chatminal_terminal_core::TerminalSize;
 use portable_pty::CommandBuilder;
 
-use super::super::{TerminalInstanceId, SessionCoreState, SessionRuntimeEvent, StatefulSessionEngine, RuntimeId};
+use super::super::{
+    RuntimeId, SessionCoreState, SessionRuntimeEvent, StatefulSessionEngine, TerminalInstanceId,
+};
 
 fn shell_command(script: &str) -> CommandBuilder {
     let mut command = CommandBuilder::new("/bin/sh");
@@ -46,22 +48,24 @@ fn detached_runtime_spawn_registers_runtime_and_layout() {
     let runtime = core
         .runtime(state.snapshot.runtime_id)
         .expect("runtime state");
-    let active_terminal_instance = state.snapshot.active_terminal_instance_id.expect("active leaf id");
+    let active_terminal_instance = state
+        .snapshot
+        .active_terminal_instance_id
+        .expect("active leaf id");
     assert_eq!(runtime.session_id, "session-a");
-    assert_eq!(runtime.active_terminal_instance_id, Some(active_terminal_instance));
-    assert!(
-        runtime
-            .leaves
-            .get(&active_terminal_instance)
-            .and_then(|leaf| leaf.process.clone())
-            .is_some()
+    assert_eq!(
+        runtime.active_terminal_instance_id,
+        Some(active_terminal_instance)
     );
-    assert!(
-        engine
-            .leaf_runtime_registry()
-            .runtime(active_terminal_instance)
-            .is_some()
-    );
+    assert!(runtime
+        .leaves
+        .get(&active_terminal_instance)
+        .and_then(|leaf| leaf.process.clone())
+        .is_some());
+    assert!(engine
+        .leaf_runtime_registry()
+        .runtime(active_terminal_instance)
+        .is_some());
 }
 
 #[test]
@@ -82,29 +86,30 @@ fn detached_runtime_close_cleans_runtime_and_core_state() {
             None,
         )
         .expect("spawn detached runtime");
-    let active_terminal_instance = state.snapshot.active_terminal_instance_id.expect("active leaf id");
+    let active_terminal_instance = state
+        .snapshot
+        .active_terminal_instance_id
+        .expect("active leaf id");
 
     assert!(engine.close_detached_runtime(state.snapshot.runtime_id));
-    assert!(
-        engine
-            .core_state_handle()
-            .lock()
-            .unwrap()
-            .runtime(state.snapshot.runtime_id)
-            .is_none()
-    );
-    assert!(
-        engine
-            .leaf_runtime_registry()
-            .runtime(active_terminal_instance)
-            .is_none()
-    );
+    assert!(engine
+        .core_state_handle()
+        .lock()
+        .unwrap()
+        .runtime(state.snapshot.runtime_id)
+        .is_none());
+    assert!(engine
+        .leaf_runtime_registry()
+        .runtime(active_terminal_instance)
+        .is_none());
 }
 
 #[test]
 fn snapshot_runtime_from_core_returns_none_for_unknown_runtime() {
     let engine = StatefulSessionEngine::new(Arc::new(Mutex::new(SessionCoreState::default())));
-    assert!(engine.snapshot_runtime_from_core(RuntimeId::new(99)).is_none());
+    assert!(engine
+        .snapshot_runtime_from_core(RuntimeId::new(99))
+        .is_none());
 }
 
 #[test]
@@ -117,7 +122,13 @@ fn focus_terminal_instance_native_updates_active_leaf_and_publishes_event() {
             "session-a",
             1,
             shell_command("sleep 1"),
-            TerminalSize { rows: 20, cols: 80, pixel_width: 0, pixel_height: 0, dpi: 96 },
+            TerminalSize {
+                rows: 20,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+                dpi: 96,
+            },
             None,
         )
         .expect("spawn");
@@ -126,12 +137,18 @@ fn focus_terminal_instance_native_updates_active_leaf_and_publishes_event() {
     let _ = events.recv_timeout(Duration::from_secs(1));
 
     let runtime_id = state.snapshot.runtime_id;
-    let terminal_instance_id = state.snapshot.active_terminal_instance_id.expect("active leaf");
+    let terminal_instance_id = state
+        .snapshot
+        .active_terminal_instance_id
+        .expect("active leaf");
 
     let focused = engine
         .focus_terminal_instance_native("session-a", runtime_id, terminal_instance_id)
         .expect("focus leaf");
-    assert_eq!(focused.snapshot.active_terminal_instance_id, Some(terminal_instance_id));
+    assert_eq!(
+        focused.snapshot.active_terminal_instance_id,
+        Some(terminal_instance_id)
+    );
 
     let event = events.recv_timeout(Duration::from_secs(1)).unwrap();
     assert_eq!(
@@ -152,16 +169,20 @@ fn focus_terminal_instance_native_returns_none_for_unknown_leaf() {
             "session-a",
             1,
             shell_command("sleep 1"),
-            TerminalSize { rows: 20, cols: 80, pixel_width: 0, pixel_height: 0, dpi: 96 },
+            TerminalSize {
+                rows: 20,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+                dpi: 96,
+            },
             None,
         )
         .expect("spawn");
     let runtime_id = state.snapshot.runtime_id;
-    assert!(
-        engine
-            .focus_terminal_instance_native("session-a", runtime_id, TerminalInstanceId::new(9999))
-            .is_none()
-    );
+    assert!(engine
+        .focus_terminal_instance_native("session-a", runtime_id, TerminalInstanceId::new(9999))
+        .is_none());
 }
 
 #[test]
@@ -173,7 +194,13 @@ fn focus_runtime_native_publishes_runtime_focused_event() {
             "session-a",
             1,
             shell_command("sleep 1"),
-            TerminalSize { rows: 20, cols: 80, pixel_width: 0, pixel_height: 0, dpi: 96 },
+            TerminalSize {
+                rows: 20,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+                dpi: 96,
+            },
             None,
         )
         .expect("spawn");
@@ -204,7 +231,13 @@ fn close_runtime_native_removes_state_and_publishes_closed_event() {
             "session-a",
             1,
             shell_command("sleep 5"),
-            TerminalSize { rows: 20, cols: 80, pixel_width: 0, pixel_height: 0, dpi: 96 },
+            TerminalSize {
+                rows: 20,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+                dpi: 96,
+            },
             None,
         )
         .expect("spawn");
@@ -215,8 +248,16 @@ fn close_runtime_native_removes_state_and_publishes_closed_event() {
 
     assert!(engine.close_runtime_native("session-a", runtime_id));
 
-    assert!(engine.core_state_handle().lock().unwrap().runtime(runtime_id).is_none());
-    assert!(engine.leaf_runtime_registry().runtime(terminal_instance_id).is_none());
+    assert!(engine
+        .core_state_handle()
+        .lock()
+        .unwrap()
+        .runtime(runtime_id)
+        .is_none());
+    assert!(engine
+        .leaf_runtime_registry()
+        .runtime(terminal_instance_id)
+        .is_none());
 
     // Drain events until RuntimeClosed (TerminalInstanceOutput/TerminalInstanceExited may arrive first)
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
@@ -245,7 +286,13 @@ fn ensure_session_runtime_native_focuses_existing_runtime_without_spawn() {
             "session-a",
             1,
             shell_command("sleep 5"),
-            TerminalSize { rows: 20, cols: 80, pixel_width: 0, pixel_height: 0, dpi: 96 },
+            TerminalSize {
+                rows: 20,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+                dpi: 96,
+            },
         )
         .expect("first ensure");
     let _ = events.recv_timeout(Duration::from_secs(1)); // drain RuntimeAttached
@@ -256,7 +303,13 @@ fn ensure_session_runtime_native_focuses_existing_runtime_without_spawn() {
             "session-a",
             2,
             shell_command("sleep 5"),
-            TerminalSize { rows: 20, cols: 80, pixel_width: 0, pixel_height: 0, dpi: 96 },
+            TerminalSize {
+                rows: 20,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+                dpi: 96,
+            },
         )
         .expect("second ensure");
 
@@ -290,7 +343,10 @@ fn detached_runtime_output_can_be_replayed_from_registry() {
             None,
         )
         .expect("spawn detached runtime");
-    let terminal_instance_id = state.snapshot.active_terminal_instance_id.expect("active leaf");
+    let terminal_instance_id = state
+        .snapshot
+        .active_terminal_instance_id
+        .expect("active leaf");
 
     let started = std::time::Instant::now();
     while started.elapsed() < Duration::from_secs(3) {

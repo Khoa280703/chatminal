@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use super::{LayoutNodeId, TerminalInstanceId, RuntimeId};
+use super::{LayoutNodeId, RuntimeId, TerminalInstanceId};
 
 pub const SESSION_GRAPH_SNAPSHOT_VERSION: u16 = 1;
 

@@ -1,6 +1,6 @@
+use crate::chatminal_runtime::overlay_compat::OverlayTerminal;
 use crate::scripting::guiwin::GuiWin;
 use config::keyassignment::{KeyAssignment, PromptInputLine};
-use crate::chatminal_runtime::overlay_compat::OverlayTerminal;
 use std::rc::Rc;
 use termwiz::input::{InputEvent, KeyCode, KeyEvent};
 use termwiz::lineedit::*;

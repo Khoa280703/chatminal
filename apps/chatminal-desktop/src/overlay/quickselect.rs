@@ -1,3 +1,8 @@
+use crate::chatminal_runtime::overlay_compat::{
+    OverlayCachePolicy, OverlayDomainHandle, OverlayForEachLogicalLine, OverlayLogicalLine,
+    OverlayPane, OverlayPaneHandle, OverlayPattern, OverlaySearchResult, OverlayWithPaneLines,
+    RenderableDimensions, StableCursorPosition,
+};
 use crate::selection::{SelectionCoordinate, SelectionRange};
 use crate::termwindow::{TermWindow, TermWindowNotif};
 use config::keyassignment::{ClipboardCopyDestination, QuickSelectArguments, ScrollbackEraseMode};
@@ -5,11 +10,6 @@ use config::ConfigHandle;
 use engine_term::color::ColorPalette;
 use engine_term::{
     Clipboard, Intensity, KeyCode, KeyModifiers, Line, MouseEvent, StableRowIndex, TerminalSize,
-};
-use crate::chatminal_runtime::overlay_compat::{
-    OverlayCachePolicy, OverlayDomainHandle, OverlayForEachLogicalLine, OverlayLogicalLine,
-    OverlayPane, OverlayPaneHandle, OverlayPattern, OverlaySearchResult, OverlayWithPaneLines,
-    RenderableDimensions, StableCursorPosition,
 };
 use parking_lot::{MappedMutexGuard, Mutex};
 use rangeset::RangeSet;
@@ -514,7 +514,11 @@ impl OverlayPane for QuickSelectOverlay {
         self.delegate.get_logical_lines(lines)
     }
 
-    fn with_lines_mut(&self, lines: Range<StableRowIndex>, with_lines: &mut dyn OverlayWithPaneLines) {
+    fn with_lines_mut(
+        &self,
+        lines: Range<StableRowIndex>,
+        with_lines: &mut dyn OverlayWithPaneLines,
+    ) {
         let mut renderer = self.renderer.lock();
         // Take care to access self.delegate methods here before we get into
         // calling into its own with_lines_mut to avoid a runtime

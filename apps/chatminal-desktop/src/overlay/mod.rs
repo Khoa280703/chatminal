@@ -1,7 +1,7 @@
-use crate::termwindow::TermWindow;
-use engine_term::{TerminalConfiguration, TerminalSize};
 use crate::chatminal_runtime::overlay_compat::OverlayPane;
 use crate::chatminal_runtime::overlay_compat::{allocate_overlay_terminal, OverlayTerminal};
+use crate::termwindow::TermWindow;
+use engine_term::{TerminalConfiguration, TerminalSize};
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -14,9 +14,7 @@ pub mod prompt;
 pub mod quickselect;
 pub mod selector;
 
-pub use confirm_close_pane::{
-    confirm_close_tab, confirm_close_window, confirm_quit_program,
-};
+pub use confirm_close_pane::{confirm_close_tab, confirm_close_window, confirm_quit_program};
 pub use copy::{CopyModeParams, CopyOverlay};
 pub use debug::show_debug_overlay;
 pub use launcher::{launcher, LauncherArgs, LauncherFlags};
@@ -56,4 +54,3 @@ where
 
     (tw_tab, Box::pin(future))
 }
-

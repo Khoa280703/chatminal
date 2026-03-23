@@ -5,16 +5,16 @@
 //! be rendered as a popup/context menu if the system supports it; at the
 //! time of writing our window layer doesn't provide an API for context
 //! menus.
+use crate::chatminal_runtime::overlay_compat::OverlayTerminal;
+use crate::chatminal_runtime::{HostLauncherDomainEntry, LauncherSessionEntry};
 use crate::commands::derive_command_from_key_assignment;
-use crate::scripting::guiwin::DesktopWindowId;
 use crate::inputmap::InputMap;
 use crate::overlay::quickselect;
 use crate::overlay::selector::{matcher_pattern, matcher_score};
+use crate::scripting::guiwin::DesktopWindowId;
 use crate::termwindow::TermWindowNotif;
-use crate::chatminal_runtime::{HostLauncherDomainEntry, LauncherSessionEntry};
 use config::configuration;
 use config::keyassignment::{KeyAssignment, SpawnCommand, SpawnSessionDomain};
-use crate::chatminal_runtime::overlay_compat::OverlayTerminal;
 use rayon::prelude::*;
 use std::collections::BTreeMap;
 use termwiz::cell::{AttributeChange, CellAttributes};
@@ -268,8 +268,7 @@ impl LauncherState {
             // Give a consistent order to the entries
             let keys: BTreeMap<_, _> = input_map.keys.default.into_iter().collect();
             for ((keycode, mods), entry) in keys {
-                if crate::desktop_commands::is_session_bar_switching_key_assignment(&entry.action)
-                {
+                if crate::desktop_commands::is_session_bar_switching_key_assignment(&entry.action) {
                     // Filter out some noisy, repetitive entries
                     continue;
                 }

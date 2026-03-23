@@ -1,3 +1,9 @@
+use crate::chatminal_runtime::overlay_compat::{
+    OverlayAssignmentResult, OverlayCachePolicy, OverlayDomainHandle, OverlayForEachLogicalLine,
+    OverlayLogicalLine, OverlayPane, OverlayPaneHandle, OverlayPattern, OverlayPatternType,
+    OverlayRuntimeEntryHandle, OverlaySearchResult, OverlayWithPaneLines, RenderableDimensions,
+    StableCursorPosition,
+};
 use crate::selection::{SelectionCoordinate, SelectionRange, SelectionX};
 use crate::termwindow::keyevent::KeyTableArgs;
 use crate::termwindow::{TermWindow, TermWindowNotif};
@@ -9,12 +15,6 @@ use engine_term::color::ColorPalette;
 use engine_term::{
     unicode_column_width, Clipboard, KeyCode, KeyModifiers, Line, MouseEvent, SemanticType,
     StableRowIndex, TerminalSize,
-};
-use crate::chatminal_runtime::overlay_compat::{
-    OverlayAssignmentResult, OverlayCachePolicy, OverlayDomainHandle, OverlayForEachLogicalLine,
-    OverlayLogicalLine, OverlayPane, OverlayPaneHandle, OverlayPattern, OverlayPatternType,
-    OverlayRuntimeEntryHandle, OverlaySearchResult, OverlayWithPaneLines, RenderableDimensions,
-    StableCursorPosition,
 };
 use ordered_float::NotNan;
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
@@ -647,7 +647,9 @@ impl CopyRenderable {
         let pattern = self.search_line.get_line().to_string();
         match self.pattern_type {
             OverlayPatternType::CaseSensitiveString => OverlayPattern::CaseSensitiveString(pattern),
-            OverlayPatternType::CaseInSensitiveString => OverlayPattern::CaseInSensitiveString(pattern),
+            OverlayPatternType::CaseInSensitiveString => {
+                OverlayPattern::CaseInSensitiveString(pattern)
+            }
             OverlayPatternType::Regex => OverlayPattern::Regex(pattern),
         }
     }
@@ -1386,7 +1388,11 @@ impl OverlayPane for CopyOverlay {
             .for_each_logical_line_in_stable_range_mut(lines, for_line);
     }
 
-    fn with_lines_mut(&self, lines: Range<StableRowIndex>, with_lines: &mut dyn OverlayWithPaneLines) {
+    fn with_lines_mut(
+        &self,
+        lines: Range<StableRowIndex>,
+        with_lines: &mut dyn OverlayWithPaneLines,
+    ) {
         // Take care to access self.delegate methods here before we get into
         // calling into its own with_lines_mut to avoid a runtime
         // lock erro!

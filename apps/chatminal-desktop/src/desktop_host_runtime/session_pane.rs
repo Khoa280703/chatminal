@@ -8,7 +8,9 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use super::session_engine::{TerminalInstanceId, SessionEngineShared, SessionRuntimeEvent, RuntimeId};
+use super::session_engine::{
+    RuntimeId, SessionEngineShared, SessionRuntimeEvent, TerminalInstanceId,
+};
 use chatminal_terminal_core::TerminalSize as CoreTerminalSize;
 use config::keyassignment::ScrollbackEraseMode;
 use config::TermConfig;
@@ -20,8 +22,8 @@ use engine_term::{
 };
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
 use rangeset::RangeSet;
-use termwiz::escape::Action;
 use termwiz::escape::parser::Parser as EscapeParser;
+use termwiz::escape::Action;
 use termwiz::input::KeyboardEncoding;
 use termwiz::surface::{Line, SequenceNo};
 use url::Url;
@@ -30,11 +32,10 @@ use super::{
     alloc_host_terminal_handle, host_impl_get_logical_lines_via_get_lines,
     host_terminal_for_each_logical_line_in_stable_range_mut, host_terminal_get_cursor_position,
     host_terminal_get_dimensions, host_terminal_get_dirty_lines, host_terminal_get_lines,
-    host_terminal_with_lines_mut, HostCachePolicy as CachePolicy,
-    HostCloseReason as CloseReason, HostDomainId as DomainId,
-    HostLogicalLine as LogicalLine, HostMux, HostTerminal, HostTerminalHandle as HostTerminalHandle,
-    HostPattern as Pattern, HostRenderableDimensions as RenderableDimensions,
-    HostSearchResult as SearchResult, HostStableCursorPosition as StableCursorPosition,
+    host_terminal_with_lines_mut, HostCachePolicy as CachePolicy, HostCloseReason as CloseReason,
+    HostDomainId as DomainId, HostLogicalLine as LogicalLine, HostMux, HostPattern as Pattern,
+    HostRenderableDimensions as RenderableDimensions, HostSearchResult as SearchResult,
+    HostStableCursorPosition as StableCursorPosition, HostTerminal, HostTerminalHandle,
 };
 use crate::chatminal_runtime::overlay_compat::{
     OverlayForEachLogicalLine as ForEachPaneLogicalLine, OverlayWithPaneLines as WithPaneLines,
@@ -168,32 +169,46 @@ impl ChatminalSessionPane {
                 terminal_instance_id,
                 chunk,
                 ..
-            } if runtime_id == self.runtime_id && terminal_instance_id == self.terminal_instance_id => {
+            } if runtime_id == self.runtime_id
+                && terminal_instance_id == self.terminal_instance_id =>
+            {
                 self.apply_output(&chunk);
-                HostMux::get().notify(crate::chatminal_runtime::RuntimeNotification::PaneOutput(self.pane_id));
+                HostMux::get().notify(crate::chatminal_runtime::RuntimeNotification::PaneOutput(
+                    self.pane_id,
+                ));
             }
             SessionRuntimeEvent::TerminalInstanceExited {
                 runtime_id,
                 terminal_instance_id,
                 ..
-            } if runtime_id == self.runtime_id && terminal_instance_id == self.terminal_instance_id => {
+            } if runtime_id == self.runtime_id
+                && terminal_instance_id == self.terminal_instance_id =>
+            {
                 *self.dead.lock() = true;
-                HostMux::get().notify(crate::chatminal_runtime::RuntimeNotification::PaneOutput(self.pane_id));
+                HostMux::get().notify(crate::chatminal_runtime::RuntimeNotification::PaneOutput(
+                    self.pane_id,
+                ));
             }
             SessionRuntimeEvent::TerminalInstanceError {
                 runtime_id,
                 terminal_instance_id,
                 message,
                 ..
-            } if runtime_id == self.runtime_id && terminal_instance_id == self.terminal_instance_id => {
+            } if runtime_id == self.runtime_id
+                && terminal_instance_id == self.terminal_instance_id =>
+            {
                 self.apply_output(&format!("\r\n[chatminal session error] {}\r\n", message));
-                HostMux::get().notify(crate::chatminal_runtime::RuntimeNotification::PaneOutput(self.pane_id));
+                HostMux::get().notify(crate::chatminal_runtime::RuntimeNotification::PaneOutput(
+                    self.pane_id,
+                ));
             }
             SessionRuntimeEvent::RuntimeClosed { runtime_id, .. }
                 if runtime_id == self.runtime_id =>
             {
                 *self.dead.lock() = true;
-                HostMux::get().notify(crate::chatminal_runtime::RuntimeNotification::PaneOutput(self.pane_id));
+                HostMux::get().notify(crate::chatminal_runtime::RuntimeNotification::PaneOutput(
+                    self.pane_id,
+                ));
             }
             _ => {}
         }
@@ -235,9 +250,9 @@ fn parse_output_actions(parser: &mut EscapeParser, bytes: &[u8]) -> Vec<Action> 
 #[cfg(test)]
 mod parser_tests {
     use super::parse_output_actions;
-    use termwiz::escape::Action;
-    use termwiz::escape::csi::{CSI, Sgr};
+    use termwiz::escape::csi::{Sgr, CSI};
     use termwiz::escape::parser::Parser as EscapeParser;
+    use termwiz::escape::Action;
 
     #[test]
     fn parser_state_survives_across_split_escape_chunks() {
@@ -247,10 +262,17 @@ mod parser_tests {
         let second = parse_output_actions(&mut parser, b"1mhi");
 
         assert!(first.is_empty());
-        assert!(matches!(second.first(), Some(Action::CSI(CSI::Sgr(Sgr::Foreground(_))))));
+        assert!(matches!(
+            second.first(),
+            Some(Action::CSI(CSI::Sgr(Sgr::Foreground(_))))
+        ));
         assert!(
-            second.iter().any(|action| matches!(action, Action::Print('h')))
-                || second.iter().any(|action| matches!(action, Action::PrintString(s) if s == "hi"))
+            second
+                .iter()
+                .any(|action| matches!(action, Action::Print('h')))
+                || second
+                    .iter()
+                    .any(|action| matches!(action, Action::PrintString(s) if s == "hi"))
         );
     }
 }
@@ -341,13 +363,16 @@ impl HostTerminal for ChatminalSessionPane {
     }
     fn resize(&self, size: TerminalSize) -> anyhow::Result<()> {
         self.shared
-            .resize_terminal_instance(self.terminal_instance_id, CoreTerminalSize {
-                rows: size.rows,
-                cols: size.cols,
-                pixel_width: size.pixel_width,
-                pixel_height: size.pixel_height,
-                dpi: size.dpi,
-            })
+            .resize_terminal_instance(
+                self.terminal_instance_id,
+                CoreTerminalSize {
+                    rows: size.rows,
+                    cols: size.cols,
+                    pixel_width: size.pixel_width,
+                    pixel_height: size.pixel_height,
+                    dpi: size.dpi,
+                },
+            )
             .map_err(anyhow::Error::msg)?;
         self.terminal.lock().resize(size);
         Ok(())

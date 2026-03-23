@@ -5,6 +5,7 @@
 use crate::renderstate::BorrowedLayers;
 use ::window::bitmaps::TextureRect;
 use ::window::color::LinearRgba;
+use ::window::RectF;
 use config::HsbTransform;
 
 /// Each cell is composed of two triangles built from 4 vertices.
@@ -306,6 +307,52 @@ impl BoxedQuad {
 
         vert
     }
+
+    fn clip_to_rect(&mut self, rect: RectF) -> bool {
+        let (left, top, right, bottom) = self.position;
+        let clipped_left = left.max(rect.min_x());
+        let clipped_top = top.max(rect.min_y());
+        let clipped_right = right.min(rect.max_x());
+        let clipped_bottom = bottom.min(rect.max_y());
+
+        if clipped_right <= clipped_left || clipped_bottom <= clipped_top {
+            return false;
+        }
+
+        let width = right - left;
+        let height = bottom - top;
+        let (tex_left, tex_right, tex_top, tex_bottom) = self.tex;
+
+        let clipped_tex_left = if width.abs() < f32::EPSILON {
+            tex_left
+        } else {
+            tex_left + ((clipped_left - left) / width) * (tex_right - tex_left)
+        };
+        let clipped_tex_right = if width.abs() < f32::EPSILON {
+            tex_right
+        } else {
+            tex_left + ((clipped_right - left) / width) * (tex_right - tex_left)
+        };
+        let clipped_tex_top = if height.abs() < f32::EPSILON {
+            tex_top
+        } else {
+            tex_top + ((clipped_top - top) / height) * (tex_bottom - tex_top)
+        };
+        let clipped_tex_bottom = if height.abs() < f32::EPSILON {
+            tex_bottom
+        } else {
+            tex_top + ((clipped_bottom - top) / height) * (tex_bottom - tex_top)
+        };
+
+        self.position = (clipped_left, clipped_top, clipped_right, clipped_bottom);
+        self.tex = (
+            clipped_tex_left,
+            clipped_tex_right,
+            clipped_tex_top,
+            clipped_tex_bottom,
+        );
+        true
+    }
 }
 
 #[derive(Default)]
@@ -331,6 +378,12 @@ impl HeapQuadAllocator {
         }
         metrics::histogram!("quad_buffer_apply").record(start.elapsed());
         Ok(())
+    }
+
+    pub fn clip_to_rect(&mut self, rect: RectF) {
+        for quads in [&mut self.layer0, &mut self.layer1, &mut self.layer2] {
+            quads.retain_mut(|quad| quad.clip_to_rect(rect));
+        }
     }
 }
 

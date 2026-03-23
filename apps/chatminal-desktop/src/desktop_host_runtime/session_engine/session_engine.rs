@@ -1,9 +1,9 @@
 use std::sync::{Arc, Mutex};
 
 use super::leaf_runtime::TerminalInstanceRuntimeEvent;
-use super::{SessionCoreState, SessionEngineShared};
 #[cfg(test)]
 use super::TerminalInstanceId;
+use super::{SessionCoreState, SessionEngineShared};
 
 #[derive(Clone, Debug)]
 pub struct StatefulSessionEngine {
@@ -47,7 +47,8 @@ impl StatefulSessionEngine {
 
     #[cfg(test)]
     pub fn replay_leaf_output(&self, terminal_instance_id: TerminalInstanceId) -> Option<String> {
-        self.leaf_runtime_registry().replay_output(terminal_instance_id)
+        self.leaf_runtime_registry()
+            .replay_output(terminal_instance_id)
     }
 
     pub(crate) fn leaf_runtime_events_tx(

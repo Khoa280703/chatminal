@@ -5,14 +5,14 @@ use chatminal_terminal_core::color::ColorPalette;
 #[cfg(test)]
 use chatminal_terminal_core::ScreenSnapshot;
 use chatminal_terminal_core::{Terminal, TerminalConfiguration, TerminalSize};
-use portable_pty::{Child, CommandBuilder, MasterPty, native_pty_system};
+use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty};
 
 use super::leaf_runtime_command::prepare_leaf_command;
 use super::leaf_runtime_threads::{
     command_label, sanitize_zsh_prompt_spacer, spawn_reader_loop, spawn_waiter_loop,
     spawn_writer_loop, to_pty_size,
 };
-use super::{TerminalInstanceId, TerminalInstanceProcessState, RuntimeId};
+use super::{RuntimeId, TerminalInstanceId, TerminalInstanceProcessState};
 
 const INPUT_QUEUE_CAPACITY: usize = 256;
 
@@ -143,7 +143,10 @@ impl TerminalInstanceRuntime {
         })
     }
 
-    pub fn process_state(&self, spawn: &TerminalInstanceRuntimeSpawn) -> TerminalInstanceProcessState {
+    pub fn process_state(
+        &self,
+        spawn: &TerminalInstanceRuntimeSpawn,
+    ) -> TerminalInstanceProcessState {
         TerminalInstanceProcessState {
             process_id: self.child.lock().ok().and_then(|guard| guard.process_id()),
             command_label: command_label(&spawn.command),

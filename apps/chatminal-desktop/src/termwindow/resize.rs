@@ -7,9 +7,52 @@ use engine_term::TerminalSize;
 use std::rc::Rc;
 
 #[derive(Debug, Clone, Copy)]
+pub(crate) struct ShellWindowPadding {
+    pub left: usize,
+    pub top: usize,
+    pub right: usize,
+    pub bottom: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct RowsAndCols {
     pub rows: usize,
     pub cols: usize,
+}
+
+pub(crate) fn shell_window_padding_for_dimensions(
+    config: &ConfigHandle,
+    render_metrics: &RenderMetrics,
+    dimensions: &Dimensions,
+    sidebar_width: usize,
+    terminal_pixel_width: usize,
+    terminal_pixel_height: usize,
+) -> ShellWindowPadding {
+    let h_context = DimensionContext {
+        dpi: dimensions.dpi as f32,
+        pixel_max: terminal_pixel_width as f32,
+        pixel_cell: render_metrics.cell_size.width as f32,
+    };
+    let v_context = DimensionContext {
+        dpi: dimensions.dpi as f32,
+        pixel_max: terminal_pixel_height as f32,
+        pixel_cell: render_metrics.cell_size.height as f32,
+    };
+
+    ShellWindowPadding {
+        left: config.window_padding.left.evaluate_as_pixels(h_context) as usize + sidebar_width,
+        top: config.window_padding.top.evaluate_as_pixels(v_context) as usize
+            + super::TermWindow::chatminal_terminal_chrome_height_for_dimensions(
+                dimensions.pixel_width,
+                dimensions.dpi,
+            ),
+        right: effective_right_padding(config, h_context),
+        bottom: config.window_padding.bottom.evaluate_as_pixels(v_context) as usize
+            + super::TermWindow::chatminal_terminal_footer_height_for_dimensions(
+                dimensions.pixel_width,
+                dimensions.dpi,
+            ),
+    }
 }
 
 #[derive(Debug)]
@@ -184,33 +227,19 @@ impl super::TermWindow {
             let rows = size.rows;
             let cols = size.cols;
 
-            let h_context = DimensionContext {
-                dpi: dimensions.dpi as f32,
-                pixel_max: size.pixel_width as f32,
-                pixel_cell: self.render_metrics.cell_size.width as f32,
-            };
-            let v_context = DimensionContext {
-                dpi: dimensions.dpi as f32,
-                pixel_max: size.pixel_height as f32,
-                pixel_cell: self.render_metrics.cell_size.height as f32,
-            };
-            let padding_left = config.window_padding.left.evaluate_as_pixels(h_context) as usize
-                + Self::chatminal_sidebar_width_for_dimensions(
-                    dimensions.pixel_width,
-                    dimensions.dpi,
-                );
-            let padding_top = config.window_padding.top.evaluate_as_pixels(v_context) as usize
-                + Self::chatminal_terminal_chrome_height_for_dimensions(
-                    dimensions.pixel_width,
-                    dimensions.dpi,
-                );
-            let padding_bottom = config.window_padding.bottom.evaluate_as_pixels(v_context)
-                as usize
-                + Self::chatminal_terminal_footer_height_for_dimensions(
-                    dimensions.pixel_width,
-                    dimensions.dpi,
-                );
-            let padding_right = effective_right_padding(&config, h_context);
+            let shell_padding = shell_window_padding_for_dimensions(
+                config,
+                &self.render_metrics,
+                dimensions,
+                self.chatminal_sidebar
+                    .width_pixels_for_window(dimensions.pixel_width, dimensions.dpi),
+                size.pixel_width,
+                size.pixel_height,
+            );
+            let padding_left = shell_padding.left;
+            let padding_top = shell_padding.top;
+            let padding_bottom = shell_padding.bottom;
+            let padding_right = shell_padding.right;
 
             let pixel_height = (rows * self.render_metrics.cell_size.height as usize)
                 + (padding_top + padding_bottom)
@@ -242,33 +271,19 @@ impl super::TermWindow {
         } else {
             // Resize of the window dimensions may result in changed terminal dimensions
 
-            let h_context = DimensionContext {
-                dpi: dimensions.dpi as f32,
-                pixel_max: self.terminal_size.pixel_width as f32,
-                pixel_cell: self.render_metrics.cell_size.width as f32,
-            };
-            let v_context = DimensionContext {
-                dpi: dimensions.dpi as f32,
-                pixel_max: self.terminal_size.pixel_height as f32,
-                pixel_cell: self.render_metrics.cell_size.height as f32,
-            };
-            let padding_left = config.window_padding.left.evaluate_as_pixels(h_context) as usize
-                + Self::chatminal_sidebar_width_for_dimensions(
-                    dimensions.pixel_width,
-                    dimensions.dpi,
-                );
-            let padding_top = config.window_padding.top.evaluate_as_pixels(v_context) as usize
-                + Self::chatminal_terminal_chrome_height_for_dimensions(
-                    dimensions.pixel_width,
-                    dimensions.dpi,
-                );
-            let padding_bottom = config.window_padding.bottom.evaluate_as_pixels(v_context)
-                as usize
-                + Self::chatminal_terminal_footer_height_for_dimensions(
-                    dimensions.pixel_width,
-                    dimensions.dpi,
-                );
-            let padding_right = effective_right_padding(&config, h_context);
+            let shell_padding = shell_window_padding_for_dimensions(
+                config,
+                &self.render_metrics,
+                dimensions,
+                self.chatminal_sidebar
+                    .width_pixels_for_window(dimensions.pixel_width, dimensions.dpi),
+                self.terminal_size.pixel_width,
+                self.terminal_size.pixel_height,
+            );
+            let padding_left = shell_padding.left;
+            let padding_top = shell_padding.top;
+            let padding_bottom = shell_padding.bottom;
+            let padding_right = shell_padding.right;
 
             let avail_width = dimensions.pixel_width.saturating_sub(
                 (padding_left + padding_right) as usize
@@ -517,36 +532,23 @@ impl super::TermWindow {
             0
         };
 
-        let h_context = DimensionContext {
-            dpi: self.dimensions.dpi as f32,
-            pixel_max: self.dimensions.pixel_width as f32,
-            pixel_cell: render_metrics.cell_size.width as f32,
-        };
-        let v_context = DimensionContext {
-            dpi: self.dimensions.dpi as f32,
-            pixel_max: self.dimensions.pixel_height as f32,
-            pixel_cell: render_metrics.cell_size.height as f32,
-        };
-        let padding_left = config.window_padding.left.evaluate_as_pixels(h_context) as usize
-            + Self::chatminal_sidebar_width_for_dimensions(
-                self.dimensions.pixel_width,
-                self.dimensions.dpi,
-            );
-        let padding_top = config.window_padding.top.evaluate_as_pixels(v_context) as usize
-            + Self::chatminal_terminal_chrome_height_for_dimensions(
-                self.dimensions.pixel_width,
-                self.dimensions.dpi,
-            );
-        let padding_bottom = config.window_padding.bottom.evaluate_as_pixels(v_context) as usize
-            + Self::chatminal_terminal_footer_height_for_dimensions(
-                self.dimensions.pixel_width,
-                self.dimensions.dpi,
-            );
+        let shell_padding = shell_window_padding_for_dimensions(
+            &config,
+            &render_metrics,
+            &self.dimensions,
+            self.chatminal_sidebar
+                .width_pixels_for_window(self.dimensions.pixel_width, self.dimensions.dpi),
+            terminal_size.pixel_width,
+            terminal_size.pixel_height,
+        );
+        let padding_left = shell_padding.left;
+        let padding_top = shell_padding.top;
+        let padding_bottom = shell_padding.bottom;
 
         let dimensions = Dimensions {
             pixel_width: ((terminal_size.cols as usize * render_metrics.cell_size.width as usize)
                 + padding_left
-                + effective_right_padding(&config, h_context)),
+                + shell_padding.right),
             pixel_height: ((terminal_size.rows as usize * render_metrics.cell_size.height as usize)
                 + padding_top
                 + padding_bottom) as usize

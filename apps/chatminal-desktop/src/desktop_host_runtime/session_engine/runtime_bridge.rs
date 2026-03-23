@@ -1,5 +1,5 @@
 use super::{
-    SessionEventBus, SessionRuntimeEvent, SessionRuntimeLookup, SessionWorkspaceHost, RuntimeId,
+    RuntimeId, SessionEventBus, SessionRuntimeEvent, SessionRuntimeLookup, SessionWorkspaceHost,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -90,7 +90,7 @@ mod tests {
     use std::sync::Mutex;
 
     use super::{
-        SessionEventBus, SessionRuntimeEvent, SessionRuntimeLookup, SessionWorkspaceHost, RuntimeId,
+        RuntimeId, SessionEventBus, SessionRuntimeEvent, SessionRuntimeLookup, SessionWorkspaceHost,
     };
 
     use super::{SessionBridgeAction, SessionRuntimeBridge};
@@ -249,5 +249,4 @@ mod tests {
             ]
         );
     }
-
 }

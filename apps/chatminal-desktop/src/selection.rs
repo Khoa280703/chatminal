@@ -5,8 +5,8 @@ use crate::chatminal_runtime::overlay_compat::OverlayPane;
 use engine_term::{SemanticZone, StableRowIndex};
 use std::cmp::Ordering;
 use std::ops::Range;
-use termwiz::surface::SequenceNo;
 use termwiz::surface::line::DoubleClickRange;
+use termwiz::surface::SequenceNo;
 
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 pub struct Selection {

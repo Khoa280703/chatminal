@@ -89,6 +89,7 @@ mod prevcursor;
 pub mod render;
 pub mod resize;
 mod selection;
+pub mod sidebar_session_modal;
 pub mod spawn;
 pub mod webgpu;
 use crate::spawn::SpawnWhere;
@@ -189,10 +190,15 @@ pub enum UIItemType {
     BelowScrollThumb,
     Split(TerminalSplit),
     ChatminalSidebarBackground,
+    ChatminalSidebarResizeHandle,
+    ChatminalSidebarSettings,
     ChatminalSidebarCreateProfile,
     ChatminalSidebarProfile(String),
     ChatminalSidebarCreateSession,
     ChatminalSidebarSession(String),
+    ChatminalSidebarSessionMenu,
+    ChatminalSidebarSessionMenuRename(String),
+    ChatminalSidebarSessionMenuDelete(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -497,7 +503,7 @@ impl TermWindow {
     }
 
     pub(crate) fn chatminal_sidebar_width(&self) -> usize {
-        Self::chatminal_sidebar_width_for_dimensions(
+        self.chatminal_sidebar.width_pixels_for_window(
             self.dimensions.pixel_width,
             self.dimensions.dpi,
         )
@@ -559,8 +565,7 @@ impl TermWindow {
         let br = border.right.get() as f32;
         let ww = self.dimensions.pixel_width as f32;
         let wh = self.dimensions.pixel_height as f32;
-        let shell_enabled =
-            Self::chatminal_shell_enabled_for_dimensions(self.dimensions.pixel_width, self.dimensions.dpi);
+        let shell_enabled = self.chatminal_sidebar_width() > 0;
         let sidebar_w = if shell_enabled {
             self.chatminal_sidebar_width() as f32
         } else {
@@ -634,6 +639,15 @@ impl TermWindow {
             shell_enabled,
             session_bar_at_bottom,
         }
+    }
+
+    pub(crate) fn terminal_grid_origin(&self) -> ::window::PointF {
+        let bounds = self.shell_bounds();
+        let (padding_left, padding_top) = self.padding_left_top();
+        euclid::point2(
+            bounds.border_left + padding_left,
+            bounds.content_y + padding_top,
+        )
     }
 
     fn should_show_session_bar_for_count(
@@ -1108,6 +1122,56 @@ impl TermWindow {
             return self.close_chatminal_view_by_id(session_id);
         }
         self.close_chatminal_session_by_id(session_id)
+    }
+
+    fn prompt_rename_chatminal_session(&mut self, session_id: &str) {
+        if !self.chatminal_sidebar.is_enabled() {
+            return;
+        }
+        if self.chatminal_sidebar.start_inline_rename(session_id) {
+            self.cancel_modal();
+            if let Some(window) = self.window.as_ref() {
+                window.invalidate();
+            }
+        }
+    }
+
+    fn confirm_delete_chatminal_session(&mut self, session_id: &str) {
+        if !self.chatminal_sidebar.is_enabled() {
+            return;
+        }
+        let session_name = self
+            .chatminal_sidebar
+            .snapshot()
+            .sessions
+            .iter()
+            .find(|session| session.session_id == session_id)
+            .map(|session| session.name.clone())
+            .unwrap_or_else(|| "session này".to_string());
+        self.set_modal(Rc::new(
+            crate::termwindow::sidebar_session_modal::SidebarSessionModal::delete(
+                session_id.to_string(),
+                session_name,
+            ),
+        ));
+    }
+
+    fn rename_chatminal_session(&mut self, session_id: &str, name: &str) {
+        if !self.chatminal_sidebar.is_enabled() {
+            return;
+        }
+        match self.chatminal_sidebar.rename_session(session_id, name) {
+            Ok(workspace) => {
+                self.chatminal_sidebar.apply_workspace(workspace);
+                self.update_title_post_status();
+                if let Some(window) = self.window.as_ref() {
+                    window.invalidate();
+                }
+            }
+            Err(err) => {
+                log::error!("failed to rename sidebar session {session_id}: {err}");
+            }
+        }
     }
 
     fn switch_chatminal_profile(&mut self, profile_id: &str) {

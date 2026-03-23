@@ -1,4 +1,4 @@
-use super::{SessionLayoutSnapshot, SessionRuntimeSnapshot, RuntimeId};
+use super::{RuntimeId, SessionLayoutSnapshot, SessionRuntimeSnapshot};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionRuntimeState {

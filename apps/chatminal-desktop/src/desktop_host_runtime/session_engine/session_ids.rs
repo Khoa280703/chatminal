@@ -45,7 +45,10 @@ mod tests {
     #[test]
     fn ids_format_with_stable_prefixes() {
         assert_eq!(RuntimeId::new(7).to_string(), "runtime-7");
-        assert_eq!(TerminalInstanceId::new(11).to_string(), "terminal-instance-11");
+        assert_eq!(
+            TerminalInstanceId::new(11).to_string(),
+            "terminal-instance-11"
+        );
         assert_eq!(LayoutNodeId::new(13).to_string(), "layout-13");
         assert_eq!(SessionViewId::new(17).to_string(), "view-17");
         assert_eq!(WorkspaceNodeId::new(19).to_string(), "workspace-node-19");

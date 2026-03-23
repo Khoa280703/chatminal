@@ -72,6 +72,19 @@ impl StateInner {
         self.load_workspace_snapshot()
     }
 
+    pub(super) fn session_rename(
+        &mut self,
+        session_id: &str,
+        name: &str,
+    ) -> Result<RuntimeWorkspace, String> {
+        self.store.rename_session(session_id, name)?;
+        if let Some(entry) = self.sessions.get_mut(session_id) {
+            entry.session.name = name.trim().to_string();
+        }
+        self.publish_session_and_workspace_updated(session_id);
+        self.load_workspace_snapshot()
+    }
+
     pub(super) fn session_snapshot_get(
         &self,
         session_id: &str,

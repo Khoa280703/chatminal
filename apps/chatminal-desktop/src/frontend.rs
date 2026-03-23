@@ -1,14 +1,14 @@
-use crate::TermWindow;
 use crate::chatminal_runtime::{
-    FrontendClientHandle, RuntimeNotification, active_frontend_client,
-    active_workspace_for_client, focus_terminal_handle_by_id, frontend_resolve_focused_pane,
-    frontend_resolve_pane, set_active_workspace_for_client, subscribe_frontend_notifications,
-    workspace_is_empty, workspace_names, workspace_window_ids,
+    active_frontend_client, active_workspace_for_client, focus_terminal_handle_by_id,
+    frontend_resolve_focused_pane, frontend_resolve_pane, set_active_workspace_for_client,
+    subscribe_frontend_notifications, workspace_is_empty, workspace_names, workspace_window_ids,
+    FrontendClientHandle, RuntimeNotification,
 };
-use crate::scripting::guiwin::GuiWin;
 use crate::scripting::guiwin::DesktopWindowId;
+use crate::scripting::guiwin::GuiWin;
 use crate::spawn::SpawnWhere;
 use crate::termwindow::TermWindowNotif;
+use crate::TermWindow;
 use ::window::*;
 use anyhow::{Context, Error};
 use config::keyassignment::{KeyAssignment, SpawnCommand};
@@ -392,16 +392,11 @@ impl GuiFrontEnd {
         promise::spawn::spawn(async move {
             while let Some(window_id) = workspace_window_ids.next() {
                 if front_end().is_closing_window_id(window_id) {
-                    log::debug!(
-                        "frontend reconcile: skip respawn for closing window {window_id}"
-                    );
+                    log::debug!("frontend reconcile: skip respawn for closing window {window_id}");
                     continue;
                 }
                 if front_end().has_window_id(window_id)
-                    || front_end()
-                        .spawned_window_ids
-                        .borrow()
-                        .contains(&window_id)
+                    || front_end().spawned_window_ids.borrow().contains(&window_id)
                 {
                     continue;
                 }
@@ -445,9 +440,7 @@ impl GuiFrontEnd {
 
     pub fn record_window_binding(&self, window: Window, window_id: DesktopWindowId) {
         self.closing_window_ids.borrow_mut().remove(&window_id);
-        self.known_windows
-            .borrow_mut()
-            .insert(window, window_id);
+        self.known_windows.borrow_mut().insert(window, window_id);
         crate::commands::CommandDef::recreate_menubar(&config::configuration());
         if !self.is_switching_workspace() {
             self.reconcile_workspace();

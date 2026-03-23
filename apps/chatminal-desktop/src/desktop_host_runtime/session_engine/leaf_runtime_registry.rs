@@ -36,8 +36,15 @@ impl TerminalInstanceRuntimeRegistry {
         initial_scrollback: Option<String>,
         events: std_mpsc::SyncSender<TerminalInstanceRuntimeEvent>,
     ) -> Result<Arc<TerminalInstanceRuntime>, String> {
-        if self.runtimes.lock().unwrap().contains_key(&terminal_instance_id) {
-            return Err(format!("terminal instance runtime {terminal_instance_id} already exists"));
+        if self
+            .runtimes
+            .lock()
+            .unwrap()
+            .contains_key(&terminal_instance_id)
+        {
+            return Err(format!(
+                "terminal instance runtime {terminal_instance_id} already exists"
+            ));
         }
         let spawn = TerminalInstanceRuntimeSpawn {
             session_id: session_id.into(),
@@ -62,12 +69,20 @@ impl TerminalInstanceRuntimeRegistry {
         Ok(runtime)
     }
 
-    pub fn runtime(&self, terminal_instance_id: TerminalInstanceId) -> Option<Arc<TerminalInstanceRuntime>> {
-        self.runtimes.lock().unwrap().get(&terminal_instance_id).cloned()
+    pub fn runtime(
+        &self,
+        terminal_instance_id: TerminalInstanceId,
+    ) -> Option<Arc<TerminalInstanceRuntime>> {
+        self.runtimes
+            .lock()
+            .unwrap()
+            .get(&terminal_instance_id)
+            .cloned()
     }
 
     pub fn replay_output(&self, terminal_instance_id: TerminalInstanceId) -> Option<String> {
-        self.runtime(terminal_instance_id).map(|runtime| runtime.replay_output())
+        self.runtime(terminal_instance_id)
+            .map(|runtime| runtime.replay_output())
     }
 
     pub fn remove_for_runtime(
@@ -76,7 +91,11 @@ impl TerminalInstanceRuntimeRegistry {
         runtime_id: RuntimeId,
         terminal_instance_id: TerminalInstanceId,
     ) -> Option<Arc<TerminalInstanceRuntime>> {
-        let runtime = self.runtimes.lock().unwrap().remove(&terminal_instance_id)?;
+        let runtime = self
+            .runtimes
+            .lock()
+            .unwrap()
+            .remove(&terminal_instance_id)?;
         runtime.kill();
         if let Some(runtime) = core_state.lock().unwrap().runtime_mut(runtime_id) {
             runtime.leaves.remove(&terminal_instance_id);

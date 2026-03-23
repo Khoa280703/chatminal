@@ -8,9 +8,9 @@ use chatminal_runtime::{RuntimeCreatedSession, RuntimeProfile, RuntimeWorkspace}
 
 use crate::chatminal_runtime::DESKTOP_LAYOUT_WORKSPACE_ID;
 use crate::chatminal_runtime::{
-    activate_runtime_session, close_runtime_session, create_runtime_profile, create_runtime_session,
-    desktop_workspace_subscribe, load_desktop_sidebar_sessions_from_store,
-    move_runtime_session_to_profile, switch_runtime_profile,
+    activate_runtime_session, close_runtime_session, create_runtime_profile,
+    create_runtime_session, desktop_workspace_subscribe, load_desktop_sidebar_sessions_from_store,
+    move_runtime_session_to_profile, rename_runtime_session, switch_runtime_profile,
 };
 pub use crate::chatminal_runtime::{
     DesktopSidebarProfile as SidebarProfile, DesktopSidebarSession as SidebarSession,
@@ -19,9 +19,24 @@ pub use crate::chatminal_runtime::{
 
 const SIDEBAR_ENABLE_ENV: &str = "CHATMINAL_DESKTOP_SESSIONS_SIDEBAR";
 const SIDEBAR_DEFAULT_WIDTH_PX: f32 = 304.0;
-const SIDEBAR_MIN_WIDTH_PX: f32 = 280.0;
-const SIDEBAR_MAX_WINDOW_RATIO: f32 = 0.32;
+const SIDEBAR_MIN_WIDTH_PX: f32 = 56.0;
+const SIDEBAR_MAX_WINDOW_RATIO: f32 = 0.58;
+const TERMINAL_MIN_CONTENT_WIDTH_PX: f32 = 640.0;
 const EVENT_POLL_TIMEOUT: Duration = Duration::from_millis(400);
+
+#[derive(Debug)]
+pub struct SidebarSessionContextMenu {
+    pub session_id: String,
+    pub anchor_x_px: f32,
+    pub anchor_y_px: f32,
+}
+
+#[derive(Debug)]
+pub struct SidebarInlineRenameState {
+    pub session_id: String,
+    pub input: String,
+    pub select_all: bool,
+}
 
 #[derive(Debug)]
 struct SharedState {
@@ -30,6 +45,9 @@ struct SharedState {
     seed_active_profile_on_first_snapshot: bool,
     scroll_offset_px: f32,
     max_scroll_offset_px: f32,
+    width_override_px: Option<f32>,
+    session_context_menu: Option<SidebarSessionContextMenu>,
+    inline_rename: Option<SidebarInlineRenameState>,
 }
 
 impl Default for SharedState {
@@ -40,6 +58,9 @@ impl Default for SharedState {
             seed_active_profile_on_first_snapshot: true,
             scroll_offset_px: 0.0,
             max_scroll_offset_px: 0.0,
+            width_override_px: None,
+            session_context_menu: None,
+            inline_rename: None,
         }
     }
 }
@@ -115,6 +136,181 @@ impl ChatminalSidebar {
         close_runtime_session(session_id)
     }
 
+    pub fn rename_session(&self, session_id: &str, name: &str) -> Result<RuntimeWorkspace, String> {
+        rename_runtime_session(session_id, name)
+    }
+
+    pub fn open_session_context_menu(
+        &self,
+        session_id: &str,
+        anchor_x_px: f32,
+        anchor_y_px: f32,
+    ) -> bool {
+        let Ok(mut state) = self.shared.lock() else {
+            return false;
+        };
+        let Some(session) = state
+            .snapshot
+            .sessions
+            .iter()
+            .find(|session| session.session_id == session_id)
+        else {
+            return false;
+        };
+        let next = SidebarSessionContextMenu {
+            session_id: session.session_id.clone(),
+            anchor_x_px,
+            anchor_y_px,
+        };
+        let changed = state
+            .session_context_menu
+            .as_ref()
+            .map(|menu| {
+                menu.session_id != next.session_id
+                    || (menu.anchor_x_px - next.anchor_x_px).abs() >= f32::EPSILON
+                    || (menu.anchor_y_px - next.anchor_y_px).abs() >= f32::EPSILON
+            })
+            .unwrap_or(true);
+        if !changed {
+            return false;
+        }
+        state.session_context_menu = Some(next);
+        state.snapshot.version = state.snapshot.version.saturating_add(1);
+        true
+    }
+
+    pub fn close_session_context_menu(&self) -> bool {
+        let Ok(mut state) = self.shared.lock() else {
+            return false;
+        };
+        if state.session_context_menu.take().is_none() {
+            return false;
+        }
+        state.snapshot.version = state.snapshot.version.saturating_add(1);
+        true
+    }
+
+    pub fn session_context_menu(&self) -> Option<SidebarSessionContextMenu> {
+        self.shared
+            .lock()
+            .ok()
+            .and_then(|state| state.session_context_menu.as_ref().map(clone_context_menu))
+    }
+
+    pub fn start_inline_rename(&self, session_id: &str) -> bool {
+        let Ok(mut state) = self.shared.lock() else {
+            return false;
+        };
+        let Some(session) = state
+            .snapshot
+            .sessions
+            .iter()
+            .find(|session| session.session_id == session_id)
+        else {
+            return false;
+        };
+        let next = SidebarInlineRenameState {
+            session_id: session.session_id.clone(),
+            input: session.name.clone(),
+            select_all: true,
+        };
+        let changed = state
+            .inline_rename
+            .as_ref()
+            .map(|rename| rename.session_id != next.session_id || rename.input != next.input)
+            .unwrap_or(true);
+        if !changed {
+            return false;
+        }
+        state.session_context_menu = None;
+        state.inline_rename = Some(next);
+        state.snapshot.version = state.snapshot.version.saturating_add(1);
+        true
+    }
+
+    pub fn inline_rename_state(&self) -> Option<SidebarInlineRenameState> {
+        self.shared
+            .lock()
+            .ok()
+            .and_then(|state| state.inline_rename.as_ref().map(clone_inline_rename))
+    }
+
+    pub fn inline_rename_cancel(&self) -> bool {
+        let Ok(mut state) = self.shared.lock() else {
+            return false;
+        };
+        if state.inline_rename.take().is_none() {
+            return false;
+        }
+        state.snapshot.version = state.snapshot.version.saturating_add(1);
+        true
+    }
+
+    pub fn inline_rename_backspace(&self) -> bool {
+        let Ok(mut state) = self.shared.lock() else {
+            return false;
+        };
+        let Some(rename) = state.inline_rename.as_mut() else {
+            return false;
+        };
+        if rename.select_all {
+            if rename.input.is_empty() {
+                return false;
+            }
+            rename.input.clear();
+            rename.select_all = false;
+            state.snapshot.version = state.snapshot.version.saturating_add(1);
+            return true;
+        }
+        if rename.input.is_empty() {
+            return false;
+        }
+        rename.input.pop();
+        state.snapshot.version = state.snapshot.version.saturating_add(1);
+        true
+    }
+
+    pub fn inline_rename_clear(&self) -> bool {
+        let Ok(mut state) = self.shared.lock() else {
+            return false;
+        };
+        let Some(rename) = state.inline_rename.as_mut() else {
+            return false;
+        };
+        if rename.input.is_empty() {
+            return false;
+        }
+        rename.input.clear();
+        rename.select_all = false;
+        state.snapshot.version = state.snapshot.version.saturating_add(1);
+        true
+    }
+
+    pub fn inline_rename_push(&self, c: char) -> bool {
+        let Ok(mut state) = self.shared.lock() else {
+            return false;
+        };
+        let Some(rename) = state.inline_rename.as_mut() else {
+            return false;
+        };
+        if rename.select_all {
+            rename.input.clear();
+            rename.select_all = false;
+        }
+        rename.input.push(c);
+        state.snapshot.version = state.snapshot.version.saturating_add(1);
+        true
+    }
+
+    pub fn inline_rename_commit(&self) -> Option<(String, String)> {
+        let Ok(mut state) = self.shared.lock() else {
+            return None;
+        };
+        let rename = state.inline_rename.take()?;
+        state.snapshot.version = state.snapshot.version.saturating_add(1);
+        Some((rename.session_id, rename.input))
+    }
+
     pub fn toggle_profile_expanded(&self, profile_id: &str) {
         let Ok(mut state) = self.shared.lock() else {
             return;
@@ -176,6 +372,37 @@ impl ChatminalSidebar {
             changed = true;
         }
         changed
+    }
+
+    pub fn width_pixels_for_window(&self, window_width: usize, dpi: usize) -> usize {
+        if !self.enabled {
+            return 0;
+        }
+        let override_px = self
+            .shared
+            .lock()
+            .ok()
+            .and_then(|state| state.width_override_px);
+        clamp_sidebar_width_px(override_px.unwrap_or_else(|| default_sidebar_width_px(dpi)), window_width, dpi)
+    }
+
+    pub fn set_width_pixels(&self, requested_width_px: f32, window_width: usize, dpi: usize) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        let clamped = clamp_sidebar_width_px(requested_width_px, window_width, dpi) as f32;
+        let Ok(mut state) = self.shared.lock() else {
+            return false;
+        };
+        if state
+            .width_override_px
+            .map(|width| (width - clamped).abs() < f32::EPSILON)
+            .unwrap_or(false)
+        {
+            return false;
+        }
+        state.width_override_px = Some(clamped);
+        true
     }
 
     #[allow(dead_code)]
@@ -249,14 +476,26 @@ impl ChatminalSidebar {
         if !sidebar_enabled_from_env() {
             return 0;
         }
-        let scale = (dpi as f32 / 96.0).max(1.0);
-        let preferred = SIDEBAR_DEFAULT_WIDTH_PX * scale;
-        let min_width = SIDEBAR_MIN_WIDTH_PX * scale;
-        preferred
-            .min(window_width as f32 * SIDEBAR_MAX_WINDOW_RATIO)
-            .max(min_width)
-            .round() as usize
+        clamp_sidebar_width_px(default_sidebar_width_px(dpi), window_width, dpi)
     }
+}
+
+fn default_sidebar_width_px(dpi: usize) -> f32 {
+    let scale = (dpi as f32 / 96.0).max(1.0);
+    SIDEBAR_DEFAULT_WIDTH_PX * scale
+}
+
+fn clamp_sidebar_width_px(requested_width_px: f32, window_width: usize, dpi: usize) -> usize {
+    let scale = (dpi as f32 / 96.0).max(1.0);
+    let min_width = SIDEBAR_MIN_WIDTH_PX * scale;
+    let min_terminal_width = TERMINAL_MIN_CONTENT_WIDTH_PX * scale;
+    let max_width_by_ratio = window_width as f32 * SIDEBAR_MAX_WINDOW_RATIO;
+    let max_width_by_terminal = (window_width as f32 - min_terminal_width).max(min_width);
+    let max_width = max_width_by_ratio.min(max_width_by_terminal).max(min_width);
+    requested_width_px
+        .min(max_width)
+        .max(min_width)
+        .round() as usize
 }
 
 pub fn sidebar_enabled_from_env() -> bool {
@@ -372,6 +611,25 @@ fn replace_snapshot(shared: &Arc<Mutex<SharedState>>, mut next: SidebarSnapshot)
         }
         state.seed_active_profile_on_first_snapshot = false;
     }
+    let valid_session_ids: BTreeSet<&str> = next
+        .sessions
+        .iter()
+        .map(|session| session.session_id.as_str())
+        .collect();
+    if state
+        .session_context_menu
+        .as_ref()
+        .is_some_and(|menu| !valid_session_ids.contains(menu.session_id.as_str()))
+    {
+        state.session_context_menu = None;
+    }
+    if state
+        .inline_rename
+        .as_ref()
+        .is_some_and(|rename| !valid_session_ids.contains(rename.session_id.as_str()))
+    {
+        state.inline_rename = None;
+    }
     let changed = state.snapshot.active_profile_id != next.active_profile_id
         || state.snapshot.active_session_id != next.active_session_id
         || state.snapshot.profiles != next.profiles
@@ -382,4 +640,20 @@ fn replace_snapshot(shared: &Arc<Mutex<SharedState>>, mut next: SidebarSnapshot)
     }
     next.version = state.snapshot.version.saturating_add(1);
     state.snapshot = next;
+}
+
+fn clone_context_menu(menu: &SidebarSessionContextMenu) -> SidebarSessionContextMenu {
+    SidebarSessionContextMenu {
+        session_id: menu.session_id.clone(),
+        anchor_x_px: menu.anchor_x_px,
+        anchor_y_px: menu.anchor_y_px,
+    }
+}
+
+fn clone_inline_rename(rename: &SidebarInlineRenameState) -> SidebarInlineRenameState {
+    SidebarInlineRenameState {
+        session_id: rename.session_id.clone(),
+        input: rename.input.clone(),
+        select_all: rename.select_all,
+    }
 }

@@ -1,10 +1,10 @@
+#[cfg(test)]
+use crate::chatminal_runtime::SessionEngineShared;
 use crate::chatminal_runtime::{
     SessionViewId, WorkspaceLayoutState, WorkspaceNodeId, WorkspaceSplitAxis,
 };
 #[cfg(test)]
 use std::sync::Arc;
-#[cfg(test)]
-use crate::chatminal_runtime::SessionEngineShared;
 
 pub const DEFAULT_LAYOUT_WORKSPACE_ID: &str = "desktop-main";
 
@@ -152,11 +152,11 @@ impl DesktopWorkspaceLayoutStore {
     ) -> Option<WorkspaceLayoutState> {
         #[cfg(test)]
         if let Some(shared) = &self.shared {
-            let layout = shared
-                .workspace_layouts()
-                .lock()
-                .unwrap()
-                .attach_session(&self.workspace_id, view_id, session_id.to_string());
+            let layout = shared.workspace_layouts().lock().unwrap().attach_session(
+                &self.workspace_id,
+                view_id,
+                session_id.to_string(),
+            );
             if let Some(layout) = layout.as_ref() {
                 persist_layout_for_test(layout);
             }
@@ -231,11 +231,11 @@ impl DesktopWorkspaceLayoutStore {
     ) -> Option<WorkspaceLayoutState> {
         #[cfg(test)]
         if let Some(shared) = &self.shared {
-            let layout = shared
-                .workspace_layouts()
-                .lock()
-                .unwrap()
-                .resize_split(&self.workspace_id, node_id, ratio);
+            let layout = shared.workspace_layouts().lock().unwrap().resize_split(
+                &self.workspace_id,
+                node_id,
+                ratio,
+            );
             if let Some(layout) = layout.as_ref() {
                 persist_layout_for_test(layout);
             }

@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use super::{LayoutNodeId, TerminalInstanceId, RuntimeId};
+use super::{LayoutNodeId, RuntimeId, TerminalInstanceId};
 
 const CORE_RUNTIME_BASE: u64 = 1 << 60;
 const CORE_LEAF_BASE: u64 = 1 << 61;
@@ -29,7 +29,10 @@ impl SessionCoreIdAllocator {
     }
 
     pub fn next_terminal_instance_id(&self) -> TerminalInstanceId {
-        TerminalInstanceId::new(self.next_terminal_instance_id.fetch_add(1, Ordering::Relaxed))
+        TerminalInstanceId::new(
+            self.next_terminal_instance_id
+                .fetch_add(1, Ordering::Relaxed),
+        )
     }
 
     pub fn next_layout_node_id(&self) -> LayoutNodeId {

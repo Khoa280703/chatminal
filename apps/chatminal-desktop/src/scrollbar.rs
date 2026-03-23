@@ -1,5 +1,5 @@
-use engine_term::StableRowIndex;
 use crate::chatminal_runtime::overlay_compat::OverlayPane;
+use engine_term::StableRowIndex;
 
 pub struct ScrollHit {
     /// Offset from the top of the window in pixels

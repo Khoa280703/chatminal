@@ -4,7 +4,7 @@ use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use super::{TerminalInstanceId, RuntimeId};
+use super::{RuntimeId, TerminalInstanceId};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SessionRuntimeEvent {
@@ -141,8 +141,8 @@ impl Drop for SessionEventSubscription {
 mod tests {
     use std::time::Duration;
 
+    use super::{RuntimeId, TerminalInstanceId};
     use super::{SessionEventBus, SessionEventHub, SessionRuntimeEvent};
-    use super::{TerminalInstanceId, RuntimeId};
 
     #[test]
     fn event_hub_broadcasts_runtime_events_to_subscribers() {

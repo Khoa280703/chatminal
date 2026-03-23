@@ -4,15 +4,14 @@ pub(crate) mod session_engine;
 mod session_host;
 mod session_pane;
 
-use std::ffi::{OsStr, OsString};
 use std::convert::TryFrom;
+use std::ffi::{OsStr, OsString};
 use std::sync::Arc;
 use std::sync::OnceLock;
 
-use anyhow::anyhow;
-use session_engine::TerminalInstanceId;
-use chatminal_runtime::RuntimeState;
 use crate::chatminal_runtime::ChatminalRuntimeClient;
+use anyhow::anyhow;
+use chatminal_runtime::RuntimeState;
 use config::keyassignment::{RotationDirection, SessionDirection, SpawnSessionDomain};
 use config::ConfigHandle;
 use engine_dynamic::Value;
@@ -24,6 +23,7 @@ use host_runtime::pane::Pane;
 use host_runtime::window::{Window as MuxWindow, WindowId as EngineWindowId};
 use host_runtime::{Mux, MuxNotification};
 use portable_pty::CommandBuilder;
+use session_engine::TerminalInstanceId;
 
 pub(crate) use execution_bridge::DesktopRuntimeExecutionBridge;
 pub(crate) use session_host::{get_or_init_session_host, DesktopSessionHost};
@@ -36,16 +36,16 @@ pub(crate) type HostDomainHandle = Arc<dyn Domain>;
 pub(crate) struct HostActivityGuard(Activity);
 
 pub(crate) mod overlay_compat {
-    pub use host_runtime::renderable::*;
-    pub use host_runtime::termwiztermtab::{
-        allocate as allocate_overlay_terminal, TermWizTerminal as OverlayTerminal,
-    };
     pub use host_runtime::pane::{
         CachePolicy as OverlayCachePolicy, CloseReason as OverlayCloseReason,
         ForEachPaneLogicalLine as OverlayForEachLogicalLine, LogicalLine as OverlayLogicalLine,
-        Pane as OverlayPane, Pattern as OverlayPattern,
-        PatternType as OverlayPatternType, PerformAssignmentResult as OverlayAssignmentResult,
-        SearchResult as OverlaySearchResult, WithPaneLines as OverlayWithPaneLines,
+        Pane as OverlayPane, Pattern as OverlayPattern, PatternType as OverlayPatternType,
+        PerformAssignmentResult as OverlayAssignmentResult, SearchResult as OverlaySearchResult,
+        WithPaneLines as OverlayWithPaneLines,
+    };
+    pub use host_runtime::renderable::*;
+    pub use host_runtime::termwiztermtab::{
+        allocate as allocate_overlay_terminal, TermWizTerminal as OverlayTerminal,
     };
     pub type OverlaySplitDirection = host_runtime::tab::SplitDirection;
     pub type OverlayDomainHandle = host_runtime::domain::DomainId;
@@ -154,7 +154,8 @@ impl EmbeddedRuntime {
         }
 
         let bridge = Arc::new(DesktopRuntimeExecutionBridge::new());
-        let bridge_dyn: Arc<dyn chatminal_runtime::RuntimeExecutionAdapter> = Arc::clone(&bridge) as _;
+        let bridge_dyn: Arc<dyn chatminal_runtime::RuntimeExecutionAdapter> =
+            Arc::clone(&bridge) as _;
         let (state, _config) = RuntimeState::initialize_default(bridge_dyn)?;
         let runtime = Arc::new(Self { state, bridge });
         let _ = EMBEDDED_RUNTIME.set(runtime);
@@ -253,7 +254,8 @@ fn terminal_handle_metadata_u64(pane: &dyn Pane, key: &str) -> Option<u64> {
 }
 
 fn terminal_handle_terminal_instance_id(pane: &dyn Pane) -> Option<TerminalInstanceId> {
-    terminal_handle_metadata_u64(pane, "chatminal_terminal_instance_id").map(TerminalInstanceId::new)
+    terminal_handle_metadata_u64(pane, "chatminal_terminal_instance_id")
+        .map(TerminalInstanceId::new)
 }
 
 fn terminal_handle_matches_public_id(pane: &dyn Pane, public_id: u64) -> bool {
@@ -330,25 +332,22 @@ pub(crate) fn host_resize_render_scope_split(
 ) -> Option<overlay_compat::OverlaySplitLayout> {
     with_host_render_scope_by_id(render_scope_id, |render_scope| {
         render_scope.resize_split_by(split_index, delta);
-        overlay_split_layouts(render_scope).into_iter().nth(split_index)
+        overlay_split_layouts(render_scope)
+            .into_iter()
+            .nth(split_index)
     })
     .flatten()
 }
 
-pub(crate) fn host_set_render_scope_zoomed(
-    render_scope_id: u64,
-    zoomed: bool,
-) -> Option<bool> {
+pub(crate) fn host_set_render_scope_zoomed(render_scope_id: u64, zoomed: bool) -> Option<bool> {
     with_host_render_scope_by_id(render_scope_id, |render_scope| {
         render_scope.set_zoomed(zoomed)
     })
 }
 
 pub(crate) fn host_toggle_render_scope_zoom(render_scope_id: u64) -> bool {
-    with_host_render_scope_by_id(render_scope_id, |render_scope| {
-        render_scope.toggle_zoom()
-    })
-    .is_some()
+    with_host_render_scope_by_id(render_scope_id, |render_scope| render_scope.toggle_zoom())
+        .is_some()
 }
 
 pub(crate) fn host_adjust_render_scope_terminal_size(
@@ -382,7 +381,9 @@ pub(crate) fn host_activate_terminal_handle_in_render_scope(
         render_scope
             .iter_panes()
             .iter()
-            .position(|positioned| terminal_handle_matches_public_id(&*positioned.pane, terminal_handle))
+            .position(|positioned| {
+                terminal_handle_matches_public_id(&*positioned.pane, terminal_handle)
+            })
             .map(|tab_index| render_scope.set_active_idx(tab_index))
             .is_some()
     })
@@ -398,7 +399,9 @@ pub(crate) fn host_swap_active_with_terminal_handle_in_render_scope(
         render_scope
             .iter_panes()
             .iter()
-            .position(|positioned| terminal_handle_matches_public_id(&*positioned.pane, terminal_handle))
+            .position(|positioned| {
+                terminal_handle_matches_public_id(&*positioned.pane, terminal_handle)
+            })
             .and_then(|tab_index| render_scope.swap_active_with_index(tab_index, keep_focus))
             .is_some()
     })
@@ -433,7 +436,11 @@ pub(crate) fn host_activate_terminal_index_in_render_scope(
 ) -> bool {
     with_host_render_scope_by_id(render_scope_id, |render_scope| {
         let panes = render_scope.iter_panes();
-        if panes.iter().position(|positioned| positioned.index == index).is_some() {
+        if panes
+            .iter()
+            .position(|positioned| positioned.index == index)
+            .is_some()
+        {
             render_scope.set_active_idx(index);
             return true;
         }
@@ -453,7 +460,9 @@ pub(crate) fn host_activate_terminal_direction_in_render_scope(
     .unwrap_or(false)
 }
 
-pub(crate) fn overlay_pane_layouts(render_scope: &HostRenderScope) -> Vec<overlay_compat::OverlayPaneLayout> {
+pub(crate) fn overlay_pane_layouts(
+    render_scope: &HostRenderScope,
+) -> Vec<overlay_compat::OverlayPaneLayout> {
     render_scope
         .iter_panes()
         .into_iter()
@@ -582,7 +591,9 @@ pub(crate) fn resize_host_window_tabs(window_id: EngineWindowId, size: TerminalS
     });
 }
 
-pub(crate) fn host_window_initial_position(window_id: EngineWindowId) -> Option<config::GuiPosition> {
+pub(crate) fn host_window_initial_position(
+    window_id: EngineWindowId,
+) -> Option<config::GuiPosition> {
     with_host_window(window_id, |window| window.get_initial_position().clone()).flatten()
 }
 
@@ -781,10 +792,7 @@ pub(crate) fn active_workspace_for_client(client_id: &FrontendClientHandle) -> S
     Mux::get().active_workspace_for_client(client_id)
 }
 
-pub(crate) fn set_active_workspace_for_client(
-    client_id: &FrontendClientHandle,
-    workspace: &str,
-) {
+pub(crate) fn set_active_workspace_for_client(client_id: &FrontendClientHandle, workspace: &str) {
     Mux::get().set_active_workspace_for_client(client_id, workspace);
 }
 
@@ -805,8 +813,8 @@ pub(crate) fn workspace_window_ids(workspace: &str) -> Vec<u64> {
 }
 
 pub(crate) fn focus_terminal_handle_by_id(pane_id: u64) -> anyhow::Result<()> {
-    let pane_id = HostTerminalHandle::try_from(pane_id)
-        .map_err(|_| anyhow!("invalid pane id {pane_id}"))?;
+    let pane_id =
+        HostTerminalHandle::try_from(pane_id).map_err(|_| anyhow!("invalid pane id {pane_id}"))?;
     Mux::get()
         .focus_pane_and_containing_tab(pane_id)
         .map_err(anyhow::Error::from)
@@ -850,8 +858,6 @@ pub(crate) async fn spawn_local_shell_runner() -> anyhow::Result<Arc<dyn HostTer
     Ok(pane)
 }
 
-
-
 pub(crate) async fn spawn_host_runtime_entry(
     window_id: Option<u64>,
     domain: SpawnSessionDomain,
@@ -880,7 +886,6 @@ pub(crate) async fn spawn_host_runtime_entry(
         .await?;
     Ok((pane, result_window_id as u64))
 }
-
 
 pub(crate) fn add_host_domain(domain: &HostDomainHandle) {
     Mux::get().add_domain(domain);
@@ -931,17 +936,22 @@ pub(crate) fn show_host_configuration_error_message(err: &str) {
     log::error!("Configuration Error: {}", err);
 }
 
-pub(crate) fn create_serial_domain(serial_domain: config::SerialDomain) -> anyhow::Result<HostDomainHandle> {
-    Ok(Arc::new(host_runtime::domain::LocalDomain::new_serial_domain(
-        serial_domain,
-    )?))
+pub(crate) fn create_serial_domain(
+    serial_domain: config::SerialDomain,
+) -> anyhow::Result<HostDomainHandle> {
+    Ok(Arc::new(
+        host_runtime::domain::LocalDomain::new_serial_domain(serial_domain)?,
+    ))
 }
 
 pub(crate) fn shutdown_host_mux() {
     Mux::shutdown();
 }
 
-pub(crate) fn activate_host_runtime_entry(window_id: u64, render_scope_id: u64) -> anyhow::Result<()> {
+pub(crate) fn activate_host_runtime_entry(
+    window_id: u64,
+    render_scope_id: u64,
+) -> anyhow::Result<()> {
     let window_id = EngineWindowId::try_from(window_id)
         .map_err(|_| anyhow!("invalid window id {window_id}"))?;
     let render_scope_id = usize::try_from(render_scope_id)
@@ -950,9 +960,9 @@ pub(crate) fn activate_host_runtime_entry(window_id: u64, render_scope_id: u64) 
     let mut window = mux
         .get_window_mut(window_id)
         .ok_or_else(|| anyhow!("failed to get host window id {window_id}"))?;
-    let tab_idx = window
-        .idx_by_id(render_scope_id)
-        .ok_or_else(|| anyhow!("runtime entry {render_scope_id} not attached to window {window_id}"))?;
+    let tab_idx = window.idx_by_id(render_scope_id).ok_or_else(|| {
+        anyhow!("runtime entry {render_scope_id} not attached to window {window_id}")
+    })?;
     window.set_active_without_saving(tab_idx);
     Ok(())
 }
@@ -963,9 +973,15 @@ pub(crate) fn create_empty_host_window(workspace: Option<String>) -> u64 {
     *builder as u64
 }
 
-pub(crate) fn host_domain_has_panes_in_workspace(domain_id: usize, workspace: Option<&str>) -> bool {
+pub(crate) fn host_domain_has_panes_in_workspace(
+    domain_id: usize,
+    workspace: Option<&str>,
+) -> bool {
     let mux = Mux::get();
-    let have_panes_in_domain = mux.iter_panes().iter().any(|pane| pane.domain_id() == domain_id);
+    let have_panes_in_domain = mux
+        .iter_panes()
+        .iter()
+        .any(|pane| pane.domain_id() == domain_id);
     if !have_panes_in_domain {
         return false;
     }
