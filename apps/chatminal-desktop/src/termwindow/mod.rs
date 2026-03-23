@@ -89,7 +89,6 @@ mod prevcursor;
 pub mod render;
 pub mod resize;
 mod selection;
-pub mod sidebar_session_modal;
 pub mod spawn;
 pub mod webgpu;
 use crate::spawn::SpawnWhere;
@@ -1134,26 +1133,6 @@ impl TermWindow {
                 window.invalidate();
             }
         }
-    }
-
-    fn confirm_delete_chatminal_session(&mut self, session_id: &str) {
-        if !self.chatminal_sidebar.is_enabled() {
-            return;
-        }
-        let session_name = self
-            .chatminal_sidebar
-            .snapshot()
-            .sessions
-            .iter()
-            .find(|session| session.session_id == session_id)
-            .map(|session| session.name.clone())
-            .unwrap_or_else(|| "session này".to_string());
-        self.set_modal(Rc::new(
-            crate::termwindow::sidebar_session_modal::SidebarSessionModal::delete(
-                session_id.to_string(),
-                session_name,
-            ),
-        ));
     }
 
     fn rename_chatminal_session(&mut self, session_id: &str, name: &str) {

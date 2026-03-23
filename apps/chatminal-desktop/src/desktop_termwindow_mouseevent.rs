@@ -704,7 +704,7 @@ impl super::TermWindow {
             let session_id = session_id.to_string();
             self.dismiss_chatminal_sidebar_context_menu(context);
             window.notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                term_window.confirm_delete_chatminal_session(&session_id);
+                term_window.close_chatminal_session_by_id(&session_id);
             })));
         }
         context.set_cursor(Some(MouseCursor::Arrow));
