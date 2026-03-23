@@ -62,18 +62,19 @@ impl crate::TermWindow {
         if !self.chatminal_sidebar.is_enabled() {
             return Ok(());
         }
-        let sidebar_background = self.build_chatminal_sidebar()?;
-        let sidebar_header = self.build_chatminal_sidebar_header()?;
-        let (sidebar_tree, tree_clip_rect) = self.build_chatminal_sidebar_tree()?;
-        let footer_background = self.build_chatminal_terminal_footer_background()?;
-        let footer_content = self.build_chatminal_terminal_footer_content()?;
+        let bounds = self.shell_bounds();
+        let sidebar_background = self.build_chatminal_sidebar(&bounds)?;
+        let sidebar_header = self.build_chatminal_sidebar_header(&bounds)?;
+        let (sidebar_tree, tree_clip_rect) = self.build_chatminal_sidebar_tree(&bounds)?;
+        let footer_background = self.build_chatminal_terminal_footer_background(&bounds)?;
+        let footer_content = self.build_chatminal_terminal_footer_content(&bounds)?;
 
         self.append_and_render_overlay(&sidebar_background)?;
         if let Some(tree) = sidebar_tree.as_ref() {
             self.append_and_render_overlay_clipped(tree, tree_clip_rect)?;
         }
         self.append_and_render_overlay(&sidebar_header)?;
-        self.render_chatminal_sidebar_scrollbar()?;
+        self.render_chatminal_sidebar_scrollbar(&bounds)?;
         self.append_and_render_overlay(&footer_background)?;
         self.append_and_render_overlay(&footer_content)
     }
@@ -105,13 +106,10 @@ impl crate::TermWindow {
 
     fn build_chatminal_sidebar(
         &mut self,
+        sb: &crate::shell_bounds::ShellBounds,
     ) -> anyhow::Result<crate::termwindow::box_model::ComputedElement> {
-        let border = self.get_os_border();
-        let sidebar_width = self.chatminal_sidebar_width() as f32;
-        let sidebar_height =
-            self.dimensions
-                .pixel_height
-                .saturating_sub((border.top + border.bottom).get() as usize) as f32;
+        let sidebar_width = sb.sidebar_width;
+        let sidebar_height = sb.sidebar_height;
         let body_font = self.fonts.default_font()?;
 
         let panel_bg = LinearRgba::with_components(0.008, 0.008, 0.008, 1.0);
@@ -146,7 +144,7 @@ impl crate::TermWindow {
                     pixel_max: sidebar_height,
                     pixel_cell: self.render_metrics.cell_size.height as f32,
                 },
-                bounds: euclid::rect(0.0, border.top.get() as f32, sidebar_width, sidebar_height),
+                bounds: euclid::rect(sb.sidebar_x, sb.sidebar_y, sidebar_width, sidebar_height),
                 metrics: &self.render_metrics,
                 gl_state: self.render_state.as_ref().unwrap(),
                 zindex: 1,
@@ -157,9 +155,9 @@ impl crate::TermWindow {
 
     fn build_chatminal_sidebar_header(
         &mut self,
+        sb: &crate::shell_bounds::ShellBounds,
     ) -> anyhow::Result<crate::termwindow::box_model::ComputedElement> {
-        let border = self.get_os_border();
-        let sidebar_width = self.chatminal_sidebar_width() as f32;
+        let sidebar_width = sb.sidebar_width;
         let body_font = self.fonts.default_font()?;
         let title_font = self.fonts.default_font()?;
         let text = LinearRgba::with_components(0.867, 0.867, 0.867, 1.0);
@@ -180,8 +178,8 @@ impl crate::TermWindow {
                     pixel_cell: self.render_metrics.cell_size.height as f32,
                 },
                 bounds: euclid::rect(
-                    0.0,
-                    border.top.get() as f32,
+                    sb.sidebar_x,
+                    sb.sidebar_y,
                     sidebar_width,
                     SIDEBAR_HEADER_HEIGHT_PX,
                 ),
@@ -195,19 +193,16 @@ impl crate::TermWindow {
 
     fn build_chatminal_sidebar_tree(
         &mut self,
+        sb: &crate::shell_bounds::ShellBounds,
     ) -> anyhow::Result<(Option<crate::termwindow::box_model::ComputedElement>, ::window::RectF)> {
         let snapshot = ordered_sidebar_snapshot(self, self.chatminal_sidebar.snapshot());
-        let border = self.get_os_border();
-        let sidebar_width = self.chatminal_sidebar_width() as f32;
-        let sidebar_height =
-            self.dimensions
-                .pixel_height
-                .saturating_sub((border.top + border.bottom).get() as usize) as f32;
+        let sidebar_width = sb.sidebar_width;
+        let sidebar_height = sb.sidebar_height;
         let tree_viewport_height =
             (sidebar_height - SIDEBAR_HEADER_HEIGHT_PX - SIDEBAR_BODY_BOTTOM_PADDING_PX).max(0.0);
         let tree_clip_rect = euclid::rect(
-            0.0,
-            border.top.get() as f32 + SIDEBAR_HEADER_HEIGHT_PX,
+            sb.sidebar_x,
+            sb.sidebar_y + SIDEBAR_HEADER_HEIGHT_PX,
             sidebar_width,
             tree_viewport_height,
         );
@@ -267,8 +262,8 @@ impl crate::TermWindow {
                     pixel_cell: self.render_metrics.cell_size.height as f32,
                 },
                 bounds: euclid::rect(
-                    0.0,
-                    border.top.get() as f32 + SIDEBAR_HEADER_HEIGHT_PX,
+                    sb.sidebar_x,
+                    sb.sidebar_y + SIDEBAR_HEADER_HEIGHT_PX,
                     sidebar_width,
                     total_tree_height.max(tree_viewport_height),
                 ),
@@ -283,18 +278,17 @@ impl crate::TermWindow {
         Ok((Some(computed), tree_clip_rect))
     }
 
-    fn render_chatminal_sidebar_scrollbar(&mut self) -> anyhow::Result<()> {
+    fn render_chatminal_sidebar_scrollbar(
+        &mut self,
+        sb: &crate::shell_bounds::ShellBounds,
+    ) -> anyhow::Result<()> {
         if !self.chatminal_sidebar.is_enabled() {
             return Ok(());
         }
 
         let snapshot = ordered_sidebar_snapshot(self, self.chatminal_sidebar.snapshot());
-        let border = self.get_os_border();
-        let sidebar_width = self.chatminal_sidebar_width() as f32;
-        let sidebar_height =
-            self.dimensions
-                .pixel_height
-                .saturating_sub((border.top + border.bottom).get() as usize) as f32;
+        let sidebar_width = sb.sidebar_width;
+        let sidebar_height = sb.sidebar_height;
         let tree_viewport_height =
             (sidebar_height - SIDEBAR_HEADER_HEIGHT_PX - SIDEBAR_BODY_BOTTOM_PADDING_PX).max(0.0);
         let line_height = self.render_metrics.cell_size.height as f32;
@@ -316,7 +310,7 @@ impl crate::TermWindow {
         };
         let rect = euclid::rect(
             (sidebar_width - SIDEBAR_SCROLLBAR_WIDTH_PX - 6.0).max(0.0),
-            border.top.get() as f32 + SIDEBAR_HEADER_HEIGHT_PX + thumb_offset,
+            sb.sidebar_y + SIDEBAR_HEADER_HEIGHT_PX + thumb_offset,
             SIDEBAR_SCROLLBAR_WIDTH_PX,
             thumb_height,
         );
@@ -439,13 +433,12 @@ impl crate::TermWindow {
 
     fn build_chatminal_terminal_footer_background(
         &mut self,
+        sb: &crate::shell_bounds::ShellBounds,
     ) -> anyhow::Result<crate::termwindow::box_model::ComputedElement> {
-        let border = self.get_os_border();
-        let x = self.chatminal_sidebar_width() as f32;
-        let width = (self.dimensions.pixel_width as f32 - x).max(0.0);
-        let height = self.chatminal_terminal_footer_height();
-        let y =
-            (self.dimensions.pixel_height as f32 - border.bottom.get() as f32 - height).max(0.0);
+        let x = sb.footer_x;
+        let width = sb.footer_width;
+        let height = sb.footer_height;
+        let y = sb.footer_y;
         let body_font = self.fonts.title_font()?;
         let bg = LinearRgba::with_components(0.0, 0.0, 0.0, 1.0);
         let divider = LinearRgba::with_components(0.133, 0.133, 0.133, 1.0);
@@ -495,15 +488,14 @@ impl crate::TermWindow {
 
     fn build_chatminal_terminal_footer_content(
         &mut self,
+        sb: &crate::shell_bounds::ShellBounds,
     ) -> anyhow::Result<crate::termwindow::box_model::ComputedElement> {
         let snapshot = ordered_sidebar_snapshot(self, self.chatminal_sidebar.snapshot());
-        let border = self.get_os_border();
-        let sidebar_width = self.chatminal_sidebar_width() as f32;
+        let sidebar_width = sb.sidebar_width;
         let x = 0.0;
-        let width = self.dimensions.pixel_width as f32;
-        let height = self.chatminal_terminal_footer_height();
-        let y =
-            (self.dimensions.pixel_height as f32 - border.bottom.get() as f32 - height).max(0.0);
+        let width = sb.window_width;
+        let height = sb.footer_height;
+        let y = sb.footer_y;
         let body_font = self.fonts.title_font()?;
         let label = LinearRgba::with_components(0.35, 0.35, 0.35, 1.0);
         let value = LinearRgba::with_components(0.65, 0.65, 0.65, 1.0);

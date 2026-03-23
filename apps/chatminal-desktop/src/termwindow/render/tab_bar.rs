@@ -19,18 +19,12 @@ impl crate::TermWindow {
             return Ok(());
         }
 
-        let border = self.get_os_border();
-        let tab_bar_x = self.terminal_tab_bar_left();
-        let tab_bar_width = self.terminal_tab_bar_width();
+        let sb = self.shell_bounds();
+        let tab_bar_x = sb.session_bar_x;
+        let tab_bar_width = sb.session_bar_width;
+        let tab_bar_y = sb.session_bar_y;
 
         let palette = self.palette().clone();
-        let tab_bar_height = self.tab_bar_pixel_height()?;
-        let tab_bar_y = if self.config.session_bar_at_bottom {
-            ((self.dimensions.pixel_height as f32) - (tab_bar_height + border.bottom.get() as f32))
-                .max(0.)
-        } else {
-            border.top.get() as f32
-        };
 
         // Register the tab bar location
         self.ui_items.append(&mut self.tab_bar.compute_ui_items(

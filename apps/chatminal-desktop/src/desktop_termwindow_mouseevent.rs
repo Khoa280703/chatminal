@@ -36,15 +36,8 @@ impl super::TermWindow {
         let WMEK::VertWheel(amount) = event.kind else {
             return false;
         };
-        let border = self.get_os_border();
-        let sidebar_width = self.chatminal_sidebar_width() as isize;
-        let sidebar_bottom =
-            (self.dimensions.pixel_height as f32 - border.bottom.get() as f32).max(0.0) as isize;
-        let inside_sidebar = event.coords.x >= 0
-            && event.coords.x < sidebar_width
-            && event.coords.y >= border.top.get() as isize
-            && event.coords.y < sidebar_bottom;
-        if !inside_sidebar {
+        let sb = self.shell_bounds();
+        if !sb.is_inside_sidebar(event.coords.x as f32, event.coords.y as f32) {
             return false;
         }
 

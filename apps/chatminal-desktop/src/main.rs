@@ -51,6 +51,7 @@ mod resize_increment_calculator;
 mod scripting;
 mod scrollbar;
 mod selection;
+mod shell_bounds;
 mod shapecache;
 mod spawn;
 mod stats;

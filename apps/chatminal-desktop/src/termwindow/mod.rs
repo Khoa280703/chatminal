@@ -547,6 +547,95 @@ impl TermWindow {
         ) as f32
     }
 
+    /// Compute shell chrome geometry for the current frame.
+    ///
+    /// Both render and hit-test paths should use this as the single source
+    /// of truth for sidebar/session-bar/footer/content bounds.
+    pub(crate) fn shell_bounds(&self) -> crate::shell_bounds::ShellBounds {
+        let border = self.get_os_border();
+        let bt = border.top.get() as f32;
+        let bb = border.bottom.get() as f32;
+        let bl = border.left.get() as f32;
+        let br = border.right.get() as f32;
+        let ww = self.dimensions.pixel_width as f32;
+        let wh = self.dimensions.pixel_height as f32;
+        let shell_enabled =
+            Self::chatminal_shell_enabled_for_dimensions(self.dimensions.pixel_width, self.dimensions.dpi);
+        let sidebar_w = if shell_enabled {
+            self.chatminal_sidebar_width() as f32
+        } else {
+            0.0
+        };
+        let footer_h = self.chatminal_terminal_footer_height();
+        let session_bar_h = if self.show_session_bar {
+            self.tab_bar_pixel_height().unwrap_or(0.0)
+        } else {
+            0.0
+        };
+        let session_bar_at_bottom = self.config.session_bar_at_bottom;
+
+        // Sidebar: left edge, full height inside border
+        let sidebar_x = 0.0;
+        let sidebar_y = bt;
+        let sidebar_height = (wh - bt - bb).max(0.0);
+
+        // Session bar: right of sidebar
+        let session_bar_x = sidebar_w;
+        let session_bar_width = (ww - sidebar_w).max(0.0);
+        let session_bar_y = if session_bar_at_bottom {
+            (wh - bb - footer_h - session_bar_h).max(bt)
+        } else {
+            bt
+        };
+
+        // Footer: below content, right of sidebar
+        let footer_x = sidebar_w;
+        let footer_width = (ww - sidebar_w).max(0.0);
+        let footer_y = (wh - bb - footer_h).max(0.0);
+
+        // Content: between session bar and footer, right of sidebar
+        let content_x = sidebar_w;
+        let content_y = if session_bar_at_bottom {
+            bt
+        } else {
+            bt + session_bar_h
+        };
+        let content_bottom = if session_bar_at_bottom {
+            (wh - bb - footer_h - session_bar_h).max(content_y)
+        } else {
+            (wh - bb - footer_h).max(content_y)
+        };
+        let content_width = (ww - sidebar_w).max(0.0);
+        let content_height = (content_bottom - content_y).max(0.0);
+
+        crate::shell_bounds::ShellBounds {
+            window_width: ww,
+            window_height: wh,
+            border_top: bt,
+            border_bottom: bb,
+            border_left: bl,
+            border_right: br,
+            sidebar_x,
+            sidebar_y,
+            sidebar_width: sidebar_w,
+            sidebar_height,
+            session_bar_x,
+            session_bar_y,
+            session_bar_width,
+            session_bar_height: session_bar_h,
+            footer_x,
+            footer_y,
+            footer_width,
+            footer_height: footer_h,
+            content_x,
+            content_y,
+            content_width,
+            content_height,
+            shell_enabled,
+            session_bar_at_bottom,
+        }
+    }
+
     fn should_show_session_bar_for_count(
         config: &ConfigHandle,
         num_tabs: usize,
