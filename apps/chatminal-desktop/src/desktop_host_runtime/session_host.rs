@@ -16,9 +16,8 @@ use portable_pty::CommandBuilder;
 
 use super::session_pane::{pane_id_for_terminal_instance, ChatminalSessionPane};
 use super::{
-    host_window_exists, HostDomainId as DomainId, HostMux, HostRenderScope,
-    HostRenderableDimensions as RenderableDimensions, HostTerminal,
-    RuntimeWindowId as EngineWindowId,
+    host_window_exists, HostMux, HostRenderScope,
+    HostRenderableDimensions as RenderableDimensions, HostTerminal, RuntimeWindowId as EngineWindowId,
 };
 use crate::chatminal_render::{ChatminalRenderPane, ChatminalRenderState};
 use crate::chatminal_runtime::{
@@ -38,13 +37,12 @@ fn host_registry() -> &'static Mutex<HashMap<EngineWindowId, Arc<DesktopSessionH
 
 pub(crate) fn get_or_init_session_host(
     window_id: EngineWindowId,
-    domain_id: DomainId,
     shared: Arc<SessionEngineShared>,
 ) -> Arc<DesktopSessionHost> {
     let mut registry = host_registry().lock().unwrap();
     registry
         .entry(window_id)
-        .or_insert_with(|| Arc::new(DesktopSessionHost::new(window_id, domain_id, shared)))
+        .or_insert_with(|| Arc::new(DesktopSessionHost::new(window_id, shared)))
         .clone()
 }
 
@@ -54,7 +52,6 @@ pub(crate) fn get_or_init_session_host(
 
 pub(crate) struct DesktopSessionHost {
     window_id: EngineWindowId,
-    domain_id: DomainId,
     shared: Arc<SessionEngineShared>,
     // terminal_instance_id → pane (for output/input routing)
     panes: Mutex<HashMap<TerminalInstanceId, Arc<ChatminalSessionPane>>>,
@@ -73,12 +70,10 @@ pub(crate) struct DesktopSessionHost {
 impl DesktopSessionHost {
     fn new(
         window_id: EngineWindowId,
-        domain_id: DomainId,
         shared: Arc<SessionEngineShared>,
     ) -> Self {
         Self {
             window_id,
-            domain_id,
             shared,
             panes: Mutex::new(HashMap::new()),
             session_pane: Mutex::new(HashMap::new()),
@@ -348,7 +343,6 @@ impl DesktopSessionHost {
 
                 match ChatminalSessionPane::new(
                     Arc::clone(&self.shared),
-                    self.domain_id,
                     session_id.clone(),
                     runtime_id,
                     terminal_instance_id,

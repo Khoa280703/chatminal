@@ -1,8 +1,7 @@
 use crate::chatminal_runtime::overlay_compat::{
-    OverlayAssignmentResult, OverlayCachePolicy, OverlayDomainHandle, OverlayForEachLogicalLine,
-    OverlayLogicalLine, OverlayPane, OverlayPaneHandle, OverlayPattern, OverlayPatternType,
-    OverlayRuntimeEntryHandle, OverlaySearchResult, OverlayWithPaneLines, RenderableDimensions,
-    StableCursorPosition,
+    OverlayAssignmentResult, OverlayCachePolicy, OverlayForEachLogicalLine, OverlayLogicalLine,
+    OverlayPane, OverlayPaneHandle, OverlayPattern, OverlayPatternType, OverlayRuntimeEntryHandle,
+    OverlaySearchResult, OverlayWithPaneLines, RenderableDimensions, StableCursorPosition,
 };
 use crate::selection::{SelectionCoordinate, SelectionRange, SelectionX};
 use crate::termwindow::keyevent::KeyTableArgs;
@@ -1315,10 +1314,6 @@ impl OverlayPane for CopyOverlay {
 
     fn palette(&self) -> ColorPalette {
         self.delegate.palette()
-    }
-
-    fn domain_id(&self) -> OverlayDomainHandle {
-        self.delegate.domain_id()
     }
 
     fn erase_scrollback(&self, erase_mode: ScrollbackEraseMode) {

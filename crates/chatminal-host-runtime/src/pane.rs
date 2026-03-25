@@ -1,4 +1,3 @@
-use crate::domain::DomainId;
 use crate::renderable::*;
 use crate::ExitBehavior;
 use async_trait::async_trait;
@@ -257,7 +256,6 @@ pub trait Pane: DowncastSync + Send + Sync {
     fn is_dead(&self) -> bool;
     fn kill(&self) {}
     fn palette(&self) -> ColorPalette;
-    fn domain_id(&self) -> DomainId;
 
     fn get_keyboard_encoding(&self) -> KeyboardEncoding {
         KeyboardEncoding::Xterm
@@ -646,9 +644,6 @@ mod test {
             unimplemented!()
         }
         fn palette(&self) -> ColorPalette {
-            unimplemented!()
-        }
-        fn domain_id(&self) -> DomainId {
             unimplemented!()
         }
 

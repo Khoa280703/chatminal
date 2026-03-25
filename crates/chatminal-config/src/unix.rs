@@ -1,22 +1,22 @@
-use crate::config::validate_domain_name;
+use crate::config::validate_target_name;
 use crate::*;
 use engine_dynamic::{FromDynamic, ToDynamic};
 use std::path::PathBuf;
 
 /// Configures an instance of a multiplexer that can be communicated
-/// with via a unix domain socket
+/// with via a unix socket target
 #[derive(Debug, Clone, FromDynamic, ToDynamic)]
-pub struct UnixDomain {
-    /// The name of this specific domain.  Must be unique amongst
-    /// all types of domain in the configuration file.
-    #[dynamic(validate = "validate_domain_name")]
+pub struct UnixTargetConfig {
+    /// The name of this specific target. Must be unique amongst
+    /// all target types in the configuration file.
+    #[dynamic(validate = "validate_target_name")]
     pub name: String,
 
     /// The path to the socket.  If unspecified, a resonable default
     /// value will be computed.
     pub socket_path: Option<PathBuf>,
 
-    /// If true, connect to this domain automatically at startup
+    /// If true, connect to this target automatically at startup
     #[dynamic(default)]
     pub connect_automatically: bool,
 
@@ -30,7 +30,7 @@ pub struct UnixDomain {
     ///
     /// Desktop-only Chatminal no longer provides a default compatibility
     /// runtime host for this path, so this must be configured explicitly for
-    /// legacy unix-domain usage.
+    /// legacy unix-socket target usage.
     pub serve_command: Option<Vec<String>>,
 
     /// Instead of directly connecting to `socket_path`,
@@ -53,7 +53,7 @@ pub struct UnixDomain {
     pub write_timeout: Duration,
 
     /// Don't use default_local_echo_threshold_ms() here to
-    /// disable the predictive echo for Unix domains by default.
+    /// disable the predictive echo for unix targets by default.
     pub local_echo_threshold_ms: Option<u64>,
 
     /// Show time since last response when waiting for a response.
@@ -64,7 +64,7 @@ pub struct UnixDomain {
     pub overlay_lag_indicator: bool,
 }
 
-impl Default for UnixDomain {
+impl Default for UnixTargetConfig {
     fn default() -> Self {
         Self {
             name: String::new(),
@@ -88,7 +88,7 @@ pub enum UnixTarget {
     Proxy(Vec<String>),
 }
 
-impl UnixDomain {
+impl UnixTargetConfig {
     pub fn socket_path(&self) -> PathBuf {
         self.socket_path
             .as_ref()
@@ -104,8 +104,8 @@ impl UnixDomain {
         }
     }
 
-    pub fn default_unix_domains() -> Vec<Self> {
-        vec![UnixDomain {
+    pub fn default_unix_targets() -> Vec<Self> {
+        vec![UnixTargetConfig {
             name: "unix".to_string(),
             read_timeout: default_read_timeout(),
             write_timeout: default_read_timeout(),
@@ -117,7 +117,7 @@ impl UnixDomain {
         match self.serve_command.as_ref() {
             Some(cmd) => Ok(cmd.iter().map(Into::into).collect()),
             None => anyhow::bail!(
-                "UnixDomain::serve_command requires explicit configuration in desktop-only Chatminal"
+                "UnixTargetConfig::serve_command requires explicit configuration in desktop-only Chatminal"
             ),
         }
     }
@@ -125,11 +125,13 @@ impl UnixDomain {
 
 #[cfg(test)]
 mod tests {
-    use super::UnixDomain;
+    use super::UnixTargetConfig;
 
     #[test]
     fn default_serve_command_requires_explicit_configuration() {
-        let err = UnixDomain::default().serve_command().expect_err("missing serve command");
+        let err = UnixTargetConfig::default()
+            .serve_command()
+            .expect_err("missing serve command");
         assert!(
             err.to_string()
                 .contains("requires explicit configuration")

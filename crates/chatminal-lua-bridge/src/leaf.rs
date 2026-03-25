@@ -132,7 +132,7 @@ impl UserData for TerminalRef {
             let mux = get_mux()?;
             Ok(mux
                 .resolve_pane_id(this.0)
-                .map(|(_domain_id, window_id, _tab_id)| WindowRef(window_id)))
+                .map(|(window_id, _tab_id)| WindowRef(window_id)))
         });
         methods.add_method("session", |_, this, _: ()| {
             let mux = get_mux()?;
@@ -275,22 +275,6 @@ impl UserData for TerminalRef {
             },
         );
 
-        methods.add_method("get_domain_name", |_, this, _: ()| {
-            let mux = get_mux()?;
-            let pane = this.resolve(&mux)?;
-            let mut name = None;
-            if let Some(mux) = Mux::try_get() {
-                let domain_id = pane.domain_id();
-                name = mux
-                    .get_domain(domain_id)
-                    .map(|dom| dom.domain_name().to_string());
-            }
-            match name {
-                Some(name) => Ok(name),
-                None => Ok("".to_string()),
-            }
-        });
-
         methods.add_method("inject_output", |_, this, text: String| {
             let mux = get_mux()?;
             let pane = this.resolve(&mux)?;
@@ -381,7 +365,7 @@ impl UserData for TerminalRef {
 
         methods.add_async_method("move_to_new_session", |_lua, this, ()| async move {
             let mux = Mux::get();
-            let (_domain, window_id, _tab) = mux
+            let (window_id, _tab) = mux
                 .resolve_pane_id(this.0)
                 .ok_or_else(|| mlua::Error::external(format!("leaf {} not found", this.0)))?;
             let (tab, window) = mux
@@ -414,7 +398,7 @@ impl UserData for TerminalRef {
         methods.add_method("activate", move |_lua, this, ()| {
             let mux = Mux::get();
             let pane = this.resolve(&mux)?;
-            let (_domain_id, window_id, tab_id) = mux
+            let (window_id, tab_id) = mux
                 .resolve_pane_id(this.0)
                 .ok_or_else(|| mlua::Error::external(format!("leaf {} not found", this.0)))?;
             {
@@ -447,8 +431,6 @@ impl UserData for TerminalRef {
 struct SplitSession {
     #[dynamic(flatten)]
     cmd_builder: CommandBuilderFrag,
-    #[dynamic(default = "spawn_session_default_domain")]
-    domain: SpawnSessionDomain,
     #[dynamic(default)]
     direction: SessionSplitDirection,
     #[dynamic(default)]
@@ -495,12 +477,10 @@ impl SplitSession {
 
         let mux = get_mux()?;
         let (pane, _size) = mux
-            .split_pane(pane.0, request, source, self.domain.clone())
+            .split_pane(pane.0, request, source)
             .await
             .map_err(|e| mlua::Error::external(format!("{:#?}", e)))?;
 
         Ok(TerminalRef(pane.pane_id()))
     }
 }
-
-

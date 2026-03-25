@@ -1,4 +1,3 @@
-use crate::domain::DomainId;
 use crate::pane::*;
 use crate::renderable::StableCursorPosition;
 use crate::{Mux, MuxNotification, WindowId};
@@ -668,10 +667,6 @@ impl Tab {
 
     pub fn kill_pane(&self, pane_id: PaneId) -> bool {
         self.inner.lock().kill_pane(pane_id)
-    }
-
-    pub fn kill_panes_in_domain(&self, domain: DomainId) -> bool {
-        self.inner.lock().kill_panes_in_domain(domain)
     }
 
     /// Remove pane from tab.
@@ -1587,12 +1582,6 @@ impl TabInner {
             .is_empty()
     }
 
-    fn kill_panes_in_domain(&mut self, domain: DomainId) -> bool {
-        !self
-            .remove_pane_if(|_, pane| pane.domain_id() == domain, true)
-            .is_empty()
-    }
-
     fn remove_pane(&mut self, pane_id: PaneId) -> Option<Arc<dyn Pane>> {
         let panes = self.remove_pane_if(|_, pane| pane.pane_id() == pane_id, false);
         for pane in panes {
@@ -2301,9 +2290,6 @@ mod test {
         }
         fn palette(&self) -> ColorPalette {
             unimplemented!()
-        }
-        fn domain_id(&self) -> DomainId {
-            1
         }
         fn is_mouse_grabbed(&self) -> bool {
             false

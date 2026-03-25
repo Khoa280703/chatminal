@@ -1,17 +1,15 @@
-//! A Domain represents an instance of a multiplexer.
-//! For example, the gui frontend has its own domain,
-//! and we can connect to a domain hosted by a mux server
-//! that may be local or running inside a WSL container.
+//! A SpawnTarget is the execution backend used by the mux to create panes/tabs.
+//! The active desktop product path installs a single primary backend.
 
 use crate::localpane::LocalPane;
 use crate::pane::{alloc_pane_id, Pane, PaneId};
 use crate::tab::{SplitRequest, Tab, TabId};
 use crate::window::WindowId;
 use crate::Mux;
-use anyhow::{bail, Context, Error};
+use anyhow::{Context, Error};
 use async_trait::async_trait;
-use config::keyassignment::{SpawnCommand, SpawnSessionDomain};
-use config::{configuration, ExecDomain, SerialDomain, ValueOrFunc, WslDomain};
+use config::keyassignment::SpawnCommand;
+use config::{configuration, ExecTarget, SerialTarget, WslTarget};
 use downcast_rs::{impl_downcast, Downcast};
 use engine_term::TerminalSize;
 use parking_lot::Mutex;
@@ -21,19 +19,6 @@ use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-
-static DOMAIN_ID: ::std::sync::atomic::AtomicUsize = ::std::sync::atomic::AtomicUsize::new(0);
-pub type DomainId = usize;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DomainState {
-    Detached,
-    Attached,
-}
-
-pub fn alloc_domain_id() -> DomainId {
-    DOMAIN_ID.fetch_add(1, ::std::sync::atomic::Ordering::Relaxed)
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SplitSource {
@@ -45,8 +30,8 @@ pub enum SplitSource {
 }
 
 #[async_trait(?Send)]
-pub trait Domain: Downcast + Send + Sync {
-    /// Spawn a new command within this domain
+pub trait SpawnTarget: Downcast + Send + Sync {
+    /// Spawn a new command within this target.
     async fn spawn(
         &self,
         size: TerminalSize,
@@ -107,7 +92,7 @@ pub trait Domain: Downcast + Send + Sync {
                     .await?
             }
             SplitSource::MovePane(src_pane_id) => {
-                let (_domain, _window, src_tab) = mux
+                let (_window, src_tab) = mux
                     .resolve_pane_id(src_pane_id)
                     .ok_or_else(|| anyhow::anyhow!("pane {} not found", src_pane_id))?;
                 let src_tab = match mux.get_tab(src_tab) {
@@ -148,8 +133,8 @@ pub trait Domain: Downcast + Send + Sync {
         command_dir: Option<String>,
     ) -> anyhow::Result<Arc<dyn Pane>>;
 
-    /// The mux will call this method on the domain of the pane that
-    /// is being moved to give the domain a chance to handle the movement.
+    /// The mux will call this method on the spawn target of the pane that
+    /// is being moved to give the target a chance to handle the movement.
     /// If this method returns Ok(None), then the mux will handle the
     /// movement itself by mutating its local Tabs and Windows.
     async fn move_pane_to_new_tab(
@@ -161,96 +146,62 @@ pub trait Domain: Downcast + Send + Sync {
         Ok(None)
     }
 
-    /// Returns false if the `spawn` method will never succeed.
-    /// There are some internal placeholder domains that are
-    /// pre-created with local UI that we do not want to allow
-    /// to show in the launcher/menu as launchable items.
-    fn spawnable(&self) -> bool {
-        true
-    }
-
-    /// Returns true if the `detach` method can be used
-    /// to detach the domain, preserving the associated
-    /// panes, or false if the `detach` method will never
-    /// succeed
-    fn detachable(&self) -> bool;
-
-    /// Returns the domain id, which is useful for obtaining
-    /// a handle on the domain later.
-    fn domain_id(&self) -> DomainId;
-
-    /// Returns the name of the domain.
+    /// Returns the name of the target.
     /// Should be a short identifier.
-    fn domain_name(&self) -> &str;
+    fn spawn_target_name(&self) -> &str;
 
-    /// Returns a label describing the domain.
-    async fn domain_label(&self) -> String {
-        self.domain_name().to_string()
-    }
-
-    /// Re-attach to any tabs that might be pre-existing in this domain
-    async fn attach(&self, window_id: Option<WindowId>) -> anyhow::Result<()>;
-
-    /// Detach all tabs
-    fn detach(&self) -> anyhow::Result<()>;
-
-    /// Indicates the state of the domain
-    fn state(&self) -> DomainState;
 }
-impl_downcast!(Domain);
+impl_downcast!(SpawnTarget);
 
-pub struct LocalDomain {
+pub struct LocalSpawnTarget {
     pty_system: Mutex<Box<dyn PtySystem + Send>>,
-    id: DomainId,
     name: String,
 }
 
-impl LocalDomain {
+impl LocalSpawnTarget {
     pub fn new(name: &str) -> Result<Self, Error> {
         Ok(Self::with_pty_system(name, native_pty_system()))
     }
 
-    fn resolve_exec_domain(&self) -> Option<ExecDomain> {
+    fn resolve_exec_target_config(&self) -> Option<ExecTarget> {
         config::configuration()
-            .exec_domains
+            .exec_targets
             .iter()
             .find(|ed| ed.name == self.name)
             .cloned()
     }
 
-    fn resolve_wsl_domain(&self) -> Option<WslDomain> {
+    fn resolve_wsl_target_config(&self) -> Option<WslTarget> {
         config::configuration()
-            .wsl_domains()
+            .wsl_targets()
             .iter()
             .find(|d| d.name == self.name)
             .cloned()
     }
 
     pub fn with_pty_system(name: &str, pty_system: Box<dyn PtySystem + Send>) -> Self {
-        let id = alloc_domain_id();
         Self {
             pty_system: Mutex::new(pty_system),
-            id,
             name: name.to_string(),
         }
     }
 
-    pub fn new_wsl(wsl: WslDomain) -> Result<Self, Error> {
+    pub fn new_wsl_target(wsl: WslTarget) -> Result<Self, Error> {
         Self::new(&wsl.name)
     }
 
-    pub fn new_exec_domain(exec_domain: ExecDomain) -> anyhow::Result<Self> {
-        Self::new(&exec_domain.name)
+    pub fn new_exec_target(exec_target: ExecTarget) -> anyhow::Result<Self> {
+        Self::new(&exec_target.name)
     }
 
-    pub fn new_serial_domain(serial_domain: SerialDomain) -> anyhow::Result<Self> {
-        let port = serial_domain.port.as_ref().unwrap_or(&serial_domain.name);
+    pub fn new_serial_target(serial_target: SerialTarget) -> anyhow::Result<Self> {
+        let port = serial_target.port.as_ref().unwrap_or(&serial_target.name);
         let mut serial = portable_pty::serial::SerialTty::new(&port);
-        if let Some(baud) = serial_domain.baud {
+        if let Some(baud) = serial_target.baud {
             serial.set_baud_rate(baud as u32);
         }
         let pty_system = Box::new(serial);
-        Ok(Self::with_pty_system(&serial_domain.name, pty_system))
+        Ok(Self::with_pty_system(&serial_target.name, pty_system))
     }
 
     #[cfg(unix)]
@@ -268,7 +219,7 @@ impl LocalDomain {
     }
 
     async fn fixup_command(&self, cmd: &mut CommandBuilder) -> anyhow::Result<()> {
-        if let Some(wsl) = self.resolve_wsl_domain() {
+        if let Some(wsl) = self.resolve_wsl_target_config() {
             let mut args: Vec<OsString> = cmd.get_argv().clone();
 
             if args.is_empty() {
@@ -310,7 +261,7 @@ impl LocalDomain {
 
             cmd.clear_cwd();
             *cmd.get_argv_mut() = argv;
-        } else if let Some(ed) = self.resolve_exec_domain() {
+        } else if let Some(ed) = self.resolve_exec_target_config() {
             let mut args = vec![];
             let mut set_environment_variables = HashMap::new();
             for arg in cmd.get_argv() {
@@ -329,7 +280,6 @@ impl LocalDomain {
             };
             let spawn_command = SpawnCommand {
                 label: None,
-                domain: SpawnSessionDomain::DomainName(ed.name.clone()),
                 args: if args.is_empty() { None } else { Some(args) },
                 set_environment_variables,
                 cwd,
@@ -346,14 +296,14 @@ impl LocalDomain {
                 let cmd: SpawnCommand =
                     luahelper::from_lua_value_dynamic(value).with_context(|| {
                         format!(
-                            "interpreting SpawnCommand result from ExecDomain {}",
+                            "interpreting SpawnCommand result from ExecTarget {}",
                             ed.name
                         )
                     })?;
                 Ok(cmd)
             })
             .await
-            .with_context(|| format!("calling ExecDomain {} function", ed.name))?;
+            .with_context(|| format!("calling ExecTarget {} function", ed.name))?;
 
             // Reinterpret the SpawnCommand into the builder
 
@@ -454,7 +404,7 @@ impl LocalDomain {
     ) -> anyhow::Result<CommandBuilder> {
         let config = configuration();
 
-        let wsl = self.resolve_wsl_domain();
+        let wsl = self.resolve_wsl_target_config();
         let default_prog = wsl
             .as_ref()
             .map(|wsl| wsl.default_prog.as_ref())
@@ -583,7 +533,7 @@ impl portable_pty::ChildKiller for FailedProcessSpawn {
 }
 
 #[async_trait(?Send)]
-impl Domain for LocalDomain {
+impl SpawnTarget for LocalSpawnTarget {
     async fn spawn_pane(
         &self,
         size: TerminalSize,
@@ -604,7 +554,7 @@ impl Domain for LocalDomain {
             .as_unix_command_line()
             .unwrap_or_else(|err| format!("error rendering command line: {:?}", err));
         let command_description = format!(
-            "\"{}\" in domain \"{}\"",
+            "\"{}\" on target \"{}\"",
             if command_line.is_empty() {
                 cmd.get_shell()
             } else {
@@ -633,7 +583,6 @@ impl Domain for LocalDomain {
                 child,
                 pair.master,
                 Box::new(writer),
-                self.id,
                 command_description,
             )),
             Err(err) => {
@@ -649,7 +598,6 @@ impl Domain for LocalDomain {
                         inner: Mutex::new(pair.master),
                     }),
                     Box::new(writer),
-                    self.id,
                     command_description,
                 ))
             }
@@ -660,70 +608,8 @@ impl Domain for LocalDomain {
 
         Ok(pane)
     }
-
-    fn domain_id(&self) -> DomainId {
-        self.id
-    }
-
-    fn domain_name(&self) -> &str {
+    fn spawn_target_name(&self) -> &str {
         &self.name
     }
 
-    async fn domain_label(&self) -> String {
-        if let Some(ed) = self.resolve_exec_domain() {
-            match &ed.label {
-                Some(ValueOrFunc::Value(engine_dynamic::Value::String(s))) => s.to_string(),
-                Some(ValueOrFunc::Func(label_func)) => {
-                    let label = config::with_lua_config_on_main_thread(|lua| async {
-                        let lua = lua.ok_or_else(|| anyhow::anyhow!("missing lua context"))?;
-                        let value = config::lua::emit_async_callback(
-                            &*lua,
-                            (label_func.clone(), (self.name.clone())),
-                        )
-                        .await?;
-                        let label: String =
-                            luahelper::from_lua_value_dynamic(value).with_context(|| {
-                                format!(
-                                    "interpreting SpawnCommand result from ExecDomain {}",
-                                    ed.name
-                                )
-                            })?;
-                        Ok(label)
-                    })
-                    .await;
-                    match label {
-                        Ok(label) => label,
-                        Err(err) => {
-                            log::error!(
-                                "Error while calling label function for ExecDomain `{}`: {err:#}",
-                                self.name
-                            );
-                            self.name.to_string()
-                        }
-                    }
-                }
-                _ => self.name.to_string(),
-            }
-        } else if let Some(wsl) = self.resolve_wsl_domain() {
-            wsl.distribution.unwrap_or_else(|| self.name.to_string())
-        } else {
-            self.name.to_string()
-        }
-    }
-
-    async fn attach(&self, _window_id: Option<WindowId>) -> anyhow::Result<()> {
-        Ok(())
-    }
-
-    fn detachable(&self) -> bool {
-        false
-    }
-
-    fn detach(&self) -> anyhow::Result<()> {
-        bail!("detach not implemented for LocalDomain");
-    }
-
-    fn state(&self) -> DomainState {
-        DomainState::Attached
-    }
 }

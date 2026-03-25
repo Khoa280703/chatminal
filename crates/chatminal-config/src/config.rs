@@ -4,7 +4,7 @@ use crate::color::{
     ColorSchemeFile, HsbTransform, Palette, SrgbaTuple, SessionBarStyle, WindowFrameConfig,
 };
 use crate::runtime_options::RuntimeOptions;
-use crate::exec_domain::ExecDomain;
+use crate::exec_target::ExecTarget;
 use crate::font::{
     AllowSquareGlyphOverflow, DisplayPixelGeometry, FontLocatorSelection, FontRasterizerSelection,
     FontShaperSelection, FreeTypeLoadFlags, FreeTypeLoadTarget, StyleRule, TextStyle,
@@ -15,16 +15,16 @@ use crate::keyassignment::{
 };
 use crate::keys::{Key, LeaderKey, Mouse};
 use crate::lua::make_lua_context;
-use crate::ssh::{SshBackend, SshDomain};
-use crate::tls::{TlsDomainClient, TlsDomainServer};
+use crate::ssh::{SshBackend, SshTarget};
+use crate::tls::{TlsTargetClient, TlsTargetServer};
 use crate::units::Dimension;
-use crate::unix::UnixDomain;
-use crate::wsl::WslDomain;
+use crate::unix::UnixTargetConfig;
+use crate::wsl::WslTarget;
 use crate::{
     default_config_with_overrides_applied, default_one_point_oh, default_one_point_oh_f64,
     default_true, default_win32_acrylic_accent_color, CellWidth, GpuInfo,
     IntegratedTitleButtonColor, KeyMapPreference, LoadedConfig, MouseEventTriggerMods, RgbaColor,
-    SerialDomain, SystemBackdrop, WebGpuPowerPreference, CONFIG_DIRS, CONFIG_FILE_OVERRIDE,
+    SerialTarget, SystemBackdrop, WebGpuPowerPreference, CONFIG_DIRS, CONFIG_FILE_OVERRIDE,
     CONFIG_OVERRIDES, CONFIG_SKIP, HOME_DIR,
 };
 use anyhow::Context;
@@ -241,8 +241,8 @@ pub struct Config {
     pub detect_password_input: bool,
 
     /// Specifies a map of environment variables that should be set
-    /// when spawning commands in the local domain.
-    /// This is not used when working with remote domains.
+    /// when spawning commands on the local target.
+    /// This is not used when working with remote targets.
     #[dynamic(default)]
     pub set_environment_variables: HashMap<String, String>,
 
@@ -353,20 +353,20 @@ pub struct Config {
     pub webgpu_preferred_adapter: Option<GpuInfo>,
 
     #[dynamic(default)]
-    pub wsl_domains: Option<Vec<WslDomain>>,
+    pub wsl_targets: Option<Vec<WslTarget>>,
 
     #[dynamic(default)]
-    pub exec_domains: Vec<ExecDomain>,
+    pub exec_targets: Vec<ExecTarget>,
 
     #[dynamic(default)]
-    pub serial_ports: Vec<SerialDomain>,
+    pub serial_ports: Vec<SerialTarget>,
 
-    /// The set of unix domains
-    #[dynamic(default = "UnixDomain::default_unix_domains")]
-    pub unix_domains: Vec<UnixDomain>,
+    /// The set of unix targets
+    #[dynamic(default = "UnixTargetConfig::default_unix_targets")]
+    pub unix_targets: Vec<UnixTargetConfig>,
 
     #[dynamic(default)]
-    pub ssh_domains: Option<Vec<SshDomain>>,
+    pub ssh_targets: Option<Vec<SshTarget>>,
 
     #[dynamic(default)]
     pub ssh_backend: SshBackend,
@@ -374,11 +374,11 @@ pub struct Config {
     /// When running in server mode, defines configuration for
     /// each of the endpoints that we'll listen for connections
     #[dynamic(default)]
-    pub tls_servers: Vec<TlsDomainServer>,
+    pub tls_servers: Vec<TlsTargetServer>,
 
-    /// The set of tls domains that we can connect to as a client
+    /// The set of tls targets that we can connect to as a client
     #[dynamic(default)]
-    pub tls_clients: Vec<TlsDomainClient>,
+    pub tls_clients: Vec<TlsTargetClient>,
 
     /// Constrains the rate at which the multiplexer client will
     /// speculatively fetch line data.
@@ -858,10 +858,10 @@ pub struct Config {
     pub allow_win32_input_mode: bool,
 
     #[dynamic(default)]
-    pub default_domain: Option<String>,
+    pub default_target: Option<String>,
 
     #[dynamic(default)]
-    pub default_mux_server_domain: Option<String>,
+    pub default_mux_server_target: Option<String>,
 
     #[dynamic(default)]
     pub default_workspace: Option<String>,
@@ -925,19 +925,19 @@ impl Config {
     /// It is relatively expensive to parse all the ssh config files,
     /// so we defer producing the default list until someone explicitly
     /// asks for it
-    pub fn ssh_domains(&self) -> Vec<SshDomain> {
-        if let Some(domains) = &self.ssh_domains {
-            domains.clone()
+    pub fn ssh_targets(&self) -> Vec<SshTarget> {
+        if let Some(targets) = &self.ssh_targets {
+            targets.clone()
         } else {
-            SshDomain::default_domains()
+            SshTarget::default_targets()
         }
     }
 
-    pub fn wsl_domains(&self) -> Vec<WslDomain> {
-        if let Some(domains) = &self.wsl_domains {
-            domains.clone()
+    pub fn wsl_targets(&self) -> Vec<WslTarget> {
+        if let Some(targets) = &self.wsl_targets {
+            targets.clone()
         } else {
-            WslDomain::default_domains()
+            WslTarget::default_targets()
         }
     }
 
@@ -1219,42 +1219,42 @@ impl Config {
 
     /// Check for logical conflicts in the config
     pub fn check_consistency(&self) -> anyhow::Result<()> {
-        self.check_domain_consistency()?;
+        self.check_target_consistency()?;
         Ok(())
     }
 
-    fn check_domain_consistency(&self) -> anyhow::Result<()> {
-        let mut domains = HashMap::new();
+    fn check_target_consistency(&self) -> anyhow::Result<()> {
+        let mut target_names = HashMap::new();
 
-        let mut check_domain = |name: &str, kind: &str| {
-            if let Some(exists) = domains.get(name) {
+        let mut check_target = |name: &str, kind: &str| {
+            if let Some(exists) = target_names.get(name) {
                 anyhow::bail!(
                     "{kind} with name \"{name}\" conflicts with \
                      another existing {exists} with the same name"
                 );
             }
-            domains.insert(name.to_string(), kind.to_string());
+            target_names.insert(name.to_string(), kind.to_string());
             Ok(())
         };
 
-        for d in &self.unix_domains {
-            check_domain(&d.name, "unix domain")?;
+        for d in &self.unix_targets {
+            check_target(&d.name, "unix target")?;
         }
-        if let Some(domains) = &self.ssh_domains {
-            for d in domains {
-                check_domain(&d.name, "ssh domain")?;
+        if let Some(targets) = &self.ssh_targets {
+            for d in targets {
+                check_target(&d.name, "ssh target")?;
             }
         }
-        for d in &self.exec_domains {
-            check_domain(&d.name, "exec domain")?;
+        for d in &self.exec_targets {
+            check_target(&d.name, "exec target")?;
         }
-        if let Some(domains) = &self.wsl_domains {
-            for d in domains {
-                check_domain(&d.name, "wsl domain")?;
+        if let Some(targets) = &self.wsl_targets {
+            for d in targets {
+                check_target(&d.name, "wsl target")?;
             }
         }
         for d in &self.tls_clients {
-            check_domain(&d.name, "tls domain")?;
+            check_target(&d.name, "tls target")?;
         }
         Ok(())
     }
@@ -2192,13 +2192,13 @@ fn validate_line_height(value: &f64) -> Result<(), String> {
     }
 }
 
-pub(crate) fn validate_domain_name(name: &str) -> Result<(), String> {
+pub(crate) fn validate_target_name(name: &str) -> Result<(), String> {
     if name == "local" {
         Err(format!(
-            "\"{name}\" is a built-in domain and cannot be redefined"
+            "\"{name}\" is a built-in target and cannot be redefined"
         ))
     } else if name == "" {
-        Err("the empty string is an invalid domain name".to_string())
+        Err("the empty string is an invalid target name".to_string())
     } else {
         Ok(())
     }

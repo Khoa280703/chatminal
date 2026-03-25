@@ -1,12 +1,10 @@
-use config::keyassignment::SpawnSessionDomain;
 use config::lua::mlua::{self, Lua, UserData, UserDataMethods, Value as LuaValue};
 use config::lua::{get_or_create_module, get_or_create_sub_module};
 use engine_dynamic::{FromDynamic, ToDynamic, Value};
 use engine_term::TerminalSize;
 use luahelper::impl_lua_conversion_dynamic;
-use mlua::UserDataRef;
-use host_runtime::domain::{DomainId, SplitSource};
 use host_runtime::pane::Pane;
+use host_runtime::spawn_target::SplitSource;
 use host_runtime::tab::{SplitDirection, SplitRequest, SplitSize, Tab};
 use host_runtime::window::{Window, WindowId};
 use host_runtime::Mux;
@@ -14,12 +12,10 @@ use portable_pty::CommandBuilder;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-mod domain;
 mod leaf;
 mod session;
 mod window;
 
-pub use domain::DomainRef;
 pub use leaf::TerminalRef;
 pub use session::SessionRef;
 pub use window::WindowRef;
@@ -135,55 +131,6 @@ pub fn register(lua: &Lua) -> anyhow::Result<()> {
     )?;
 
     session_module.set(
-        "get_domain",
-        lua.create_function(|_, domain: LuaValue| {
-            let mux = get_mux()?;
-            match domain {
-                LuaValue::Nil => Ok(Some(DomainRef(mux.default_domain().domain_id()))),
-                LuaValue::String(s) => match s.to_str() {
-                    Ok(name) => Ok(mux
-                        .get_domain_by_name(name)
-                        .map(|dom| DomainRef(dom.domain_id()))),
-                    Err(err) => Err(mlua::Error::external(format!(
-                        "invalid domain identifier passed to session.get_domain: {err:#}"
-                    ))),
-                },
-                LuaValue::Integer(id) => match TryInto::<DomainId>::try_into(id) {
-                    Ok(id) => Ok(mux.get_domain(id).map(|dom| DomainRef(dom.domain_id()))),
-                    Err(err) => Err(mlua::Error::external(format!(
-                        "invalid domain identifier passed to session.get_domain: {err:#}"
-                    ))),
-                },
-                _ => Err(mlua::Error::external(
-                    "invalid domain identifier passed to session.get_domain".to_string(),
-                )),
-            }
-        })?,
-    )?;
-
-    session_module.set(
-        "all_domains",
-        lua.create_function(|_, _: ()| {
-            let mux = get_mux()?;
-            Ok(mux
-                .iter_domains()
-                .into_iter()
-                .map(|dom| DomainRef(dom.domain_id()))
-                .collect::<Vec<DomainRef>>())
-        })?,
-    )?;
-
-    session_module.set(
-        "set_default_domain",
-        lua.create_function(|_, domain: UserDataRef<DomainRef>| {
-            let mux = get_mux()?;
-            let domain = domain.resolve(&mux)?;
-            mux.set_default_domain(&domain);
-            Ok(())
-        })?,
-    )?;
-
-    session_module.set(
         "all_windows",
         lua.create_function(|_, _: ()| {
             let mux = get_mux()?;
@@ -280,8 +227,6 @@ impl Default for SessionSplitDirection {
 
 #[derive(Debug, FromDynamic, ToDynamic)]
 struct SpawnWindow {
-    #[dynamic(default = "spawn_session_default_domain")]
-    domain: SpawnSessionDomain,
     width: Option<usize>,
     height: Option<usize>,
     workspace: Option<String>,
@@ -290,10 +235,6 @@ struct SpawnWindow {
     cmd_builder: CommandBuilderFrag,
 }
 impl_lua_conversion_dynamic!(SpawnWindow);
-
-fn spawn_session_default_domain() -> SpawnSessionDomain {
-    SpawnSessionDomain::DefaultDomain
-}
 
 impl SpawnWindow {
     async fn spawn(self) -> mlua::Result<(SessionRef, TerminalRef, WindowRef)> {
@@ -312,7 +253,6 @@ impl SpawnWindow {
         let (tab, pane, window_id) = mux
             .spawn_tab_or_window(
                 None,
-                self.domain,
                 cmd_builder,
                 cwd,
                 size,
@@ -324,7 +264,7 @@ impl SpawnWindow {
             .map_err(|e| mlua::Error::external(format!("{:#?}", e)))?;
 
         let session_ref = make_session_ref(&tab).ok_or_else(|| {
-            mlua::Error::external("spawned session has no chatminal session_id (non-chatminal domain?)")
+            mlua::Error::external("spawned session has no chatminal session_id")
         })?;
         Ok((session_ref, TerminalRef(pane.pane_id()), WindowRef(window_id)))
     }
@@ -332,8 +272,6 @@ impl SpawnWindow {
 
 #[derive(Debug, FromDynamic, ToDynamic)]
 struct SpawnSession {
-    #[dynamic(default)]
-    domain: SpawnSessionDomain,
     #[dynamic(flatten)]
     cmd_builder: CommandBuilderFrag,
 }
@@ -362,7 +300,6 @@ impl SpawnSession {
         let (tab, pane, window_id) = mux
             .spawn_tab_or_window(
                 Some(window.0),
-                self.domain,
                 cmd_builder,
                 cwd,
                 size,
@@ -374,7 +311,7 @@ impl SpawnSession {
             .map_err(|e| mlua::Error::external(format!("{:#?}", e)))?;
 
         let session_ref = make_session_ref(&tab).ok_or_else(|| {
-            mlua::Error::external("spawned session has no chatminal session_id (non-chatminal domain?)")
+            mlua::Error::external("spawned session has no chatminal session_id")
         })?;
         Ok((session_ref, TerminalRef(pane.pane_id()), WindowRef(window_id)))
     }

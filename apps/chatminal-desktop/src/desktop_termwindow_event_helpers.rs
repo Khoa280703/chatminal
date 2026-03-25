@@ -827,12 +827,6 @@ impl TermWindow {
             Some(pane) => pane,
             None => return,
         };
-        let active_terminal_pane = match self.active_terminal_instance() {
-            Some(pane) => pane,
-            None => return,
-        };
-
-        let domain_id_of_current_pane = active_terminal_pane.domain_id();
         let pane_id = pane.pane_id() as u64;
         let title = args.title.unwrap();
         let flags = args.flags;
@@ -854,7 +848,6 @@ impl TermWindow {
                 flags,
                 engine_window_id as DesktopWindowId,
                 pane_id as u64,
-                domain_id_of_current_pane,
                 &help_text,
                 &fuzzy_help_text,
                 &alphabet,

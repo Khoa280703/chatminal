@@ -1,4 +1,3 @@
-use crate::domain::DomainId;
 use crate::pane::{
     CachePolicy, CloseReason, ForEachPaneLogicalLine, LogicalLine, Pane, PaneId, Pattern,
     SearchResult, WithPaneLines,
@@ -126,7 +125,6 @@ pub struct LocalPane {
     process: Mutex<ProcessState>,
     pty: Mutex<Box<dyn MasterPty>>,
     writer: Mutex<Box<dyn Write + Send>>,
-    domain_id: DomainId,
     proc_list: Mutex<Option<CachedProcInfo>>,
     #[cfg(unix)]
     leader: Arc<Mutex<Option<CachedLeaderInfo>>>,
@@ -215,7 +213,7 @@ impl Pane for LocalPane {
 
     fn exit_behavior(&self) -> Option<ExitBehavior> {
         let pty = self.pty.lock();
-        let is_failed_spawn = pty.is::<crate::domain::FailedSpawnPty>();
+        let is_failed_spawn = pty.is::<crate::spawn_target::FailedSpawnPty>();
 
         if is_failed_spawn {
             Some(ExitBehavior::CloseOnCleanExit)
@@ -439,10 +437,6 @@ impl Pane for LocalPane {
 
     fn palette(&self) -> ColorPalette {
         self.terminal.lock().palette()
-    }
-
-    fn domain_id(&self) -> DomainId {
-        self.domain_id
     }
 
     fn erase_scrollback(&self, erase_mode: ScrollbackEraseMode) {
@@ -840,14 +834,14 @@ impl AlertHandler for LocalPaneNotifHandler {
             let mux = Mux::get();
             match &alert {
                 Alert::WindowTitleChanged(title) => {
-                    if let Some((_domain, window_id, _tab_id)) = mux.resolve_pane_id(pane_id) {
+                    if let Some((window_id, _tab_id)) = mux.resolve_pane_id(pane_id) {
                         if let Some(mut window) = mux.get_window_mut(window_id) {
                             window.set_title(title);
                         }
                     }
                 }
                 Alert::TabTitleChanged(title) => {
-                    if let Some((_domain, _window_id, tab_id)) = mux.resolve_pane_id(pane_id) {
+                    if let Some((_window_id, tab_id)) = mux.resolve_pane_id(pane_id) {
                         if let Some(tab) = mux.get_tab(tab_id) {
                             tab.set_title(title.as_deref().unwrap_or(""));
                         }
@@ -902,7 +896,6 @@ impl LocalPane {
         process: Box<dyn Child + Send>,
         pty: Box<dyn MasterPty>,
         writer: Box<dyn Write + Send>,
-        domain_id: DomainId,
         command_description: String,
     ) -> Self {
         let (process, signaller, pid) = split_child(process);
@@ -923,7 +916,6 @@ impl LocalPane {
             }),
             pty: Mutex::new(pty),
             writer: Mutex::new(writer),
-            domain_id,
             proc_list: Mutex::new(None),
             #[cfg(unix)]
             leader: Arc::new(Mutex::new(None)),

@@ -655,7 +655,6 @@ pub struct SplitPane {
     pub split_request: SplitRequest,
     pub command: Option<CommandBuilder>,
     pub command_dir: Option<String>,
-    pub domain: config::keyassignment::SpawnSessionDomain,
     /// Instead of spawning a command, move the specified
     /// pane into the new split target
     pub move_pane_id: Option<PaneId>,
@@ -676,7 +675,6 @@ pub struct MovePaneToNewTabResponse {
 
 #[derive(Deserialize, Serialize, PartialEq, Debug)]
 pub struct SpawnV2 {
-    pub domain: config::keyassignment::SpawnSessionDomain,
     /// If None, create a new window for this new tab
     pub window_id: Option<WindowId>,
     pub command: Option<CommandBuilder>,

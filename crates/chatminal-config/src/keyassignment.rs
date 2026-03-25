@@ -150,26 +150,6 @@ pub enum MouseEventTrigger {
     Up { streak: usize, button: MouseButton },
 }
 
-/// When spawning a tab, specify which domain should be used to
-/// host/spawn that tab.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, FromDynamic, ToDynamic)]
-pub enum SpawnSessionDomain {
-    /// Use the default domain
-    DefaultDomain,
-    /// Use the domain from the current tab in the associated window
-    CurrentSessionDomain,
-    /// Use a specific domain by name
-    DomainName(String),
-    /// Use a specific domain by id
-    DomainId(usize),
-}
-
-impl Default for SpawnSessionDomain {
-    fn default() -> Self {
-        Self::CurrentSessionDomain
-    }
-}
-
 #[derive(Default, Clone, PartialEq, FromDynamic, ToDynamic)]
 pub struct SpawnCommand {
     /// Optional descriptive label
@@ -177,7 +157,7 @@ pub struct SpawnCommand {
 
     /// The command line to use.
     /// If omitted, the default command associated with the
-    /// domain will be used instead, which is typically the
+    /// spawn target will be used instead, which is typically the
     /// shell for the user.
     pub args: Option<Vec<String>>,
 
@@ -185,17 +165,14 @@ pub struct SpawnCommand {
     /// If omitted, a default will be used; typically that will
     /// be the home directory of the user, but may also be the
     /// current working directory of the Chatminal process when
-    /// it was launched, or for some domains it may be some
-    /// other location appropriate to the domain.
+    /// it was launched, or for some targets it may be some
+    /// other location appropriate to that target.
     pub cwd: Option<PathBuf>,
 
     /// Specifies a map of environment variables that should be set.
-    /// Whether this is used depends on the domain.
+    /// Whether this is used depends on the target.
     #[dynamic(default)]
     pub set_environment_variables: HashMap<String, String>,
-
-    #[dynamic(default)]
-    pub domain: SpawnSessionDomain,
 
     pub position: Option<crate::GuiPosition>,
 }
@@ -213,7 +190,6 @@ impl std::fmt::Display for SpawnCommand {
         if let Some(label) = &self.label {
             write!(fmt, " label='{}'", label)?;
         }
-        write!(fmt, " domain={:?}", self.domain)?;
         if let Some(args) = &self.args {
             write!(fmt, " args={:?}", args)?;
         }
@@ -257,7 +233,6 @@ impl SpawnCommand {
         };
         Ok(Self {
             label: None,
-            domain: SpawnSessionDomain::DefaultDomain,
             args: if args.is_empty() { None } else { Some(args) },
             set_environment_variables,
             cwd,
@@ -533,7 +508,7 @@ fn default_message() -> String {
 
 #[derive(Debug, Clone, PartialEq, FromDynamic, ToDynamic)]
 pub enum KeyAssignment {
-    SpawnSession(SpawnSessionDomain),
+    SpawnSession,
     SpawnWindow,
     ToggleFullScreen,
     ToggleAlwaysOnTop,
@@ -625,9 +600,6 @@ pub enum KeyAssignment {
     },
     PopKeyTable,
     ClearKeyTableStack,
-    DetachDomain(SpawnSessionDomain),
-    AttachDomain(String),
-
     CopyMode(CopyModeAssignment),
     RotatePanes(RotationDirection),
     SplitSession(SplitSession),

@@ -78,8 +78,8 @@
                     self.perform_key_assignment(pane, a)?;
                 }
             }
-            SpawnSession(spawn_where) => {
-                self.spawn_runtime_entry(spawn_where);
+            SpawnSession => {
+                self.spawn_runtime_entry();
             }
             SpawnCommandInNewSession(spawn) => {
                 self.spawn_command(spawn, SpawnWhere::NewSession);
@@ -429,42 +429,6 @@
                 } else {
                     switcher.do_switch();
                 }
-            }
-            DetachDomain(domain) => {
-                let domain =
-                    crate::chatminal_runtime::resolve_spawn_domain(Some(pane.pane_id()), domain)?;
-                domain.detach()?;
-            }
-            AttachDomain(domain) => {
-                let window = self.window_id;
-                let domain = domain.to_string();
-                let dpi = self.dimensions.dpi as u32;
-
-                promise::spawn::spawn(async move {
-                    let domain = crate::chatminal_runtime::host_domain_by_name(&domain)?;
-                    domain.attach(Some(window)).await?;
-
-                    let have_panes_in_domain =
-                        crate::chatminal_runtime::host_domain_has_panes(domain.domain_id());
-
-                    if !have_panes_in_domain {
-                        let config = config::configuration();
-                        let _tab = domain
-                            .spawn(
-                                config.initial_size(
-                                    dpi,
-                                    Some(crate::cell_pixel_dims(&config, dpi as f64)?),
-                                ),
-                                None,
-                                None,
-                                window,
-                            )
-                            .await?;
-                    }
-
-                    Result::<(), anyhow::Error>::Ok(())
-                })
-                .detach();
             }
             CopyMode(_) => {
                 // NOP here; handled by the overlay directly

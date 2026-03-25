@@ -429,13 +429,8 @@ pub(crate) fn desktop_runtime_id_for_session(session_id: &str) -> Option<Runtime
 
 pub(crate) fn desktop_session_host(window_id: DesktopWindowId) -> Option<Arc<DesktopSessionHost>> {
     let eng_window_id = desktop_runtime_window_id(window_id)?;
-    if chatminal_domain_id().is_none() {
-        let command = runtime_proxy_command(None);
-        let _ = ensure_chatminal_domain_for_command(&Some(command));
-    }
     let shared = session_engine_shared()?;
-    let domain_id = chatminal_domain_id()?;
-    Some(get_or_init_session_host(eng_window_id, domain_id, shared))
+    Some(get_or_init_session_host(eng_window_id, shared))
 }
 
 fn desktop_prepare_host_layout(

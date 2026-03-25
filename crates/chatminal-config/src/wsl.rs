@@ -1,29 +1,29 @@
-use crate::config::validate_domain_name;
+use crate::config::validate_target_name;
 use crate::*;
 use engine_dynamic::{FromDynamic, ToDynamic};
 use luahelper::impl_lua_conversion_dynamic;
 use std::collections::HashMap;
 
 #[derive(Default, Debug, Clone, FromDynamic, ToDynamic)]
-pub struct WslDomain {
-    #[dynamic(validate = "validate_domain_name")]
+pub struct WslTarget {
+    #[dynamic(validate = "validate_target_name")]
     pub name: String,
     pub distribution: Option<String>,
     pub username: Option<String>,
     pub default_cwd: Option<PathBuf>,
     pub default_prog: Option<Vec<String>>,
 }
-impl_lua_conversion_dynamic!(WslDomain);
+impl_lua_conversion_dynamic!(WslTarget);
 
-impl WslDomain {
-    pub fn default_domains() -> Vec<WslDomain> {
+impl WslTarget {
+    pub fn default_targets() -> Vec<WslTarget> {
         #[allow(unused_mut)]
-        let mut domains = vec![];
+        let mut targets = vec![];
 
         #[cfg(windows)]
         if let Ok(distros) = WslDistro::load_distro_list() {
             for distro in distros {
-                domains.push(WslDomain {
+                targets.push(WslTarget {
                     name: format!("WSL:{}", distro.name),
                     distribution: Some(distro.name.clone()),
                     username: None,
@@ -33,7 +33,7 @@ impl WslDomain {
             }
         }
 
-        domains
+        targets
     }
 }
 

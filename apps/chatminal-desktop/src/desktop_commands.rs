@@ -960,7 +960,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             menubar: &["View", "Font Size"],
             icon: Some("md_format_size"),
         },
-        SpawnSession(SpawnSessionDomain::CurrentSessionDomain) => CommandDef {
+        SpawnSession => CommandDef {
             brief: "New Session".into(),
             doc: "Create a new session".into(),
             keys: vec![(Modifiers::SUPER, "t".into())],
@@ -968,9 +968,6 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             menubar: &["Shell"],
             icon: Some("md_tab_plus"),
         },
-        SpawnSession(SpawnSessionDomain::DefaultDomain) => return None,
-        SpawnSession(SpawnSessionDomain::DomainName(_)) => return None,
-        SpawnSession(SpawnSessionDomain::DomainId(_)) => return None,
         SpawnCommandInNewSession(cmd) => CommandDef {
             brief: label_string(action, format!("Spawn a new Session with {cmd:?}").to_string())
                 .into(),
@@ -1426,10 +1423,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             menubar: &["Edit"],
             icon: Some("md_content_copy"),
         },
-        SplitVertical(SpawnCommand {
-            domain: SpawnSessionDomain::CurrentSessionDomain,
-            ..
-        }) => CommandDef {
+        SplitVertical(_) => CommandDef {
             brief: label_string(action, "Split Vertically (Top/Bottom)".to_string()).into(),
             doc: "Split the current session view vertically into two session views, by spawning \
             the default program into the bottom half"
@@ -1444,10 +1438,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             menubar: &["Shell"],
             icon: Some("cod_split_vertical"),
         },
-        SplitHorizontal(SpawnCommand {
-            domain: SpawnSessionDomain::CurrentSessionDomain,
-            ..
-        }) => CommandDef {
+        SplitHorizontal(_) => CommandDef {
             brief: label_string(action, "Split Horizontally (Left/Right)".to_string()).into(),
             doc: "Split the current session view horizontally into two session views, by spawning \
             the default program into the right hand side"
@@ -1461,26 +1452,6 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             args: &[ArgType::ActiveTerminal],
             menubar: &["Shell"],
             icon: Some("cod_split_horizontal"),
-        },
-        SplitHorizontal(_) => CommandDef {
-            brief: label_string(action, "Split Horizontally (Left/Right)".to_string()).into(),
-            doc: "Split the current session view horizontally into two session views, by spawning \
-            the default program into the right hand side"
-                .into(),
-            keys: vec![],
-            args: &[ArgType::ActiveTerminal],
-            menubar: &[],
-            icon: Some("cod_split_horizontal"),
-        },
-        SplitVertical(_) => CommandDef {
-            brief: label_string(action, "Split Vertically (Top/Bottom)".to_string()).into(),
-            doc: "Split the current session view veritically into two session views, by spawning \
-            the default program into the bottom"
-                .into(),
-            keys: vec![],
-            args: &[ArgType::ActiveTerminal],
-            menubar: &[],
-            icon: Some("cod_split_vertical"),
         },
         AdjustSplitSize(SessionDirection::Left, amount) => CommandDef {
             brief: format!("Resize Session Layout {amount} cell(s) to the Left").into(),
@@ -1602,7 +1573,6 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             menubar: &["Window", "Select Session"],
             icon: Some("cod_list_flat"),
         },
-        DetachDomain(_) => return None,
         OpenUri(uri) => match uri.as_ref() {
             "https://github.com/Khoa280703/chatminal" => CommandDef {
                 brief: "Documentation".into(),
@@ -1882,7 +1852,6 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             menubar: &[],
             icon: None,
         },
-        AttachDomain(_) => return None,
         CopyMode(copy_mode) => CommandDef {
             brief: format!("{copy_mode:?}").into(),
             doc: "".into(),
@@ -1948,15 +1917,9 @@ fn compute_default_actions() -> Vec<KeyAssignment> {
         #[cfg(target_os = "macos")]
         QuitApplication,
         // ----------------- Shell
-        SpawnSession(SpawnSessionDomain::CurrentSessionDomain),
-        SplitVertical(SpawnCommand {
-            domain: SpawnSessionDomain::CurrentSessionDomain,
-            ..Default::default()
-        }),
-        SplitHorizontal(SpawnCommand {
-            domain: SpawnSessionDomain::CurrentSessionDomain,
-            ..Default::default()
-        }),
+        SpawnSession,
+        SplitVertical(SpawnCommand::default()),
+        SplitHorizontal(SpawnCommand::default()),
         CloseCurrentSession { confirm: true },
         CloseCurrentSession { confirm: true },
         ResetTerminal,
@@ -2080,9 +2043,7 @@ mod tests {
 
     #[test]
     fn session_ui_filter_keeps_supported_actions() {
-        assert!(is_supported_in_session_ui(&KeyAssignment::SpawnSession(
-            SpawnSessionDomain::CurrentSessionDomain,
-        )));
+        assert!(is_supported_in_session_ui(&KeyAssignment::SpawnSession));
         assert!(is_supported_in_session_ui(&KeyAssignment::ActivateSession(
             0
         )));

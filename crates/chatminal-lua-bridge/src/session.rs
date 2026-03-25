@@ -41,7 +41,7 @@ impl UserData for SessionRef {
             Ok(tab
                 .get_active_pane()
                 .and_then(|pane| mux.resolve_pane_id(pane.pane_id()))
-                .map(|(_domain_id, window_id, _tab_id)| WindowRef(window_id)))
+                .map(|(window_id, _tab_id)| WindowRef(window_id)))
         });
         methods.add_method("get_title", |_, this, _: ()| {
             let mux = get_mux()?;
@@ -147,7 +147,7 @@ impl UserData for SessionRef {
                 mlua::Error::external(format!("session '{}' has no active terminal", this.0))
             })?;
 
-            let (_domain_id, window_id, tab_id) =
+            let (window_id, tab_id) =
                 mux.resolve_pane_id(pane.pane_id()).ok_or_else(|| {
                     mlua::Error::external(format!("active terminal {} not found", pane.pane_id()))
                 })?;

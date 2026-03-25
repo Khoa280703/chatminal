@@ -1,4 +1,4 @@
-use crate::config::validate_domain_name;
+use crate::config::validate_target_name;
 use crate::*;
 use engine_dynamic::{FromDynamic, ToDynamic};
 use luahelper::impl_lua_conversion_dynamic;
@@ -48,10 +48,10 @@ impl Default for Shell {
 }
 
 #[derive(Default, Debug, Clone, FromDynamic, ToDynamic)]
-pub struct SshDomain {
-    /// The name of this specific domain.  Must be unique amongst
-    /// all types of domain in the configuration file.
-    #[dynamic(validate = "validate_domain_name")]
+pub struct SshTarget {
+    /// The name of this specific target. Must be unique amongst
+    /// all target types in the configuration file.
+    #[dynamic(validate = "validate_target_name")]
     pub name: String,
 
     /// identifies the host:port pair of the remote server.
@@ -64,7 +64,7 @@ pub struct SshDomain {
     /// The username to use for authenticating with the remote host
     pub username: Option<String>,
 
-    /// If true, connect to this domain automatically at startup
+    /// If true, connect to this target automatically at startup
     #[dynamic(default)]
     pub connect_automatically: bool,
 
@@ -105,10 +105,10 @@ pub struct SshDomain {
     #[dynamic(default)]
     pub assume_shell: Shell,
 }
-impl_lua_conversion_dynamic!(SshDomain);
+impl_lua_conversion_dynamic!(SshTarget);
 
-impl SshDomain {
-    pub fn default_domains() -> Vec<Self> {
+impl SshTarget {
+    pub fn default_targets() -> Vec<Self> {
         vec![]
     }
 }

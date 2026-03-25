@@ -1,4 +1,4 @@
-use crate::exec_domain::{ExecDomain, ValueOrFunc};
+use crate::exec_target::{ExecTarget, ValueOrFunc};
 use crate::keyassignment::KeyAssignment;
 use crate::{
     Config, FontAttributes, FontStretch, FontStyle, FontWeight, FreeTypeLoadTarget, RgbaColor,
@@ -336,8 +336,8 @@ end
         )?;
 
         api_mod.set(
-            "default_wsl_domains",
-            lua.create_function(|_, ()| Ok(crate::WslDomain::default_domains()))?,
+            "default_wsl_targets",
+            lua.create_function(|_, ()| Ok(crate::WslTarget::default_targets()))?,
         )?;
 
         api_mod.set("font", lua.create_function(font)?)?;
@@ -356,7 +356,7 @@ end
 
         lua.set_named_registry_value(LUA_REGISTRY_USER_CALLBACK_COUNT, 0)?;
         api_mod.set("action_callback", lua.create_function(action_callback)?)?;
-        api_mod.set("exec_domain", lua.create_function(exec_domain)?)?;
+        api_mod.set("exec_target", lua.create_function(exec_target)?)?;
 
         api_mod.set("utf16_to_utf8", lua.create_function(utf16_to_utf8)?)?;
         api_mod.set("split_by_newlines", lua.create_function(split_by_newlines)?)?;
@@ -657,19 +657,19 @@ fn action_callback<'lua>(lua: &'lua Lua, callback: mlua::Function) -> mlua::Resu
     Ok(KeyAssignment::EmitEvent(user_event_id))
 }
 
-fn exec_domain<'lua>(
+fn exec_target<'lua>(
     lua: &'lua Lua,
     (name, fixup_command, label): (String, mlua::Function, Option<mlua::Value>),
-) -> mlua::Result<ExecDomain> {
+) -> mlua::Result<ExecTarget> {
     let fixup_command = {
-        let event_name = format!("exec-domain-{name}");
+        let event_name = format!("exec-target-{name}");
         register_event(lua, (event_name.clone(), fixup_command))?;
         event_name
     };
 
     let label = match label {
         Some(Value::Function(callback)) => {
-            let event_name = format!("exec-domain-{name}-label");
+            let event_name = format!("exec-target-{name}-label");
             register_event(lua, (event_name.clone(), callback))?;
             Some(ValueOrFunc::Func(event_name))
         }
@@ -683,7 +683,7 @@ fn exec_domain<'lua>(
         }
         None => None,
     };
-    Ok(ExecDomain {
+    Ok(ExecTarget {
         name,
         fixup_command,
         label,

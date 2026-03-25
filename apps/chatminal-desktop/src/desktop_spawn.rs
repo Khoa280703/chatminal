@@ -52,7 +52,7 @@ pub async fn spawn_command_internal(
     let cwd = if let Some(cwd) = spawn.cwd.as_ref() {
         Some(cwd.to_str().map(|s| s.to_owned()).ok_or_else(|| {
             anyhow!(
-                "Domain::spawn requires that the cwd be unicode in {:?}",
+                "SpawnTarget::spawn requires that the cwd be unicode in {:?}",
                 cwd
             )
         })?)
@@ -118,7 +118,6 @@ pub async fn spawn_command_internal(
                     SpawnWhere::NewWindow => None,
                     _ => engine_src_window_id,
                 },
-                spawn.domain,
                 cmd_builder,
                 cwd,
                 size,

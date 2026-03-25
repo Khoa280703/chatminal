@@ -1,11 +1,11 @@
-use crate::config::validate_domain_name;
+use crate::config::validate_target_name;
 use engine_dynamic::{FromDynamic, ToDynamic};
 
 #[derive(Default, Debug, Clone, FromDynamic, ToDynamic)]
-pub struct SerialDomain {
-    /// The name of this specific domain.  Must be unique amongst
-    /// all types of domain in the configuration file.
-    #[dynamic(validate = "validate_domain_name")]
+pub struct SerialTarget {
+    /// The name of this specific target. Must be unique amongst
+    /// all target types in the configuration file.
+    #[dynamic(validate = "validate_target_name")]
     pub name: String,
 
     /// Specifies the serial device name.

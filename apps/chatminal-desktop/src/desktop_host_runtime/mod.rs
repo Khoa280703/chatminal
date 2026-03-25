@@ -1,24 +1,24 @@
-mod domain;
+mod spawn_target;
 pub(crate) mod execution_bridge;
 pub(crate) mod session_engine;
 mod session_host;
 mod session_pane;
 
 use std::convert::TryFrom;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
 use crate::chatminal_runtime::ChatminalRuntimeClient;
 use anyhow::anyhow;
 use chatminal_runtime::RuntimeState;
-use config::keyassignment::{RotationDirection, SessionDirection, SpawnSessionDomain};
+use config::keyassignment::{RotationDirection, SessionDirection};
 use config::ConfigHandle;
 use engine_dynamic::Value;
 use engine_term::TerminalSize;
 use host_runtime::activity::Activity;
 use host_runtime::client::ClientId;
-use host_runtime::domain::{Domain, DomainState};
+use host_runtime::spawn_target::SpawnTarget;
 use host_runtime::pane::Pane;
 use host_runtime::window::{Window as MuxWindow, WindowId as EngineWindowId};
 use host_runtime::{Mux, MuxNotification};
@@ -29,9 +29,9 @@ pub(crate) use execution_bridge::DesktopRuntimeExecutionBridge;
 pub(crate) use session_host::{get_or_init_session_host, DesktopSessionHost};
 pub(crate) use session_pane::ChatminalSessionPane;
 
-pub(crate) const CHATMINAL_RUNTIME_DOMAIN_NAME: &str = "chatminal-runtime";
+pub(crate) const CHATMINAL_RUNTIME_SPAWN_TARGET_NAME: &str = "chatminal-runtime";
 const DESKTOP_PROXY_COMMAND: &str = "proxy-desktop-session";
-pub(crate) type HostDomainHandle = Arc<dyn Domain>;
+pub(crate) type HostSpawnTargetHandle = Arc<dyn SpawnTarget>;
 
 pub(crate) struct HostActivityGuard(Activity);
 
@@ -48,7 +48,6 @@ pub(crate) mod overlay_compat {
         allocate as allocate_overlay_terminal, TermWizTerminal as OverlayTerminal,
     };
     pub type OverlaySplitDirection = host_runtime::tab::SplitDirection;
-    pub type OverlayDomainHandle = host_runtime::domain::DomainId;
     pub type OverlayPaneHandle = usize;
     pub type OverlayRuntimeEntryHandle = usize;
 
@@ -86,9 +85,7 @@ pub(crate) type RuntimeNotification = MuxNotification;
 pub(crate) type RuntimeWindow = MuxWindow;
 pub(crate) type RuntimeWindowId = EngineWindowId;
 pub(crate) type HostMux = Mux;
-pub(crate) use host_runtime::domain::Domain as HostDomain;
-pub(crate) type HostDomainId = host_runtime::domain::DomainId;
-pub(crate) type HostDomainState = host_runtime::domain::DomainState;
+pub(crate) use host_runtime::spawn_target::SpawnTarget as HostSpawnTarget;
 pub(crate) use host_runtime::pane::Pane as HostTerminal;
 pub(crate) type HostTerminalHandle = usize;
 pub(crate) type HostCachePolicy = host_runtime::pane::CachePolicy;
@@ -100,7 +97,6 @@ pub(crate) type HostRenderableDimensions = host_runtime::renderable::RenderableD
 pub(crate) type HostStableCursorPosition = host_runtime::renderable::StableCursorPosition;
 pub(crate) type HostRenderScope = host_runtime::tab::Tab;
 
-pub(crate) use host_runtime::domain::alloc_domain_id as alloc_host_domain_id;
 pub(crate) use host_runtime::pane::alloc_pane_id as alloc_host_terminal_handle;
 pub(crate) use host_runtime::pane::impl_get_logical_lines_via_get_lines as host_impl_get_logical_lines_via_get_lines;
 pub(crate) use host_runtime::renderable::{
@@ -132,16 +128,7 @@ pub(crate) struct LauncherSessionEntry {
     pub pane_count: Option<usize>,
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct HostLauncherDomainEntry {
-    pub domain_id: usize,
-    pub name: String,
-    pub is_attached: bool,
-    pub label: String,
-}
-
 static EMBEDDED_RUNTIME: OnceLock<Arc<EmbeddedRuntime>> = OnceLock::new();
-static CHATMINAL_DOMAIN_ID: OnceLock<usize> = OnceLock::new();
 
 impl EmbeddedRuntime {
     pub(crate) fn session_engine_shared(&self) -> Arc<session_engine::SessionEngineShared> {
@@ -163,34 +150,6 @@ impl EmbeddedRuntime {
             .get()
             .ok_or_else(|| "failed to initialize embedded chatminal runtime".to_string())
     }
-}
-
-pub(crate) fn chatminal_domain_id() -> Option<usize> {
-    CHATMINAL_DOMAIN_ID.get().copied()
-}
-
-pub(crate) fn ensure_chatminal_domain_for_command(
-    cmd: &Option<CommandBuilder>,
-) -> anyhow::Result<Option<HostDomainHandle>> {
-    let Some(cmd) = cmd.as_ref() else {
-        return Ok(None);
-    };
-    if parse_proxy_session_id(cmd).is_none() {
-        return Ok(None);
-    }
-
-    let runtime = Arc::clone(EmbeddedRuntime::global().map_err(anyhow::Error::msg)?);
-    let mux = Mux::get();
-    if let Some(domain_id) = CHATMINAL_DOMAIN_ID.get().copied() {
-        if let Some(domain) = mux.get_domain(domain_id) {
-            return Ok(Some(domain));
-        }
-    }
-
-    let domain: HostDomainHandle = Arc::new(domain::ChatminalRuntimeDomain::new(runtime));
-    CHATMINAL_DOMAIN_ID.get_or_init(|| domain.domain_id());
-    mux.add_domain(&domain);
-    Ok(Some(domain))
 }
 
 pub(crate) fn runtime_client() -> Result<ChatminalRuntimeClient, String> {
@@ -223,17 +182,6 @@ pub(crate) fn parse_proxy_session_id(builder: &CommandBuilder) -> Option<String>
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
         .or(Some(String::new()))
-}
-
-pub(crate) fn runtime_proxy_command(session_id: Option<&str>) -> CommandBuilder {
-    let mut argv = vec![
-        OsString::from("chatminal-runtime"),
-        OsString::from(DESKTOP_PROXY_COMMAND),
-    ];
-    if let Some(session_id) = session_id.map(str::trim).filter(|value| !value.is_empty()) {
-        argv.push(OsString::from(session_id));
-    }
-    CommandBuilder::from_argv(argv)
 }
 
 fn os_str_to_str(value: &OsStr) -> Option<&str> {
@@ -614,26 +562,6 @@ where
     Mux::get().subscribe(subscriber);
 }
 
-pub(crate) fn resolve_spawn_domain(
-    pane_id: Option<HostTerminalHandle>,
-    domain: &SpawnSessionDomain,
-) -> anyhow::Result<HostDomainHandle> {
-    Mux::get().resolve_spawn_tab_domain(pane_id, domain)
-}
-
-pub(crate) fn host_domain_by_name(name: &str) -> anyhow::Result<HostDomainHandle> {
-    Mux::get()
-        .get_domain_by_name(name)
-        .ok_or_else(|| anyhow!("{name} is not a valid domain name"))
-}
-
-pub(crate) fn host_domain_has_panes(domain_id: usize) -> bool {
-    Mux::get()
-        .iter_panes()
-        .iter()
-        .any(|pane| pane.domain_id() == domain_id)
-}
-
 pub(crate) fn kill_host_window_by_public_id(window_id: u64) -> anyhow::Result<()> {
     let window_id = EngineWindowId::try_from(window_id)
         .map_err(|_| anyhow!("invalid window id {window_id}"))?;
@@ -666,16 +594,6 @@ pub(crate) fn resolve_public_pane(
         })
 }
 
-pub(crate) fn resolve_public_pane_domain_name(
-    host_terminal_handle: u64,
-    terminal_instance_id: u64,
-) -> Option<String> {
-    let mux = Mux::try_get()?;
-    let pane = resolve_public_pane(host_terminal_handle, terminal_instance_id)?;
-    let domain = mux.get_domain(pane.domain_id())?;
-    Some(domain.domain_name().to_string())
-}
-
 pub(crate) fn launcher_sessions(window_id: u64) -> Vec<LauncherSessionEntry> {
     let Ok(window_id) = EngineWindowId::try_from(window_id) else {
         return vec![];
@@ -702,52 +620,6 @@ pub(crate) fn launcher_sessions(window_id: u64) -> Vec<LauncherSessionEntry> {
             .collect()
     })
     .unwrap_or_default()
-}
-
-pub(crate) async fn host_launcher_domains() -> Vec<HostLauncherDomainEntry> {
-    let mut domains = Mux::get().iter_domains();
-    domains.sort_by(|a, b| {
-        let a_state = a.state();
-        let b_state = b.state();
-        if a_state != b_state {
-            use std::cmp::Ordering;
-            return if a_state == DomainState::Attached {
-                Ordering::Less
-            } else {
-                Ordering::Greater
-            };
-        }
-        a.domain_id().cmp(&b.domain_id())
-    });
-    domains.retain(|domain| domain.spawnable());
-    let mut entries = Vec::new();
-    for domain in domains {
-        let name = domain.domain_name();
-        let label = domain.domain_label().await;
-        let label = if name == label || label.is_empty() {
-            format!("domain `{name}`")
-        } else {
-            format!("domain `{name}` - {label}")
-        };
-        entries.push(HostLauncherDomainEntry {
-            domain_id: domain.domain_id(),
-            name: name.to_string(),
-            is_attached: domain.state() == DomainState::Attached,
-            label,
-        });
-    }
-    entries
-}
-
-pub(crate) async fn attach_host_domain(
-    domain: &HostDomainHandle,
-    window_id: Option<u64>,
-) -> anyhow::Result<()> {
-    let window_id = window_id
-        .map(EngineWindowId::try_from)
-        .transpose()
-        .map_err(|_| anyhow!("invalid window id"))?;
-    domain.attach(window_id).await
 }
 
 pub(crate) fn active_frontend_client() -> Option<FrontendClientHandle> {
@@ -795,7 +667,7 @@ pub(crate) fn focus_terminal_handle_by_id(pane_id: u64) -> anyhow::Result<()> {
 
 pub(crate) fn frontend_resolve_pane(pane_id: u64) -> Option<FrontendResolvedPane> {
     let pane_id = HostTerminalHandle::try_from(pane_id).ok()?;
-    let (_domain_id, window_id, runtime_entry_id) = Mux::get().resolve_pane_id(pane_id)?;
+    let (window_id, runtime_entry_id) = Mux::get().resolve_pane_id(pane_id)?;
     Some(FrontendResolvedPane {
         window_id: window_id as u64,
         runtime_entry_id: runtime_entry_id as u64,
@@ -805,8 +677,7 @@ pub(crate) fn frontend_resolve_pane(pane_id: u64) -> Option<FrontendResolvedPane
 pub(crate) fn frontend_resolve_focused_pane(
     client_id: &FrontendClientHandle,
 ) -> Option<FrontendFocusedPane> {
-    let (_domain_id, window_id, runtime_entry_id, pane_id) =
-        Mux::get().resolve_focused_pane(client_id)?;
+    let (window_id, runtime_entry_id, pane_id) = Mux::get().resolve_focused_pane(client_id)?;
     Some(FrontendFocusedPane {
         window_id: window_id as u64,
         runtime_entry_id: runtime_entry_id as u64,
@@ -819,7 +690,6 @@ pub(crate) async fn spawn_local_shell_runner() -> anyhow::Result<Arc<dyn HostTer
     let (_runtime_entry, pane, _window_id) = Mux::get()
         .spawn_tab_or_window(
             None,
-            SpawnSessionDomain::DomainName("local".to_string()),
             None,
             None,
             TerminalSize::default(),
@@ -833,7 +703,6 @@ pub(crate) async fn spawn_local_shell_runner() -> anyhow::Result<Arc<dyn HostTer
 
 pub(crate) async fn spawn_host_runtime_entry(
     window_id: Option<u64>,
-    domain: SpawnSessionDomain,
     command: Option<CommandBuilder>,
     command_dir: Option<String>,
     size: TerminalSize,
@@ -848,7 +717,6 @@ pub(crate) async fn spawn_host_runtime_entry(
     let (_runtime_entry, pane, result_window_id) = Mux::get()
         .spawn_tab_or_window(
             engine_window_id,
-            domain,
             command,
             command_dir,
             size,
@@ -860,21 +728,20 @@ pub(crate) async fn spawn_host_runtime_entry(
     Ok((pane, result_window_id as u64))
 }
 
-pub(crate) fn add_host_domain(domain: &HostDomainHandle) {
-    Mux::get().add_domain(domain);
+pub(crate) fn set_host_spawn_target(spawn_target: &HostSpawnTargetHandle) {
+    Mux::get().set_primary_spawn_target(spawn_target);
 }
 
-pub(crate) fn default_host_domain() -> HostDomainHandle {
-    Mux::get().default_domain()
+pub(crate) fn primary_host_spawn_target() -> HostSpawnTargetHandle {
+    Mux::get().primary_spawn_target()
 }
-
 pub(crate) fn build_initial_host_mux(
     config: &ConfigHandle,
-    default_domain_name: Option<&str>,
     default_workspace_name: Option<&str>,
 ) -> anyhow::Result<()> {
-    let local_domain: HostDomainHandle = Arc::new(host_runtime::domain::LocalDomain::new("local")?);
-    let mux = Arc::new(Mux::new(Some(local_domain)));
+    let desktop_spawn_target: HostSpawnTargetHandle =
+        Arc::new(spawn_target::DesktopSpawnTarget::new_local()?);
+    let mux = Arc::new(Mux::new(Some(desktop_spawn_target)));
     Mux::set_mux(&mux);
     let client_id = Arc::new(ClientId::new());
     mux.register_client(client_id.clone());
@@ -884,16 +751,6 @@ pub(crate) fn build_initial_host_mux(
         .map(str::to_string)
         .unwrap_or_else(|| configured_default_workspace_name(config));
     mux.set_active_workspace(&workspace);
-
-    let domain_name =
-        default_domain_name.unwrap_or(config.default_domain.as_deref().unwrap_or("local"));
-    let domain = mux.get_domain_by_name(domain_name).ok_or_else(|| {
-        anyhow!(
-            "desired default domain '{}' was not found in host runtime",
-            domain_name
-        )
-    })?;
-    mux.set_default_domain(&domain);
     Ok(())
 }
 
@@ -909,12 +766,12 @@ pub(crate) fn show_host_configuration_error_message(err: &str) {
     log::error!("Configuration Error: {}", err);
 }
 
-pub(crate) fn create_serial_domain(
-    serial_domain: config::SerialDomain,
-) -> anyhow::Result<HostDomainHandle> {
-    Ok(Arc::new(
-        host_runtime::domain::LocalDomain::new_serial_domain(serial_domain)?,
-    ))
+pub(crate) fn create_serial_spawn_target(
+    serial_target: config::SerialTarget,
+) -> anyhow::Result<HostSpawnTargetHandle> {
+    Ok(Arc::new(spawn_target::DesktopSpawnTarget::new_serial(
+        serial_target,
+    )?))
 }
 
 pub(crate) fn shutdown_host_mux() {
@@ -946,16 +803,9 @@ pub(crate) fn create_empty_host_window(workspace: Option<String>) -> u64 {
     *builder as u64
 }
 
-pub(crate) fn host_domain_has_panes_in_workspace(
-    domain_id: usize,
-    workspace: Option<&str>,
-) -> bool {
+pub(crate) fn host_has_panes_in_workspace(workspace: Option<&str>) -> bool {
     let mux = Mux::get();
-    let have_panes_in_domain = mux
-        .iter_panes()
-        .iter()
-        .any(|pane| pane.domain_id() == domain_id);
-    if !have_panes_in_domain {
+    if mux.iter_panes().is_empty() {
         return false;
     }
     let Some(workspace) = workspace else {
@@ -964,10 +814,13 @@ pub(crate) fn host_domain_has_panes_in_workspace(
     for window_id in mux.iter_windows_in_workspace(workspace) {
         if let Some(window) = mux.get_window(window_id) {
             for runtime_entry in window.iter() {
-                for positioned in runtime_entry.iter_panes_ignoring_zoom() {
-                    if positioned.pane.domain_id() == domain_id {
-                        return true;
-                    }
+                if runtime_entry
+                    .iter_panes_ignoring_zoom()
+                    .iter()
+                    .next()
+                    .is_some()
+                {
+                    return true;
                 }
             }
         }

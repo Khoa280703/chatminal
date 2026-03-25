@@ -1,9 +1,9 @@
-use crate::config::validate_domain_name;
+use crate::config::validate_target_name;
 use crate::*;
 use engine_dynamic::{FromDynamic, ToDynamic};
 
 #[derive(Default, Debug, Clone, FromDynamic, ToDynamic)]
-pub struct TlsDomainServer {
+pub struct TlsTargetServer {
     /// The address:port combination on which the server will listen
     /// for client connections
     pub bind_address: String,
@@ -27,10 +27,10 @@ pub struct TlsDomainServer {
 }
 
 #[derive(Default, Debug, Clone, FromDynamic, ToDynamic)]
-pub struct TlsDomainClient {
-    /// The name of this specific domain.  Must be unique amongst
-    /// all types of domain in the configuration file.
-    #[dynamic(validate = "validate_domain_name")]
+pub struct TlsTargetClient {
+    /// The name of this specific target. Must be unique amongst
+    /// all target types in the configuration file.
+    #[dynamic(validate = "validate_target_name")]
     pub name: String,
 
     /// If set, use ssh to connect, start the server, and obtain
@@ -72,7 +72,7 @@ pub struct TlsDomainClient {
     /// should not normally need to override this value.
     pub expected_cn: Option<String>,
 
-    /// If true, connect to this domain automatically at startup
+    /// If true, connect to this target automatically at startup
     #[dynamic(default)]
     pub connect_automatically: bool,
 
@@ -96,7 +96,7 @@ pub struct TlsDomainClient {
     pub overlay_lag_indicator: bool,
 }
 
-impl TlsDomainClient {
+impl TlsTargetClient {
     pub fn ssh_parameters(&self) -> Option<anyhow::Result<SshParameters>> {
         self.bootstrap_via_ssh
             .as_ref()

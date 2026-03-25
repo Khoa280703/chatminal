@@ -1,12 +1,11 @@
 //! The launcher is a menu that presents a list of activities that can
-//! be launched, such as spawning a new session in various domains or attaching
-//! ssh/tls domains.
+//! be launched, such as spawning a new session or switching workspace/session.
 //! The launcher is implemented here as an overlay, but could potentially
 //! be rendered as a popup/context menu if the system supports it; at the
 //! time of writing our window layer doesn't provide an API for context
 //! menus.
 use crate::chatminal_runtime::overlay_compat::OverlayTerminal;
-use crate::chatminal_runtime::{HostLauncherDomainEntry, LauncherSessionEntry};
+use crate::chatminal_runtime::LauncherSessionEntry;
 use crate::commands::derive_command_from_key_assignment;
 use crate::inputmap::InputMap;
 use crate::overlay::quickselect;
@@ -14,7 +13,7 @@ use crate::overlay::selector::{matcher_pattern, matcher_score};
 use crate::scripting::guiwin::DesktopWindowId;
 use crate::termwindow::TermWindowNotif;
 use config::configuration;
-use config::keyassignment::{KeyAssignment, SpawnCommand, SpawnSessionDomain};
+use config::keyassignment::KeyAssignment;
 use rayon::prelude::*;
 use std::collections::BTreeMap;
 use termwiz::cell::{AttributeChange, CellAttributes};
@@ -34,15 +33,11 @@ struct Entry {
 }
 
 pub type LauncherTabEntry = LauncherSessionEntry;
-pub type LauncherDomainEntry = HostLauncherDomainEntry;
-
 pub struct LauncherArgs {
     flags: LauncherFlags,
-    domains: Vec<LauncherDomainEntry>,
     tabs: Vec<LauncherTabEntry>,
     session_ui_mode: bool,
     pane_id: u64,
-    domain_id_of_current_tab: usize,
     title: String,
     active_workspace: String,
     workspaces: Vec<String>,
@@ -58,7 +53,6 @@ impl LauncherArgs {
         flags: LauncherFlags,
         window_id: DesktopWindowId,
         pane_id: u64,
-        domain_id_of_current_tab: usize,
         help_text: &str,
         fuzzy_help_text: &str,
         alphabet: &str,
@@ -79,19 +73,11 @@ impl LauncherArgs {
         let session_ui_mode =
             crate::chatminal_runtime::desktop_current_active_session_id(window_id).is_some();
 
-        let domains = if flags.contains(LauncherFlags::DOMAINS) {
-            crate::chatminal_runtime::host_launcher_domains().await
-        } else {
-            vec![]
-        };
-
         Self {
             flags,
-            domains,
             tabs,
             session_ui_mode,
             pane_id,
-            domain_id_of_current_tab,
             title: title.to_string(),
             workspaces,
             active_workspace,
@@ -176,31 +162,6 @@ impl LauncherState {
                     action: KeyAssignment::SpawnCommandInNewSession(item.clone()),
                 });
             }
-        }
-
-        for domain in &args.domains {
-            let entry = if domain.is_attached {
-                Entry {
-                    label: format!("New Session ({})", domain.label),
-                    action: KeyAssignment::SpawnCommandInNewSession(SpawnCommand {
-                        domain: SpawnSessionDomain::DomainName(domain.name.to_string()),
-                        ..SpawnCommand::default()
-                    }),
-                }
-            } else {
-                Entry {
-                    label: format!("Attach {}", domain.label),
-                    action: KeyAssignment::AttachDomain(domain.name.to_string()),
-                }
-            };
-
-            // Preselect the entry that corresponds to the active tab
-            // at the time that the launcher was set up, so that pressing
-            // Enter immediately afterwards spawns a session in the same domain.
-            if domain.domain_id == args.domain_id_of_current_tab {
-                self.active_idx = self.entries.len();
-            }
-            self.entries.push(entry);
         }
 
         if args.flags.contains(LauncherFlags::WORKSPACES) {

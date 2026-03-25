@@ -23,14 +23,13 @@ impl TermWindow {
         )
     }
 
-    pub fn spawn_runtime_entry(&mut self, domain: &config::keyassignment::SpawnSessionDomain) {
+    pub fn spawn_runtime_entry(&mut self) {
         if self.chatminal_sidebar.is_enabled() {
             self.create_chatminal_session();
             return;
         }
         self.spawn_command(
             &SpawnCommand {
-                domain: domain.clone(),
                 ..Default::default()
             },
             crate::spawn::SpawnWhere::NewSession,

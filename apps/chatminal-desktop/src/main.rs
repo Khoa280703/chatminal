@@ -7,11 +7,10 @@ use crate::glyphcache::GlyphCache;
 use crate::utilsprites::RenderMetrics;
 use ::window::*;
 use anyhow::{anyhow, Context};
-use chatminal_lua_bridge::DomainRef;
 use clap::builder::ValueParser;
 use clap::{Parser, ValueHint};
-use config::keyassignment::{SpawnCommand, SpawnSessionDomain};
-use config::{ConfigHandle, SerialDomain};
+use config::keyassignment::SpawnCommand;
+use config::{ConfigHandle, SerialTarget};
 use engine_bidi::Direction;
 use engine_font::shaper::PresentationWidth;
 use engine_font::FontConfiguration;
@@ -133,7 +132,7 @@ enum SubCommand {
 }
 
 async fn async_run_serial(opts: SerialCommand) -> anyhow::Result<()> {
-    let serial_domain = SerialDomain {
+    let serial_target = SerialTarget {
         name: format!("Serial Port {}", opts.port),
         port: Some(opts.port.clone()),
         baud: opts.baud,
@@ -146,17 +145,16 @@ async fn async_run_serial(opts: SerialCommand) -> anyhow::Result<()> {
         no_auto_connect: true,
         position: opts.position,
         workspace: None,
-        domain: Some(serial_domain.name.clone()),
         ..Default::default()
     };
 
     let cmd = None;
 
-    let domain = chatminal_runtime::create_serial_domain(serial_domain)?;
-    chatminal_runtime::add_host_domain(&domain);
+    let spawn_target = chatminal_runtime::create_serial_spawn_target(serial_target)?;
+    chatminal_runtime::set_host_spawn_target(&spawn_target);
 
     let should_publish = false;
-    async_run_terminal_gui(cmd, start_command, should_publish).await
+    async_run_terminal_gui(cmd, start_command, should_publish, Some(spawn_target)).await
 }
 
 fn run_serial(config: config::ConfigHandle, opts: SerialCommand) -> anyhow::Result<()> {
@@ -167,7 +165,7 @@ fn run_serial(config: config::ConfigHandle, opts: SerialCommand) -> anyhow::Resu
         set_window_position(pos.clone());
     }
 
-    chatminal_runtime::build_initial_host_mux(&config, None, None)?;
+    chatminal_runtime::build_initial_host_mux(&config, None)?;
 
     let gui = crate::frontend::try_new()?;
 
@@ -182,25 +180,23 @@ fn run_serial(config: config::ConfigHandle, opts: SerialCommand) -> anyhow::Resu
     gui.run_forever()
 }
 
-fn have_panes_in_domain_and_ws(
-    domain: &chatminal_runtime::HostDomainHandle,
+fn have_panes_in_spawn_target_and_ws(
+    spawn_target: &chatminal_runtime::HostSpawnTargetHandle,
     workspace: &Option<String>,
 ) -> bool {
-    chatminal_runtime::host_domain_has_panes_in_workspace(domain.domain_id(), workspace.as_deref())
+    let _ = spawn_target;
+    chatminal_runtime::host_has_panes_in_workspace(workspace.as_deref())
 }
 
-async fn spawn_tab_in_domain_if_mux_is_empty(
+async fn spawn_tab_in_spawn_target_if_mux_is_empty(
     cmd: Option<CommandBuilder>,
-    is_connecting: bool,
-    domain: Option<chatminal_runtime::HostDomainHandle>,
+    spawn_target: Option<chatminal_runtime::HostSpawnTargetHandle>,
     workspace: Option<String>,
 ) -> anyhow::Result<()> {
-    let domain = domain.unwrap_or_else(chatminal_runtime::default_host_domain);
+    let spawn_target = spawn_target.unwrap_or_else(chatminal_runtime::primary_host_spawn_target);
 
-    if !is_connecting {
-        if have_panes_in_domain_and_ws(&domain, &workspace) {
-            return Ok(());
-        }
+    if have_panes_in_spawn_target_and_ws(&spawn_target, &workspace) {
+        return Ok(());
     }
 
     let window_id = chatminal_runtime::create_empty_host_window(workspace.clone()) as usize;
@@ -208,15 +204,13 @@ async fn spawn_tab_in_domain_if_mux_is_empty(
     let config = config::configuration();
     config.update_ulimit()?;
 
-    chatminal_runtime::attach_host_domain(&domain, Some(window_id as u64)).await?;
-
-    if have_panes_in_domain_and_ws(&domain, &workspace) {
-        trigger_and_log_gui_attached(DomainRef(domain.domain_id())).await;
+    if have_panes_in_spawn_target_and_ws(&spawn_target, &workspace) {
+        trigger_and_log_gui_attached().await;
         return Ok(());
     }
 
     let dpi = config.dpi.unwrap_or_else(|| ::window::default_dpi());
-    let _tab = domain
+    let _tab = spawn_target
         .spawn(
             config.initial_size(dpi as u32, Some(cell_pixel_dims(&config, dpi)?)),
             cmd,
@@ -224,7 +218,7 @@ async fn spawn_tab_in_domain_if_mux_is_empty(
             window_id,
         )
         .await?;
-    trigger_and_log_gui_attached(DomainRef(domain.domain_id())).await;
+    trigger_and_log_gui_attached().await;
     Ok(())
 }
 
@@ -250,18 +244,16 @@ async fn trigger_and_log_gui_startup(spawn_command: Option<SpawnCommand>) {
     }
 }
 
-async fn trigger_gui_attached(lua: Option<Rc<mlua::Lua>>, domain: DomainRef) -> anyhow::Result<()> {
+async fn trigger_gui_attached(lua: Option<Rc<mlua::Lua>>) -> anyhow::Result<()> {
     if let Some(lua) = lua {
-        let args = lua.pack_multi(domain)?;
+        let args = lua.pack_multi(())?;
         config::lua::emit_event(&lua, ("gui-attached".to_string(), args)).await?;
     }
     Ok(())
 }
 
-async fn trigger_and_log_gui_attached(domain: DomainRef) {
-    if let Err(err) =
-        config::with_lua_config_on_main_thread(move |lua| trigger_gui_attached(lua, domain)).await
-    {
+async fn trigger_and_log_gui_attached() {
+    if let Err(err) = config::with_lua_config_on_main_thread(trigger_gui_attached).await {
         let message = format!("while processing gui-attached event: {:#}", err);
         log::error!("{}", message);
         persistent_toast_notification("Error", &message);
@@ -281,6 +273,7 @@ async fn async_run_terminal_gui(
     cmd: Option<CommandBuilder>,
     opts: StartCommand,
     should_publish: bool,
+    startup_spawn_target: Option<chatminal_runtime::HostSpawnTargetHandle>,
 ) -> anyhow::Result<()> {
     let unix_socket_path =
         config::RUNTIME_DIR.join(format!("gui-sock-{}", unsafe { libc::getpid() }));
@@ -295,60 +288,31 @@ async fn async_run_terminal_gui(
         None => None,
     };
 
-    // Apply the domain to the command
-    let spawn_command = match (spawn_command, &opts.domain) {
-        (Some(spawn), Some(name)) => Some(SpawnCommand {
-            domain: SpawnSessionDomain::DomainName(name.to_string()),
-            ..spawn
-        }),
-        (None, Some(name)) => Some(SpawnCommand {
-            domain: SpawnSessionDomain::DomainName(name.to_string()),
-            ..SpawnCommand::default()
-        }),
-        (spawn, None) => spawn,
-    };
-    let chatminal_domain = chatminal_runtime::ensure_chatminal_domain_for_command(&cmd)
-        .context("initialize chatminal runtime domain")?;
+    let spawn_target = startup_spawn_target
+        .or_else(|| cmd.as_ref().map(|_| chatminal_runtime::primary_host_spawn_target()));
 
-    let domain = if let Some(domain) = chatminal_domain {
-        Some(domain)
-    } else if let Some(name) = &opts.domain {
-        let domain = chatminal_runtime::host_domain_by_name(name)
-            .map_err(|_| anyhow!("invalid domain {name}"))?;
-        Some(domain)
-    } else {
-        None
-    };
+    trigger_and_log_gui_startup(spawn_command).await;
 
-    if !opts.attach {
-        trigger_and_log_gui_startup(spawn_command).await;
+    if let Some(spawn_target) = &spawn_target {
+        let window_id = chatminal_runtime::create_empty_host_window(None) as usize;
+
+        let config = config::configuration();
+        let dpi = config.dpi.unwrap_or_else(|| ::window::default_dpi());
+        let tab = spawn_target
+            .spawn(
+                config.initial_size(dpi as u32, Some(cell_pixel_dims(&config, dpi)?)),
+                cmd.clone(),
+                None,
+                window_id,
+            )
+            .await?;
+        chatminal_runtime::activate_host_runtime_entry(window_id as u64, tab.tab_id() as u64)?;
+        trigger_and_log_gui_attached().await;
     }
-
-    let is_connecting = opts.attach;
-
-    if let Some(domain) = &domain {
-        if !opts.attach {
-            let window_id = chatminal_runtime::create_empty_host_window(None) as usize;
-
-            chatminal_runtime::attach_host_domain(domain, Some(window_id as u64)).await?;
-            let config = config::configuration();
-            let dpi = config.dpi.unwrap_or_else(|| ::window::default_dpi());
-            let tab = domain
-                .spawn(
-                    config.initial_size(dpi as u32, Some(cell_pixel_dims(&config, dpi)?)),
-                    cmd.clone(),
-                    None,
-                    window_id,
-                )
-                .await?;
-            chatminal_runtime::activate_host_runtime_entry(window_id as u64, tab.tab_id() as u64)?;
-            trigger_and_log_gui_attached(DomainRef(domain.domain_id())).await;
-        }
-    }
-    spawn_tab_in_domain_if_mux_is_empty(cmd, is_connecting, domain, opts.workspace).await
+    spawn_tab_in_spawn_target_if_mux_is_empty(cmd, spawn_target, opts.workspace).await
 }
 
-fn run_terminal_gui(opts: StartCommand, default_domain_name: Option<String>) -> anyhow::Result<()> {
+fn run_terminal_gui(opts: StartCommand) -> anyhow::Result<()> {
     if let Some(cls) = opts.class.as_ref() {
         crate::set_window_class(cls);
     }
@@ -378,17 +342,13 @@ fn run_terminal_gui(opts: StartCommand, default_domain_name: Option<String>) -> 
         None
     };
 
-    chatminal_runtime::build_initial_host_mux(
-        &config,
-        default_domain_name.as_deref(),
-        opts.workspace.as_deref(),
-    )?;
+    chatminal_runtime::build_initial_host_mux(&config, opts.workspace.as_deref())?;
 
     let gui = crate::frontend::try_new()?;
     let activity = chatminal_runtime::start_host_activity();
 
     promise::spawn::spawn(async move {
-        if let Err(err) = async_run_terminal_gui(cmd, opts, false).await {
+        if let Err(err) = async_run_terminal_gui(cmd, opts, false, None).await {
             terminate_with_error(err);
         }
         drop(activity);
@@ -871,7 +831,7 @@ fn run() -> anyhow::Result<()> {
     match sub {
         SubCommand::Start(start) => {
             log::trace!("Using configuration: {:#?}\nopts: {:#?}", config, opts);
-            let res = run_terminal_gui(start, None);
+            let res = run_terminal_gui(start);
             engine_blob_leases::clear_storage();
             res
         }

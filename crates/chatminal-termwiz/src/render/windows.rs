@@ -456,7 +456,7 @@ impl WindowsConsoleRenderer {
                 Change::Title(_text) => {
                     // Don't actually render this for now.
                     // The primary purpose of Change::Title at the time of
-                    // writing is to transfer tab titles across domains
+                    // writing is to transfer tab titles across peer instances
                     // in the Chatminal multiplexer model.  It's not clear
                     // that it would be a good idea to unilaterally output
                     // eg: a title change escape sequence here in the

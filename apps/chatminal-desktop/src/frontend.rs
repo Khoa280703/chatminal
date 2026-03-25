@@ -288,14 +288,8 @@ impl GuiFrontEnd {
                         // immediately
                         Connection::get().unwrap().terminate_message_loop();
                     }
-                    KeyAssignment::SpawnSession(spawn_where) => {
-                        spawn_command(
-                            &SpawnCommand {
-                                domain: spawn_where,
-                                ..Default::default()
-                            },
-                            SpawnWhere::NewWindow,
-                        );
+                    KeyAssignment::SpawnSession => {
+                        spawn_command(&SpawnCommand::default(), SpawnWhere::NewWindow);
                     }
                     KeyAssignment::SpawnCommandInNewSession(spawn) => {
                         spawn_command(&spawn, SpawnWhere::NewSession);

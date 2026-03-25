@@ -33,7 +33,7 @@ use super::{
     host_terminal_for_each_logical_line_in_stable_range_mut, host_terminal_get_cursor_position,
     host_terminal_get_dimensions, host_terminal_get_dirty_lines, host_terminal_get_lines,
     host_terminal_with_lines_mut, HostCachePolicy as CachePolicy, HostCloseReason as CloseReason,
-    HostDomainId as DomainId, HostLogicalLine as LogicalLine, HostMux, HostPattern as Pattern,
+    HostLogicalLine as LogicalLine, HostMux, HostPattern as Pattern,
     HostRenderableDimensions as RenderableDimensions, HostSearchResult as SearchResult,
     HostStableCursorPosition as StableCursorPosition, HostTerminal, HostTerminalHandle,
 };
@@ -87,7 +87,6 @@ impl Write for SessionPaneWriter {
 
 pub(crate) struct ChatminalSessionPane {
     pane_id: HostTerminalHandle,
-    domain_id: DomainId,
     session_id: String,
     runtime_id: RuntimeId,
     terminal_instance_id: TerminalInstanceId,
@@ -103,7 +102,6 @@ pub(crate) struct ChatminalSessionPane {
 impl ChatminalSessionPane {
     pub(crate) fn new(
         shared: Arc<SessionEngineShared>,
-        domain_id: DomainId,
         session_id: String,
         runtime_id: RuntimeId,
         terminal_instance_id: TerminalInstanceId,
@@ -112,7 +110,6 @@ impl ChatminalSessionPane {
         let writer = SessionPaneWriter::new(Arc::clone(&shared), terminal_instance_id);
         let pane = Arc::new(Self {
             pane_id: pane_id_for_terminal_instance(terminal_instance_id),
-            domain_id,
             session_id,
             runtime_id,
             terminal_instance_id,
@@ -472,9 +469,6 @@ impl HostTerminal for ChatminalSessionPane {
     fn palette(&self) -> ColorPalette {
         self.terminal.lock().palette()
     }
-    fn domain_id(&self) -> DomainId {
-        self.domain_id
-    }
     fn get_keyboard_encoding(&self) -> KeyboardEncoding {
         KeyboardEncoding::Xterm
     }
@@ -623,7 +617,7 @@ mod tests {
 
     #[test]
     fn reset_display_state_replays_existing_output_immediately() {
-        build_initial_host_mux(&config::configuration(), None, None).expect("init host mux");
+        build_initial_host_mux(&config::configuration(), None).expect("init host mux");
         let runtime_id = RuntimeId::new(7);
         let terminal_instance_id = TerminalInstanceId::new(11);
         let core_state = Arc::new(Mutex::new(SessionCoreState::default()));
@@ -662,7 +656,6 @@ mod tests {
 
         let pane = ChatminalSessionPane::new(
             Arc::clone(&shared),
-            1,
             "session-a".to_string(),
             runtime_id,
             terminal_instance_id,

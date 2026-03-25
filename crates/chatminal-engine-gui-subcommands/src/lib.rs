@@ -27,7 +27,7 @@ pub fn name_equals_value(arg: &str) -> Result<(String, String), String> {
 #[derive(Debug, Parser, Default, Clone)]
 #[command(trailing_var_arg = true)]
 pub struct StartCommand {
-    /// If true, do not connect to domains marked as connect_automatically
+    /// If true, do not connect to targets marked as connect_automatically
     /// in your Chatminal configuration file.
     #[arg(long = "no-auto-connect")]
     pub no_auto_connect: bool,
@@ -87,19 +87,6 @@ pub struct StartCommand {
     /// Note that Wayland does not allow applications to control window positioning.
     #[arg(long, verbatim_doc_comment)]
     pub position: Option<GuiPosition>,
-
-    /// Name of the multiplexer domain section from the configuration
-    /// to which you'd like to connect. If omitted, the default domain
-    /// will be used.
-    #[arg(long)]
-    pub domain: Option<String>,
-
-    /// When used with --domain, if the domain already has running panes,
-    /// Chatminal will simply attach and will NOT spawn the specified PROG.
-    /// If you omit --attach when using --domain, Chatminal will attach
-    /// AND then spawn PROG.
-    #[arg(long, requires = "domain")]
-    pub attach: bool,
 
     /// Instead of executing your shell, run PROG.
     /// For example: `chatminal start -- bash -l` will spawn bash
@@ -203,9 +190,9 @@ pub struct SerialCommand {
 #[derive(Debug, Parser, Clone)]
 #[command(trailing_var_arg = true)]
 pub struct ConnectCommand {
-    /// Name of the multiplexer domain section from the configuration
+    /// Name of the multiplexer target section from the configuration
     /// to which you'd like to connect
-    pub domain_name: String,
+    pub target_name: String,
 
     /// When spawning into an existing GUI instance, spawn a new
     /// tab into the active window rather than spawn a new window.

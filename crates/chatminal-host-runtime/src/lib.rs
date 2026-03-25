@@ -3,9 +3,8 @@ use crate::pane::{CachePolicy, Pane, PaneId};
 use crate::tab::{SplitRequest, Tab, TabId};
 use crate::window::{Window, WindowId};
 use anyhow::{anyhow, Context, Error};
-use config::keyassignment::SpawnSessionDomain;
 use config::{configuration, ExitBehavior, GuiPosition};
-use domain::{Domain, DomainId, DomainState, SplitSource};
+use spawn_target::{SpawnTarget, SplitSource};
 use engine_term::{Clipboard, ClipboardSelection, DownloadHandler, TerminalSize};
 use filedescriptor::{poll, pollfd, socketpair, AsRawSocketDescriptor, FileDescriptor, POLLIN};
 #[cfg(unix)]
@@ -17,7 +16,7 @@ use parking_lot::{
 };
 use percent_encoding::percent_decode_str;
 use portable_pty::{CommandBuilder, ExitStatus, PtySize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::io::{Read, Write};
 #[cfg(windows)]
@@ -34,7 +33,7 @@ use winapi::um::winsock2::{SOL_SOCKET, SO_RCVBUF, SO_SNDBUF};
 
 pub mod activity;
 pub mod client;
-pub mod domain;
+pub mod spawn_target;
 pub mod localpane;
 pub mod pane;
 pub mod renderable;
@@ -104,9 +103,7 @@ pub struct Mux {
     tabs: RwLock<HashMap<TabId, Arc<Tab>>>,
     panes: RwLock<HashMap<PaneId, Arc<dyn Pane>>>,
     windows: RwLock<HashMap<WindowId, Window>>,
-    default_domain: RwLock<Option<Arc<dyn Domain>>>,
-    domains: RwLock<HashMap<DomainId, Arc<dyn Domain>>>,
-    domains_by_name: RwLock<HashMap<String, Arc<dyn Domain>>>,
+    primary_spawn_target: RwLock<Option<Arc<dyn SpawnTarget>>>,
     subscribers: RwLock<HashMap<usize, Box<dyn Fn(MuxNotification) -> bool + Send + Sync>>>,
     banner: RwLock<Option<String>>,
     clients: RwLock<HashMap<ClientId, ClientInfo>>,
@@ -424,25 +421,12 @@ impl std::ops::Deref for MuxWindowBuilder {
 }
 
 impl Mux {
-    pub fn new(default_domain: Option<Arc<dyn Domain>>) -> Self {
-        let mut domains = HashMap::new();
-        let mut domains_by_name = HashMap::new();
-        if let Some(default_domain) = default_domain.as_ref() {
-            domains.insert(default_domain.domain_id(), Arc::clone(default_domain));
-
-            domains_by_name.insert(
-                default_domain.domain_name().to_string(),
-                Arc::clone(default_domain),
-            );
-        }
-
+    pub fn new(primary_spawn_target: Option<Arc<dyn SpawnTarget>>) -> Self {
         Self {
             tabs: RwLock::new(HashMap::new()),
             panes: RwLock::new(HashMap::new()),
             windows: RwLock::new(HashMap::new()),
-            default_domain: RwLock::new(default_domain),
-            domains_by_name: RwLock::new(domains_by_name),
-            domains: RwLock::new(domains),
+            primary_spawn_target: RwLock::new(primary_spawn_target),
             subscribers: RwLock::new(HashMap::new()),
             banner: RwLock::new(None),
             clients: RwLock::new(HashMap::new()),
@@ -504,10 +488,10 @@ impl Mux {
     pub fn resolve_focused_pane(
         &self,
         client_id: &ClientId,
-    ) -> Option<(DomainId, WindowId, TabId, PaneId)> {
+    ) -> Option<(WindowId, TabId, PaneId)> {
         let pane_id = self.clients.read().get(client_id)?.focused_pane_id?;
-        let (domain, window, tab) = self.resolve_pane_id(pane_id)?;
-        Some((domain, window, tab, pane_id))
+        let (window, tab) = self.resolve_pane_id(pane_id)?;
+        Some((window, tab, pane_id))
     }
 
     pub fn record_focus_for_client(&self, client_id: &ClientId, pane_id: PaneId) {
@@ -538,7 +522,7 @@ impl Mux {
             .get_pane(pane_id)
             .ok_or_else(|| anyhow::anyhow!("pane {pane_id} not found"))?;
 
-        let (_domain, window_id, tab_id) = self
+        let (window_id, tab_id) = self
             .resolve_pane_id(pane_id)
             .ok_or_else(|| anyhow::anyhow!("can't find {pane_id} in the mux"))?;
 
@@ -718,32 +702,16 @@ impl Mux {
         .detach();
     }
 
-    pub fn default_domain(&self) -> Arc<dyn Domain> {
-        self.default_domain.read().as_ref().map(Arc::clone).unwrap()
+    pub fn primary_spawn_target(&self) -> Arc<dyn SpawnTarget> {
+        self.primary_spawn_target
+            .read()
+            .as_ref()
+            .map(Arc::clone)
+            .unwrap()
     }
 
-    pub fn set_default_domain(&self, domain: &Arc<dyn Domain>) {
-        *self.default_domain.write() = Some(Arc::clone(domain));
-    }
-
-    pub fn get_domain(&self, id: DomainId) -> Option<Arc<dyn Domain>> {
-        self.domains.read().get(&id).cloned()
-    }
-
-    pub fn get_domain_by_name(&self, name: &str) -> Option<Arc<dyn Domain>> {
-        self.domains_by_name.read().get(name).cloned()
-    }
-
-    pub fn add_domain(&self, domain: &Arc<dyn Domain>) {
-        if self.default_domain.read().is_none() {
-            *self.default_domain.write() = Some(Arc::clone(domain));
-        }
-        self.domains
-            .write()
-            .insert(domain.domain_id(), Arc::clone(domain));
-        self.domains_by_name
-            .write()
-            .insert(domain.domain_name().to_string(), Arc::clone(domain));
+    pub fn set_primary_spawn_target(&self, spawn_target: &Arc<dyn SpawnTarget>) {
+        *self.primary_spawn_target.write() = Some(Arc::clone(spawn_target));
     }
 
     pub fn set_mux(mux: &Arc<Mux>) {
@@ -774,7 +742,7 @@ impl Mux {
     /// Returns None for SSH/serial/legacy sessions that carry no chatminal session_id.
     pub fn get_tab_by_chatminal_session_id(&self, session_id: &str) -> Option<Arc<Tab>> {
         let pane_id = *self.chatminal_session_id_index.read().get(session_id)?;
-        let (_domain_id, _window_id, tab_id) = self.resolve_pane_id(pane_id)?;
+        let (_window_id, tab_id) = self.resolve_pane_id(pane_id)?;
         self.get_tab(tab_id)
     }
 
@@ -882,28 +850,6 @@ impl Mux {
 
         let window = self.windows.write().remove(&window_id);
         if let Some(window) = window {
-            // Gather all the domains referenced by this window
-            let mut domains_of_window = HashSet::new();
-            for tab in window.iter() {
-                for pane in tab.iter_panes_ignoring_zoom() {
-                    domains_of_window.insert(pane.pane.domain_id());
-                }
-            }
-
-            for domain_id in domains_of_window {
-                if let Some(domain) = self.get_domain(domain_id) {
-                    if domain.detachable() {
-                        log::info!("detaching domain");
-                        if let Err(err) = domain.detach() {
-                            log::error!(
-                                "while detaching domain {domain_id} {}: {err:#}",
-                                domain.domain_name()
-                            );
-                        }
-                    }
-                }
-            }
-
             for tab in window.iter() {
                 self.remove_tab_internal(tab.tab_id());
             }
@@ -1093,103 +1039,42 @@ impl Mux {
         self.windows.read().keys().cloned().collect()
     }
 
-    pub fn iter_domains(&self) -> Vec<Arc<dyn Domain>> {
-        self.domains.read().values().cloned().collect()
-    }
-
-    pub fn resolve_pane_id(&self, pane_id: PaneId) -> Option<(DomainId, WindowId, TabId)> {
-        let mut ids = None;
+    pub fn resolve_pane_id(&self, pane_id: PaneId) -> Option<(WindowId, TabId)> {
+        let mut tab_id = None;
         for tab in self.tabs.read().values() {
             for p in tab.iter_panes_ignoring_zoom() {
                 if p.pane.pane_id() == pane_id {
-                    ids = Some((tab.tab_id(), p.pane.domain_id()));
+                    tab_id = Some(tab.tab_id());
                     break;
                 }
             }
         }
-        let (tab_id, domain_id) = ids?;
+        let tab_id = tab_id?;
         let window_id = self.window_containing_tab(tab_id)?;
-        Some((domain_id, window_id, tab_id))
-    }
-
-    pub fn domain_was_detached(&self, domain: DomainId) {
-        let mut dead_panes = vec![];
-        for pane in self.panes.read().values() {
-            if pane.domain_id() == domain {
-                dead_panes.push(pane.pane_id());
-            }
-        }
-
-        {
-            let mut windows = self.windows.write();
-            for (_, win) in windows.iter_mut() {
-                for tab in win.iter() {
-                    tab.kill_panes_in_domain(domain);
-                }
-            }
-        }
-
-        log::info!("domain detached panes: {:?}", dead_panes);
-        for pane_id in dead_panes {
-            self.remove_pane_internal(pane_id);
-        }
-
-        self.prune_dead_windows();
+        Some((window_id, tab_id))
     }
 
     pub fn set_banner(&self, banner: Option<String>) {
         *self.banner.write() = banner;
     }
 
-    pub fn resolve_spawn_tab_domain(
+    pub fn resolve_spawn_target(
         &self,
         // TODO: disambiguate with TabId
-        pane_id: Option<PaneId>,
-        domain: &config::keyassignment::SpawnSessionDomain,
-    ) -> anyhow::Result<Arc<dyn Domain>> {
-        let domain = match domain {
-            SpawnSessionDomain::DefaultDomain => self.default_domain(),
-            SpawnSessionDomain::CurrentSessionDomain => match pane_id {
-                Some(pane_id) => {
-                    let (pane_domain_id, _window_id, _tab_id) = self
-                        .resolve_pane_id(pane_id)
-                        .ok_or_else(|| anyhow!("pane_id {} invalid", pane_id))?;
-                    self.get_domain(pane_domain_id)
-                        .expect("resolve_pane_id to give valid domain_id")
-                }
-                None => self.default_domain(),
-            },
-            SpawnSessionDomain::DomainId(domain_id) => self
-                .get_domain(*domain_id)
-                .ok_or_else(|| anyhow!("domain id {} is invalid", domain_id))?,
-            SpawnSessionDomain::DomainName(name) => {
-                self.get_domain_by_name(&name).ok_or_else(|| {
-                    let names: Vec<String> = self
-                        .domains_by_name
-                        .read()
-                        .keys()
-                        .map(|name| format!("\"{name}\""))
-                        .collect();
-                    anyhow!(
-                        "domain name \"{name}\" is invalid. Possible names are {}.",
-                        names.join(", ")
-                    )
-                })?
-            }
-        };
-        Ok(domain)
+        _pane_id: Option<PaneId>,
+    ) -> anyhow::Result<Arc<dyn SpawnTarget>> {
+        Ok(self.primary_spawn_target())
     }
 
     fn resolve_cwd(
         &self,
         command_dir: Option<String>,
         pane: Option<Arc<dyn Pane>>,
-        target_domain: DomainId,
         policy: CachePolicy,
     ) -> Option<String> {
         command_dir.or_else(|| {
             match pane {
-                Some(pane) if pane.domain_id() == target_domain => pane
+                Some(pane) => pane
                     .get_current_working_dir(policy)
                     .and_then(|url| {
                         percent_decode_str(url.path())
@@ -1219,19 +1104,14 @@ impl Mux {
         pane_id: PaneId,
         request: SplitRequest,
         source: SplitSource,
-        domain: config::keyassignment::SpawnSessionDomain,
     ) -> anyhow::Result<(Arc<dyn Pane>, TerminalSize)> {
-        let (_pane_domain_id, window_id, tab_id) = self
+        let (_window_id, tab_id) = self
             .resolve_pane_id(pane_id)
             .ok_or_else(|| anyhow!("pane_id {} invalid", pane_id))?;
 
-        let domain = self
-            .resolve_spawn_tab_domain(Some(pane_id), &domain)
-            .context("resolve_spawn_tab_domain")?;
-
-        if domain.state() == DomainState::Detached {
-            domain.attach(Some(window_id)).await?;
-        }
+        let spawn_target = self
+            .resolve_spawn_target(Some(pane_id))
+            .context("resolve_spawn_target")?;
 
         let current_pane = self
             .get_pane(pane_id)
@@ -1247,7 +1127,6 @@ impl Mux {
                 command_dir: self.resolve_cwd(
                     command_dir,
                     Some(Arc::clone(&current_pane)),
-                    domain.domain_id(),
                     CachePolicy::FetchImmediate,
                 ),
             },
@@ -1255,7 +1134,9 @@ impl Mux {
         };
 
         #[allow(deprecated)]
-        let pane = domain.split_pane(source, tab_id, pane_id, request).await?;
+        let pane = spawn_target
+            .split_pane(source, tab_id, pane_id, request)
+            .await?;
         if let Some(config) = term_config {
             pane.set_config(config);
         }
@@ -1281,15 +1162,13 @@ impl Mux {
         window_id: Option<WindowId>,
         workspace_for_new_window: Option<String>,
     ) -> anyhow::Result<(Arc<Tab>, WindowId)> {
-        let (domain_id, _src_window, src_tab) = self
+        let (_src_window, src_tab) = self
             .resolve_pane_id(pane_id)
             .ok_or_else(|| anyhow::anyhow!("pane {} not found", pane_id))?;
 
-        let domain = self
-            .get_domain(domain_id)
-            .ok_or_else(|| anyhow::anyhow!("domain {domain_id} of pane {pane_id} not found"))?;
+        let spawn_target = self.resolve_spawn_target(Some(pane_id))?;
 
-        if let Some((tab, window_id)) = domain
+        if let Some((tab, window_id)) = spawn_target
             .move_pane_to_new_tab(pane_id, window_id, workspace_for_new_window.clone())
             .await?
         {
@@ -1337,7 +1216,6 @@ impl Mux {
     pub async fn spawn_tab_or_window(
         &self,
         window_id: Option<WindowId>,
-        domain: SpawnSessionDomain,
         command: Option<CommandBuilder>,
         command_dir: Option<String>,
         size: TerminalSize,
@@ -1345,9 +1223,9 @@ impl Mux {
         workspace_for_new_window: String,
         window_position: Option<GuiPosition>,
     ) -> anyhow::Result<(Arc<Tab>, Arc<dyn Pane>, WindowId)> {
-        let domain = self
-            .resolve_spawn_tab_domain(current_pane_id, &domain)
-            .context("resolve_spawn_tab_domain")?;
+        let spawn_target = self
+            .resolve_spawn_target(current_pane_id)
+            .context("resolve_spawn_target")?;
 
         let window_builder;
         let term_config;
@@ -1373,38 +1251,22 @@ impl Mux {
             (*window_builder, size)
         };
 
-        if domain.state() == DomainState::Detached {
-            domain.attach(Some(window_id)).await?;
-        }
-
         let cwd = self.resolve_cwd(
             command_dir,
             match current_pane_id {
-                Some(id) => {
-                    // Only use the cwd from the current pane if the domain
-                    // is the same as the one we are spawning into
-                    let (current_domain_id, _, _) = self
-                        .resolve_pane_id(id)
-                        .ok_or_else(|| anyhow!("pane_id {} invalid", id))?;
-                    if current_domain_id == domain.domain_id() {
-                        self.get_pane(id)
-                    } else {
-                        None
-                    }
-                }
+                Some(id) => self.get_pane(id),
                 None => None,
             },
-            domain.domain_id(),
             CachePolicy::FetchImmediate,
         );
 
-        let tab = domain
+        let tab = spawn_target
             .spawn(size, command.clone(), cwd.clone(), window_id)
             .await
             .with_context(|| {
                 format!(
-                    "Spawning in domain `{}`: {size:?} command={command:?} cwd={cwd:?}",
-                    domain.domain_name()
+                    "Spawning on target `{}`: {size:?} command={command:?} cwd={cwd:?}",
+                    spawn_target.spawn_target_name()
                 )
             })?;
 

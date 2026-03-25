@@ -1,9 +1,7 @@
 //! a tab hosting a termwiz terminal applet
 //! The idea is to use these when Chatminal needs to request
-//! input from the user as part of eg: setting up an ssh
-//! session.
+//! input from the user as part of setup flows.
 
-use crate::domain::{alloc_domain_id, Domain, DomainId, DomainState};
 use crate::pane::{
     alloc_pane_id, CachePolicy, CloseReason, ForEachPaneLogicalLine, LogicalLine, Pane, PaneId,
     WithPaneLines,
@@ -12,8 +10,6 @@ use crate::renderable::*;
 use crate::tab::Tab;
 use crate::window::WindowId;
 use crate::Mux;
-use anyhow::bail;
-use async_trait::async_trait;
 use config::keyassignment::ScrollbackEraseMode;
 use crossbeam::channel::{unbounded as channel, Receiver, Sender};
 use engine_term::color::ColorPalette;
@@ -22,7 +18,6 @@ use engine_term::{
 };
 use filedescriptor::{FileDescriptor, Pipe};
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
-use portable_pty::*;
 use rangeset::RangeSet;
 use std::io::{BufWriter, Write};
 use std::ops::Range;
@@ -35,59 +30,8 @@ use termwiz::terminal::{ScreenSize, TerminalWaker};
 use termwiz::Context;
 use url::Url;
 
-struct TermWizTerminalDomain {
-    domain_id: DomainId,
-}
-
-impl TermWizTerminalDomain {
-    pub fn new() -> Self {
-        let domain_id = alloc_domain_id();
-        Self { domain_id }
-    }
-}
-
-#[async_trait(?Send)]
-impl Domain for TermWizTerminalDomain {
-    async fn spawn_pane(
-        &self,
-        _size: TerminalSize,
-        _command: Option<CommandBuilder>,
-        _command_dir: Option<String>,
-    ) -> anyhow::Result<Arc<dyn Pane>> {
-        bail!("cannot spawn panes in a TermWizTerminalPane");
-    }
-
-    fn spawnable(&self) -> bool {
-        false
-    }
-
-    fn domain_id(&self) -> DomainId {
-        self.domain_id
-    }
-
-    fn domain_name(&self) -> &str {
-        "TermWizTerminalDomain"
-    }
-    async fn attach(&self, _window_id: Option<WindowId>) -> anyhow::Result<()> {
-        Ok(())
-    }
-
-    fn detachable(&self) -> bool {
-        false
-    }
-
-    fn detach(&self) -> anyhow::Result<()> {
-        bail!("detach not implemented for TermWizTerminalDomain");
-    }
-
-    fn state(&self) -> DomainState {
-        DomainState::Attached
-    }
-}
-
 pub struct TermWizTerminalPane {
     pane_id: PaneId,
-    domain_id: DomainId,
     terminal: Mutex<engine_term::Terminal>,
     input_tx: Sender<InputEvent>,
     dead: Mutex<bool>,
@@ -97,7 +41,6 @@ pub struct TermWizTerminalPane {
 
 impl TermWizTerminalPane {
     fn new(
-        domain_id: DomainId,
         size: TerminalSize,
         input_tx: Sender<InputEvent>,
         render_rx: FileDescriptor,
@@ -115,7 +58,6 @@ impl TermWizTerminalPane {
 
         Self {
             pane_id,
-            domain_id,
             terminal,
             writer: Mutex::new(Vec::new()),
             render_rx,
@@ -276,10 +218,6 @@ impl Pane for TermWizTerminalPane {
 
     fn palette(&self) -> ColorPalette {
         self.terminal.lock().palette()
-    }
-
-    fn domain_id(&self) -> DomainId {
-        self.domain_id
     }
 
     fn is_mouse_grabbed(&self) -> bool {
@@ -469,8 +407,7 @@ pub fn allocate(
         grab_mouse: true,
     };
 
-    let domain_id = 0;
-    let pane = TermWizTerminalPane::new(domain_id, size, input_tx, render_pipe.read, Some(config));
+    let pane = TermWizTerminalPane::new(size, input_tx, render_pipe.read, Some(config));
 
     // Add the tab to the mux so that the output is processed
     let pane: Arc<dyn Pane> = Arc::new(pane);
@@ -527,10 +464,6 @@ pub async fn run<
     ) -> anyhow::Result<(PaneId, WindowId)> {
         let mux = Mux::get();
 
-        // TODO: make a singleton
-        let domain: Arc<dyn Domain> = Arc::new(TermWizTerminalDomain::new());
-        mux.add_domain(&domain);
-
         let window_builder;
         let window_id = match window_id {
             Some(id) => id,
@@ -540,8 +473,7 @@ pub async fn run<
             }
         };
 
-        let pane =
-            TermWizTerminalPane::new(domain.domain_id(), size, input_tx, render_rx, term_config);
+        let pane = TermWizTerminalPane::new(size, input_tx, render_rx, term_config);
         let pane: Arc<dyn Pane> = Arc::new(pane);
 
         let tab = Arc::new(Tab::new(&size));

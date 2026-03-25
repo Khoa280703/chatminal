@@ -357,13 +357,6 @@ impl UserData for TerminalInstanceInformation {
                 .and_then(|pane| pane.get_current_working_dir(CachePolicy::AllowStale))
                 .map(|url| url_funcs::Url { url }))
         });
-        fields.add_field_method_get("domain_name", |_, this| {
-            Ok(crate::chatminal_runtime::resolve_public_pane_domain_name(
-                this.host_terminal_handle,
-                this.terminal_instance_id,
-            )
-            .unwrap_or_default())
-        });
     }
 }
 
@@ -2347,7 +2340,7 @@ impl TermWindow {
                 } => {
                     let mut size = self.terminal_size;
                     if let Some(tab_size) = self.render_scope_size(tab_id as u64) {
-                        // If we attached to a remote domain and loaded in
+                        // If we attached to a remote target and loaded in
                         // a tab async, we need to fixup its size, either
                         // by resizing it or resizes ourselves.
                         // The strategy here is to adjust both by taking

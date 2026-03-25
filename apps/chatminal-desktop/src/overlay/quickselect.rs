@@ -1,7 +1,7 @@
 use crate::chatminal_runtime::overlay_compat::{
-    OverlayCachePolicy, OverlayDomainHandle, OverlayForEachLogicalLine, OverlayLogicalLine,
-    OverlayPane, OverlayPaneHandle, OverlayPattern, OverlaySearchResult, OverlayWithPaneLines,
-    RenderableDimensions, StableCursorPosition,
+    OverlayCachePolicy, OverlayForEachLogicalLine, OverlayLogicalLine, OverlayPane, OverlayPaneHandle,
+    OverlayPattern, OverlaySearchResult, OverlayWithPaneLines, RenderableDimensions,
+    StableCursorPosition,
 };
 use crate::selection::{SelectionCoordinate, SelectionRange};
 use crate::termwindow::{TermWindow, TermWindowNotif};
@@ -450,9 +450,6 @@ impl OverlayPane for QuickSelectOverlay {
 
     fn palette(&self) -> ColorPalette {
         self.delegate.palette()
-    }
-    fn domain_id(&self) -> OverlayDomainHandle {
-        self.delegate.domain_id()
     }
 
     fn erase_scrollback(&self, erase_mode: ScrollbackEraseMode) {
