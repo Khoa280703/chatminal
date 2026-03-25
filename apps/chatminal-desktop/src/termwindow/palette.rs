@@ -10,9 +10,9 @@ use crate::termwindow::{DimensionContext, GuiWin, TermWindow};
 use crate::utilsprites::RenderMetrics;
 use chatminal_lua_bridge::TerminalRef;
 use config::keyassignment::KeyAssignment;
-use config::Dimension;
+use config::{Dimension, FontAttributes, FontWeight, TextStyle};
 use engine_dynamic::{FromDynamic, ToDynamic};
-use engine_term::{KeyCode, KeyModifiers, MouseEvent};
+use engine_term::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use frecency::Frecency;
 use luahelper::{from_lua_value_dynamic, impl_lua_conversion_dynamic};
 use rayon::prelude::*;
@@ -24,6 +24,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use termwiz::nerdfonts::NERD_FONTS;
 use window::color::LinearRgba;
+use window::DeadKeyStatus;
 use window::Modifiers;
 
 struct MatchResults {
@@ -34,6 +35,7 @@ struct MatchResults {
 pub struct CommandPalette {
     element: RefCell<Option<Vec<ComputedElement>>>,
     selection: RefCell<String>,
+    composing: RefCell<Option<String>>,
     matches: RefCell<Option<MatchResults>>,
     selected_row: RefCell<usize>,
     top_row: RefCell<usize>,
@@ -140,13 +142,8 @@ fn build_commands(
         }
     }
 
-    commands.retain(|cmd| {
-        if filter_copy_mode {
-            !matches!(cmd.action, KeyAssignment::CopyMode(_))
-        } else {
-            true
-        }
-    });
+    commands.retain(|cmd| command_is_palette_worthy(cmd, filter_copy_mode));
+    dedup_commands(&mut commands);
 
     let mut scores: HashMap<&str, f64> = HashMap::new();
     let recents = load_recents();
@@ -176,6 +173,125 @@ fn build_commands(
     });
 
     commands
+}
+
+fn command_is_palette_worthy(command: &ExpandedCommand, filter_copy_mode: bool) -> bool {
+    if filter_copy_mode && matches!(command.action, KeyAssignment::CopyMode(_)) {
+        return false;
+    }
+
+    !matches!(
+        command.action,
+        KeyAssignment::ActivateCommandPalette
+            | KeyAssignment::ActivateKeyTable { .. }
+            | KeyAssignment::PopKeyTable
+            | KeyAssignment::ClearKeyTableStack
+            | KeyAssignment::InputSelector(_)
+            | KeyAssignment::PromptInputLine(_)
+            | KeyAssignment::Confirmation(_)
+            | KeyAssignment::SelectTextAtMouseCursor(_)
+            | KeyAssignment::ExtendSelectionToMouseCursor(_)
+            | KeyAssignment::ClearSelection
+            | KeyAssignment::CompleteSelection(_)
+            | KeyAssignment::CompleteSelectionOrOpenLinkAtMouseCursor(_)
+            | KeyAssignment::StartWindowDrag
+            | KeyAssignment::ShowDebugOverlay
+            | KeyAssignment::ScrollByCurrentEventWheelDelta
+            | KeyAssignment::Nop
+            | KeyAssignment::DisableDefaultAssignment
+    )
+}
+
+fn dedup_commands(commands: &mut Vec<ExpandedCommand>) {
+    let mut seen_actions = vec![];
+    commands.retain(|command| {
+        if seen_actions
+            .iter()
+            .any(|existing| *existing == command.action)
+        {
+            false
+        } else {
+            seen_actions.push(command.action.clone());
+            true
+        }
+    });
+}
+
+fn visible_row_summary(total: usize, top_row: usize, rows_per_page: usize) -> String {
+    if total == 0 {
+        return "0 results".to_string();
+    }
+
+    let visible_start = top_row.min(total - 1) + 1;
+    let visible_end = (top_row + rows_per_page).min(total);
+    let mut parts = vec![format!("{visible_start}-{visible_end}/{total}")];
+
+    if top_row > 0 {
+        parts.insert(0, "↑ more".to_string());
+    }
+    if visible_end < total {
+        parts.push("↓ more".to_string());
+    }
+
+    parts.join("  ")
+}
+
+fn sidebar_like_panel_bg() -> LinearRgba {
+    LinearRgba::with_components(0.007, 0.007, 0.007, 1.0)
+}
+
+fn sidebar_like_border() -> LinearRgba {
+    LinearRgba::with_components(0.053, 0.053, 0.053, 1.0)
+}
+
+fn sidebar_like_text() -> LinearRgba {
+    LinearRgba::with_components(0.800, 0.800, 0.800, 1.0)
+}
+
+fn sidebar_like_muted_text() -> LinearRgba {
+    LinearRgba::with_components(0.616, 0.616, 0.616, 1.0)
+}
+
+fn sidebar_like_font_stack(weight: FontWeight) -> Vec<FontAttributes> {
+    #[cfg(target_os = "macos")]
+    let families = ["Helvetica Neue", "Helvetica", "Arial"];
+
+    #[cfg(target_os = "windows")]
+    let families = ["Segoe WPC", "Segoe UI", "Arial"];
+
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    let families = ["Ubuntu", "Noto Sans", "Droid Sans", "Arial"];
+
+    IntoIterator::into_iter(families)
+        .enumerate()
+        .map(|(idx, family)| FontAttributes {
+            family: family.to_string(),
+            weight,
+            is_fallback: idx != 0,
+            ..FontAttributes::default()
+        })
+        .collect()
+}
+
+fn sidebar_like_text_style() -> TextStyle {
+    TextStyle {
+        foreground: None,
+        font: sidebar_like_font_stack(FontWeight::REGULAR),
+    }
+}
+
+fn resolve_sidebar_like_font(
+    term_window: &mut TermWindow,
+) -> anyhow::Result<std::rc::Rc<engine_font::LoadedFont>> {
+    let style = sidebar_like_text_style();
+    term_window.fonts.resolve_font(&style).or_else(|err| {
+        log::warn!(
+            "command palette font fallback to command_palette_font: {:#}; requested={:?}",
+            err,
+            style.font
+        );
+        term_window.fonts.command_palette_font()
+    })
 }
 
 #[derive(Debug)]
@@ -252,12 +368,21 @@ impl CommandPalette {
         Self {
             element: RefCell::new(None),
             selection: RefCell::new(String::new()),
+            composing: RefCell::new(None),
             commands,
             matches: RefCell::new(None),
             selected_row: RefCell::new(0),
             top_row: RefCell::new(0),
             max_rows_on_screen: RefCell::new(0),
         }
+    }
+
+    fn effective_selection(&self) -> String {
+        let mut selection = self.selection.borrow().clone();
+        if let Some(composing) = self.composing.borrow().as_ref() {
+            selection.push_str(composing);
+        }
+        selection
     }
 
     fn compute(
@@ -269,11 +394,15 @@ impl CommandPalette {
         selected_row: usize,
         top_row: usize,
     ) -> anyhow::Result<Vec<ComputedElement>> {
-        let font = term_window
-            .fonts
-            .command_palette_font()
-            .expect("to resolve command palette font");
+        let font = resolve_sidebar_like_font(term_window)
+            .expect("to resolve sidebar-like command palette font");
         let metrics = RenderMetrics::with_font_metrics(&font.metrics());
+        let panel_bg = sidebar_like_panel_bg();
+        let root_border = sidebar_like_border();
+        let text_color = sidebar_like_text();
+        let muted_text = sidebar_like_muted_text();
+        let active_bg = LinearRgba::with_components(0.016, 0.224, 0.369, 1.0);
+        let hover_bg = LinearRgba::with_components(0.071, 0.102, 0.141, 1.0);
 
         let top_bar_height =
             if term_window.show_session_bar && !term_window.config.session_bar_at_bottom {
@@ -285,20 +414,39 @@ impl CommandPalette {
         let border = term_window.get_os_border();
         let top_pixel_y = top_bar_height + padding_top + border.top.get() as f32;
 
-        let mut elements =
-            vec![
-                Element::new(&font, ElementContent::Text(format!("> {selection}_")))
-                    .colors(ElementColors {
-                        border: BorderColor::default(),
-                        bg: LinearRgba::TRANSPARENT.into(),
-                        text: term_window
-                            .config
-                            .command_palette_fg_color
-                            .to_linear()
-                            .into(),
-                    })
-                    .display(DisplayType::Block),
-            ];
+        let mut elements = vec![
+            Element::new(&font, ElementContent::Text("Action Finder".to_string()))
+                .colors(ElementColors {
+                    border: BorderColor::default(),
+                    bg: LinearRgba::TRANSPARENT.into(),
+                    text: text_color.into(),
+                })
+                .display(DisplayType::Block),
+            Element::new(
+                &font,
+                ElementContent::Text("Find and run Chatminal actions".to_string()),
+            )
+            .colors(ElementColors {
+                border: BorderColor::default(),
+                bg: LinearRgba::TRANSPARENT.into(),
+                text: muted_text.into(),
+            })
+            .padding(BoxDimension {
+                left: Dimension::Cells(0.0),
+                right: Dimension::Cells(0.0),
+                top: Dimension::Cells(0.0),
+                bottom: Dimension::Cells(0.25),
+            })
+            .display(DisplayType::Block),
+            Element::new(&font, ElementContent::Text(format!("> {selection}_")))
+                .colors(ElementColors {
+                    border: BorderColor::default(),
+                    bg: LinearRgba::TRANSPARENT.into(),
+                    text: text_color.into(),
+                })
+                .display(DisplayType::Block),
+        ];
+        let total_matches = matches.matches.len();
 
         for (display_idx, command) in matches
             .matches
@@ -322,27 +470,20 @@ impl CommandPalette {
                 None => &' ',
             };
 
-            let solid_bg_color: InheritableColor = term_window
-                .config
-                .command_palette_bg_color
-                .to_linear()
-                .into();
-            let solid_fg_color: InheritableColor = term_window
-                .config
-                .command_palette_fg_color
-                .to_linear()
-                .into();
+            let solid_bg_color: InheritableColor = active_bg.into();
+            let solid_fg_color: InheritableColor = text_color.into();
+            let inactive_key_bg: InheritableColor = hover_bg.into();
 
             let (bg, text) = if display_idx == selected_row {
-                (solid_fg_color.clone(), solid_bg_color.clone())
+                (solid_bg_color.clone(), solid_fg_color.clone())
             } else {
                 (LinearRgba::TRANSPARENT.into(), solid_fg_color.clone())
             };
 
             let (label_bg, label_text) = if display_idx == selected_row {
-                (solid_fg_color.clone(), solid_bg_color.clone())
-            } else {
                 (solid_bg_color.clone(), solid_fg_color.clone())
+            } else {
+                (inactive_key_bg.clone(), solid_fg_color.clone())
             };
 
             // DRY if the brief and doc are the same
@@ -456,11 +597,34 @@ impl CommandPalette {
             );
         }
 
+        elements.push(
+            Element::new(
+                &font,
+                ElementContent::Text(visible_row_summary(
+                    total_matches,
+                    top_row,
+                    max_rows_on_screen,
+                )),
+            )
+            .colors(ElementColors {
+                border: BorderColor::default(),
+                bg: LinearRgba::TRANSPARENT.into(),
+                text: muted_text.into(),
+            })
+            .padding(BoxDimension {
+                left: Dimension::Cells(0.25),
+                right: Dimension::Cells(0.25),
+                top: Dimension::Cells(0.25),
+                bottom: Dimension::Cells(0.),
+            })
+            .display(DisplayType::Block),
+        );
+
         let dimensions = term_window.dimensions;
         let size = term_window.terminal_size;
 
         // Avoid covering the entire width
-        let desired_width = (size.cols / 3).max(120).min(size.cols);
+        let desired_width = (size.cols / 2).max(132).min(size.cols);
 
         // Center it
         let avail_pixel_width =
@@ -470,23 +634,9 @@ impl CommandPalette {
 
         let element = Element::new(&font, ElementContent::Children(elements))
             .colors(ElementColors {
-                border: BorderColor::new(
-                    term_window
-                        .config
-                        .command_palette_bg_color
-                        .to_linear()
-                        .into(),
-                ),
-                bg: term_window
-                    .config
-                    .command_palette_bg_color
-                    .to_linear()
-                    .into(),
-                text: term_window
-                    .config
-                    .command_palette_fg_color
-                    .to_linear()
-                    .into(),
+                border: BorderColor::new(root_border),
+                bg: panel_bg.into(),
+                text: text_color.into(),
             })
             .margin(BoxDimension {
                 left: Dimension::Cells(0.25),
@@ -586,6 +736,60 @@ impl CommandPalette {
             *top_row = row.saturating_sub(max_rows_on_screen - 1);
         }
     }
+
+    fn move_page_up(&self) {
+        let page = (*self.max_rows_on_screen.borrow()).max(1);
+        let mut row = self.selected_row.borrow_mut();
+        *row = row.saturating_sub(page);
+
+        let mut top_row = self.top_row.borrow_mut();
+        *top_row = top_row.saturating_sub(page);
+        if *row < *top_row {
+            *top_row = *row;
+        }
+    }
+
+    fn move_page_down(&self) {
+        let page = (*self.max_rows_on_screen.borrow()).max(1);
+        let limit = self
+            .matches
+            .borrow()
+            .as_ref()
+            .map(|m| m.matches.len())
+            .unwrap_or_else(|| self.commands.len())
+            .saturating_sub(1);
+        let mut row = self.selected_row.borrow_mut();
+        *row = row.saturating_add(page).min(limit);
+
+        let mut top_row = self.top_row.borrow_mut();
+        *top_row = top_row
+            .saturating_add(page)
+            .min(limit.saturating_sub(page.saturating_sub(1)));
+        if *row > *top_row + page - 1 {
+            *top_row = row.saturating_sub(page - 1);
+        }
+    }
+
+    fn scroll_by_lines(&self, delta: isize) {
+        let page = (*self.max_rows_on_screen.borrow()).max(1);
+        let total = self
+            .matches
+            .borrow()
+            .as_ref()
+            .map(|m| m.matches.len())
+            .unwrap_or_else(|| self.commands.len());
+        let max_top_row = total.saturating_sub(page);
+        let mut top_row = self.top_row.borrow_mut();
+        *top_row = top_row.saturating_add_signed(delta).clamp(0, max_top_row);
+
+        let mut selected_row = self.selected_row.borrow_mut();
+        if total == 0 {
+            *selected_row = 0;
+            return;
+        }
+        let last_visible_row = (*top_row + page - 1).min(total - 1);
+        *selected_row = (*selected_row).clamp(*top_row, last_visible_row);
+    }
 }
 
 impl Modal for CommandPalette {
@@ -597,7 +801,20 @@ impl Modal for CommandPalette {
         false
     }
 
-    fn mouse_event(&self, _event: MouseEvent, _term_window: &mut TermWindow) -> anyhow::Result<()> {
+    fn mouse_event(&self, event: MouseEvent, term_window: &mut TermWindow) -> anyhow::Result<()> {
+        if event.kind == MouseEventKind::Press {
+            match event.button {
+                MouseButton::WheelUp(amount) => {
+                    self.scroll_by_lines(-(amount as isize));
+                    term_window.invalidate_modal();
+                }
+                MouseButton::WheelDown(amount) => {
+                    self.scroll_by_lines(amount as isize);
+                    term_window.invalidate_modal();
+                }
+                _ => {}
+            }
+        }
         Ok(())
     }
 
@@ -617,20 +834,32 @@ impl Modal for CommandPalette {
             (KeyCode::DownArrow, KeyModifiers::NONE) | (KeyCode::Char('n'), KeyModifiers::CTRL) => {
                 self.move_down();
             }
+            (KeyCode::PageUp, KeyModifiers::NONE) | (KeyCode::Char('b'), KeyModifiers::CTRL) => {
+                self.move_page_up();
+            }
+            (KeyCode::PageDown, KeyModifiers::NONE) | (KeyCode::Char('f'), KeyModifiers::CTRL) => {
+                self.move_page_down();
+            }
             (KeyCode::Char(c), KeyModifiers::NONE) | (KeyCode::Char(c), KeyModifiers::SHIFT) => {
                 // Type to add to the selection
+                self.composing.borrow_mut().take();
                 let mut selection = self.selection.borrow_mut();
                 selection.push(c);
                 self.updated_input();
             }
             (KeyCode::Backspace, KeyModifiers::NONE) => {
                 // Backspace to edit the selection
-                let mut selection = self.selection.borrow_mut();
-                selection.pop();
+                if self.composing.borrow().is_some() {
+                    self.composing.borrow_mut().take();
+                } else {
+                    let mut selection = self.selection.borrow_mut();
+                    selection.pop();
+                }
                 self.updated_input();
             }
             (KeyCode::Char('u'), KeyModifiers::CTRL) => {
                 // CTRL-u to clear the selection
+                self.composing.borrow_mut().take();
                 let mut selection = self.selection.borrow_mut();
                 selection.clear();
                 self.updated_input();
@@ -664,24 +893,66 @@ impl Modal for CommandPalette {
         Ok(true)
     }
 
+    fn text_input(
+        &self,
+        text: &str,
+        _mods: KeyModifiers,
+        term_window: &mut TermWindow,
+    ) -> anyhow::Result<bool> {
+        self.composing.borrow_mut().take();
+        let mut changed = false;
+        {
+            let mut selection = self.selection.borrow_mut();
+            for c in text.chars() {
+                if c.is_control() {
+                    continue;
+                }
+                selection.push(c);
+                changed = true;
+            }
+        }
+        if changed {
+            self.updated_input();
+            term_window.invalidate_modal();
+        }
+        Ok(changed)
+    }
+
+    fn composition_status_changed(
+        &self,
+        status: &DeadKeyStatus,
+        term_window: &mut TermWindow,
+    ) -> anyhow::Result<bool> {
+        let next = match status {
+            DeadKeyStatus::None => None,
+            DeadKeyStatus::Composing(text) => Some(text.clone()),
+        };
+        if *self.composing.borrow() == next {
+            return Ok(false);
+        }
+        self.composing.borrow_mut().clone_from(&next);
+        self.updated_input();
+        term_window.invalidate_modal();
+        Ok(true)
+    }
+
     fn computed_element(
         &self,
         term_window: &mut TermWindow,
     ) -> anyhow::Result<Ref<'_, [ComputedElement]>> {
-        let selection = self.selection.borrow();
+        let selection = self.effective_selection();
         let selection = selection.as_str();
 
         let mut results = self.matches.borrow_mut();
 
-        let font = term_window
-            .fonts
-            .command_palette_font()
-            .expect("to resolve char selection font");
+        let font =
+            resolve_sidebar_like_font(term_window).expect("to resolve sidebar-like palette font");
         let metrics = RenderMetrics::with_font_metrics(&font.metrics());
 
         let mut max_rows_on_screen = ((term_window.dimensions.pixel_height * 8 / 10)
             / metrics.cell_size.height as usize)
-            - 2;
+            .saturating_sub(3)
+            .max(1);
         if let Some(size) = term_window.config.command_palette_rows {
             max_rows_on_screen = max_rows_on_screen.min(size);
         }
@@ -718,5 +989,74 @@ impl Modal for CommandPalette {
 
     fn reconfigure(&self, _term_window: &mut TermWindow) {
         self.element.borrow_mut().take();
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use config::keyassignment::ClipboardCopyDestination;
+
+    fn make_command(action: KeyAssignment) -> ExpandedCommand {
+        ExpandedCommand {
+            brief: "test".into(),
+            doc: "".into(),
+            keys: vec![],
+            action,
+            menubar: &["Edit"],
+            icon: None,
+        }
+    }
+
+    #[test]
+    fn visible_row_summary_reports_more_above_and_below() {
+        assert_eq!(visible_row_summary(20, 5, 8), "↑ more  6-13/20  ↓ more");
+        assert_eq!(visible_row_summary(3, 0, 8), "1-3/3");
+        assert_eq!(visible_row_summary(0, 0, 8), "0 results");
+    }
+
+    #[test]
+    fn dedup_commands_keeps_first_action() {
+        let action = KeyAssignment::CopyTo(ClipboardCopyDestination::Clipboard);
+        let mut commands = vec![make_command(action.clone()), make_command(action)];
+        dedup_commands(&mut commands);
+        assert_eq!(commands.len(), 1);
+    }
+
+    #[test]
+    fn palette_filter_removes_internal_actions() {
+        assert!(!command_is_palette_worthy(
+            &make_command(KeyAssignment::ClearKeyTableStack),
+            false
+        ));
+        assert!(!command_is_palette_worthy(
+            &make_command(KeyAssignment::ActivateCommandPalette),
+            false
+        ));
+        assert!(!command_is_palette_worthy(
+            &make_command(KeyAssignment::PromptInputLine(
+                config::keyassignment::PromptInputLine {
+                    action: Box::new(KeyAssignment::Nop),
+                    initial_value: None,
+                    description: "test".into(),
+                    prompt: "> ".into(),
+                }
+            )),
+            false
+        ));
+        assert!(command_is_palette_worthy(
+            &make_command(KeyAssignment::SpawnSession),
+            false
+        ));
+        assert!(command_is_palette_worthy(
+            &make_command(KeyAssignment::ShowSessionNavigator),
+            false
+        ));
+        assert!(command_is_palette_worthy(
+            &make_command(KeyAssignment::Search(
+                config::keyassignment::Pattern::CurrentSelectionOrEmptyString
+            )),
+            false
+        ));
     }
 }

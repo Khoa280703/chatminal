@@ -1,4 +1,3 @@
-use crate::default_true;
 use crate::keys::KeyNoAction;
 use crate::window::WindowLevel;
 use engine_dynamic::{FromDynamic, FromDynamicOptions, ToDynamic, Value};
@@ -270,18 +269,6 @@ impl SessionDirection {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, FromDynamic, ToDynamic, Serialize, Deserialize)]
-pub enum ScrollbackEraseMode {
-    ScrollbackOnly,
-    ScrollbackAndViewport,
-}
-
-impl Default for ScrollbackEraseMode {
-    fn default() -> Self {
-        Self::ScrollbackOnly
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromDynamic, ToDynamic)]
 pub enum ClipboardCopyDestination {
     Clipboard,
@@ -334,84 +321,6 @@ pub struct SessionSelectArguments {
 
     #[dynamic(default)]
     pub show_session_ids: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, FromDynamic, ToDynamic)]
-pub enum CharSelectGroup {
-    RecentlyUsed,
-    SmileysAndEmotion,
-    PeopleAndBody,
-    AnimalsAndNature,
-    FoodAndDrink,
-    TravelAndPlaces,
-    Activities,
-    Objects,
-    Symbols,
-    Flags,
-    NerdFonts,
-    UnicodeNames,
-    ShortCodes,
-}
-
-// next is default, previous is the reverse
-macro_rules! char_select_group_impl_next_prev {
-    ($($x:ident => $y:ident),+ $(,)?) => {
-        impl CharSelectGroup {
-            pub const fn next(self) -> Self {
-                match self {
-                    $(CharSelectGroup::$x => CharSelectGroup::$y),+
-                }
-            }
-
-            pub const fn previous(self) -> Self {
-                match self {
-                    $(CharSelectGroup::$y => CharSelectGroup::$x),+
-                }
-            }
-        }
-    };
-}
-
-char_select_group_impl_next_prev! (
-    RecentlyUsed => SmileysAndEmotion,
-    SmileysAndEmotion => PeopleAndBody,
-    PeopleAndBody => AnimalsAndNature,
-    AnimalsAndNature => FoodAndDrink,
-    FoodAndDrink => TravelAndPlaces,
-    TravelAndPlaces => Activities,
-    Activities => Objects,
-    Objects => Symbols,
-    Symbols => Flags,
-    Flags => NerdFonts,
-    NerdFonts => UnicodeNames,
-    UnicodeNames => ShortCodes,
-    ShortCodes => RecentlyUsed,
-);
-
-impl Default for CharSelectGroup {
-    fn default() -> Self {
-        Self::SmileysAndEmotion
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, FromDynamic, ToDynamic)]
-pub struct CharSelectArguments {
-    #[dynamic(default)]
-    pub group: Option<CharSelectGroup>,
-    #[dynamic(default = "default_true")]
-    pub copy_on_select: bool,
-    #[dynamic(default)]
-    pub copy_to: ClipboardCopyDestination,
-}
-
-impl Default for CharSelectArguments {
-    fn default() -> Self {
-        Self {
-            group: None,
-            copy_on_select: true,
-            copy_to: ClipboardCopyDestination::default(),
-        }
-    }
 }
 
 #[derive(Default, Debug, Clone, PartialEq, FromDynamic, ToDynamic)]
@@ -556,7 +465,6 @@ pub enum KeyAssignment {
     SplitVertical(SpawnCommand),
     ShowLauncher,
     ShowLauncherArgs(LauncherActionArgs),
-    ClearScrollback(ScrollbackEraseMode),
     Search(Pattern),
     ActivateCopyMode,
 
@@ -604,7 +512,6 @@ pub enum KeyAssignment {
     RotatePanes(RotationDirection),
     SplitSession(SplitSession),
     SessionSelect(SessionSelectArguments),
-    CharSelect(CharSelectArguments),
 
     ResetTerminal,
     OpenUri(String),

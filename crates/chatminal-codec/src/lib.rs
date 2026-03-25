@@ -12,7 +12,7 @@
 #![allow(clippy::range_plus_one)]
 
 use anyhow::{bail, Context as _, Error};
-use config::keyassignment::{SessionDirection, ScrollbackEraseMode};
+use config::keyassignment::SessionDirection;
 use engine_term::color::ColorPalette;
 use engine_term::{Alert, ClipboardSelection, StableRowIndex, TerminalSize};
 use host_runtime::client::{ClientId, ClientInfo};
@@ -498,7 +498,6 @@ pdu! {
     TabTitleChanged: 56,
     WindowTitleChanged: 57,
     RenameWorkspace: 58,
-    EraseScrollbackRequest: 59,
     GetSessionDirection: 60,
     GetSessionDirectionResponse: 61,
     AdjustPaneSize: 62,
@@ -1105,12 +1104,6 @@ impl From<Vec<(StableRowIndex, Line)>> for SerializedLines {
 pub struct GetLinesResponse {
     pub pane_id: PaneId,
     pub lines: SerializedLines,
-}
-
-#[derive(Deserialize, Serialize, PartialEq, Debug)]
-pub struct EraseScrollbackRequest {
-    pub pane_id: PaneId,
-    pub erase_mode: ScrollbackEraseMode,
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Debug)]

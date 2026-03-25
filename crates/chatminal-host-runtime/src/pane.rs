@@ -1,7 +1,7 @@
 use crate::renderable::*;
 use crate::ExitBehavior;
 use async_trait::async_trait;
-use config::keyassignment::{KeyAssignment, ScrollbackEraseMode};
+use config::keyassignment::KeyAssignment;
 use downcast_rs::{impl_downcast, DowncastSync};
 use engine_dynamic::Value;
 use engine_term::color::ColorPalette;
@@ -264,8 +264,6 @@ pub trait Pane: DowncastSync + Send + Sync {
     fn copy_user_vars(&self) -> HashMap<String, String> {
         HashMap::new()
     }
-
-    fn erase_scrollback(&self, _erase_mode: ScrollbackEraseMode) {}
 
     /// Called to advise on whether this tab has focus
     fn focus_changed(&self, _focused: bool) {}

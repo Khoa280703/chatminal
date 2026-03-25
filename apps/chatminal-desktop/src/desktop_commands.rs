@@ -774,35 +774,17 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             menubar: &["Chatminal"],
             icon: None,
         },
-        ClearScrollback(ScrollbackEraseMode::ScrollbackOnly) => CommandDef {
-            brief: "Clear scrollback".into(),
-            doc: "Clears any text that has scrolled out of the \
-              viewport of the current session view"
-                .into(),
-            keys: vec![(Modifiers::SUPER, "k".into())],
-            args: &[ArgType::ActiveTerminal],
-            menubar: &["Edit"],
-            icon: Some("cod_clear_all"),
-        },
-        ClearScrollback(ScrollbackEraseMode::ScrollbackAndViewport) => CommandDef {
-            brief: "Clear the scrollback and viewport".into(),
-            doc: "Removes all content from the screen and scrollback".into(),
-            keys: vec![],
-            args: &[ArgType::ActiveTerminal],
-            menubar: &["Edit"],
-            icon: Some("cod_clear_all"),
-        },
         Search(Pattern::CurrentSelectionOrEmptyString) => CommandDef {
-            brief: "Search session view output".into(),
-            doc: "Enters the search mode UI for the current session view".into(),
+            brief: "Search Terminal Output".into(),
+            doc: "Search the visible terminal output and scrollback".into(),
             keys: vec![(Modifiers::SUPER, "f".into())],
             args: &[ArgType::ActiveTerminal],
             menubar: &["Edit"],
             icon: Some("oct_search"),
         },
         Search(_) => CommandDef {
-            brief: "Search session view output".into(),
-            doc: "Enters the search mode UI for the current session view".into(),
+            brief: "Search Terminal Output".into(),
+            doc: "Search the visible terminal output and scrollback".into(),
             keys: vec![],
             args: &[ArgType::ActiveTerminal],
             menubar: &[],
@@ -841,35 +823,27 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             icon: None,
         },
         QuickSelect => CommandDef {
-            brief: "Enter QuickSelect mode".into(),
-            doc: "Activates the quick selection UI for the current session view".into(),
+            brief: "Open Quick Select".into(),
+            doc: "Find and jump to selectable text in the current terminal".into(),
             keys: vec![(Modifiers::CTRL.union(Modifiers::SHIFT), "Space".into())],
             args: &[ArgType::ActiveTerminal],
             menubar: &["Edit"],
             icon: None,
         },
         QuickSelectArgs(_) => CommandDef {
-            brief: "Enter QuickSelect mode".into(),
-            doc: "Activates the quick selection UI for the current session view".into(),
+            brief: "Open Quick Select".into(),
+            doc: "Find and jump to selectable text in the current terminal".into(),
             keys: vec![],
             args: &[ArgType::ActiveTerminal],
             menubar: &[],
             icon: None,
         },
-        CharSelect(_) => CommandDef {
-            brief: "Enter Emoji / Character selection mode".into(),
-            doc: "Activates the character selection UI for the current session view".into(),
-            keys: vec![(Modifiers::CTRL.union(Modifiers::SHIFT), "u".into())],
-            args: &[ArgType::ActiveTerminal],
-            menubar: &["Edit"],
-            icon: Some("md_sticker_emoji"),
-        },
         SessionSelect(SessionSelectArguments {
             mode: SessionSelectMode::Activate,
             ..
         }) => CommandDef {
-            brief: "Enter Session View selection mode".into(),
-            doc: "Activates the session view selection UI".into(),
+            brief: "Open Pane Picker".into(),
+            doc: "Pick a pane from the current window".into(),
             keys: vec![], // FIXME: find a new assignment
             args: &[ArgType::ActiveTerminal],
             menubar: &["Window"],
@@ -879,8 +853,8 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             mode: SessionSelectMode::SwapWithActive,
             ..
         }) => CommandDef {
-            brief: "Swap a session view with the active session view".into(),
-            doc: "Activates the session view selection UI".into(),
+            brief: "Swap With Another Pane".into(),
+            doc: "Pick another pane and swap it with the current pane".into(),
             keys: vec![], // FIXME: find a new assignment
             args: &[ArgType::ActiveTerminal],
             menubar: &["Window"],
@@ -890,8 +864,8 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             mode: SessionSelectMode::SwapWithActiveKeepFocus,
             ..
         }) => CommandDef {
-            brief: "Swap a session view with the active session view, keeping focus".into(),
-            doc: "Activates the session view selection UI".into(),
+            brief: "Swap With Another Pane And Keep Focus".into(),
+            doc: "Swap the current pane with another pane but keep focus here".into(),
             keys: vec![], // FIXME: find a new assignment
             args: &[ArgType::ActiveTerminal],
             menubar: &["Window"],
@@ -901,8 +875,8 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             mode: SessionSelectMode::MoveToNewSession,
             ..
         }) => CommandDef {
-            brief: "Move a session view into its own session".into(),
-            doc: "Activates the session view selection UI".into(),
+            brief: "Move Pane To New Session".into(),
+            doc: "Pick a pane and move it into its own session".into(),
             keys: vec![], // FIXME: find a new assignment
             args: &[ArgType::ActiveTerminal],
             menubar: &["Window"],
@@ -912,8 +886,8 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             mode: SessionSelectMode::MoveToNewWindow,
             ..
         }) => CommandDef {
-            brief: "Move a session view into its own window".into(),
-            doc: "Activates the session view selection UI".into(),
+            brief: "Move Pane To New Window".into(),
+            doc: "Pick a pane and move it into its own window".into(),
             keys: vec![], // FIXME: find a new assignment
             args: &[ArgType::ActiveTerminal],
             menubar: &["Window"],
@@ -1414,20 +1388,16 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             icon: Some("md_format_align_top"),
         },
         ActivateCopyMode => CommandDef {
-            brief: "Activate Copy Mode".into(),
-            doc: "Enter mouse-less copy mode to select text using only \
-            the keyboard"
-                .into(),
+            brief: "Open Copy Mode".into(),
+            doc: "Use the keyboard to move through terminal output and copy text".into(),
             keys: vec![(Modifiers::CTRL.union(Modifiers::SHIFT), "x".into())],
             args: &[ArgType::ActiveTerminal],
             menubar: &["Edit"],
             icon: Some("md_content_copy"),
         },
         SplitVertical(_) => CommandDef {
-            brief: label_string(action, "Split Vertically (Top/Bottom)".to_string()).into(),
-            doc: "Split the current session view vertically into two session views, by spawning \
-            the default program into the bottom half"
-                .into(),
+            brief: label_string(action, "Split Top/Bottom".to_string()).into(),
+            doc: "Split the current pane into top and bottom panes".into(),
             keys: vec![(
                 Modifiers::CTRL
                     .union(Modifiers::ALT)
@@ -1439,10 +1409,8 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             icon: Some("cod_split_vertical"),
         },
         SplitHorizontal(_) => CommandDef {
-            brief: label_string(action, "Split Horizontally (Left/Right)".to_string()).into(),
-            doc: "Split the current session view horizontally into two session views, by spawning \
-            the default program into the right hand side"
-                .into(),
+            brief: label_string(action, "Split Left/Right".to_string()).into(),
+            doc: "Split the current pane into left and right panes".into(),
             keys: vec![(
                 Modifiers::CTRL
                     .union(Modifiers::ALT)
@@ -1454,8 +1422,8 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             icon: Some("cod_split_horizontal"),
         },
         AdjustSplitSize(SessionDirection::Left, amount) => CommandDef {
-            brief: format!("Resize Session Layout {amount} cell(s) to the Left").into(),
-            doc: "Adjusts the closest session view divider to the left".into(),
+            brief: format!("Resize Split Left By {amount}").into(),
+            doc: "Move the nearest split divider to the left".into(),
             keys: vec![(
                 Modifiers::CTRL
                     .union(Modifiers::ALT)
@@ -1467,8 +1435,8 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             icon: None,
         },
         AdjustSplitSize(SessionDirection::Right, amount) => CommandDef {
-            brief: format!("Resize Session Layout {amount} cell(s) to the Right").into(),
-            doc: "Adjusts the closest session view divider to the right".into(),
+            brief: format!("Resize Split Right By {amount}").into(),
+            doc: "Move the nearest split divider to the right".into(),
             keys: vec![(
                 Modifiers::CTRL
                     .union(Modifiers::ALT)
@@ -1480,8 +1448,8 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             icon: None,
         },
         AdjustSplitSize(SessionDirection::Up, amount) => CommandDef {
-            brief: format!("Resize Session Layout {amount} cell(s) Upwards").into(),
-            doc: "Adjusts the closest session view divider towards the top".into(),
+            brief: format!("Resize Split Up By {amount}").into(),
+            doc: "Move the nearest split divider upward".into(),
             keys: vec![(
                 Modifiers::CTRL
                     .union(Modifiers::ALT)
@@ -1493,8 +1461,8 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             icon: None,
         },
         AdjustSplitSize(SessionDirection::Down, amount) => CommandDef {
-            brief: format!("Resize Session Layout {amount} cell(s) Downwards").into(),
-            doc: "Adjusts the closest session view divider towards the bottom".into(),
+            brief: format!("Resize Split Down By {amount}").into(),
+            doc: "Move the nearest split divider downward".into(),
             keys: vec![(
                 Modifiers::CTRL
                     .union(Modifiers::ALT)
@@ -1508,48 +1476,48 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
         AdjustSplitSize(SessionDirection::Next | SessionDirection::Prev, _) => return None,
         ActivateSessionDirection(SessionDirection::Next | SessionDirection::Prev) => return None,
         ActivateSessionDirection(SessionDirection::Left) => CommandDef {
-            brief: "Activate Session View Left".into(),
-            doc: "Activates the session view to the left of the current session view".into(),
+            brief: "Focus Pane Left".into(),
+            doc: "Move focus to the pane on the left".into(),
             keys: vec![(Modifiers::CTRL.union(Modifiers::SHIFT), "LeftArrow".into())],
             args: &[ArgType::ActiveTerminal],
             menubar: &["Window", "Select Session View"],
             icon: Some("fa_long_arrow_left"),
         },
         ActivateSessionDirection(SessionDirection::Right) => CommandDef {
-            brief: "Activate Session View Right".into(),
-            doc: "Activates the session view to the right of the current session view".into(),
+            brief: "Focus Pane Right".into(),
+            doc: "Move focus to the pane on the right".into(),
             keys: vec![(Modifiers::CTRL.union(Modifiers::SHIFT), "RightArrow".into())],
             args: &[ArgType::ActiveTerminal],
             menubar: &["Window", "Select Session View"],
             icon: Some("fa_long_arrow_right"),
         },
         ActivateSessionDirection(SessionDirection::Up) => CommandDef {
-            brief: "Activate Session View Up".into(),
-            doc: "Activates the session view above the current session view".into(),
+            brief: "Focus Pane Up".into(),
+            doc: "Move focus to the pane above".into(),
             keys: vec![(Modifiers::CTRL.union(Modifiers::SHIFT), "UpArrow".into())],
             args: &[ArgType::ActiveTerminal],
             menubar: &["Window", "Select Session View"],
             icon: Some("fa_long_arrow_up"),
         },
         ActivateSessionDirection(SessionDirection::Down) => CommandDef {
-            brief: "Activate Session View Down".into(),
-            doc: "Activates the session view below the current session view".into(),
+            brief: "Focus Pane Down".into(),
+            doc: "Move focus to the pane below".into(),
             keys: vec![(Modifiers::CTRL.union(Modifiers::SHIFT), "DownArrow".into())],
             args: &[ArgType::ActiveTerminal],
             menubar: &["Window", "Select Session View"],
             icon: Some("fa_long_arrow_down"),
         },
         ToggleTerminalZoomState => CommandDef {
-            brief: "Toggle Session View Zoom".into(),
-            doc: "Toggles the zoom state for the current session view".into(),
+            brief: "Toggle Pane Zoom".into(),
+            doc: "Expand the current pane, or restore the split layout".into(),
             keys: vec![(Modifiers::CTRL.union(Modifiers::SHIFT), "z".into())],
             args: &[ArgType::ActiveTerminal],
             menubar: &["Window"],
             icon: Some("md_fullscreen"),
         },
         ActivateLastSession => CommandDef {
-            brief: "Activate the last active session".into(),
-            doc: "If there was no prior active session, has no effect.".into(),
+            brief: "Switch To Last Session".into(),
+            doc: "Switch back to the session you used most recently".into(),
             keys: vec![],
             args: &[ArgType::ActiveWindow],
             menubar: &["Window", "Select Session"],
@@ -1566,8 +1534,8 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
         OpenLinkAtMouseCursor => return None,
         ShowLauncherArgs(_) | ShowLauncher => return None,
         ShowSessionNavigator => CommandDef {
-            brief: "Navigate sessions".into(),
-            doc: "Shows the session navigator".into(),
+            brief: "Open Session Navigator".into(),
+            doc: "Browse and switch sessions from a searchable list".into(),
             keys: vec![],
             args: &[ArgType::ActiveWindow],
             menubar: &["Window", "Select Session"],
@@ -1861,8 +1829,8 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             icon: None,
         },
         RotatePanes(direction) => CommandDef {
-            brief: format!("Rotate session layout {direction:?}").into(),
-            doc: format!("Rotate the current session layout {direction:?}").into(),
+            brief: format!("Rotate Split Layout {direction:?}").into(),
+            doc: format!("Rotate the current split layout {direction:?}").into(),
             keys: vec![],
             args: &[ArgType::ActiveTerminal],
             menubar: &["Window", "Rotate Session Layout"],
@@ -1895,11 +1863,11 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             icon: None,
         },
         ActivateCommandPalette => CommandDef {
-            brief: "Activate Command Palette".into(),
-            doc: "Shows the command palette modal".into(),
+            brief: "Open Action Finder".into(),
+            doc: "Shows the Action Finder modal".into(),
             keys: vec![(Modifiers::CTRL.union(Modifiers::SHIFT), "p".into())],
             args: &[ArgType::ActiveTerminal],
-            menubar: &["Edit"],
+            menubar: &["Chatminal"],
             icon: None,
         },
     })
@@ -1930,10 +1898,7 @@ fn compute_default_actions() -> Vec<KeyAssignment> {
         CopyTo(ClipboardCopyDestination::PrimarySelection),
         CopyTo(ClipboardCopyDestination::Clipboard),
         PasteFrom(ClipboardPasteSource::Clipboard),
-        ClearScrollback(ScrollbackEraseMode::ScrollbackOnly),
-        ClearScrollback(ScrollbackEraseMode::ScrollbackAndViewport),
         QuickSelect,
-        CharSelect(CharSelectArguments::default()),
         ActivateCopyMode,
         ClearKeyTableStack,
         ActivateCommandPalette,

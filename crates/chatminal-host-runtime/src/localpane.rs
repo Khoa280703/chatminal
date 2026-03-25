@@ -6,7 +6,6 @@ use crate::renderable::*;
 use crate::{Mux, MuxNotification};
 use anyhow::Error;
 use async_trait::async_trait;
-use config::keyassignment::ScrollbackEraseMode;
 use config::{configuration, ExitBehavior, ExitBehaviorMessaging};
 use engine_dynamic::Value;
 use engine_term::color::ColorPalette;
@@ -437,17 +436,6 @@ impl Pane for LocalPane {
 
     fn palette(&self) -> ColorPalette {
         self.terminal.lock().palette()
-    }
-
-    fn erase_scrollback(&self, erase_mode: ScrollbackEraseMode) {
-        match erase_mode {
-            ScrollbackEraseMode::ScrollbackOnly => {
-                self.terminal.lock().erase_scrollback();
-            }
-            ScrollbackEraseMode::ScrollbackAndViewport => {
-                self.terminal.lock().erase_scrollback_and_viewport();
-            }
-        }
     }
 
     fn focus_changed(&self, focused: bool) {

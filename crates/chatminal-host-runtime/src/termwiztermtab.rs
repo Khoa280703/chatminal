@@ -10,7 +10,6 @@ use crate::renderable::*;
 use crate::tab::Tab;
 use crate::window::WindowId;
 use crate::Mux;
-use config::keyassignment::ScrollbackEraseMode;
 use crossbeam::channel::{unbounded as channel, Receiver, Sender};
 use engine_term::color::ColorPalette;
 use engine_term::{
@@ -232,16 +231,6 @@ impl Pane for TermWizTerminalPane {
         self.terminal.lock().get_current_dir().cloned()
     }
 
-    fn erase_scrollback(&self, erase_mode: ScrollbackEraseMode) {
-        match erase_mode {
-            ScrollbackEraseMode::ScrollbackOnly => {
-                self.terminal.lock().erase_scrollback();
-            }
-            ScrollbackEraseMode::ScrollbackAndViewport => {
-                self.terminal.lock().erase_scrollback_and_viewport();
-            }
-        }
-    }
 }
 
 pub struct TermWizTerminal {

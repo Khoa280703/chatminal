@@ -58,7 +58,6 @@ mod stats;
 mod system_metrics;
 mod tabbar;
 mod termwindow;
-mod unicode_names;
 mod uniforms;
 mod utilsprites;
 

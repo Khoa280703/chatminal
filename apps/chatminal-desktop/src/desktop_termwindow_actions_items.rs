@@ -239,11 +239,6 @@ impl TermWindow {
                     window.invalidate();
                 }
             }
-            ClearScrollback(erase_mode) => {
-                pane.erase_scrollback(*erase_mode);
-                let window = self.window.as_ref().unwrap();
-                window.invalidate();
-            }
             Search(pattern) => {
                 if let Some(pane) = self.active_terminal_instance_or_overlay() {
                     let mut replace_current = false;
@@ -478,10 +473,6 @@ impl TermWindow {
             }
             SessionSelect(args) => {
                 let modal = crate::termwindow::paneselect::PaneSelector::new(self, args);
-                self.set_modal(Rc::new(modal));
-            }
-            CharSelect(args) => {
-                let modal = crate::termwindow::charselect::CharSelector::new(self, args);
                 self.set_modal(Rc::new(modal));
             }
             ResetTerminal => {
