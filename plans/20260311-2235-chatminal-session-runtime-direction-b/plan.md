@@ -22,7 +22,7 @@ Goal: Thay runtime graph tab-centric bằng session-centric architecture, cô l�
 - Phase 07: completed
 
 ## Phase 07 Checkpoint
-- compatibility unix-domain default server không còn spawn `chatminal-mux`; đã chuyển sang `chatminald`
+- compatibility unix-target default server không còn spawn `chatminal-mux`; đã chuyển sang `chatminald`
 - desktop package không còn ship `chatminal-mux` wrapper binary
 - public scripting/window identity giữ `DesktopWindowId`
 - session-surface helper path và spawn helper path đã neutralize `MuxWindowId` ở app-facing boundary

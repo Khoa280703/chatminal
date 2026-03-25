@@ -1,7 +1,7 @@
 ---
-title: "Single-Flow Desktop Path Domain Removal"
-description: "Refactor desktop product path to stop exposing or routing by domain while preserving private runtime compatibility."
-status: pending
+title: "Single-Flow Desktop Path Legacy Vocabulary Removal"
+description: "Refactor desktop product path to stop exposing or routing by legacy execution-target semantics while preserving private runtime compatibility."
+status: completed
 priority: P1
 effort: 2.5d
 branch: main
@@ -11,30 +11,29 @@ created: 2026-03-25
 
 # Overview
 
-Goal: desktop product path nhìn và chạy như 1 luồng duy nhất. `domain` không còn xuất hiện hay điều khiển flow ở public/product-facing path. Private host-runtime compat được cô lập rồi dọn sau.
+Goal: desktop product path nhìn và chạy như 1 luồng duy nhất. Legacy vocabulary cũ không còn xuất hiện hay điều khiển flow ở public/product-facing path. Active config/runtime vocabulary đã được dọn sang `target`.
 
 ## Phases
 
-1. `pending` [Phase 01](./phase-01-cut-product-facing-domain-surface.md)
-Cut toàn bộ `domain` khỏi UI/menu/command/public labels và desktop-facing command routing.
+1. `completed` Phase 01
+Cắt toàn bộ legacy vocabulary cũ khỏi UI/menu/command/public labels và desktop-facing command routing.
 
-2. `pending` [Phase 02](./phase-02-single-flow-spawn-resolution.md)
-Collapse spawn resolution của desktop path về một đường duy nhất, không còn `SpawnSessionDomain::*` trong desktop product flow.
+2. `completed` [Phase 02](./phase-02-single-flow-spawn-resolution.md)
+Collapse spawn resolution của desktop path về một đường duy nhất, không còn `SpawnSessionTarget::*` trong desktop product flow.
 
-3. `pending` [Phase 03](./phase-03-collapse-desktop-adapter-domain-routing.md)
-Rút `domain_id`/domain lookup khỏi desktop adapter path nơi product không cần biết đến nó.
+3. `completed` Phase 03
+Rút `spawn_target_id`/target lookup khỏi desktop adapter path nơi product không cần biết đến execution target.
 
-4. `pending` [Phase 04](./phase-04-compat-tail-docs-and-guardrails.md)
-Khoanh `domain` còn lại vào compat/private zone, cập nhật docs, thêm guard không cho public path tái lộ `domain`.
+4. `completed` [Phase 04](./phase-04-compat-tail-docs-and-guardrails.md)
+Dọn tiếp config/docs/guardrails để active product path không còn legacy naming cũ.
 
-## Slice nên làm ngay
+## Current status
 
-Làm **Phase 01** trước.
-
-Lý do:
-- ROI cao nhất: user-facing confusion biến mất ngay.
-- Rủi ro thấp: chủ yếu dọn command surface, labels, routing entry points.
-- Tạo nền cho phase sau: sau khi product path không còn dùng `domain`, mới an toàn collapse spawn path và adapter internals.
+- Desktop UI/menu/toolbar/command surface không còn flow public theo execution target.
+- Desktop startup/CLI path không còn route theo legacy attach/spawn selection flags; host mux init mặc định ép `local`.
+- Lua public API `session.get_target`, `session.all_targets`, `session.set_default_target` đã bị cắt.
+- Host/runtime/config vocabulary active path đã đổi sang `spawn target`.
+- Config breaking rename hoàn tất: legacy target-list keys -> `*_targets`, legacy default target key -> `default_target`.
 
 ## Key dependencies
 
@@ -48,7 +47,7 @@ Lý do:
 
 ## Done criteria
 
-- Desktop product path không còn menu/label/command public nào dùng chữ `domain`.
-- Desktop spawn/focus path không cần caller product truyền `domain`.
-- `domain` chỉ còn trong private compat zone hoặc bị xoá hẳn nếu phase tương ứng hoàn tất.
-- `cargo check -p chatminal-desktop` pass ở mỗi phase; full workspace verify ở phase cuối.
+- Desktop product path không còn menu/label/command public nào dùng legacy vocabulary cũ.
+- Desktop spawn/focus path không cần caller product truyền execution target.
+- Legacy vocabulary cũ không còn nằm trong active desktop/runtime/config product path.
+- `cargo check -p chatminal-desktop` pass ở mỗi phase; `cargo check --workspace` pass ở phase cuối.

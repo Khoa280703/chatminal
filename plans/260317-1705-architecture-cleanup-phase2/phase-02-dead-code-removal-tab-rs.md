@@ -11,8 +11,8 @@ tab.rs is ~2528 lines. After Phase 1 removes the engine split path, several func
 ## Key Insights
 
 ### CAN remove (split mutation — no longer called from Desktop after Phase 1)
-- `split_and_insert` (pub(crate), line 740) — only caller was `domain.rs:140` (deprecated `split_pane`)
-- `compute_split_size` (pub, line 728) — only caller was `domain.rs:96` + `split_and_insert` internal
+- `split_and_insert` (pub(crate), line 740) — only caller was `spawn_target.rs:140` (deprecated `split_pane`)
+- `compute_split_size` (pub, line 728) — only caller was `spawn_target.rs:96` + `split_and_insert` internal
 - Inner impl counterparts: `TabInner::split_and_insert` (line 1960), `TabInner::compute_split_size` (line 1869)
 - Related types: `SplitDirectionAndSize`, `SplitRequest` — check if rendering still uses them
 - Tests that exercise split_and_insert (lines ~2340-2502)
@@ -35,7 +35,7 @@ tab.rs is ~2528 lines. After Phase 1 removes the engine split path, several func
   - Delete `compute_split_size` (pub + inner)
   - Delete related helper functions used only by these
   - Delete tests that only test removed functions
-- `crates/chatminal-host-runtime/src/domain.rs`:
+- `crates/chatminal-host-runtime/src/spawn_target.rs`:
   - If Phase 1 removed `split_pane` body: remove `SplitSource` enum, clean imports
 
 ### Do NOT modify

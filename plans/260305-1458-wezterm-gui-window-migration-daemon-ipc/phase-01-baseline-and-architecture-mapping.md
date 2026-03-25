@@ -30,7 +30,7 @@
 
 ## Architecture
 - Adopt `wezterm-gui` event/render loop for window runtime.
-- Introduce adapter boundary `chatminal_ipc_mux_domain` for IPC -> GUI/mux integration.
+- Introduce adapter boundary `chatminal_ipc_mux_target` for IPC -> GUI/mux integration.
 - Keep `chatminald` unchanged as authority for session/profile/history/store.
 
 ## Related Code Files

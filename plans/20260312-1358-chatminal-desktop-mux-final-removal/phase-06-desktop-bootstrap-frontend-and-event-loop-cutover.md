@@ -9,7 +9,7 @@
 ## Overview
 - Priority: P0
 - Status: completed
-- Brief: loại `Mux` global khỏi bootstrap, frontend subscriptions, update loop, domain bootstrap.
+- Brief: loại `Mux` global khỏi bootstrap, frontend subscriptions, update loop, target bootstrap.
 
 ## Key Insights
 - Dù render/action đã sạch, desktop vẫn chưa sạch nếu `main/frontend` còn tạo `Mux` global và route event qua `MuxNotification`.
@@ -17,11 +17,11 @@
 ## Requirements
 - Tạo event bus first-party cho desktop window/runtime.
 - Frontend loop subscribe `chatminal-runtime` và session host events, không subscribe mux notifications.
-- `main.rs` bootstrap window/domain/session runtime first-party, không dựng `Arc<mux::Mux>`.
+- `main.rs` bootstrap window/target/session runtime first-party, không dựng `Arc<mux::Mux>`.
 
 ## Architecture
 - Add `DesktopRuntimeBus` hoặc module tương đương cho window invalidation, input/output notifications, workspace changes.
-- `chatminal_runtime/domain.rs` nếu còn cần domain abstraction thì phải first-party hoặc engine-private không lộ `mux`.
+- `chatminal_runtime/spawn_target.rs` nếu còn cần target abstraction thì phải first-party hoặc engine-private không lộ `mux`.
 
 ## Related Code Files
 - Refactor: `apps/chatminal-desktop/src/main.rs`

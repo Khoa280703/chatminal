@@ -11,7 +11,7 @@ The engine split fallback in `desktop_spawn.rs:111-131` still calls `split_termi
 - Line 94: `if let Some(_session_id)` check — when this is `None`, we fall through to the engine split path
 - This fallback should never fire in normal Desktop use (session always exists)
 - `split_terminal_handle_by_public_id` defined in `desktop_host_runtime/mod.rs:880`
-- After removing the caller, the function + `Domain::split_pane` become dead code
+- After removing the caller, the function + `SpawnTarget::split_pane` become dead code
 
 ## Related Code Files
 
@@ -20,7 +20,7 @@ The engine split fallback in `desktop_spawn.rs:111-131` still calls `split_termi
 - `apps/chatminal-desktop/src/desktop_host_runtime/mod.rs` — delete `split_terminal_handle_by_public_id` fn
 
 ### Evaluate for removal
-- `crates/chatminal-host-runtime/src/domain.rs` — `Domain::split_pane` trait method (deprecated)
+- `crates/chatminal-host-runtime/src/spawn_target.rs` — `SpawnTarget::split_pane` trait method (deprecated)
   - Check if daemon still calls it; if not, delete
 - `crates/chatminal-host-runtime/src/lib.rs` — re-export of `split_pane` related types
 
@@ -36,7 +36,7 @@ The engine split fallback in `desktop_spawn.rs:111-131` still calls `split_termi
 
 2. Delete `split_terminal_handle_by_public_id` from `desktop_host_runtime/mod.rs`.
 
-3. Check if `Domain::split_pane` has any remaining callers outside `domain.rs:140` (the trait default impl):
+3. Check if `SpawnTarget::split_pane` has any remaining callers outside `spawn_target.rs:140` (the trait default impl):
    - If no external callers: delete the default impl body, keep deprecated empty trait method for daemon compat
    - `crates/chatminal-lua-bridge/src/leaf.rs` — check for `split_pane` usage
 

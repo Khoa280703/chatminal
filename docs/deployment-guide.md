@@ -29,7 +29,7 @@ CHATMINAL_DAEMON_ENDPOINT=/tmp/chatminald.sock cargo run --manifest-path apps/ch
 ```
 
 ## Endpoint Transport (Linux/macOS)
-- Transport hiện tại: Unix Domain Socket (local-only), không dùng TCP.
+- Transport hiện tại: Unix socket (local-only), không dùng TCP.
 - Endpoint mặc định local dev: `/tmp/chatminald.sock`.
 - Policy runtime:
   - Nếu endpoint path là file thường -> daemon từ chối startup.

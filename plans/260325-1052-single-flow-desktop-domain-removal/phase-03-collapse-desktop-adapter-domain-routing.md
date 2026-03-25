@@ -8,23 +8,23 @@
 # Overview
 
 - Priority: P1
-- Status: pending
-- Brief: Gỡ `domain_id` khỏi các tương tác desktop adapter nơi product path không cần biết đến execution target.
+- Status: completed
+- Brief: Gỡ `spawn_target_id` khỏi các tương tác desktop adapter nơi product path không cần biết đến execution target.
 
 # Key Insights
 
-- `pane.domain_id()` và domain lookup đang còn là cầu nối từ host primitives sang desktop shell.
-- Không nhất thiết xoá trait `Domain` ngay; chỉ cần product adapter không còn phụ thuộc.
+- `pane.spawn_target_id()` và target lookup đang còn là cầu nối từ host primitives sang desktop shell.
+- Không nhất thiết xoá trait `SpawnTarget` ngay; chỉ cần product adapter không còn phụ thuộc.
 
 # Requirements
 
-- Desktop render/input path không cần đọc/resolve public pane domain name.
-- Session pane metadata không cần domain cho product routing.
+- Desktop render/input path không cần đọc/resolve public pane target name.
+- Session pane metadata không cần target cho product routing.
 
 # Architecture
 
 - `session_id`, `runtime_id`, `terminal_instance_id` đủ làm desktop-facing identity.
-- `domain_id` chỉ còn là host-runtime internal concern.
+- `spawn_target_id` chỉ còn là host-runtime internal concern.
 
 # Related Code Files
 
@@ -36,24 +36,24 @@
 
 # Implementation Steps
 
-1. Audit all desktop-facing reads of `domain_id`.
+1. Audit all desktop-facing reads of `spawn_target_id`.
 2. Replace with session/runtime identities where possible.
-3. Remove public helper APIs that expose domain name/id to desktop product path.
+3. Remove public helper APIs that expose target name/id to desktop product path.
 4. Keep any unavoidable host internal usage private.
 
 # Todo List
 
-- [ ] Remove public domain name exposure helpers from desktop path
-- [ ] Replace pane domain usage with session/runtime identity
-- [ ] Verify no product feature regresses
+- [x] Remove public target name exposure helpers from desktop path
+- [x] Replace pane target usage with session/runtime identity
+- [x] Verify no product feature regresses
 
 # Success Criteria
 
-- Desktop product path no longer needs `domain_id` to route/focus/render sessions.
+- Desktop product path no longer needs `spawn_target_id` to route/focus/render sessions.
 
 # Risk Assessment
 
-- Overlay/session navigator/legacy helpers may still assume domain access.
+- Overlay/session navigator/legacy helpers may still assume target access.
 
 # Security Considerations
 
@@ -61,4 +61,4 @@
 
 # Next Steps
 
-- Phase 04: compat tail cleanup and docs.
+- Phase 04 in progress: docs sync done một phần, guardrails/tests còn lại chưa thêm.

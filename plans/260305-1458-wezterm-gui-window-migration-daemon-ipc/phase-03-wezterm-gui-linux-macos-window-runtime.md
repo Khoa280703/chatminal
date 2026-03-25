@@ -11,7 +11,7 @@
 - Priority: P1
 - Status: Completed
 - Effort: 1.5w
-- Brief: migrate `make window` sang WezTerm GUI runtime path cho Linux/macOS; bridge/proxy path được harden, và một phần logic event/input đã tách vào module mux-domain dùng chung.
+- Brief: migrate `make window` sang WezTerm GUI runtime path cho Linux/macOS; bridge/proxy path được harden, và một phần logic event/input đã tách vào module mux adapter dùng chung.
 
 ## Key Insights
 - Full fidelity requires using WezTerm native render/input stack, not `TextEdit` snapshots.
@@ -57,7 +57,7 @@
 - [x] Linux smoke script cho GUI launcher pass (`scripts/smoke/window-wezterm-gui-smoke.sh`).
 - [x] Command surface cutover: bỏ `window-wezterm`/`window-legacy`, giữ `window-wezterm-gui` làm entrypoint chính.
 - [x] macOS manual smoke được chuyển thành external release preflight (không block đóng coding phase trong môi trường Linux-only).
-- [x] Embedded `chatminal_ipc_mux_domain` runtime đã hoàn tất cho phần event/input ordering; launcher/proxy vẫn giữ bootstrap session + resize/event loop runtime.
+- [x] Embedded `chatminal_ipc_mux_target` runtime đã hoàn tất cho phần event/input ordering; launcher/proxy vẫn giữ bootstrap session + resize/event loop runtime.
 
 ## Success Criteria
 - Terminal rendering and input path are native WezTerm GUI.

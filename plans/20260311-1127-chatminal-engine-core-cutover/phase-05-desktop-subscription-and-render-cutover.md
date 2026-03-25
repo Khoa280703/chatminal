@@ -24,7 +24,7 @@
 - Leaf runtime event đã được map sang `SessionRuntimeEvent::{LeafOutput,LeafExited,LeafError}`
 - Detached surface core path publish được `SurfaceAttached`
 - Leaf runtime giữ raw output replay và `ChatminalSessionPane` đã dùng path này để seed terminal state khi attach
-- `ChatminalRuntimeDomain` active path giờ tạo `ChatminalSessionPane` trực tiếp từ `DaemonState` execution core attachment (`surface_id + leaf_id + SessionEngineShared`), không còn render active pane qua `RuntimeEvent + snapshot` path cũ
+- `ChatminalRuntimeTarget` active path giờ tạo `ChatminalSessionPane` trực tiếp từ `DaemonState` execution core attachment (`surface_id + leaf_id + SessionEngineShared`), không còn render active pane qua `RuntimeEvent + snapshot` path cũ
 - `ChatminalRuntimePane` cũ hiện chỉ còn giữ làm test/reference path; binary thường không còn dùng làm active consumer
 - `chatminal_session_surface` không còn giữ `SessionEngineShared` riêng theo window; shell helper giờ lấy thẳng shared execution state từ `DaemonState`, giúp desktop host path và execution core nhìn cùng một session graph
 - `ChatminalSessionPane` giờ dùng `pane_id == leaf_id` khi có thể, để các đường script/action cũ nhìn thấy session leaf identity thay vì pane id tương thích tạm

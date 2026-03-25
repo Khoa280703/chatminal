@@ -9,25 +9,25 @@
 # Overview
 
 - Priority: P1
-- Status: pending
-- Brief: Xoá `domain` khỏi toàn bộ desktop product-facing surface, nhưng chưa đụng private host-runtime structure.
+- Status: completed
+- Brief: Xoá legacy vocabulary cũ khỏi toàn bộ desktop product-facing surface, nhưng chưa đụng private host-runtime structure.
 
 # Key Insights
 
 - User confusion đến từ public/menu vocabulary, không phải từ low-level engine trước tiên.
-- `domain` hiện còn lộ qua menu động, command labels, attach/detach phrasing, spawn variants.
+- legacy vocabulary cũ vẫn còn lộ qua menu động, command labels, attach/detach phrasing, spawn variants.
 - Phase này nên giữ runtime behavior cũ nhưng đổi/collapse entry points của desktop path.
 
 # Requirements
 
-- Public-facing desktop path không còn label/menu/action nào dùng chữ `domain`.
+- Public-facing desktop path không còn label/menu/action nào dùng vocabulary cũ.
 - Không làm hỏng create session, split session, activate session, session navigator.
 - Không xoá private launcher engine nếu session navigator còn dùng.
 
 # Architecture
 
 - Product path chỉ nên có: `session`, `session view`, `workspace`, `terminal instance`.
-- `domain` bị xem là private execution detail; callers desktop product không route theo nó.
+- execution target bị xem là private execution detail; callers desktop product không route theo đó.
 
 # Related Code Files
 
@@ -40,26 +40,26 @@
 
 # Implementation Steps
 
-1. Dọn menu/command expansion còn generate từ `host_domain_menu_entries()`.
-2. Collapse public command labels `SpawnSession(DefaultDomain|DomainName|DomainId)` về wording single-flow.
-3. Chặn `AttachDomain`/`DetachDomain` khỏi desktop product surface nếu không còn intended UX.
-4. Giữ internal resolver tạm thời, nhưng không cho desktop product path gọi trực tiếp bằng domain-specific variants.
+1. Dọn menu/command expansion còn generate từ host execution-target entries.
+2. Collapse public command labels `SpawnSession(DefaultTarget|TargetName|TargetId)` về wording single-flow.
+3. Chặn `AttachTarget`/`DetachTarget` khỏi desktop product surface nếu không còn intended UX.
+4. Giữ internal resolver tạm thời, nhưng không cho desktop product path gọi trực tiếp bằng target-specific variants.
 
 # Todo List
 
-- [ ] Remove dynamic domain menu entries from desktop shell surface
-- [ ] Rename or hide remaining public domain-based command defs
-- [ ] Audit right-click / palette / command palette exposure
-- [ ] Verify `cargo check -p chatminal-desktop`
+- [x] Remove dynamic execution-target menu entries from desktop shell surface
+- [x] Rename or hide remaining public target-based command defs
+- [x] Audit right-click / palette / command palette exposure
+- [x] Verify `cargo check -p chatminal-desktop`
 
 # Success Criteria
 
-- Không còn item/menu public nào nói về `domain`.
+- Không còn item/menu public nào nói về legacy vocabulary cũ.
 - Desktop session creation vẫn chạy bình thường bằng một flow duy nhất.
 
 # Risk Assessment
 
-- Config cũ còn emit `AttachDomain`/`SpawnSessionDomain::DomainName`.
+- Config cũ còn emit `AttachTarget`/`SpawnSessionTarget::TargetName`.
 - Có thể cần giữ parse compat nhưng map về single-flow behavior.
 
 # Security Considerations
@@ -69,4 +69,4 @@
 
 # Next Steps
 
-- Nếu phase này xong sạch, chuyển sang phase 02 để collapse spawn resolution thực sự.
+- Phase 02 completed: desktop spawn path đã bị collapse về single-flow.

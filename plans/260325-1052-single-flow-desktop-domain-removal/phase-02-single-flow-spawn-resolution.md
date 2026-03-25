@@ -8,18 +8,18 @@
 # Overview
 
 - Priority: P1
-- Status: pending
-- Brief: Biến desktop spawn path thành một resolver duy nhất, product caller không còn phải mang `SpawnSessionDomain`.
+- Status: completed
+- Brief: Biến desktop spawn path thành một resolver duy nhất, product caller không còn phải mang `SpawnSessionTarget`.
 
 # Key Insights
 
-- `SpawnSessionDomain` đang là chỗ neo lớn nhất của vocabulary `domain` vào public path.
+- `SpawnSessionTarget` đang là chỗ neo lớn nhất của vocabulary `target` vào public path.
 - Không cần xoá enum toàn repo ngay; đủ nếu desktop path không còn consume nó trực tiếp.
 
 # Requirements
 
 - Desktop caller chỉ gọi một API kiểu `spawn_session()` hoặc `spawn_in_current_flow()`.
-- Resolver domain-specific bị đẩy xuống private compat layer.
+- Resolver target-specific bị đẩy xuống private compat layer.
 
 # Architecture
 
@@ -38,21 +38,21 @@
 
 # Implementation Steps
 
-1. Thêm desktop-only spawn entrypoint không mang domain.
+1. Thêm desktop-only spawn entrypoint không mang target.
 2. Chuyển command/product call sites sang entrypoint mới.
 3. Giữ adapter chuyển đổi cũ ở private layer cho compat/config.
-4. Đánh dấu `SpawnSessionDomain` là compat-only trong desktop path.
+4. Đánh dấu `SpawnSessionTarget` là compat-only trong desktop path.
 
 # Todo List
 
-- [ ] Introduce single-flow desktop spawn entrypoint
-- [ ] Move domain-specific resolution behind private boundary
-- [ ] Repoint product call sites
-- [ ] Verify desktop checks
+- [x] Introduce single-flow desktop spawn entrypoint
+- [x] Move target-specific resolution behind private boundary
+- [x] Repoint product call sites
+- [x] Verify desktop checks
 
 # Success Criteria
 
-- Public desktop code không còn phải chọn default/current/domain-name/domain-id.
+- Public desktop code không còn phải chọn default/current/target-name/target-id.
 
 # Risk Assessment
 
@@ -64,4 +64,4 @@
 
 # Next Steps
 
-- Phase 03: bỏ `domain_id` khỏi adapter/product interactions.
+- Phase 03 completed: public adapter helpers expose `target` không còn nằm trên desktop product path.

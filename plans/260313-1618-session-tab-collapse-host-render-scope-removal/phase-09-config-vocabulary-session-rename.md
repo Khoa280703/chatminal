@@ -28,13 +28,13 @@ Xóa toàn bộ "Tab" và "Pane" vocabulary còn sót trong public config API v�
 
 | Trước | Sau |
 |-------|-----|
-| `SpawnTabDomain` (enum) | `SpawnSessionDomain` |
-| `SpawnTabDomain::CurrentPaneDomain` | `SpawnSessionDomain::CurrentSessionDomain` |
-| `SpawnTabDomain::DefaultDomain` | `SpawnSessionDomain::DefaultDomain` (giữ) |
-| `SpawnTabDomain::DomainName(String)` | `SpawnSessionDomain::DomainName(String)` (giữ) |
-| `SpawnTabDomain::DomainId(usize)` | `SpawnSessionDomain::DomainId(usize)` (giữ) |
-| `SpawnCommand.domain: SpawnTabDomain` | `.domain: SpawnSessionDomain` |
-| `KeyAssignment::SpawnTab(SpawnTabDomain)` | `SpawnSession(SpawnSessionDomain)` |
+| `SpawnTabTarget` (enum) | `SpawnSessionTarget` |
+| `SpawnTabTarget::CurrentPaneTarget` | `SpawnSessionTarget::CurrentSessionTarget` |
+| `SpawnTabTarget::DefaultTarget` | `SpawnSessionTarget::DefaultTarget` (giữ) |
+| `SpawnTabTarget::TargetName(String)` | `SpawnSessionTarget::TargetName(String)` (giữ) |
+| `SpawnTabTarget::TargetId(usize)` | `SpawnSessionTarget::TargetId(usize)` (giữ) |
+| `SpawnCommand.target: SpawnTabTarget` | `.target: SpawnSessionTarget` |
+| `KeyAssignment::SpawnTab(SpawnTabTarget)` | `SpawnSession(SpawnSessionTarget)` |
 | `KeyAssignment::SpawnCommandInNewTab(SpawnCommand)` | `SpawnCommandInNewSession(SpawnCommand)` |
 | `KeyAssignment::ActivateTab(isize)` | `ActivateSession(isize)` |
 | `KeyAssignment::ActivateTabRelative(isize)` | `ActivateSessionRelative(isize)` |
@@ -43,10 +43,10 @@ Xóa toàn bộ "Tab" và "Pane" vocabulary còn sót trong public config API v�
 | `KeyAssignment::CloseCurrentTab { confirm }` | `CloseCurrentSession { confirm }` |
 | `KeyAssignment::MoveTab(isize)` | `MoveSession(isize)` |
 | `KeyAssignment::MoveTabRelative(isize)` | `MoveSessionRelative(isize)` |
-| `KeyAssignment::DetachDomain(SpawnTabDomain)` | `DetachDomain(SpawnSessionDomain)` |
+| `KeyAssignment::DetachTarget(SpawnTabTarget)` | `DetachTarget(SpawnSessionTarget)` |
 | `PaneSelectMode::MoveToNewTab` | `MoveToNewSession` |
 
-**Cascade (all files importing SpawnTabDomain/KeyAssignment Tab variants):**
+**Cascade (all files importing SpawnTabTarget/KeyAssignment Tab variants):**
 - `crates/chatminal-lua-bridge/src/leaf.rs`
 - `crates/chatminal-lua-bridge/src/lib.rs`
 - `apps/chatminal-desktop/src/chatminal_runtime/mod.rs`
@@ -174,7 +174,7 @@ Xóa toàn bộ "Tab" và "Pane" vocabulary còn sót trong public config API v�
 
 ```bash
 grep -rn \
-  "SpawnTab\b\|ActivateTab\b\|CloseCurrentTab\|MoveTab\b\|ActivateLastTab\|SpawnTabDomain\|DetachDomain.*Tab\|PaneSelectMode::Move.*Tab\|CloseCurrentPane\|SplitPane\b\|AdjustPaneSize\|ActivatePaneDirection\|PaneSelect\b\|PaneDirection\b\|enable_tab_bar\|use_fancy_tab_bar\|tab_bar_at_bottom\|hide_tab_bar\|show_tab.*tab_bar\|TabBarColors\|TabBarStyle\|HostLauncherTabEntry\|host_launcher_tabs\b\|SpawnWhere::NewTab\|NewTabButton\|LeafRef\b\|HandySplitDirection" \
+  "SpawnTab\b\|ActivateTab\b\|CloseCurrentTab\|MoveTab\b\|ActivateLastTab\|SpawnTabTarget\|DetachTarget.*Tab\|PaneSelectMode::Move.*Tab\|CloseCurrentPane\|SplitPane\b\|AdjustPaneSize\|ActivatePaneDirection\|PaneSelect\b\|PaneDirection\b\|enable_tab_bar\|use_fancy_tab_bar\|tab_bar_at_bottom\|hide_tab_bar\|show_tab.*tab_bar\|TabBarColors\|TabBarStyle\|HostLauncherTabEntry\|host_launcher_tabs\b\|SpawnWhere::NewTab\|NewTabButton\|LeafRef\b\|HandySplitDirection" \
   crates/chatminal-config/ crates/chatminal-lua-bridge/ crates/chatminal-runtime/ \
   apps/chatminal-desktop/src/ \
   --include="*.rs" \

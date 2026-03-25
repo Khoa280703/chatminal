@@ -10,7 +10,7 @@
 - Priority: P1
 - Status: Completed
 - Effort: 4d
-- Brief: guarantee IPC/domain compatibility so session/profile/history stays stable through backend swap.
+- Brief: guarantee IPC/target compatibility so session/profile/history stays stable through backend swap.
 
 ## Key Insights
 - Existing protocol is already sufficient for lifecycle and history operations.

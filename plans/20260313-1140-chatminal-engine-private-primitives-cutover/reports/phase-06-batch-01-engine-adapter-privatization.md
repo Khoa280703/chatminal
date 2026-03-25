@@ -13,7 +13,7 @@ Date: 2026-03-13
 - `apps/chatminal-desktop/src/desktop_host_runtime/mod.rs`
 - `apps/chatminal-desktop/src/desktop_host_runtime/engine_runtime_adapter.rs`
 - `apps/chatminal-desktop/src/desktop_host_runtime/session_host.rs`
-- `apps/chatminal-desktop/src/desktop_host_runtime/domain.rs`
+- `apps/chatminal-desktop/src/desktop_host_runtime/spawn_target.rs`
 - `apps/chatminal-desktop/src/desktop_host_runtime/session_pane.rs`
 - `apps/chatminal-desktop/src/desktop_host_runtime/pane.rs`
 - `apps/chatminal-desktop/src/chatminal_runtime/mod.rs`

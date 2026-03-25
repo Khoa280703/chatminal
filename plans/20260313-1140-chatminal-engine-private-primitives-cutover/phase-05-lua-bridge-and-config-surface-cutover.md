@@ -4,7 +4,7 @@
 - `appendices/forbidden-symbols-contract.md`
 - `appendices/commit-and-cutover-strategy.md`
 - `crates/chatminal-lua-bridge/src/lib.rs`
-- `crates/chatminal-lua-bridge/src/domain.rs`
+- `crates/chatminal-lua-bridge/src/spawn_target.rs`
 - `crates/chatminal-lua-bridge/src/window.rs`
 - `crates/chatminal-lua-bridge/src/session.rs`
 - `crates/chatminal-lua-bridge/src/leaf.rs`
@@ -58,7 +58,7 @@
 - `window.get_active_session_window()` -> add if needed
 - `session.get_host_tab()` -> deprecate/delete
 - `session.get_host_leaf()` -> deprecate/delete
-- `session.get_domain()` -> keep nếu còn đúng config scope
+- `session.get_target()` -> keep nếu còn đúng config scope
 
 ## Architecture
 - `chatminal-lua-bridge` trở thành adapter từ Lua/config sang Chatminal app boundary.

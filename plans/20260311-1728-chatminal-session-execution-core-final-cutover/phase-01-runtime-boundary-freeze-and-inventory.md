@@ -74,7 +74,7 @@
 - L68–78 — `session_id_for_host_surface()` — lookup từ Tab identity
 
 **File: `apps/chatminal-desktop/src/chatminal_runtime/mod.rs`**
-- L55 — `Mux::get()` in domain registration
+- L55 — `Mux::get()` in target registration
 
 ### Bucket 3 — TermWindow Routing (Phase 04)
 **File: `apps/chatminal-desktop/src/termwindow/mod.rs`**

@@ -26,10 +26,10 @@
 ### Compiler Warnings (4 total)
 All warnings in `chatminal-desktop` binary - dead code functions:
 
-1. `active_host_domain_name()` - never used (line 776)
-2. `set_default_host_domain()` - never used (line 952)
+1. `active_host_target_name()` - never used (line 776)
+2. `set_default_host_target()` - never used (line 952)
 3. `new_headless_connection_ui()` - never used (line 1008)
-4. `host_client_domains()` - never used (line 1071)
+4. `host_client_targets()` - never used (line 1071)
 
 **File:** `/Users/khoa2807/development/2026/chatminal/apps/chatminal-desktop/src/desktop_host_runtime/mod.rs`
 

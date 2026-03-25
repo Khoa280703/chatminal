@@ -16,10 +16,10 @@
 **Status:** All dependencies resolved, no compile errors detected.
 
 **Warnings Found:** 4 dead code warnings (pre-existing, unrelated to Phase 3):
-- `active_host_domain_name()` — line 776
-- `set_default_host_domain()` — line 952
+- `active_host_target_name()` — line 776
+- `set_default_host_target()` — line 952
 - `new_headless_connection_ui()` — line 1008
-- `host_client_domains()` — line 1071
+- `host_client_targets()` — line 1071
 
 These are from desktop app and not introduced by Phase 3 changes.
 

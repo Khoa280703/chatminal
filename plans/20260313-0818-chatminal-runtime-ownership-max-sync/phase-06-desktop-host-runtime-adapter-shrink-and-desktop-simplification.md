@@ -23,7 +23,7 @@
   - terminal process/render handle
   - engine adapter implementation
   - overlay/render compatibility
-  - domain/window/pty backend helpers
+  - target/window/pty backend helpers
 - Desktop termwindow/helpers chỉ dùng host layer cho render/terminal IO, không dùng để suy ra business state.
 - Loại bỏ việc `desktop_host_runtime/session_host.rs` trực tiếp sở hữu/persist `active_session` hoặc `workspace_layout` như business state bền vững; nếu cần cache thì chỉ là derived runtime cache.
 

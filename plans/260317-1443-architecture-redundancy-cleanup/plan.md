@@ -34,7 +34,7 @@ Removes 3/4 callers of `tab.split_and_insert`. ~12,000 lines deleted (4 crates +
 
 ### [Phase 1.2: Seal engine split path](./phase-02-seal-engine-split-path.md)
 
-After 1.1, `split_and_insert` has 1 caller: `domain.rs:140`. Reduce visibility, deprecate, add tracking.
+After 1.1, `split_and_insert` has 1 caller: `spawn_target.rs:140`. Reduce visibility, deprecate, add tracking.
 
 ### [Phase 1.3: Localize ID mapping](./phase-03-localize-id-mapping.md)
 

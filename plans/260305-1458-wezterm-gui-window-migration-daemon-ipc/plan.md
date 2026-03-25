@@ -23,14 +23,14 @@ Goal: ship `window-wezterm-gui` with terminal fidelity equal to WezTerm GUI, whi
 | `window/native_window_wezterm.rs` (`eframe/egui`) | `window_wezterm_gui` runtime built on `wezterm-gui` + `window` | Replace UI loop, remove text-area pseudo terminal rendering path |
 | `terminal_wezterm_core.rs` (`wezterm-term` snapshot renderer) | Native `wezterm-gui` pane rendering | Stop re-rendering terminal text manually |
 | `native_window_wezterm_input_mapper.rs` (egui events -> bytes) | `window::WindowEvent::{RawKeyEvent,KeyEvent}` pipeline | Let WezTerm input/IME stack drive fidelity |
-| `terminal_workspace_binding_runtime.rs` (event->adapter state) | `chatminal_ipc_mux_domain` (IPC -> mux/pane updates) | Preserve daemon event stream semantics |
+| `terminal_workspace_binding_runtime.rs` (event->adapter state) | `chatminal_ipc_mux_target` (IPC -> mux/pane updates) | Preserve daemon event stream semantics |
 | `ipc::ChatminalClient` + `chatminal-protocol` | Keep and reuse | Compatibility-critical boundary |
 
 ## Phase Map
 | Phase | Status | Focus | File |
 | --- | --- | --- | --- |
 | 01 | Completed | Baseline + target architecture freeze | [phase-01-baseline-and-architecture-mapping.md](./phase-01-baseline-and-architecture-mapping.md) |
-| 02 | Completed | Build IPC-backed mux/domain adapter | [phase-02-chatminal-ipc-mux-domain-adapter.md](./phase-02-chatminal-ipc-mux-domain-adapter.md) |
+| 02 | Completed | Build IPC-backed mux/target adapter | [phase-02-chatminal-ipc-mux adapter-adapter.md](./phase-02-chatminal-ipc-mux adapter-adapter.md) |
 | 03 | Completed | Integrate wezterm-gui window runtime (Linux/macOS) | [phase-03-wezterm-gui-linux-macos-window-runtime.md](./phase-03-wezterm-gui-linux-macos-window-runtime.md) |
 | 04 | Completed | Session/profile/history compatibility + guardrails | [phase-04-session-profile-history-compatibility-and-rollout-guard.md](./phase-04-session-profile-history-compatibility-and-rollout-guard.md) |
 | 05 | Completed | Fidelity/perf test gates (IME, Ctrl+C, fullscreen, latency) | [phase-05-fidelity-and-performance-test-gates.md](./phase-05-fidelity-and-performance-test-gates.md) |
@@ -58,7 +58,7 @@ Goal: ship `window-wezterm-gui` with terminal fidelity equal to WezTerm GUI, whi
    - phase02 bench hard-gate pass (`p95=8.688ms`, `p99=13.225ms`, `pass_fail_gate=true`, fail-gate `p95<=50ms`).
 8. Đã đóng coding scope của toàn plan; các bước host-specific manual preflight được ghi rõ ở checklist release thay vì giữ TODO mở trong plan implementation.
 9. Batch closeout bổ sung:
-   - module `window_wezterm_gui/chatminal_ipc_mux_domain` + race tests cho stale timestamp/seq.
+   - module `window_wezterm_gui/chatminal_ipc_mux_target` + race tests cho stale timestamp/seq.
    - proxy graceful-detach guard khi `session_input_write` gặp race `session not running`.
    - docs consistency fixes cho phase files/roadmap/changelog.
 

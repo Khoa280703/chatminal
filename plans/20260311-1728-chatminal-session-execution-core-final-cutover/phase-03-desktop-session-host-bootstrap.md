@@ -2,7 +2,7 @@
 
 ## Context Links
 - /Users/khoa2807/development/2026/chatminal/apps/chatminal-desktop/src/chatminal_session_surface.rs
-- /Users/khoa2807/development/2026/chatminal/apps/chatminal-desktop/src/chatminal_runtime/domain.rs
+- /Users/khoa2807/development/2026/chatminal/apps/chatminal-desktop/src/chatminal_runtime/spawn_target.rs
 - /Users/khoa2807/development/2026/chatminal/apps/chatminal-desktop/src/chatminal_runtime/session_pane.rs
 - /Users/khoa2807/development/2026/chatminal/apps/chatminal-desktop/src/chatminal_runtime/pane.rs
 - /Users/khoa2807/development/2026/chatminal/apps/chatminal-desktop/src/chatminal_runtime/mod.rs
@@ -38,7 +38,7 @@
 
 ## Related Code Files
 - Modify: /Users/khoa2807/development/2026/chatminal/apps/chatminal-desktop/src/chatminal_session_surface.rs
-- Modify: /Users/khoa2807/development/2026/chatminal/apps/chatminal-desktop/src/chatminal_runtime/domain.rs
+- Modify: /Users/khoa2807/development/2026/chatminal/apps/chatminal-desktop/src/chatminal_runtime/spawn_target.rs
 - Modify: /Users/khoa2807/development/2026/chatminal/apps/chatminal-desktop/src/chatminal_runtime/session_pane.rs
 - Modify: /Users/khoa2807/development/2026/chatminal/apps/chatminal-desktop/src/chatminal_runtime/mod.rs
 - Modify: /Users/khoa2807/development/2026/chatminal/apps/chatminal-desktop/src/termwindow/mod.rs

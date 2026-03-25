@@ -11,10 +11,10 @@
 
 ## Key Insights
 
-- `chatminal-engine-client/src/domain.rs:923` calls `split_and_insert` — deleted with crate
+- `chatminal-engine-client/src/spawn_target.rs:923` calls `split_and_insert` — deleted with crate
 - `host-runtime/src/tmux_commands.rs:280,455` — 2 more callers, deleted with module
-- `domain.rs:6` comment mentions SSH sessions — update needed
-- `domain.rs:484` sets `SSH_AUTH_SOCK` from `Mux.agent` — keep (unrelated to SSH crate)
+- `spawn_target.rs:6` comment mentions SSH sessions — update needed
+- `spawn_target.rs:484` sets `SSH_AUTH_SOCK` from `Mux.agent` — keep (unrelated to SSH crate)
 - No other crate depends on these 4 crates (verified via workspace)
 
 ## Related Code Files
@@ -39,11 +39,11 @@
 - `Cargo.toml` (workspace root)
 - `crates/chatminal-host-runtime/Cargo.toml`
 - `crates/chatminal-host-runtime/src/lib.rs`
-- `crates/chatminal-host-runtime/src/domain.rs`
+- `crates/chatminal-host-runtime/src/spawn_target.rs`
 - `apps/chatminal-desktop/Cargo.toml`
 - `apps/chatminal-desktop/src/main.rs` (**~150 lines** — SSH/Connect subcommands, single-instance detection, mux server spawn)
 - `apps/chatminal-desktop/src/update.rs` (line 187 — `discover_gui_socks`)
-- `apps/chatminal-desktop/src/desktop_host_runtime/mod.rs` (line 978 — `update_mux_domains`)
+- `apps/chatminal-desktop/src/desktop_host_runtime/mod.rs` (line 978 — `update_mux_targets`)
 
 ## Implementation Steps
 
@@ -86,7 +86,7 @@
      mod tmux_pty;
      ```
 
-6. **Update `crates/chatminal-host-runtime/src/domain.rs`:**
+6. **Update `crates/chatminal-host-runtime/src/spawn_target.rs`:**
    - Update comment at line 1-6: remove mention of SSH sessions
    - Keep line 484 (`SSH_AUTH_SOCK`) — this is agent forwarding, not the SSH crate
 
@@ -99,10 +99,10 @@
      ```
 
 8. **Update `apps/chatminal-desktop/src/main.rs`:**
-   - Remove `use engine_client::domain::ClientDomain` (line 15)
-   - Remove `use engine_mux_server_impl::update_mux_domains` (line 19)
+   - Remove `use engine_client::target::ClientTarget` (line 15)
+   - Remove `use engine_mux_server_impl::update_mux_targets` (line 19)
    - Remove `async_run_ssh()` function (lines 145-210)
-   - Remove `connect_to_auto_connect_domains()` function (lines 321-329)
+   - Remove `connect_to_auto_connect_targets()` function (lines 321-329)
    - Remove single-instance detection block using `engine_client::discovery` (lines 486-530)
    - Remove `spawn_mux_server()` function (lines 614-625)
    - Remove `engine_client::discovery::publish_gui_sock_path` (line 623)
@@ -114,7 +114,7 @@
    - Line 187: remove or stub `engine_client::discovery::discover_gui_socks()`
 
 10. **Update `apps/chatminal-desktop/src/desktop_host_runtime/mod.rs`:**
-    - Line 978: remove `engine_mux_server_impl::update_mux_domains(config)?`
+    - Line 978: remove `engine_mux_server_impl::update_mux_targets(config)?`
 
 11. **Delete `apps/chatminal-desktop/src/bin/chatminal-mux/`:**
     - Entire binary uses `engine_mux_server_impl::PKI`
@@ -128,11 +128,11 @@
 - [x] Update workspace Cargo.toml members + deps
 - [x] Update host-runtime Cargo.toml
 - [x] Update host-runtime lib.rs mod declarations
-- [x] Update domain.rs comment
+- [x] Update spawn_target.rs comment
 - [x] Update desktop Cargo.toml
 - [x] Update desktop main.rs (~150 lines: SSH/Connect subcommands, single-instance, mux server)
 - [x] Update desktop update.rs (discover_gui_socks)
-- [x] Update desktop_host_runtime/mod.rs (update_mux_domains)
+- [x] Update desktop_host_runtime/mod.rs (update_mux_targets)
 - [x] Delete chatminal-mux binary
 - [x] Fix compiler errors
 - [x] Run verification
@@ -142,14 +142,14 @@
 - `cargo check --workspace` passes
 - `cargo test -p chatminal-host-runtime` passes
 - No references to deleted crates in any `.toml` file
-- `split_and_insert` callers reduced to 1 (domain.rs:140 only, excluding test/internal)
+- `split_and_insert` callers reduced to 1 (spawn_target.rs:140 only, excluding test/internal)
 
 ## Risk Assessment
 
 - **Medium risk:** Desktop main.rs has ~150 lines using these crates (single-instance detection, SSH subcommand, mux server)
 - **Watch:** Single-instance detection (`resolve_gui_sock_path`) — losing this means multiple desktop instances can launch. Desktop is deprecated so acceptable.
 - **Watch:** `ssh2` crate removal — grep for `ssh2::` imports outside deleted files
-- **Watch:** `domain.rs:484` SSH_AUTH_SOCK — must keep, not related to engine-ssh
+- **Watch:** `spawn_target.rs:484` SSH_AUTH_SOCK — must keep, not related to engine-ssh
 - **Watch:** `bin/chatminal-mux` binary depends on engine-mux-server-impl — delete entire binary
 
 ## Verification

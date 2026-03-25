@@ -3,7 +3,7 @@
 ## Context Links
 - [plan.md](./plan.md)
 - [terminal_chatminal_gui_proxy.rs](/Users/khoa2807/development/2026/chatminal/apps/chatminal-app/src/terminal_chatminal_gui_proxy.rs)
-- [chatminal_ipc_mux_domain.rs](/Users/khoa2807/development/2026/chatminal/apps/chatminal-app/src/window_chatminal_gui/chatminal_ipc_mux_domain.rs)
+- [chatminal_ipc_mux_target.rs](/Users/khoa2807/development/2026/chatminal/apps/chatminal-app/src/window_chatminal_gui/chatminal_ipc_mux_target.rs)
 - [termwindow/mod.rs](/Users/khoa2807/development/2026/chatminal/apps/chatminal-chatminal-desktop/src/termwindow/mod.rs)
 
 ## Overview
@@ -22,8 +22,8 @@
 - Mux chỉ dùng như engine/window/tab/pane manager, không dùng command bridge ngoài process.
 
 ## Architecture
-- Tạo embedded session domain trong GUI:
-  - `apps/chatminal-chatminal-desktop/src/chatminal_runtime/pane_domain.rs`
+- Tạo embedded session target trong GUI:
+  - `apps/chatminal-chatminal-desktop/src/chatminal_runtime/pane_target.rs`
   - `apps/chatminal-chatminal-desktop/src/chatminal_runtime/pane_bridge.rs`
 - `TermWindow` giữ mapping `session_id -> pane/tab handle`.
 - Khi switch session:
@@ -36,12 +36,12 @@
   - `apps/chatminal-chatminal-desktop/src/termwindow/render/*` nếu cần UI state mới
   - `apps/chatminal-chatminal-desktop/src/main.rs`
 - Create:
-  - `apps/chatminal-chatminal-desktop/src/chatminal_runtime/pane_domain.rs`
+  - `apps/chatminal-chatminal-desktop/src/chatminal_runtime/pane_target.rs`
   - `apps/chatminal-chatminal-desktop/src/chatminal_runtime/pane_bridge.rs`
 - Delete:
   - `apps/chatminal-app/src/terminal_chatminal_gui_proxy.rs`
-  - `apps/chatminal-app/src/window_chatminal_gui/chatminal_ipc_mux_domain.rs`
-  - `apps/chatminal-app/src/window_chatminal_gui/chatminal_ipc_mux_domain_tests.rs`
+  - `apps/chatminal-app/src/window_chatminal_gui/chatminal_ipc_mux_target.rs`
+  - `apps/chatminal-app/src/window_chatminal_gui/chatminal_ipc_mux_target_tests.rs`
   - `apps/chatminal-app/src/window_chatminal_gui/mod.rs`
 
 ## Implementation Steps
@@ -51,7 +51,7 @@
 4. Thêm test cho session switching không spawn process.
 
 ## Todo List
-- [ ] Thiết kế embedded pane domain
+- [ ] Thiết kế embedded pane target
 - [ ] Bỏ proxy bridge ở session switch
 - [ ] Thay resize/input/output polling bằng event path trực tiếp
 - [ ] Viết test native switching
@@ -63,7 +63,7 @@
 
 ## Risk Assessment
 - Risk: integration sâu với model pane/tab của Chatminal GUI.
-- Mitigation: làm domain/pane bridge riêng, không rải logic qua nhiều file UI.
+- Mitigation: làm target/pane bridge riêng, không rải logic qua nhiều file UI.
 
 ## Security Considerations
 - Input path phải giữ backpressure policy tương đương hiện tại.

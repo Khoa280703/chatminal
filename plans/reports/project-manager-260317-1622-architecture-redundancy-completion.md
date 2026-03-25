@@ -51,7 +51,7 @@ Tier 3 (cleanup) phases remain pending: Ghost reference cleanup (3.1) and third_
 ## Architecture Impact
 
 **Completed Tiers (1.2) Progress:**
-- Tier 1 (Critical): ~12,000 lines deleted; domain-split path sealed; ID mapping localized
+- Tier 1 (Critical): ~12,000 lines deleted; target-split path sealed; ID mapping localized
 - Tier 2 (Medium): Type deduplication complete; terminal parser ownership documented
 
 **Remaining Tier 3 (Low):**

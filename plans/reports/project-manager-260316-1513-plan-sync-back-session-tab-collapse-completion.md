@@ -59,7 +59,7 @@ grep -rn "HostRenderScope" apps/chatminal-desktop/src/ --include="*.rs" \
 
 **Config API Changes (crates/chatminal-config):**
 - `SpawnTab` → `SpawnSession`
-- `SpawnTabDomain` → `SpawnSessionDomain`
+- `SpawnTabTarget` → `SpawnSessionTarget`
 - `ActivateTab` / `ActivateTabRelative` → `ActivateSession` / `ActivateSessionRelative`
 - `CloseCurrentTab` + `CloseCurrentPane` → `CloseCurrentSession` (merged)
 - `MoveTab` → `MoveSession`

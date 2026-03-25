@@ -48,8 +48,8 @@ Last updated: 2026-03-13
    - thêm script verify `scripts/migration/phase08-wezterm-gui-killswitch-verify.sh`
    - thêm artifact/report cho plan `260305-1458` (compatibility matrix + rollout/windows follow-up)
 15. Đóng plan `260305-1458` (2026-03-05):
-   - bổ sung module `window_wezterm_gui/chatminal_ipc_mux_domain` + race tests embedded path
-   - refactor `proxy-wezterm-session` sang dùng mux-domain module (event/input ordering guard tập trung một chỗ)
+   - bổ sung module `window_wezterm_gui/chatminal_ipc_mux_target` + race tests embedded path
+   - refactor `proxy-wezterm-session` sang dùng mux adapter module (event/input ordering guard tập trung một chỗ)
    - re-run full gate suite (`check/test/smoke/fidelity/bench/soak/release-dry-run`) PASS
    - toàn bộ checklist plan `260305-1458` đã đóng; phần manual host-specific giữ ở external release preflight checklist
 16. Hard-cut WezTerm direct runtime dependency (2026-03-06):

@@ -43,7 +43,7 @@
 - Đã có tests xác nhận detached surface spawn/close dùng runtime mới và không dựa vào adapter
 - `chatminal-runtime` không còn spawn PTY qua `SessionRuntime` ở active path; `DaemonState::{session_create,session_activate,session_input_write,session_resize,session_close}` giờ đi qua detached surface/leaf runtime của `chatminal-session-runtime`
 - Đã thêm generation-aware bridge từ `SessionRuntimeEvent::{LeafOutput,LeafExited,LeafError}` quay lại `SessionEvent` để giữ nguyên business/store pipeline phía trên
-- Desktop domain active hiện đã attach pane từ runtime core mới, nhưng desktop session-surface/window-host path vẫn còn dùng adapter `EngineSurfaceAdapter` để quản shell surface trong `termwindow`
+- Desktop target active hiện đã attach pane từ runtime core mới, nhưng desktop session-surface/window-host path vẫn còn dùng adapter `EngineSurfaceAdapter` để quản shell surface trong `termwindow`
 
 ## Todo List
 - [x] Thêm core-only id allocator cho execution path mới

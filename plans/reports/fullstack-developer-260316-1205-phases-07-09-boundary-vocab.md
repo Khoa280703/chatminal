@@ -43,13 +43,13 @@ Removed `crates/chatminal-session-runtime` from workspace `Cargo.toml`, all `Car
 | `chatminal-config` | `keyassignment.rs`, `config.rs`, `color.rs` |
 | `chatminal-codec` | `lib.rs` |
 | `chatminal-lua-bridge` | `leaf.rs`, `lib.rs`, `session.rs`, `window.rs` |
-| `chatminal-host-runtime` | `lib.rs`, `domain.rs`, `tab.rs` |
-| `chatminal-engine-client` | `client.rs`, `domain.rs` |
+| `chatminal-host-runtime` | `lib.rs`, `spawn_target.rs`, `tab.rs` |
+| `chatminal-engine-client` | `client.rs`, `spawn_target.rs` |
 | `chatminal-engine-mux-server-impl` | `sessionhandler.rs` |
 | `chatminal-desktop` | `desktop_commands.rs`, `desktop_termwindow_actions_impl.rs`, `desktop_termwindow_actions_items.rs`, `desktop_spawn.rs`, `tabbar.rs`, `termwindow/mod.rs`, `termwindow/resize.rs`, `desktop_termwindow_event_helpers.rs`, `overlay/launcher.rs`, `desktop_host_runtime/mod.rs`, `desktop_host_runtime/session_engine/*.rs`, `chatminal_runtime/mod.rs` |
 
 **Key renames**:
-- `SpawnTabDomain` → `SpawnSessionDomain`, `CurrentPaneDomain` → `CurrentSessionDomain`
+- `SpawnTabTarget` → `SpawnSessionTarget`, `CurrentPaneTarget` → `CurrentSessionTarget`
 - `PaneDirection` → `SessionDirection`
 - `PaneSelectMode` / `PaneSelectArguments` → `SessionSelectMode` / `SessionSelectArguments`
 - `SplitPane` struct/variant → `SplitSession`

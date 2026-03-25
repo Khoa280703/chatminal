@@ -139,7 +139,7 @@
 - Mitigation: bắt buộc annotate từng leakage theo scope và owner.
 
 ## Security Considerations
-- Không thay đổi runtime permissions, transport, domain attachment ở phase inventory.
+- Không thay đổi runtime permissions, transport, target attachment ở phase inventory.
 
 ## Next Steps
 - Phase 02 tạo type layer và contracts đúng theo vocabulary freeze table, không tự nghĩ tên mới ngoài freeze table.

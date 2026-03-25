@@ -51,10 +51,10 @@ Completed documentation updates for Phase 2 architecture cleanup (5 phases: engi
 - `desktop_spawn.rs:111-131` split fallback replaced with `anyhow::bail!` error
 
 ### Phase 2.3 - Dead Code Cleanup
-- 4 functions removed: `active_host_domain_name`, `set_default_host_domain`, `new_headless_connection_ui`, `host_client_domains`
+- 4 functions removed: `active_host_target_name`, `set_default_host_target`, `new_headless_connection_ui`, `host_client_targets`
 - 3 type aliases removed: `RuntimeSplitDirection`, `RuntimeSplitRequest`, `RuntimeSplitSize`
 - ~33 LOC removed
-- Note: tab.rs split functions (split_and_insert, compute_split_size) NOT removed — lua-bridge still depends on Mux::split_pane → Domain::split_pane → tab
+- Note: tab.rs split functions (split_and_insert, compute_split_size) NOT removed — lua-bridge still depends on Mux::split_pane → SpawnTarget::split_pane → tab
 
 ### Phase 2.4 - Workspace Layout Persistence
 - Already implemented via `set_string_state`/`get_string_state` with key prefix `workspace_layout:`
@@ -67,7 +67,7 @@ Completed documentation updates for Phase 2 architecture cleanup (5 phases: engi
 
 ## Key Insights
 
-1. **Lua-bridge dependency**: Tab split functions cannot be removed from `chatminal-host-runtime` because daemon/lua-bridge still calls Mux::split_pane → Domain::split_pane → tab functions. Desktop uses WorkspaceLayoutState exclusively.
+1. **Lua-bridge dependency**: Tab split functions cannot be removed from `chatminal-host-runtime` because daemon/lua-bridge still calls Mux::split_pane → SpawnTarget::split_pane → tab functions. Desktop uses WorkspaceLayoutState exclusively.
 
 2. **Workspace persistence model**: Layout state uses key-value store with `workspace_layout:` prefix for JSON blobs. Auto-save on all mutations (split, close, resize, focus). No separate schema migration needed.
 

@@ -1,12 +1,19 @@
 # Codebase Summary
 
-Last updated: 2026-03-17 (Phase 2 cleanup complete)
+Last updated: 2026-03-25 (single-flow desktop/spawn-target cleanup)
 
 ## Runtime baseline
 Chatminal hiện chia làm ba lớp rõ ràng:
 - `apps/chatminal-desktop` — desktop app first-party, render/input shell + desktop facade + private engine adapter.
 - `crates/chatminal-runtime` — app/runtime orchestrator, persistence facade, native API, workspace/session state.
 - `crates/chatminal-session-runtime` — execution subsystem, workspace layout model, session engine, runtime registry.
+
+Desktop product path hiện là `single-flow local-first`:
+- startup không còn public legacy flags cho attach/spawn selection
+- desktop host mux luôn boot theo default local flow
+- active keyassignment/config path không còn các action legacy kiểu spawn/attach/detach theo execution target
+- host-runtime không còn `SpawnTarget.attach/detach/state` compat flow
+- active host engine đã đổi naming sang `spawn target`; legacy vocabulary cũ không còn nằm trong active product path
 
 ## High-signal modules
 
@@ -28,6 +35,8 @@ Chatminal hiện chia làm ba lớp rõ ràng:
 - `apps/chatminal-desktop/src/desktop_host_runtime/mod.rs`
   - private adapter boundary duy nhất còn biết host runtime.
   - Phase 2 cleanup: deleted `split_terminal_handle*`, `HostSplitSource`, `HostRuntimeEntryId`, `HostLayoutNode`, `HostSplitDirection` type aliases; removed 4 dead functions.
+  - Single-flow cleanup: desktop mux init luôn default `local`; product path không còn resolve startup target từ CLI/config public surface, cũng không còn wrapper attach-by-target.
+  - Cleanup mới nhất: internal naming đổi sang `HostSpawnTarget*`, `spawn_target.rs`, `spawn_target_id()`.
 - `apps/chatminal-desktop/src/desktop_host_runtime/session_host.rs`
   - private session host: builds `ChatminalRenderState` trực tiếp từ `session_pane` map; `HostRenderScope` chỉ còn cho overlay compat.
 - `apps/chatminal-desktop/src/desktop_host_runtime/session_pane.rs`
@@ -58,10 +67,18 @@ Chatminal hiện chia làm ba lớp rõ ràng:
 ### Lower engine/private compatibility
 - `crates/chatminal-host-runtime/*`
   - lower engine host internals; được phép giữ `Mux/Tab/Pane`.
+  - Cleanup mới nhất đã bỏ `SpawnTarget.attach/detach/state`, `spawnable`, `target_label`, `iter_targets`, `target_was_detached`, rồi đổi naming lõi sang `SpawnTarget`.
+- `crates/chatminal-config/*`
+  - config/runtime boundary giờ cũng dùng vocabulary `target`.
+  - public fields đã đổi sang `exec_targets`, `wsl_targets`, `ssh_targets`, `unix_targets`, `default_target`, `default_mux_server_target`.
+  - Lua helper đổi sang `default_wsl_targets()` và `exec_target(...)`.
 - `crates/chatminal-lua-bridge/src/lib.rs`
   - Lua/config bridge theo vocabulary Chatminal.
+  - các helper public để query/chọn execution target đã bị cắt khỏi public surface.
+  - `terminal.get_target_name` và public execution-target override cho `spawn_window` / `spawn_session` / `split` cũng đã bị cắt.
 - `apps/chatminal-desktop/src/desktop_commands.rs`
   - compatibility translation layer cho upstream `KeyAssignment` names.
+  - active `SpawnSession` đã thành single-flow action không còn payload target.
 
 ## Architectural ownership
 - Product source of truth: `chatminal-runtime` + `chatminal-session-runtime`.
@@ -85,7 +102,7 @@ Chatminal hiện chia làm ba lớp rõ ràng:
 - **Phase 2.4**: Workspace layout persistence confirmed via `set_string_state`/`get_string_state` key-value store with auto-save to app_state table.
 
 ## Remaining engineering debt (intentional, post-Phase 2)
-- **Tab split functions**: `tab.rs` split_and_insert/compute_split_size cannot be removed (lua-bridge calls Mux::split_pane → Domain::split_pane → tab). Desktop-only uses WorkspaceLayoutState; daemon/lua still need engine split support.
+- **Tab split functions**: `tab.rs` split_and_insert/compute_split_size cannot be removed (lua-bridge calls Mux::split_pane → SpawnTarget::split_pane → tab). Desktop-only uses WorkspaceLayoutState; daemon/lua still need engine split support.
 - **Engine split at daemon level**: Mux/Tab/Pane still fully present in `chatminal-host-runtime` (intentional lower private layer); daemon may use split via lua-bridge.
 - **Command/config compatibility**: `desktop_commands.rs` still translates upstream `KeyAssignment::*Tab*` for config backward-compat (not exercised by desktop product, only preserved for old configs).
 - **Lower parser duplication**: `chatminal-terminal-core` (vt100-based) vs `chatminal-engine-term` (termwiz-based) — both in codebase; daemon uses core, desktop uses engine-term.

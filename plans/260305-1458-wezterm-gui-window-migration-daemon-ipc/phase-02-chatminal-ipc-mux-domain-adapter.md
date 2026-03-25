@@ -1,4 +1,4 @@
-# Phase 02 - Chatminal IPC Mux Domain Adapter
+# Phase 02 - Chatminal IPC Mux SpawnTarget Adapter
 
 ## Context Links
 - [plan.md](./plan.md)
@@ -11,7 +11,7 @@
 - Priority: P1
 - Status: Completed
 - Effort: 1w
-- Brief: build adapter translating WezTerm mux actions to chatminal IPC without changing daemon ownership; hiện đã có bridge/proxy path, còn thiếu mux-domain embedded path.
+- Brief: build adapter translating WezTerm mux actions to chatminal IPC without changing daemon ownership; hiện đã có bridge/proxy path, còn thiếu mux adapter embedded path.
 
 ## Key Insights
 - `ChatminalClient` already has robust request/event framing + timeout behavior.
@@ -28,7 +28,7 @@
 2. Backpressure and error propagation remain visible to UI.
 
 ## Architecture
-- New module: `chatminal_ipc_mux_domain`.
+- New module: `chatminal_ipc_mux_target`.
 - Internal maps: `session_id <-> pane_id`, `profile_id <-> workspace context`.
 - Event pump thread/task pushes updates into main GUI/mux thread via channel.
 
@@ -38,8 +38,8 @@
 2. `/home/khoa2807/working-sources/chatminal/apps/chatminal-app/src/terminal_wezterm_gui_proxy.rs`
 - Create:
 1. `/home/khoa2807/working-sources/chatminal/apps/chatminal-app/src/window_wezterm_gui/mod.rs`
-2. `/home/khoa2807/working-sources/chatminal/apps/chatminal-app/src/window_wezterm_gui/chatminal_ipc_mux_domain.rs`
-3. `/home/khoa2807/working-sources/chatminal/apps/chatminal-app/src/window_wezterm_gui/chatminal_ipc_mux_domain_tests.rs`
+2. `/home/khoa2807/working-sources/chatminal/apps/chatminal-app/src/window_wezterm_gui/chatminal_ipc_mux_target.rs`
+3. `/home/khoa2807/working-sources/chatminal/apps/chatminal-app/src/window_wezterm_gui/chatminal_ipc_mux_target_tests.rs`
 - Delete:
 1. None
 
@@ -53,8 +53,8 @@
 - [x] Request mapping cơ bản cho `activate/snapshot/input/resize` đã chạy trong proxy.
 - [x] Event ordering/backlog guards cơ bản đã có (fair-drain + batch input + bounded queue).
 - [x] Snapshot restore path đã hoạt động khi attach/reconnect qua proxy.
-- [x] Hoàn tất module `chatminal_ipc_mux_domain` embedded cho đường chạy window/proxy hiện tại (tách logic lifecycle/input/event khỏi launcher).
-- [x] Unit tests race-case cho mux-domain embedded path.
+- [x] Hoàn tất module `chatminal_ipc_mux_target` embedded cho đường chạy window/proxy hiện tại (tách logic lifecycle/input/event khỏi launcher).
+- [x] Unit tests race-case cho mux adapter embedded path.
 
 ## Success Criteria
 - Adapter can drive full session lifecycle using unchanged daemon API.

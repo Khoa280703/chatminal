@@ -27,7 +27,7 @@
 - Ownership table đích:
   - `chatminal-runtime`: profile/session/workspace/layout/lifecycle/event facade
   - `chatminal-session-runtime`: runtime_id/terminal_instance/live execution
-  - `desktop_host_runtime`: render/pty/domain/window adapter
+  - `desktop_host_runtime`: render/pty/target/window adapter
   - `desktop`: view + input dispatch only
 
 ## Related Code Files
@@ -39,7 +39,7 @@
 - Refactor: `apps/chatminal-desktop/src/desktop_host_runtime/mod.rs`
 
 ## Implementation Steps
-1. Freeze ownership matrix cho từng state domain.
+1. Freeze ownership matrix cho từng state target.
 2. Inventory mọi desktop mutation/query bypass runtime facade.
 3. Nhóm callsite thành `mutation`, `query`, `subscription`, `engine-only`.
 4. Thiết kế facade API tối thiểu cho Phase 02.

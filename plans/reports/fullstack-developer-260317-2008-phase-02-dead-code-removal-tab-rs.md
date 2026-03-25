@@ -4,13 +4,13 @@
 
 ## Analysis Finding: Plan Document Error
 
-Plan document claimed `split_and_insert` / `compute_split_size` were dead code with only caller at `domain.rs:140`. This is **incorrect**.
+Plan document claimed `split_and_insert` / `compute_split_size` were dead code with only caller at `spawn_target.rs:140`. This is **incorrect**.
 
 Actual caller chain (still live):
 ```
 lua-bridge/leaf.rs:498
   → Mux::split_pane (lib.rs:1217)
-  → domain::split_pane (deprecated default impl, domain.rs:74)
+  → target::split_pane (deprecated default impl, spawn_target.rs:74)
   → tab::compute_split_size (tab.rs:728)
   → tab::split_and_insert (tab.rs:740)
 ```
@@ -28,10 +28,10 @@ Compiler warnings identified real dead code from Phase 1 desktop split removal:
 ### `apps/chatminal-desktop/src/desktop_host_runtime/mod.rs`
 - Deleted 3 type aliases (lines 88-90): `RuntimeSplitDirection`, `RuntimeSplitRequest`, `RuntimeSplitSize` — 3 lines
   - Only used in `into_host_request` (now deleted)
-- Deleted `active_host_domain_name()` — 3 lines
-- Deleted `set_default_host_domain()` — 3 lines
+- Deleted `active_host_target_name()` — 3 lines
+- Deleted `set_default_host_target()` — 3 lines
 - Deleted `new_headless_connection_ui()` — 3 lines
-- Deleted `host_client_domains()` — 3 lines
+- Deleted `host_client_targets()` — 3 lines
 
 **Total removed: ~30 lines**
 
@@ -41,7 +41,7 @@ Compiler warnings identified real dead code from Phase 1 desktop split removal:
 
 ## Files NOT Modified
 - `crates/chatminal-host-runtime/src/tab.rs` — no dead code found (all used via lua-bridge)
-- `crates/chatminal-host-runtime/src/domain.rs` — `split_pane` default impl still needed
+- `crates/chatminal-host-runtime/src/spawn_target.rs` — `split_pane` default impl still needed
 
 ## Tests Status
 - `cargo check --workspace`: PASS (0 warnings)

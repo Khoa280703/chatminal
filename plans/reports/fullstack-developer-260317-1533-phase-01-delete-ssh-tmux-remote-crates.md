@@ -23,17 +23,17 @@
 - `Cargo.toml` — removed 4 workspace members + 5 workspace.dependencies (engine-ssh, engine-client, engine-mux-server-impl, ssh-funcs, ssh2)
 - `crates/chatminal-host-runtime/Cargo.toml` — removed engine-ssh dep
 - `crates/chatminal-host-runtime/src/lib.rs` — removed 5 mod declarations, AgentProxy import/usage, `agent` field from Mux struct
-- `crates/chatminal-host-runtime/src/domain.rs` — updated comment, removed agent env injection
+- `crates/chatminal-host-runtime/src/spawn_target.rs` — updated comment, removed agent env injection
 - `crates/chatminal-host-runtime/src/client.rs` — replaced AgentProxy::default_ssh_auth_sock() with direct std::env::var
-- `crates/chatminal-host-runtime/src/localpane.rs` — removed TmuxDomain/TmuxDomainState/ssh refs, simplified tmux-gated methods
+- `crates/chatminal-host-runtime/src/localpane.rs` — removed TmuxTarget/TmuxTargetState/ssh refs, simplified tmux-gated methods
 - `crates/chatminal-config/Cargo.toml` — removed engine-ssh dep
-- `crates/chatminal-config/src/ssh.rs` — replaced default_domains() with empty vec (no engine_ssh parser)
+- `crates/chatminal-config/src/ssh.rs` — replaced default_targets() with empty vec (no engine_ssh parser)
 - `crates/chatminal-env-bootstrap/Cargo.toml` — removed ssh-funcs dep
 - `crates/chatminal-env-bootstrap/src/lib.rs` — removed ssh_funcs::register
 - `apps/chatminal-desktop/Cargo.toml` — removed engine-client, engine-mux-server-impl, engine-ssh deps
-- `apps/chatminal-desktop/src/main.rs` — removed Ssh/Connect subcommands, async_run_ssh, run_ssh, connect_to_auto_connect_domains, Publish enum, spawn_mux_server, update_mux_domains callback
+- `apps/chatminal-desktop/src/main.rs` — removed Ssh/Connect subcommands, async_run_ssh, run_ssh, connect_to_auto_connect_targets, Publish enum, spawn_mux_server, update_mux_targets callback
 - `apps/chatminal-desktop/src/update.rs` — removed discover_gui_socks, simplified update toast logic
-- `apps/chatminal-desktop/src/desktop_host_runtime/mod.rs` — removed update_mux_domains call, removed create_remote_ssh_domain fn
+- `apps/chatminal-desktop/src/desktop_host_runtime/mod.rs` — removed update_mux_targets call, removed create_remote_ssh_target fn
 
 ### Tasks Completed
 
@@ -42,11 +42,11 @@
 - [x] Update workspace Cargo.toml members + deps
 - [x] Update host-runtime Cargo.toml
 - [x] Update host-runtime lib.rs mod declarations
-- [x] Update domain.rs comment
+- [x] Update spawn_target.rs comment
 - [x] Update desktop Cargo.toml
 - [x] Update desktop main.rs (~150 lines: SSH/Connect subcommands, single-instance, mux server)
 - [x] Update desktop update.rs (discover_gui_socks)
-- [x] Update desktop_host_runtime/mod.rs (update_mux_domains)
+- [x] Update desktop_host_runtime/mod.rs (update_mux_targets)
 - [x] Delete chatminal-mux binary
 - [x] Fix compiler errors (also fixed chatminal-config, chatminal-env-bootstrap, localpane.rs)
 - [x] Run verification
@@ -58,10 +58,10 @@
 
 ### Issues Encountered
 
-1. Phase file underspecified: `chatminal-config` depended on `engine-ssh` (for `SshDomain::default_domains`), `chatminal-env-bootstrap` depended on `ssh-funcs` — both needed cleanup too
+1. Phase file underspecified: `chatminal-config` depended on `engine-ssh` (for `SshTarget::default_targets`), `chatminal-env-bootstrap` depended on `ssh-funcs` — both needed cleanup too
 2. `localpane.rs` had heavy tmux/ssh coupling not mentioned in phase file — cleaned up
 3. `AgentProxy` removed from lib.rs/client.rs — replaced ssh_auth_sock with direct env var read
-4. `create_remote_ssh_domain` fn in desktop_host_runtime/mod.rs also deleted (dead after removing SSH subcommand)
+4. `create_remote_ssh_target` fn in desktop_host_runtime/mod.rs also deleted (dead after removing SSH subcommand)
 
 ### Next Steps
 - Phase 1.2 unblocked: Seal engine split path (`split_and_insert` now has 1 caller)

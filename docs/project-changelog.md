@@ -1,5 +1,35 @@
 # Project Changelog
 
+## 2026-03-25
+
+### Changed
+- Single-flow desktop cleanup tiếp tục cho product path:
+  - `chatminal start` của desktop không còn public CLI flags legacy cho attach/spawn target selection.
+  - startup path trong `apps/chatminal-desktop/src/main.rs` không còn route spawn/attach theo execution target do user chỉ định.
+  - serial startup không còn “mượn” startup target trong `StartCommand`; serial target được truyền riêng như internal startup target.
+  - `desktop_host_runtime::build_initial_host_mux()` luôn boot default desktop flow theo `local`.
+  - public Lua APIs legacy cho target selection đã bị cắt khỏi `crates/chatminal-lua-bridge`.
+  - `gui-attached` không còn payload target-ref; file bridge cũ cho payload này cũng đã bị xoá.
+  - public Lua surface không còn `terminal.get_target_name`, và `spawn_window` / `spawn_session` / terminal `split` không còn nhận execution-target override.
+  - launcher overlay đã bỏ hẳn dead path target menu và host launcher target entries không còn nằm trong desktop product shell.
+  - active config/keyassignment path đã bỏ các action legacy kiểu attach/detach/spawn theo target; `SpawnSession` giờ là single-flow action không còn payload target.
+  - host-runtime compat tail đã bị cắt tiếp: trait `SpawnTarget` không còn `attach/detach/state`, desktop không còn wrapper attach host cũ, và các dead helpers cho target registry đã bị xoá.
+  - active host engine/app adapter đã ổn định naming nội bộ sang `SpawnTarget/SpawnTargetId/spawn_target_id()`, gồm cả module `spawn_target.rs` ở host-runtime và desktop adapter.
+  - `chatminal-config` public model đã đổi từ legacy target-list keys sang `*_targets`, và từ legacy default target keys sang `default_target` / `default_mux_server_target`.
+  - Lua config helpers đã sync sang vocabulary mới: `default_wsl_targets`, `exec_target(...)`.
+  - CLI/internal labels còn sót cũng đã sync sang `target` (`ConnectCommand.target_name`, comment/help text, serial spawn variable names).
+- Verification:
+  - `cargo check -p chatminal-config` pass qua dependency build.
+  - `cargo check -p chatminal-host-runtime` pass qua dependency build.
+  - `cargo check -p chatminal-codec` pass qua dependency build.
+  - `cargo check -p chatminal-lua-bridge` pass.
+  - `cargo check -p chatminal-desktop` pass.
+  - `cargo check --workspace` pass.
+
+### Notes
+- Đây là intentional breaking cleanup cho CLI/Lua compat surface liên quan legacy execution-target vocabulary ở desktop product path.
+- Đây cũng là intentional breaking cleanup cho config naming: config cũ dùng legacy target-list keys hoặc legacy default target key cần đổi sang `*_targets` và `default_target`.
+
 ## 2026-03-16
 
 ### Completed
@@ -230,8 +260,8 @@
 
 ### Changed
 - Phase closeout `260305-1458`:
-  - thêm module `apps/chatminal-app/src/window_wezterm_gui/chatminal_ipc_mux_domain.rs` và race tests tương ứng.
-  - refactor `proxy-wezterm-session` sang domain module chung để gom logic input UTF-8 boundary, batch flush, event ordering.
+  - thêm module `apps/chatminal-app/src/window_wezterm_gui/chatminal_ipc_mux_target.rs` và race tests tương ứng.
+  - refactor `proxy-wezterm-session` sang target module chung để gom logic input UTF-8 boundary, batch flush, event ordering.
   - toàn bộ checklist plan `plans/260305-1458-wezterm-gui-window-migration-daemon-ipc/` đã đóng.
   - manual host-specific gates (macOS smoke + IME matrix) được giữ ở external preflight checklist, không để TODO mở trong coding plan.
 - Phase 05 fidelity gate hardening (late update):

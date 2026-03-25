@@ -85,7 +85,7 @@ pub enum WorkspaceLayoutNodeKind {
 **Callers:**
 ```
 tab.split_and_insert()
-├── Domain::split_pane() [crates/chatminal-host-runtime/src/domain.rs:140]
+├── SpawnTarget::split_pane() [crates/chatminal-host-runtime/src/spawn_target.rs:140]
 │   └── Mux::split_pane() [crates/chatminal-host-runtime/src/lib.rs]
 │       └── split_terminal_handle() [apps/chatminal-desktop/src/desktop_host_runtime/mod.rs:868]
 │           └── split_terminal_handle_by_public_id() [line 880]
@@ -275,7 +275,7 @@ The new system (WorkspaceLayoutState) is lighter and better architected:
 2. Map SessionViewId ↔ PaneId at adapter layer only
 3. Remove bintree from Tab, use simple Vec<Arc<Pane>>
 4. Move resize/focus logic to adapter layer
-5. Keep Mux/Domain for execution engine, not layout
+5. Keep Mux/SpawnTarget for execution engine, not layout
 
 **Current state:** Refactor commits show this is in-progress:
 - `ee59dca` removed dead session engine bridge code

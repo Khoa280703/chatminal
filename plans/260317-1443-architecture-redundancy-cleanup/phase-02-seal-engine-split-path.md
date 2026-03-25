@@ -7,12 +7,12 @@
 - **Priority:** P1
 - **Status:** completed
 - **Effort:** 30min
-- **Description:** After Phase 1.1, `split_and_insert` has exactly 1 external caller: `domain.rs:140`. Reduce visibility to `pub(crate)`, deprecate the domain wrapper, add tracking for desktop engine-split fallback.
+- **Description:** After Phase 1.1, `split_and_insert` has exactly 1 external caller: `spawn_target.rs:140`. Reduce visibility to `pub(crate)`, deprecate the target wrapper, add tracking for desktop engine-split fallback.
 
 ## Key Insights
 
 - After Phase 1.1 deletes SSH/tmux callers, remaining callers:
-  - `host-runtime/src/domain.rs:140` — `split_pane()` trait method, calls `tab.split_and_insert()`
+  - `host-runtime/src/spawn_target.rs:140` — `split_pane()` trait method, calls `tab.split_and_insert()`
   - `host-runtime/src/tab.rs:740` — the definition itself (+ internal `TabInner` at line 1960)
   - `host-runtime/src/tab.rs:2412,2456` — internal test usage within tab module
 - `desktop_spawn.rs:107-109` already bails with message about session-native split; line 112-127 uses `split_terminal_handle_by_public_id` (session-native path). Engine split fallback no longer reachable from desktop, but add `log::warn!` for safety.
@@ -21,7 +21,7 @@
 
 **Modify:**
 - `crates/chatminal-host-runtime/src/tab.rs` (line 740)
-- `crates/chatminal-host-runtime/src/domain.rs` (line 82-141, `split_pane` method)
+- `crates/chatminal-host-runtime/src/spawn_target.rs` (line 82-141, `split_pane` method)
 - `apps/chatminal-desktop/src/desktop_spawn.rs` (line 111 area)
 
 ## Implementation Steps
@@ -34,7 +34,7 @@
    pub(crate) fn split_and_insert(
    ```
 
-2. **`domain.rs` — deprecate `split_pane`:**
+2. **`spawn_target.rs` — deprecate `split_pane`:**
    - Add `#[deprecated(note = "Use session-native split; engine split retained for daemon compatibility")]` above the `split_pane` default method (around line 82)
    - Allow the deprecation warning in the module: `#[allow(deprecated)]` on the impl block or call site
 
@@ -48,7 +48,7 @@
 ## Todo List
 
 - [x] Change `split_and_insert` to `pub(crate)` in tab.rs
-- [x] Add `#[deprecated]` to `split_pane` in domain.rs
+- [x] Add `#[deprecated]` to `split_pane` in spawn_target.rs
 - [x] Add `log::warn!` in desktop_spawn.rs engine split path
 - [x] Run verification
 

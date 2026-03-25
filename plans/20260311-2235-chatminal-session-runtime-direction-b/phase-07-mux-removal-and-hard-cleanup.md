@@ -52,7 +52,7 @@
 - `PaneInformation.pane_id` đã được neutralize thành `u64` và thêm `leaf_id`
 - `GuiWin` không còn expose `engine_window()` hay `active_tab()`
 - `GuiWin` selection/action helpers đã chuyển sang `pane_id: u64`; public scripting surface không còn trả `MuxPane/MuxTab/MuxWindow`
-- `UnixDomain::serve_command()` đã chuyển default compatibility host sang `chatminald`
+- `UnixTarget::serve_command()` đã chuyển default compatibility host sang `chatminald`
 - `apps/chatminal-desktop` đã bỏ `[[bin]] chatminal-mux`; wrapper binary `src/bin/chatminal-mux/*` đã bị xóa khỏi desktop package
 - `chatminal_session_surface.rs` và `spawn.rs` public/helper boundary đã nhận `DesktopWindowId`; việc đổi sang `MuxWindowId` chỉ còn ở private conversion trong file
 - `termwindow` session-mode callsites chính đã đổi sang `DesktopWindowId` khi đi qua session surface helpers

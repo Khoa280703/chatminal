@@ -21,21 +21,21 @@ Mục tiêu batch: chuyển `window-wezterm-gui` sang runtime embedded in-proces
 1. `cargo check --manifest-path apps/chatminal-app/Cargo.toml`
 2. `CHATMINAL_DAEMON_ENDPOINT=/tmp/chatminald.sock cargo run --manifest-path apps/chatminal-app/Cargo.toml -- --help` (verify command list)
 
-### Step 2 - Tạo IPC mux-domain embedded (single-session vertical slice)
+### Step 2 - Tạo IPC mux adapter embedded (single-session vertical slice)
 - Thực hiện:
-1. Tạo `ChatminalIpcMuxDomain` map `activate/snapshot/input/resize` trực tiếp qua `ChatminalClient` (không stdin/stdout proxy).
+1. Tạo `ChatminalIpcMuxTarget` map `activate/snapshot/input/resize` trực tiếp qua `ChatminalClient` (không stdin/stdout proxy).
 2. Tạo `session_id <-> pane_id` map riêng cho embedded runtime.
 3. Tạo event pump background thread nhận `PtyOutput/SessionUpdated/WorkspaceUpdated` và đẩy vào channel cho UI thread.
 4. Reuse watermark guard từ `terminal_workspace_binding_runtime` để chặn stale backlog.
 - Tạo file:
 1. `/home/khoa2807/working-sources/chatminal/apps/chatminal-app/src/window_wezterm_gui_embedded/mod.rs`
-2. `/home/khoa2807/working-sources/chatminal/apps/chatminal-app/src/window_wezterm_gui_embedded/chatminal_ipc_mux_domain.rs`
+2. `/home/khoa2807/working-sources/chatminal/apps/chatminal-app/src/window_wezterm_gui_embedded/chatminal_ipc_mux_target.rs`
 3. `/home/khoa2807/working-sources/chatminal/apps/chatminal-app/src/window_wezterm_gui_embedded/chatminal_event_pump.rs`
 4. `/home/khoa2807/working-sources/chatminal/apps/chatminal-app/src/window_wezterm_gui_embedded/chatminal_session_pane_map.rs`
 - Sửa file:
 1. `/home/khoa2807/working-sources/chatminal/apps/chatminal-app/src/main.rs` (wire module)
 - Checkpoint test:
-1. `cargo test --manifest-path apps/chatminal-app/Cargo.toml chatminal_ipc_mux_domain -- --nocapture`
+1. `cargo test --manifest-path apps/chatminal-app/Cargo.toml chatminal_ipc_mux_target -- --nocapture`
 2. `cargo test --manifest-path apps/chatminal-app/Cargo.toml terminal_workspace_binding_runtime -- --nocapture`
 
 ### Step 3 - Runtime embedded window loop (Linux/macOS first)
