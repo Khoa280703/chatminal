@@ -53,15 +53,14 @@ impl super::TermWindow {
 
         let edge_x = (sb.sidebar_x + sb.sidebar_width).round() as isize;
         let item = UIItem {
-            x: edge_x
-                .saturating_sub(RESIZE_HANDLE_HALF_WIDTH_PX)
-                .max(0) as usize,
+            x: edge_x.saturating_sub(RESIZE_HANDLE_HALF_WIDTH_PX).max(0) as usize,
             y: sb.sidebar_y.max(0.0).round() as usize,
             width: (RESIZE_HANDLE_HALF_WIDTH_PX * 2) as usize,
             height: sb.sidebar_height.max(0.0).round() as usize,
             item_type: UIItemType::ChatminalSidebarResizeHandle,
         };
-        item.hit_test(event.coords.x, event.coords.y).then_some(item)
+        item.hit_test(event.coords.x, event.coords.y)
+            .then_some(item)
     }
 
     fn handle_chatminal_sidebar_wheel(
@@ -175,18 +174,10 @@ impl super::TermWindow {
 
         let grid_origin = self.terminal_grid_origin();
 
-        let y = (event
-            .coords
-            .y
-            .sub(grid_origin.y as isize)
-            .max(0)
+        let y = (event.coords.y.sub(grid_origin.y as isize).max(0)
             / self.render_metrics.cell_size.height) as i64;
 
-        let x = (event
-            .coords
-            .x
-            .sub(grid_origin.x as isize)
-            .max(0) as f32)
+        let x = (event.coords.x.sub(grid_origin.x as isize).max(0) as f32)
             / self.render_metrics.cell_size.width as f32;
         let x = if !pane.as_ref().is_some_and(|pane| pane.is_mouse_grabbed()) {
             // Round the x coordinate so that we're a bit more forgiving of
@@ -197,23 +188,64 @@ impl super::TermWindow {
         }
         .trunc() as usize;
 
-        let mut y_pixel_offset = event
-            .coords
-            .y
-            .sub(grid_origin.y as isize);
+        let mut y_pixel_offset = event.coords.y.sub(grid_origin.y as isize);
         if y > 0 {
             y_pixel_offset = y_pixel_offset.max(0) % self.render_metrics.cell_size.height;
         }
 
-        let mut x_pixel_offset = event
-            .coords
-            .x
-            .sub(grid_origin.x as isize);
+        let mut x_pixel_offset = event.coords.x.sub(grid_origin.x as isize);
         if x > 0 {
             x_pixel_offset = x_pixel_offset.max(0) % self.render_metrics.cell_size.width;
         }
 
         self.last_mouse_coords = (x, y);
+
+        if let Some(modal) = self.get_modal() {
+            let modal_mouse_event = engine_term::MouseEvent {
+                kind: match event.kind {
+                    WMEK::Move => TMEK::Move,
+                    WMEK::VertWheel(_) | WMEK::HorzWheel(_) | WMEK::Press(_) => TMEK::Press,
+                    WMEK::Release(_) => TMEK::Release,
+                },
+                button: match event.kind {
+                    WMEK::Release(ref press) | WMEK::Press(ref press) => mouse_press_to_tmb(press),
+                    WMEK::Move => {
+                        if event.mouse_buttons == WMB::LEFT {
+                            TMB::Left
+                        } else if event.mouse_buttons == WMB::RIGHT {
+                            TMB::Right
+                        } else if event.mouse_buttons == WMB::MIDDLE {
+                            TMB::Middle
+                        } else {
+                            TMB::None
+                        }
+                    }
+                    WMEK::VertWheel(amount) => {
+                        if amount > 0 {
+                            TMB::WheelUp(amount as usize)
+                        } else {
+                            TMB::WheelDown((-amount) as usize)
+                        }
+                    }
+                    WMEK::HorzWheel(amount) => {
+                        if amount > 0 {
+                            TMB::WheelLeft(amount as usize)
+                        } else {
+                            TMB::WheelRight((-amount) as usize)
+                        }
+                    }
+                },
+                x,
+                y,
+                x_pixel_offset,
+                y_pixel_offset,
+                modifiers: event.modifiers,
+            };
+            if let Err(err) = modal.mouse_event(modal_mouse_event, self) {
+                log::error!("Error dispatching mouse to modal: {err:#}");
+            }
+            return;
+        }
 
         let mut capture_mouse = false;
 
@@ -426,9 +458,9 @@ impl super::TermWindow {
             effective_thumb_top,
             &*pane,
             current_viewport,
-            self.dimensions.pixel_height.saturating_sub(
-                y_offset as usize + border.bottom.get() + tab_bar_height as usize,
-            ),
+            self.dimensions
+                .pixel_height
+                .saturating_sub(y_offset as usize + border.bottom.get() + tab_bar_height as usize),
             self.min_scroll_bar_height() as usize,
         );
         self.set_viewport(pane.pane_id() as u64, Some(row), dims);
@@ -594,11 +626,7 @@ impl super::TermWindow {
                 self.mouse_event_chatminal_sidebar_session_menu_join(&session_id, event, context);
             }
             UIItemType::ChatminalSidebarSessionMenuUnjoin(session_id) => {
-                self.mouse_event_chatminal_sidebar_session_menu_unjoin(
-                    &session_id,
-                    event,
-                    context,
-                );
+                self.mouse_event_chatminal_sidebar_session_menu_unjoin(&session_id, event, context);
             }
             UIItemType::ChatminalSidebarSessionMenuRename(session_id) => {
                 self.mouse_event_chatminal_sidebar_session_menu_rename(&session_id, event, context);
@@ -699,8 +727,10 @@ impl super::TermWindow {
         context: &dyn WindowOps,
     ) {
         if Self::is_secondary_click_event(&event) {
-            if matches!(event.kind, WMEK::Release(MousePress::Right) | WMEK::Release(MousePress::Left))
-            {
+            if matches!(
+                event.kind,
+                WMEK::Release(MousePress::Right) | WMEK::Release(MousePress::Left)
+            ) {
                 let selection_changed = self
                     .chatminal_sidebar
                     .ensure_context_menu_session_selected(session_id);
@@ -751,10 +781,9 @@ impl super::TermWindow {
         event: MouseEvent,
         context: &dyn WindowOps,
     ) {
-        let exceeded_threshold =
-            (start_event.coords.x - event.coords.x).abs() >= SIDEBAR_SESSION_DRAG_THRESHOLD_PX
-                || (start_event.coords.y - event.coords.y).abs()
-                    >= SIDEBAR_SESSION_DRAG_THRESHOLD_PX;
+        let exceeded_threshold = (start_event.coords.x - event.coords.x).abs()
+            >= SIDEBAR_SESSION_DRAG_THRESHOLD_PX
+            || (start_event.coords.y - event.coords.y).abs() >= SIDEBAR_SESSION_DRAG_THRESHOLD_PX;
         let dragged_session_ids = self.ordered_selected_chatminal_session_ids(session_id);
         if !exceeded_threshold || dragged_session_ids.is_empty() {
             self.dragging.replace((item, start_event));
@@ -764,9 +793,12 @@ impl super::TermWindow {
         let drag_started = self
             .chatminal_sidebar
             .start_session_drag(session_id, dragged_session_ids.clone());
-        let drop_target = self.resolve_ui_item(&event).as_ref().and_then(|hovered_item| {
-            self.resolve_sidebar_session_drop_target(hovered_item, &dragged_session_ids, &event)
-        });
+        let drop_target = self
+            .resolve_ui_item(&event)
+            .as_ref()
+            .and_then(|hovered_item| {
+                self.resolve_sidebar_session_drop_target(hovered_item, &dragged_session_ids, &event)
+            });
         let expanded_profile = drop_target
             .as_ref()
             .and_then(|target| match target {

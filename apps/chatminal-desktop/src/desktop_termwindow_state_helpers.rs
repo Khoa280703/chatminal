@@ -27,6 +27,13 @@ impl TermWindow {
         })
     }
 
+    pub fn terminal_overlay_pane(&self, pane_id: TerminalUiKey) -> Option<Arc<dyn OverlayPane>> {
+        self.terminal_ui_state_by_handle
+            .borrow()
+            .get(&pane_id)
+            .and_then(|state| state.overlay.as_ref().map(|overlay| Arc::clone(&overlay.pane)))
+    }
+
     pub fn runtime_ui_state(&self, render_scope_id: u64) -> RefMut<'_, RuntimeUiState> {
         RefMut::map(self.runtime_ui_state.borrow_mut(), |state| {
             state

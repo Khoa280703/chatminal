@@ -791,9 +791,14 @@ impl TermWindow {
         let opengl_info = self.opengl_info.as_deref().unwrap_or("Unknown").to_string();
         let connection_info = self.connection_name.clone();
 
-        self.spawn_overlay_on_active_render_scope(move |_tab_id, term| {
+        if !self.spawn_overlay_on_active_render_scope(move |_tab_id, term| {
             crate::overlay::show_debug_overlay(term, gui_win, opengl_info, connection_info)
-        });
+        }) {
+            log::error!(
+                "failed to show debug overlay: no active render scope for active_session={:?}",
+                self.active_session_id()
+            );
+        }
     }
 
     fn show_runtime_entry_navigator(&mut self) {

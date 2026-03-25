@@ -5,7 +5,7 @@ use crate::chatminal_runtime::overlay_compat::{
 };
 use crate::selection::{SelectionCoordinate, SelectionRange};
 use crate::termwindow::{TermWindow, TermWindowNotif};
-use config::keyassignment::{ClipboardCopyDestination, QuickSelectArguments, ScrollbackEraseMode};
+use config::keyassignment::{ClipboardCopyDestination, QuickSelectArguments};
 use config::ConfigHandle;
 use engine_term::color::ColorPalette;
 use engine_term::{
@@ -52,6 +52,11 @@ const PATTERNS: [&str; 14] = [
     // number
     r"[0-9]{4,}",
 ];
+
+const QUICK_SELECT_MATCH_BG_FALLBACK: AnsiColor = AnsiColor::Yellow;
+const QUICK_SELECT_MATCH_FG_FALLBACK: AnsiColor = AnsiColor::Black;
+const QUICK_SELECT_LABEL_BG_FALLBACK: AnsiColor = AnsiColor::Fuchsia;
+const QUICK_SELECT_LABEL_FG_FALLBACK: AnsiColor = AnsiColor::Black;
 
 /// This function computes a set of labels for a given alphabet.
 /// It is derived from https://github.com/fcsonline/tmux-thumbs/blob/master/src/alphabets.rs
@@ -452,10 +457,6 @@ impl OverlayPane for QuickSelectOverlay {
         self.delegate.palette()
     }
 
-    fn erase_scrollback(&self, erase_mode: ScrollbackEraseMode) {
-        self.delegate.erase_scrollback(erase_mode)
-    }
-
     fn is_mouse_grabbed(&self) -> bool {
         // Force grabbing off while we're searching
         false
@@ -594,12 +595,12 @@ impl OverlayPane for QuickSelectOverlay {
                                         .set_background(
                                             colors
                                                 .quick_select_match_bg
-                                                .unwrap_or(AnsiColor::Black.into()),
+                                                .unwrap_or(QUICK_SELECT_MATCH_BG_FALLBACK.into()),
                                         )
                                         .set_foreground(
                                             colors
                                                 .quick_select_match_fg
-                                                .unwrap_or(AnsiColor::Green.into()),
+                                                .unwrap_or(QUICK_SELECT_MATCH_FG_FALLBACK.into()),
                                         )
                                         .set_reverse(false)
                                         .set_intensity(Intensity::Bold);
@@ -613,12 +614,12 @@ impl OverlayPane for QuickSelectOverlay {
                                 attr.set_background(
                                     colors
                                         .quick_select_label_bg
-                                        .unwrap_or(AnsiColor::Black.into()),
+                                        .unwrap_or(QUICK_SELECT_LABEL_BG_FALLBACK.into()),
                                 )
                                 .set_foreground(
                                     colors
                                         .quick_select_label_fg
-                                        .unwrap_or(AnsiColor::Olive.into()),
+                                        .unwrap_or(QUICK_SELECT_LABEL_FG_FALLBACK.into()),
                                 )
                                 .set_reverse(false)
                                 .set_intensity(Intensity::Bold);
@@ -686,12 +687,12 @@ impl OverlayPane for QuickSelectOverlay {
                                 .set_background(
                                     colors
                                         .quick_select_match_bg
-                                        .unwrap_or(AnsiColor::Black.into()),
+                                        .unwrap_or(QUICK_SELECT_MATCH_BG_FALLBACK.into()),
                                 )
                                 .set_foreground(
                                     colors
                                         .quick_select_match_fg
-                                        .unwrap_or(AnsiColor::Green.into()),
+                                        .unwrap_or(QUICK_SELECT_MATCH_FG_FALLBACK.into()),
                                 )
                                 .set_reverse(false)
                                 .set_intensity(Intensity::Bold);
@@ -705,12 +706,12 @@ impl OverlayPane for QuickSelectOverlay {
                         attr.set_background(
                             colors
                                 .quick_select_label_bg
-                                .unwrap_or(AnsiColor::Black.into()),
+                                .unwrap_or(QUICK_SELECT_LABEL_BG_FALLBACK.into()),
                         )
                         .set_foreground(
                             colors
                                 .quick_select_label_fg
-                                .unwrap_or(AnsiColor::Olive.into()),
+                                .unwrap_or(QUICK_SELECT_LABEL_FG_FALLBACK.into()),
                         )
                         .set_reverse(false)
                         .set_intensity(Intensity::Bold);

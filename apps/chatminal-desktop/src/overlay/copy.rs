@@ -8,7 +8,7 @@ use crate::termwindow::keyevent::KeyTableArgs;
 use crate::termwindow::{TermWindow, TermWindowNotif};
 use config::keyassignment::{
     ClipboardCopyDestination, CopyModeAssignment, KeyAssignment, KeyTable, KeyTableEntry,
-    ScrollbackEraseMode, SelectionMode,
+    SelectionMode,
 };
 use engine_term::color::ColorPalette;
 use engine_term::{
@@ -29,7 +29,7 @@ use termwiz::lineedit::{LineEditBuffer, Movement};
 use termwiz::surface::{CursorVisibility, SequenceNo, SEQ_ZERO};
 use unicode_segmentation::*;
 use url::Url;
-use window::{KeyCode as WKeyCode, Modifiers, WindowOps};
+use window::{DeadKeyStatus, KeyCode as WKeyCode, Modifiers, WindowOps};
 
 lazy_static::lazy_static! {
     static ref SAVED_PATTERN: Mutex<HashMap<OverlayRuntimeEntryHandle, OverlayPattern>> = Mutex::new(HashMap::new());
@@ -68,6 +68,8 @@ struct CopyRenderable {
     /// The text that the user entered
     pattern_type: OverlayPatternType,
     search_line: LineEditBuffer,
+    composing_search: Option<String>,
+    committed_search_echo: Option<String>,
     /// The most recently queried set of matches
     results: Vec<OverlaySearchResult>,
     by_line: HashMap<StableRowIndex, Vec<MatchResult>>,
@@ -154,6 +156,8 @@ impl CopyOverlay {
             tab_id,
             pattern_type: OverlayPatternType::from(&pattern),
             search_line,
+            composing_search: None,
+            committed_search_echo: None,
             editing_search: params.editing_search,
             result_pos: None,
             selection_mode: SelectionMode::Cell,
@@ -190,6 +194,8 @@ impl CopyOverlay {
     pub fn apply_params(&self, params: CopyModeParams) {
         let mut render = self.render.lock();
         render.editing_search = params.editing_search;
+        render.composing_search.take();
+        render.committed_search_echo.take();
         if render.get_pattern() != params.pattern {
             render.pattern_type = OverlayPatternType::from(&params.pattern);
             render
@@ -212,6 +218,35 @@ impl CopyOverlay {
             }
             render.viewport = viewport;
         }
+    }
+
+    pub fn apply_composition_status(&self, status: &DeadKeyStatus) {
+        let mut render = self.render.lock();
+        if !render.editing_search {
+            render.composing_search.take();
+            render.committed_search_echo.take();
+            return;
+        }
+
+        let next = match status {
+            DeadKeyStatus::None => {
+                render.committed_search_echo.take();
+                None
+            }
+            DeadKeyStatus::Composing(text) => {
+                if render.committed_search_echo.as_deref() == Some(text.as_str()) {
+                    return;
+                }
+                render.committed_search_echo.take();
+                Some(text.clone())
+            }
+        };
+        if render.composing_search == next {
+            return;
+        }
+
+        render.composing_search = next;
+        render.schedule_update_search();
     }
 }
 
@@ -643,7 +678,7 @@ impl CopyRenderable {
     }
 
     fn get_pattern(&self) -> OverlayPattern {
-        let pattern = self.search_line.get_line().to_string();
+        let pattern = self.search_text();
         match self.pattern_type {
             OverlayPatternType::CaseSensitiveString => OverlayPattern::CaseSensitiveString(pattern),
             OverlayPatternType::CaseInSensitiveString => {
@@ -653,7 +688,44 @@ impl CopyRenderable {
         }
     }
 
+    fn search_text(&self) -> String {
+        let mut pattern = self.search_line.get_line().to_string();
+        if let Some(text) = self.visible_composing_search() {
+            pattern.push_str(text);
+        }
+        pattern
+    }
+
+    fn display_search_text(&self) -> &str {
+        self.search_line.get_line()
+    }
+
+    fn visible_composing_search(&self) -> Option<&str> {
+        let text = self.composing_search.as_deref()?;
+        if text.is_empty() {
+            return None;
+        }
+
+        let cursor = self.search_line.get_cursor();
+        let committed = &self.search_line.get_line()[..cursor];
+        if committed.ends_with(text) {
+            None
+        } else {
+            Some(text)
+        }
+    }
+
+    fn clear_composing_search(&mut self) -> bool {
+        self.composing_search.take().is_some()
+    }
+
+    fn mark_committed_search_text(&mut self, text: &str) {
+        self.committed_search_echo = (!text.is_empty()).then(|| text.to_string());
+    }
+
     fn clear_pattern(&mut self) {
+        self.clear_composing_search();
+        self.committed_search_echo.take();
         self.search_line.clear();
         self.update_search();
     }
@@ -1116,6 +1188,8 @@ impl OverlayPane for CopyOverlay {
     fn send_paste(&self, text: &str) -> anyhow::Result<()> {
         // paste into the search bar
         let mut r = self.render.lock();
+        r.clear_composing_search();
+        r.mark_committed_search_text(text);
         r.search_line.insert_text(text);
         r.schedule_update_search();
         Ok(())
@@ -1170,69 +1244,110 @@ impl OverlayPane for CopyOverlay {
                 (KeyCode::Char(c), KeyModifiers::NONE)
                 | (KeyCode::Char(c), KeyModifiers::SHIFT) => {
                     // Type to add to the pattern
+                    render.clear_composing_search();
+                    render.mark_committed_search_text(&c.to_string());
                     render.search_line.insert_char(c);
 
                     render.schedule_update_search();
                 }
                 (KeyCode::Char('H'), KeyModifiers::CTRL)
                 | (KeyCode::Backspace, KeyModifiers::NONE) => {
-                    render
-                        .search_line
-                        .kill_text(Movement::BackwardChar(1), Movement::BackwardChar(1));
+                    render.committed_search_echo.take();
+                    if !render.clear_composing_search() {
+                        render
+                            .search_line
+                            .kill_text(Movement::BackwardChar(1), Movement::BackwardChar(1));
+                    }
 
                     render.schedule_update_search();
                 }
                 (KeyCode::Delete, KeyModifiers::NONE) => {
-                    render
-                        .search_line
-                        .kill_text(Movement::ForwardChar(1), Movement::None);
+                    render.committed_search_echo.take();
+                    if !render.clear_composing_search() {
+                        render
+                            .search_line
+                            .kill_text(Movement::ForwardChar(1), Movement::None);
+                    }
 
                     render.schedule_update_search();
                 }
                 (KeyCode::Backspace, KeyModifiers::ALT)
                 | (KeyCode::Char('W'), KeyModifiers::CTRL) => {
-                    render
-                        .search_line
-                        .kill_text(Movement::BackwardWord(1), Movement::BackwardWord(1));
+                    render.committed_search_echo.take();
+                    if !render.clear_composing_search() {
+                        render
+                            .search_line
+                            .kill_text(Movement::BackwardWord(1), Movement::BackwardWord(1));
+                    }
 
                     render.schedule_update_search();
                 }
                 (KeyCode::Backspace, KeyModifiers::SUPER) => {
-                    render
-                        .search_line
-                        .kill_text(Movement::StartOfLine, Movement::StartOfLine);
+                    render.committed_search_echo.take();
+                    if !render.clear_composing_search() {
+                        render
+                            .search_line
+                            .kill_text(Movement::StartOfLine, Movement::StartOfLine);
+                    }
 
                     render.schedule_update_search();
                 }
                 (KeyCode::Char('K'), KeyModifiers::CTRL) => {
-                    render
-                        .search_line
-                        .kill_text(Movement::EndOfLine, Movement::EndOfLine);
+                    render.committed_search_echo.take();
+                    if !render.clear_composing_search() {
+                        render
+                            .search_line
+                            .kill_text(Movement::EndOfLine, Movement::EndOfLine);
+                    }
 
                     render.schedule_update_search();
                 }
                 (KeyCode::Char('B'), KeyModifiers::CTRL)
                 | (KeyCode::ApplicationLeftArrow, KeyModifiers::NONE)
                 | (KeyCode::LeftArrow, KeyModifiers::NONE) => {
+                    render.committed_search_echo.take();
+                    if render.clear_composing_search() {
+                        render.schedule_update_search();
+                    }
                     render.search_line.exec_movement(Movement::BackwardChar(1));
                 }
                 (KeyCode::Char('F'), KeyModifiers::CTRL)
                 | (KeyCode::ApplicationRightArrow, KeyModifiers::NONE)
                 | (KeyCode::RightArrow, KeyModifiers::NONE) => {
+                    render.committed_search_echo.take();
+                    if render.clear_composing_search() {
+                        render.schedule_update_search();
+                    }
                     render.search_line.exec_movement(Movement::ForwardChar(1));
                 }
                 (KeyCode::ApplicationLeftArrow, KeyModifiers::CTRL)
                 | (KeyCode::LeftArrow, KeyModifiers::CTRL) => {
+                    render.committed_search_echo.take();
+                    if render.clear_composing_search() {
+                        render.schedule_update_search();
+                    }
                     render.search_line.exec_movement(Movement::BackwardWord(1));
                 }
                 (KeyCode::ApplicationRightArrow, KeyModifiers::CTRL)
                 | (KeyCode::RightArrow, KeyModifiers::CTRL) => {
+                    render.committed_search_echo.take();
+                    if render.clear_composing_search() {
+                        render.schedule_update_search();
+                    }
                     render.search_line.exec_movement(Movement::ForwardWord(1));
                 }
                 (KeyCode::Char('A'), KeyModifiers::CTRL) | (KeyCode::Home, KeyModifiers::NONE) => {
+                    render.committed_search_echo.take();
+                    if render.clear_composing_search() {
+                        render.schedule_update_search();
+                    }
                     render.search_line.exec_movement(Movement::StartOfLine);
                 }
                 (KeyCode::Char('E'), KeyModifiers::CTRL) | (KeyCode::End, KeyModifiers::NONE) => {
+                    render.committed_search_echo.take();
+                    if render.clear_composing_search() {
+                        render.schedule_update_search();
+                    }
                     render.search_line.exec_movement(Movement::EndOfLine);
                 }
                 _ => {}
@@ -1316,10 +1431,6 @@ impl OverlayPane for CopyOverlay {
         self.delegate.palette()
     }
 
-    fn erase_scrollback(&self, erase_mode: ScrollbackEraseMode) {
-        self.delegate.erase_scrollback(erase_mode)
-    }
-
     fn is_mouse_grabbed(&self) -> bool {
         // Force grabbing off while we're searching
         false
@@ -1343,10 +1454,9 @@ impl OverlayPane for CopyOverlay {
             // place in the search box
             // Padding between the start of the editable line and the left side of the terminal
             const SEARCH_CURSOR_PADDING: usize = 8;
-            let cursor = unicode_column_width(
-                &renderer.search_line.get_line()[0..renderer.search_line.get_cursor()],
-                None,
-            );
+            let visible =
+                renderer.search_line.get_line()[0..renderer.search_line.get_cursor()].to_string();
+            let cursor = unicode_column_width(&visible, None);
             StableCursorPosition {
                 x: SEARCH_CURSOR_PADDING + cursor,
                 y: renderer.compute_search_row(),
@@ -1428,6 +1538,7 @@ impl OverlayPane for CopyOverlay {
                     let stable_idx = idx as StableRowIndex + first_row;
                     self.renderer.dirty_results.remove(stable_idx);
                     let pattern = self.renderer.get_pattern();
+                    let display_pattern = self.renderer.display_search_text();
                     if stable_idx == self.search_row
                         && (self.renderer.editing_search || !pattern.is_empty())
                     {
@@ -1451,7 +1562,7 @@ impl OverlayPane for CopyOverlay {
                             0,
                             &format!(
                                 "Search: {} ({}/{} matches. {}{remain})",
-                                *pattern,
+                                display_pattern,
                                 self.renderer.result_pos.map(|x| x + 1).unwrap_or(0),
                                 self.renderer.results.len(),
                                 mode
@@ -1531,6 +1642,7 @@ impl OverlayPane for CopyOverlay {
             let stable_idx = idx as StableRowIndex + top;
             renderer.dirty_results.remove(stable_idx);
             let pattern = renderer.get_pattern();
+            let display_pattern = renderer.display_search_text();
             if stable_idx == search_row && (renderer.editing_search || !pattern.is_empty()) {
                 // Replace with search UI
                 let rev = CellAttributes::default().set_reverse(true).clone();
@@ -1544,7 +1656,7 @@ impl OverlayPane for CopyOverlay {
                     0,
                     &format!(
                         "Search: {} ({}/{} matches. {})",
-                        *pattern,
+                        display_pattern,
                         renderer.result_pos.map(|x| x + 1).unwrap_or(0),
                         renderer.results.len(),
                         mode
@@ -1610,6 +1722,8 @@ impl std::io::Write for SearchOverlayPatternWriter {
         let s = std::str::from_utf8(buf).map_err(|err| {
             std::io::Error::new(std::io::ErrorKind::Other, format!("invalid UTF-8: {err:#}"))
         })?;
+        render.clear_composing_search();
+        render.mark_committed_search_text(s);
         render.search_line.insert_text(s);
         render.schedule_update_search();
         Ok(buf.len())

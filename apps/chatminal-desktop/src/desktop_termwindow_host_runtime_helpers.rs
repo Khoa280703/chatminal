@@ -232,6 +232,19 @@ impl TermWindow {
             .map(|overlay| overlay.pane.clone())
     }
 
+    fn session_render_target_overlay(&self, session_id: &str) -> Option<Arc<dyn OverlayPane>> {
+        if !self.chatminal_sidebar.is_enabled() {
+            return None;
+        }
+        let render_scope_id = crate::chatminal_runtime::desktop_render_state_for_session(
+            self.window_id as DesktopWindowId,
+            session_id,
+        )?
+        .render_target_id()
+        .as_u64();
+        self.render_target_overlay(render_scope_id)
+    }
+
     fn active_render_target_overlay(&self) -> Option<Arc<dyn OverlayPane>> {
         let render_scope_id = self.active_render_scope_id()?;
         self.render_target_overlay(render_scope_id)
@@ -254,7 +267,14 @@ impl TermWindow {
     {
         let (overlay, future) = start_overlay(self, render_scope_id, scope_size, func);
         self.assign_overlay_for_render_scope(render_scope_id, overlay);
-        promise::spawn::spawn(future).detach();
+        promise::spawn::spawn(async move {
+            if let Err(err) = future.await {
+                log::error!(
+                    "overlay failed for render_scope_id={render_scope_id}: {err:#}"
+                );
+            }
+        })
+        .detach();
     }
 
     fn spawn_overlay_on_active_render_scope<T, F>(&mut self, func: F) -> bool
@@ -264,9 +284,18 @@ impl TermWindow {
             + FnOnce(u64, OverlayTerminal) -> anyhow::Result<T>,
     {
         let Some(render_scope_id) = self.active_render_scope_id() else {
+            log::error!(
+                "spawn_overlay_on_active_render_scope: missing active render scope for active_session={:?}",
+                self.active_session_id()
+            );
             return false;
         };
         let Some(scope_size) = self.render_scope_size(render_scope_id) else {
+            log::error!(
+                "spawn_overlay_on_active_render_scope: missing render scope size for render_scope_id={} active_session={:?}",
+                render_scope_id,
+                self.active_session_id()
+            );
             return false;
         };
         self.spawn_overlay_for_render_scope_capability(render_scope_id, scope_size, func);

@@ -277,8 +277,9 @@ impl super::TermWindow {
                     raw_modifiers,
                     context,
                 ),
-            Key::Composed(text) => self
-                .process_chatminal_sidebar_inline_rename_text(text, raw_modifiers, context),
+            Key::Composed(text) => {
+                self.process_chatminal_sidebar_inline_rename_text(text, raw_modifiers, context)
+            }
             _ => false,
         }
     }
@@ -874,6 +875,19 @@ impl super::TermWindow {
                     // the leader modifier.
                     self.leader_done();
                     return;
+                }
+                if let Some(modal) = self.get_modal() {
+                    match modal.text_input(&s, modifiers, self) {
+                        Ok(true) => {
+                            context.invalidate();
+                            return;
+                        }
+                        Ok(false) => {}
+                        Err(err) => {
+                            log::error!("Error dispatching text to modal: {err:#}");
+                            return;
+                        }
+                    }
                 }
                 self.key_table_state.did_process_key();
                 if self.config.debug_key_events {

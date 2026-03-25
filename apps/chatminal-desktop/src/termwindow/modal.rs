@@ -4,6 +4,7 @@ use config::keyassignment::KeyAssignment;
 use downcast_rs::{impl_downcast, Downcast};
 use engine_term::{KeyCode, KeyModifiers, MouseEvent};
 use std::cell::Ref;
+use window::DeadKeyStatus;
 
 pub trait Modal: Downcast {
     fn perform_assignment(
@@ -20,6 +21,28 @@ pub trait Modal: Downcast {
         mods: KeyModifiers,
         term_window: &mut TermWindow,
     ) -> anyhow::Result<bool>;
+    fn text_input(
+        &self,
+        text: &str,
+        mods: KeyModifiers,
+        term_window: &mut TermWindow,
+    ) -> anyhow::Result<bool> {
+        let mut handled = false;
+        for c in text.chars() {
+            if c.is_control() {
+                continue;
+            }
+            handled |= self.key_down(KeyCode::Char(c), mods, term_window)?;
+        }
+        Ok(handled)
+    }
+    fn composition_status_changed(
+        &self,
+        _status: &DeadKeyStatus,
+        _term_window: &mut TermWindow,
+    ) -> anyhow::Result<bool> {
+        Ok(false)
+    }
     fn computed_element(
         &self,
         term_window: &mut TermWindow,

@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::chatminal_layout::workspace_store::{DesktopWorkspaceLayoutStore, DEFAULT_LAYOUT_WORKSPACE_ID};
 use crate::chatminal_render::ChatminalRenderPane;
 use crate::chatminal_runtime::{
@@ -92,11 +90,27 @@ impl crate::TermWindow {
             ) else {
                 continue;
             };
+            if let Some(overlay) = self.session_render_target_overlay(&target.session_id) {
+                panes.push(TerminalPaneLayout {
+                    index: next_index,
+                    is_active: target.is_active,
+                    is_zoomed: false,
+                    left: target.left,
+                    top: target.top,
+                    width: target.width,
+                    pixel_width: target.width * cell_width,
+                    height: target.height,
+                    pixel_height: target.height * cell_height,
+                    pane: overlay,
+                });
+                next_index += 1;
+                continue;
+            }
             let source_size = render_state.terminal_size;
             for render_pane in render_state.panes {
                 let pane_id = render_pane.terminal_handle.as_u64();
                 // Check for pane-level overlay first (e.g. launcher/prompt on this pane)
-                if let Some(overlay) = self.terminal_ui_state(pane_id).overlay.as_ref() {
+                if let Some(overlay) = self.terminal_overlay_pane(pane_id) {
                     panes.push(TerminalPaneLayout {
                         index: next_index,
                         is_active: target.is_active,
@@ -107,7 +121,7 @@ impl crate::TermWindow {
                         pixel_width: target.width * cell_width,
                         height: target.height,
                         pixel_height: target.height * cell_height,
-                        pane: Arc::clone(&overlay.pane),
+                        pane: overlay,
                     });
                     next_index += 1;
                     continue;

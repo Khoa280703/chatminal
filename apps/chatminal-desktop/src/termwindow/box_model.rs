@@ -979,8 +979,7 @@ impl super::TermWindow {
         } else {
             let layer = gl_state.layer_for_zindex(element.zindex)?;
             let mut layers = layer.quad_allocator();
-            let rounded_clip =
-                rounded_clip_for_element(element).or(inherited_rounded_clip);
+            let rounded_clip = rounded_clip_for_element(element).or(inherited_rounded_clip);
             self.render_element_background(
                 element,
                 colors,

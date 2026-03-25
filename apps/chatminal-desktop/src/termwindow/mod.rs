@@ -77,7 +77,6 @@ use termwiz_funcs::lines_to_escapes;
 
 pub mod background;
 pub mod box_model;
-pub mod charselect;
 pub mod clipboard;
 pub mod keyevent;
 mod layout_render;
@@ -497,10 +496,8 @@ impl TermWindow {
     }
 
     pub(crate) fn chatminal_sidebar_width(&self) -> usize {
-        self.chatminal_sidebar.width_pixels_for_window(
-            self.dimensions.pixel_width,
-            self.dimensions.dpi,
-        )
+        self.chatminal_sidebar
+            .width_pixels_for_window(self.dimensions.pixel_width, self.dimensions.dpi)
     }
 
     fn chatminal_shell_enabled_for_dimensions(pixel_width: usize, dpi: usize) -> bool {
@@ -860,7 +857,11 @@ impl TermWindow {
                     .sessions
                     .iter()
                     .filter(|session| session.profile_id == *profile_id)
-                    .filter(|session| !session_ids.iter().any(|dragged| dragged == &session.session_id))
+                    .filter(|session| {
+                        !session_ids
+                            .iter()
+                            .any(|dragged| dragged == &session.session_id)
+                    })
                     .count();
                 (profile_id.clone(), target_index)
             }
@@ -872,7 +873,11 @@ impl TermWindow {
                     .sessions
                     .iter()
                     .filter(|session| session.profile_id == *profile_id)
-                    .filter(|session| !session_ids.iter().any(|dragged| dragged == &session.session_id))
+                    .filter(|session| {
+                        !session_ids
+                            .iter()
+                            .any(|dragged| dragged == &session.session_id)
+                    })
                     .position(|session| session.session_id == *session_id)
                     .unwrap_or_else(|| {
                         snapshot
@@ -1113,14 +1118,12 @@ impl TermWindow {
                         return;
                     }
                 }
-            } else if layout_store.view_id_for_session(session_id).is_none()
-                && {
-                    let _ = layout_store.save_as_profile_layout(profile_id);
-                    layout_store
-                        .restore_profile_layout_if_contains(profile_id, session_id)
-                        .is_some()
-                }
-            {
+            } else if layout_store.view_id_for_session(session_id).is_none() && {
+                let _ = layout_store.save_as_profile_layout(profile_id);
+                layout_store
+                    .restore_profile_layout_if_contains(profile_id, session_id)
+                    .is_some()
+            } {
                 let _ = crate::chatminal_runtime::desktop_prepare_workspace_layout(
                     self.window_id as DesktopWindowId,
                     self.terminal_size,
@@ -1359,13 +1362,12 @@ impl TermWindow {
             return false;
         };
 
-        let workspace_id = if snapshot.active_profile_id.as_deref()
-            == Some(target_session.profile_id.as_str())
-        {
-            DEFAULT_LAYOUT_WORKSPACE_ID.to_string()
-        } else {
-            DesktopWorkspaceLayoutStore::profile_workspace_id(&target_session.profile_id)
-        };
+        let workspace_id =
+            if snapshot.active_profile_id.as_deref() == Some(target_session.profile_id.as_str()) {
+                DEFAULT_LAYOUT_WORKSPACE_ID.to_string()
+            } else {
+                DesktopWorkspaceLayoutStore::profile_workspace_id(&target_session.profile_id)
+            };
         let store = DesktopWorkspaceLayoutStore::new(workspace_id);
         let Some(layout) = store.snapshot_or_restore() else {
             return false;
@@ -1378,8 +1380,8 @@ impl TermWindow {
             return false;
         };
 
-        let is_active_profile = snapshot.active_profile_id.as_deref()
-            == Some(target_session.profile_id.as_str());
+        let is_active_profile =
+            snapshot.active_profile_id.as_deref() == Some(target_session.profile_id.as_str());
 
         let updated = match store.close_view(view_id) {
             Some(updated) => updated,
@@ -2075,6 +2077,20 @@ impl TermWindow {
                     log::info!("DeadKeyStatus now: {:?}", status);
                 } else {
                     log::trace!("DeadKeyStatus now: {:?}", status);
+                }
+                if let Some(modal) = self.get_modal() {
+                    match modal.composition_status_changed(&status, self) {
+                        Ok(true) => {}
+                        Ok(false) => {}
+                        Err(err) => {
+                            log::error!("Error dispatching composition status to modal: {err:#}");
+                        }
+                    }
+                }
+                if let Some(pane) = self.active_terminal_instance_or_overlay() {
+                    if let Some(copy_overlay) = pane.downcast_ref::<CopyOverlay>() {
+                        copy_overlay.apply_composition_status(&status);
+                    }
                 }
                 self.dead_key_status = status;
                 self.update_title();

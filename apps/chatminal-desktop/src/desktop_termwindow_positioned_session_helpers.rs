@@ -11,8 +11,7 @@ impl TermWindow {
         let dims = session_pane.get_dimensions();
         let cols = dims.cols as usize;
         let rows = dims.viewport_rows as usize;
-        // Pane-level overlay check (e.g. launcher/prompt on this pane)
-        if let Some(overlay) = self.terminal_ui_state(pane_id).overlay.as_ref() {
+        if let Some(overlay) = self.session_render_target_overlay(session_id) {
             return vec![TerminalPaneLayout {
                 index: 0,
                 is_active: true,
@@ -23,7 +22,23 @@ impl TermWindow {
                 height: rows,
                 pixel_width: cols * cell_width,
                 pixel_height: rows * cell_height,
-                pane: Arc::clone(&overlay.pane),
+                pane: overlay,
+            }];
+        }
+        // Pane-level overlay check (e.g. launcher/prompt on this pane)
+        let session_overlay = self.terminal_overlay_pane(pane_id);
+        if let Some(overlay) = session_overlay {
+            return vec![TerminalPaneLayout {
+                index: 0,
+                is_active: true,
+                is_zoomed: false,
+                left: 0,
+                top: 0,
+                width: cols,
+                height: rows,
+                pixel_width: cols * cell_width,
+                pixel_height: rows * cell_height,
+                pane: overlay,
             }];
         }
         let Some(pane) = self.terminal_handle_arc(pane_id) else {

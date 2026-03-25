@@ -7,12 +7,12 @@ use std::ops::Range;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+use std::borrow::Cow;
 
 use super::session_engine::{
     RuntimeId, SessionEngineShared, SessionRuntimeEvent, TerminalInstanceId,
 };
 use chatminal_terminal_core::TerminalSize as CoreTerminalSize;
-use config::keyassignment::ScrollbackEraseMode;
 use config::TermConfig;
 use engine_dynamic::Value;
 use engine_term::color::ColorPalette;
@@ -27,6 +27,7 @@ use termwiz::escape::Action;
 use termwiz::input::KeyboardEncoding;
 use termwiz::surface::{Line, SequenceNo};
 use url::Url;
+use regex::Regex;
 
 use super::{
     alloc_host_terminal_handle, host_impl_get_logical_lines_via_get_lines,
@@ -475,14 +476,6 @@ impl HostTerminal for ChatminalSessionPane {
     fn copy_user_vars(&self) -> HashMap<String, String> {
         self.terminal.lock().user_vars().clone()
     }
-    fn erase_scrollback(&self, erase_mode: ScrollbackEraseMode) {
-        match erase_mode {
-            ScrollbackEraseMode::ScrollbackOnly => self.terminal.lock().erase_scrollback(),
-            ScrollbackEraseMode::ScrollbackAndViewport => {
-                self.terminal.lock().erase_scrollback_and_viewport()
-            }
-        }
-    }
     fn focus_changed(&self, focused: bool) {
         self.terminal.lock().focus_changed(focused)
     }
@@ -494,11 +487,175 @@ impl HostTerminal for ChatminalSessionPane {
     }
     async fn search(
         &self,
-        _pattern: Pattern,
-        _range: Range<StableRowIndex>,
-        _limit: Option<u32>,
+        pattern: Pattern,
+        range: Range<StableRowIndex>,
+        limit: Option<u32>,
     ) -> anyhow::Result<Vec<SearchResult>> {
-        Ok(vec![])
+        let term = self.terminal.lock();
+        let screen = term.screen();
+
+        enum CompiledPattern {
+            CaseSensitiveString(String),
+            CaseInSensitiveString(String),
+            Regex(Regex),
+        }
+
+        let pattern = match pattern {
+            Pattern::CaseSensitiveString(s) => CompiledPattern::CaseSensitiveString(s),
+            Pattern::CaseInSensitiveString(s) => {
+                CompiledPattern::CaseInSensitiveString(s.to_lowercase())
+            }
+            Pattern::Regex(r) => CompiledPattern::Regex(Regex::new(&r)?),
+        };
+
+        let mut results = vec![];
+        let mut uniq_matches: HashMap<String, usize> = HashMap::new();
+
+        screen.for_each_logical_line_in_stable_range(range, |sr, lines| {
+            if let Some(limit) = limit {
+                if results.len() == limit as usize {
+                    return false;
+                }
+            }
+
+            if lines.is_empty() {
+                return true;
+            }
+
+            let haystack = if lines.len() == 1 {
+                lines[0].as_str()
+            } else {
+                let mut s = String::new();
+                for line in lines {
+                    s.push_str(&line.as_str());
+                }
+                Cow::Owned(s)
+            };
+            let stable_idx = sr.start;
+
+            if haystack.is_empty() {
+                return true;
+            }
+
+            let haystack = match &pattern {
+                CompiledPattern::CaseInSensitiveString(_) => Cow::Owned(haystack.to_lowercase()),
+                _ => haystack,
+            };
+            let mut coords = None;
+
+            match &pattern {
+                CompiledPattern::CaseInSensitiveString(s)
+                | CompiledPattern::CaseSensitiveString(s) => {
+                    for (idx, s) in haystack.match_indices(s) {
+                        found_match(
+                            s,
+                            idx,
+                            lines,
+                            stable_idx,
+                            &mut uniq_matches,
+                            &mut coords,
+                            &mut results,
+                        );
+                    }
+                }
+                CompiledPattern::Regex(re) => {
+                    for c in re.captures_iter(&haystack) {
+                        for idx in (0..c.len()).rev() {
+                            if let Some(m) = c.get(idx) {
+                                found_match(
+                                    m.as_str(),
+                                    m.start(),
+                                    lines,
+                                    stable_idx,
+                                    &mut uniq_matches,
+                                    &mut coords,
+                                    &mut results,
+                                );
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            true
+        });
+
+        #[derive(Copy, Clone, Debug)]
+        struct Coord {
+            byte_idx: usize,
+            grapheme_idx: usize,
+            stable_row: StableRowIndex,
+        }
+
+        fn found_match(
+            text: &str,
+            byte_idx: usize,
+            lines: &[&Line],
+            stable_idx: StableRowIndex,
+            uniq_matches: &mut HashMap<String, usize>,
+            coords: &mut Option<Vec<Coord>>,
+            results: &mut Vec<SearchResult>,
+        ) {
+            if coords.is_none() {
+                coords.replace(make_coords(lines, stable_idx));
+            }
+            let coords = coords.as_ref().unwrap();
+
+            let match_id = match uniq_matches.get(text).copied() {
+                Some(id) => id,
+                None => {
+                    let id = uniq_matches.len();
+                    uniq_matches.insert(text.to_owned(), id);
+                    id
+                }
+            };
+            let (start_x, start_y) = haystack_idx_to_coord(byte_idx, coords);
+            let (end_x, end_y) = haystack_idx_to_coord(byte_idx + text.len(), coords);
+            results.push(SearchResult {
+                start_x,
+                start_y,
+                end_x,
+                end_y,
+                match_id,
+            });
+        }
+
+        fn make_coords(lines: &[&Line], stable_row: StableRowIndex) -> Vec<Coord> {
+            let mut byte_idx = 0;
+            let mut coords = vec![];
+
+            for (row_idx, line) in lines.iter().enumerate() {
+                for cell in line.visible_cells() {
+                    coords.push(Coord {
+                        byte_idx,
+                        grapheme_idx: cell.cell_index(),
+                        stable_row: stable_row + row_idx as StableRowIndex,
+                    });
+                    byte_idx += cell.str().len();
+                }
+            }
+
+            coords
+        }
+
+        fn haystack_idx_to_coord(idx: usize, coords: &[Coord]) -> (usize, StableRowIndex) {
+            let c = coords
+                .binary_search_by(|ele| ele.byte_idx.cmp(&idx))
+                .or_else(|i| -> Result<usize, usize> { Ok(i) })
+                .unwrap();
+            let coord = coords.get(c).copied().unwrap_or_else(|| {
+                let last = coords.last().unwrap();
+                Coord {
+                    byte_idx: idx,
+                    grapheme_idx: last.grapheme_idx + 1,
+                    stable_row: last.stable_row,
+                }
+            });
+            (coord.grapheme_idx, coord.stable_row)
+        }
+
+        Ok(results)
     }
     fn get_semantic_zones(&self) -> anyhow::Result<Vec<SemanticZone>> {
         Ok(vec![])
@@ -578,6 +735,8 @@ mod tests {
     use std::sync::mpsc;
     use std::sync::{Arc, Mutex};
 
+    use engine_term::StableRowIndex;
+    use host_runtime::pane::Pattern;
     use portable_pty::CommandBuilder;
 
     use super::super::session_engine::{
@@ -683,6 +842,75 @@ mod tests {
         let restored = rendered_text(&pane);
         assert!(restored.contains("restored-line-1"));
         assert!(restored.contains("restored-line-2"));
+
+        shutdown_host_mux();
+    }
+
+    #[test]
+    fn search_finds_matches_in_replayed_runtime_output() {
+        build_initial_host_mux(&config::configuration(), None).expect("init host mux");
+        let runtime_id = RuntimeId::new(1);
+        let terminal_instance_id = TerminalInstanceId::new(2);
+        let core_state = Arc::new(Mutex::new(SessionCoreState::default()));
+        core_state.lock().unwrap().sync_runtime_layout(
+            "session-a",
+            runtime_id,
+            &SessionLayoutSnapshot::single_terminal_instance(
+                LayoutNodeId::new(1),
+                terminal_instance_id,
+                None,
+            ),
+        );
+        let shared = Arc::new(SessionEngineShared::new(Arc::clone(&core_state)));
+        let (events_tx, _events_rx) = mpsc::sync_channel(32);
+
+        shared
+            .leaf_runtimes()
+            .spawn_for_runtime(
+                &core_state,
+                "session-a",
+                1,
+                runtime_id,
+                terminal_instance_id,
+                shell_command("sleep 1"),
+                chatminal_terminal_core::TerminalSize {
+                    rows: 12,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                    dpi: 96,
+                },
+                Some(
+                    "https://example.com\n/Users/khoa2807/test.txt\n12345678\n".to_string(),
+                ),
+                events_tx,
+            )
+            .expect("spawn runtime");
+
+        let pane = ChatminalSessionPane::new(
+            Arc::clone(&shared),
+            "session-a".to_string(),
+            runtime_id,
+            terminal_instance_id,
+            TerminalSize {
+                rows: 12,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+                dpi: 96,
+            },
+        )
+        .expect("create pane");
+
+        let dims = pane.get_dimensions();
+        let results = smol::block_on(pane.search(
+            Pattern::Regex("(?m)(https?://\\S+|(?:[.\\w\\-@~]+)?(?:/+[.\\w\\-@]+)+|[0-9]{4,})".into()),
+            dims.scrollback_top..dims.physical_top + dims.viewport_rows as StableRowIndex,
+            None,
+        ))
+        .expect("search quick select patterns");
+
+        assert!(!results.is_empty(), "expected search matches in replayed output");
 
         shutdown_host_mux();
     }

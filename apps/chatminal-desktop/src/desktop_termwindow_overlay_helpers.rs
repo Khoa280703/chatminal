@@ -63,6 +63,9 @@ impl TermWindow {
                 key_table_state: KeyTableState::default(),
             });
         self.update_title();
+        if let Some(window) = self.window.as_ref() {
+            window.invalidate();
+        }
     }
 
     pub fn assign_overlay_for_render_scope(
@@ -78,6 +81,9 @@ impl TermWindow {
                 key_table_state: KeyTableState::default(),
             });
         self.update_title();
+        if let Some(window) = self.window.as_ref() {
+            window.invalidate();
+        }
     }
 
 }

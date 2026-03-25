@@ -21,7 +21,8 @@ lazy_static::lazy_static! {
 
 struct LuaReplHost {
     history: BasicHistory,
-    lua: mlua::Lua,
+    lua: Option<mlua::Lua>,
+    disabled_reason: Option<String>,
 }
 
 fn history_file_name() -> PathBuf {
@@ -29,14 +30,28 @@ fn history_file_name() -> PathBuf {
 }
 
 impl LuaReplHost {
-    fn new(lua: mlua::Lua) -> Self {
+    fn new(lua: Option<mlua::Lua>, disabled_reason: Option<String>) -> Self {
         let mut history = BasicHistory::default();
         if let Ok(data) = std::fs::read_to_string(history_file_name()) {
             for line in data.lines() {
                 history.add(line);
             }
         }
-        Self { history, lua }
+        Self {
+            history,
+            lua,
+            disabled_reason,
+        }
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.lua.is_some()
+    }
+
+    fn disabled_reason(&self) -> &str {
+        self.disabled_reason
+            .as_deref()
+            .unwrap_or("Lua REPL unavailable")
     }
 
     fn add_history(&mut self, line: &str) {
@@ -120,7 +135,14 @@ impl LineEditorHost for LuaReplHost {
     fn render_preview(&self, line: &str) -> Vec<OutputElement> {
         let mut preview = vec![];
 
-        if let Err(err) = fragment_to_expr_or_statement(&self.lua, line) {
+        let Some(lua) = self.lua.as_ref() else {
+            if !line.is_empty() {
+                preview.push(OutputElement::Text(self.disabled_reason().to_string()));
+            }
+            return preview;
+        };
+
+        if let Err(err) = fragment_to_expr_or_statement(lua, line) {
             preview.push(OutputElement::Text(err))
         }
 
@@ -136,22 +158,19 @@ pub fn show_debug_overlay(
 ) -> anyhow::Result<()> {
     term.no_grab_mouse_in_raw_mode();
 
-    let config::LoadedConfig { lua, .. } = config::Config::load();
-    // Try hard to fall back to some kind of working lua context even
-    // if the user's config file is temporarily out of whack
-    let lua = match lua {
-        Some(lua) => lua,
-        None => match config::Config::try_default() {
-            Ok(config::LoadedConfig { lua: Some(lua), .. }) => lua,
-            _ => config::lua::make_lua_context(std::path::Path::new(""))?,
-        },
+    let (lua, lua_version, disabled_reason) = match initialize_debug_overlay_lua(&gui_win) {
+        Ok((lua, version)) => (Some(lua), version, None),
+        Err(err) => {
+            log::error!("debug overlay: lua repl unavailable: {err:#}");
+            (
+                None,
+                "Unavailable".to_string(),
+                Some(format!("Lua REPL unavailable: {err:#}")),
+            )
+        }
     };
 
-    lua.load("chatminal = require 'chatminal'").exec()?;
-    lua.globals().set("window", gui_win)?;
-    let lua_version: String = lua.globals().get("_VERSION")?;
-
-    let mut host = Some(LuaReplHost::new(lua));
+    let mut host = Some(LuaReplHost::new(lua, disabled_reason.clone()));
 
     term.render(&[Change::Title("Debug".to_string())])?;
 
@@ -202,8 +221,11 @@ pub fn show_debug_overlay(
          Window Environment: {connection_info}\r\n\
          Lua Version: {lua_version}\r\n\
          {opengl_info}\r\n\
-         Enter lua statements or expressions and hit Enter.\r\n\
+         {}\r\n\
          Press ESC or CTRL-D to exit\r\n",
+        disabled_reason
+            .as_deref()
+            .unwrap_or("Enter lua statements or expressions and hit Enter."),
     ))])?;
 
     loop {
@@ -215,6 +237,13 @@ pub fn show_debug_overlay(
                 continue;
             }
             host.as_mut().unwrap().add_history(&line);
+            if !host.as_ref().unwrap().is_enabled() {
+                term.render(&[Change::Text(format!(
+                    "{}\r\n",
+                    host.as_ref().unwrap().disabled_reason().replace('\n', "\r\n")
+                ))])?;
+                continue;
+            }
 
             let passed_host = host.take().unwrap();
 
@@ -257,11 +286,14 @@ fn evaluate_trampoline(
 
 async fn evaluate(host: LuaReplHost, expr: String) -> (LuaReplHost, String) {
     async fn do_it(host: &LuaReplHost, expr: &str) -> String {
-        let code = match fragment_to_expr_or_statement(&host.lua, expr) {
+        let Some(lua) = host.lua.as_ref() else {
+            return host.disabled_reason().to_string();
+        };
+        let code = match fragment_to_expr_or_statement(lua, expr) {
             Ok(code) => code,
             Err(err) => return err,
         };
-        let chunk = host.lua.load(&code).set_name("repl");
+        let chunk = lua.load(&code).set_name("repl");
 
         let result = chunk
             .eval_async::<Value>()
@@ -279,4 +311,20 @@ async fn evaluate(host: LuaReplHost, expr: String) -> (LuaReplHost, String) {
 
     let result = do_it(&host, &expr).await;
     (host, result)
+}
+
+fn initialize_debug_overlay_lua(gui_win: &GuiWin) -> anyhow::Result<(mlua::Lua, String)> {
+    let config::LoadedConfig { lua, .. } = config::Config::load();
+    let lua = match lua {
+        Some(lua) => lua,
+        None => match config::Config::try_default() {
+            Ok(config::LoadedConfig { lua: Some(lua), .. }) => lua,
+            _ => config::lua::make_lua_context(std::path::Path::new(""))?,
+        },
+    };
+
+    lua.load("chatminal = require 'chatminal'").exec()?;
+    lua.globals().set("window", gui_win.clone())?;
+    let lua_version: String = lua.globals().get("_VERSION")?;
+    Ok((lua, lua_version))
 }
