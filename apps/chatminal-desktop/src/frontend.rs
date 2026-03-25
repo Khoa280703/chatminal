@@ -30,6 +30,7 @@ pub struct GuiFrontEnd {
     known_windows: RefCell<BTreeMap<Window, DesktopWindowId>>,
     client_id: FrontendClientHandle,
     config_subscription: RefCell<Option<ConfigSubscription>>,
+    _host_activity_guard: Option<crate::chatminal_runtime::HostActivityGuard>,
 }
 
 impl Drop for GuiFrontEnd {
@@ -53,6 +54,8 @@ impl GuiFrontEnd {
             known_windows: RefCell::new(BTreeMap::new()),
             client_id: client_id.clone(),
             config_subscription: RefCell::new(None),
+            _host_activity_guard: crate::chatminal_sidebar::sidebar_enabled_from_env()
+                .then(crate::chatminal_runtime::start_host_activity),
         });
 
         subscribe_frontend_notifications(move |n| {
@@ -156,9 +159,18 @@ impl GuiFrontEnd {
                 RuntimeNotification::Empty => {
                     if config::configuration().quit_when_all_windows_are_closed {
                         promise::spawn::spawn_into_main_thread(async move {
-                            if crate::chatminal_runtime::host_activity_count() == 0 {
+                            let activity_count = crate::chatminal_runtime::host_activity_count();
+                            let should_terminate = crate::frontend::try_front_end()
+                                .as_ref()
+                                .map(|fe| fe.can_terminate_on_mux_empty())
+                                .unwrap_or(false);
+                            if activity_count == 0 && should_terminate {
                                 log::trace!("Mux is now empty, terminate gui");
                                 Connection::get().unwrap().terminate_message_loop();
+                            } else {
+                                log::debug!(
+                                    "skip gui terminate on mux empty: activity_count={activity_count}, should_terminate={should_terminate}"
+                                );
                             }
                         })
                         .detach();
@@ -275,9 +287,6 @@ impl GuiFrontEnd {
                         // the QuitApplication command, therefore it must be ok to quit
                         // immediately
                         Connection::get().unwrap().terminate_message_loop();
-                    }
-                    KeyAssignment::SpawnWindow => {
-                        spawn_command(&SpawnCommand::default(), SpawnWhere::NewWindow);
                     }
                     KeyAssignment::SpawnSession(spawn_where) => {
                         spawn_command(
@@ -430,6 +439,21 @@ impl GuiFrontEnd {
             }
         }
         false
+    }
+
+    fn has_live_host_windows(&self) -> bool {
+        workspace_names()
+            .into_iter()
+            .any(|workspace| !workspace_window_ids(&workspace).is_empty())
+    }
+
+    fn can_terminate_on_mux_empty(&self) -> bool {
+        self.prune_closing_window_ids();
+        if !self.known_windows.borrow().is_empty() || !self.spawned_window_ids.borrow().is_empty()
+        {
+            return false;
+        }
+        !self.has_live_host_windows()
     }
 
     pub fn switch_workspace(&self, workspace: &str) {

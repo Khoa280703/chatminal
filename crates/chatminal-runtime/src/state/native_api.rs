@@ -3,7 +3,8 @@ use chatminal_store::StoredSessionSnapshot;
 
 use super::{
     DEFAULT_KEEP_ALIVE_ON_CLOSE, DEFAULT_START_IN_TRAY, KEEP_ALIVE_ON_CLOSE_KEY, START_IN_TRAY_KEY,
-    StateInner, WORKSPACE_LAYOUT_PREFIX, now_millis,
+    StateInner, WORKSPACE_LAYOUT_PREFIX, normalize_session_snapshot, now_millis,
+    strip_zsh_prompt_spacer_artifact,
 };
 use crate::api::{
     RuntimeLifecyclePreferences, RuntimeProfile, RuntimeSessionSnapshot, RuntimeWorkspace,
@@ -72,6 +73,24 @@ impl StateInner {
         self.load_workspace_snapshot()
     }
 
+    pub(super) fn sessions_move_to_profile(
+        &mut self,
+        session_ids: &[String],
+        profile_id: &str,
+        target_index: Option<usize>,
+    ) -> Result<RuntimeWorkspace, String> {
+        self.store
+            .move_sessions_to_profile(session_ids, profile_id, target_index)?;
+        for session_id in session_ids {
+            if let Some(entry) = self.sessions.get_mut(session_id) {
+                entry.session.profile_id = profile_id.to_string();
+            }
+            self.publish_session_updated_for(session_id);
+        }
+        self.publish_workspace_updated();
+        self.load_workspace_snapshot()
+    }
+
     pub(super) fn session_rename(
         &mut self,
         session_id: &str,
@@ -94,10 +113,10 @@ impl StateInner {
             return Err("session not found".to_string());
         }
 
-        let from_store = self.store.session_snapshot(
+        let from_store = normalize_session_snapshot(self.store.session_snapshot(
             session_id,
             preview_lines.unwrap_or(self.config.default_preview_lines),
-        )?;
+        )?);
         let merged = if let Some(entry) = self.sessions.get(session_id) {
             if entry.live_output.is_empty() || entry.session.persist_history {
                 from_store
@@ -134,9 +153,10 @@ impl StateInner {
             .set_session_persist(session_id, persist_history)?;
         if let (Some(seq), Some(chunk)) = (flush_seq, flush_chunk.as_ref()) {
             let ts = now_millis();
+            let sanitized_chunk = strip_zsh_prompt_spacer_artifact(chunk);
             self.store.update_session_seq(session_id, seq)?;
             self.store
-                .append_scrollback_chunk(session_id, seq, chunk, ts)?;
+                .append_scrollback_chunk(session_id, seq, &sanitized_chunk, ts)?;
             self.store.enforce_session_scrollback_line_limit(
                 session_id,
                 self.config.max_scrollback_lines_per_session,

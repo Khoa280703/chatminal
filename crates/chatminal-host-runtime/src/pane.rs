@@ -3,7 +3,7 @@ use crate::renderable::*;
 use crate::ExitBehavior;
 use async_trait::async_trait;
 use config::keyassignment::{KeyAssignment, ScrollbackEraseMode};
-use downcast_rs::{impl_downcast, Downcast};
+use downcast_rs::{impl_downcast, DowncastSync};
 use engine_dynamic::Value;
 use engine_term::color::ColorPalette;
 use engine_term::{
@@ -164,7 +164,7 @@ impl LogicalLine {
 
 /// A Pane represents a view on a terminal
 #[async_trait(?Send)]
-pub trait Pane: Downcast + Send + Sync {
+pub trait Pane: DowncastSync + Send + Sync {
     fn pane_id(&self) -> PaneId;
 
     /// Returns the 0-based cursor position relative to the top left of
@@ -249,6 +249,11 @@ pub trait Pane: Downcast + Send + Sync {
     }
     fn mouse_event(&self, event: MouseEvent) -> anyhow::Result<()>;
     fn perform_actions(&self, _actions: Vec<termwiz::escape::Action>) {}
+    fn reset_display_state(&self) {
+        self.perform_actions(vec![termwiz::escape::Action::Esc(
+            termwiz::escape::Esc::Code(termwiz::escape::EscCode::FullReset),
+        )]);
+    }
     fn is_dead(&self) -> bool;
     fn kill(&self) {}
     fn palette(&self) -> ColorPalette;
@@ -337,7 +342,7 @@ pub trait Pane: Downcast + Send + Sync {
         None
     }
 }
-impl_downcast!(Pane);
+impl_downcast!(sync Pane);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CachePolicy {

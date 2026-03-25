@@ -17,7 +17,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(test)]
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
-
 #[cfg(test)]
 const INPUT_QUEUE_CAPACITY: usize = 256;
 #[cfg(test)]

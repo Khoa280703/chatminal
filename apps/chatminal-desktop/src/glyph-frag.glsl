@@ -9,6 +9,10 @@ in vec3 o_hsv;
 in vec4 o_fg_color;
 in vec4 o_fg_color_alt;
 in float o_fg_color_mix;
+in vec2 o_position;
+in vec4 o_clip_rect;
+in float o_clip_radius;
+in float o_clip_enabled;
 
 // The color + alpha
 layout(location=0, index=0) out vec4 color;
@@ -110,8 +114,18 @@ vec4 to_srgb(vec4 linearRGB)
   return vec4(mix(higher, lower, cutoff), linearRGB.a);
 }
 
+float rounded_rect_mask(vec2 position, vec4 rect, float radius) {
+  vec2 center = (rect.xy + rect.zw) * 0.5;
+  vec2 half_size = max((rect.zw - rect.xy) * 0.5, vec2(0.0));
+  float clamped_radius = min(radius, min(half_size.x, half_size.y));
+  vec2 q = abs(position - center) - (half_size - vec2(clamped_radius));
+  float distance = length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0) - clamped_radius;
+  return 1.0 - smoothstep(0.0, 1.0, distance);
+}
+
 void main() {
   vec4 fg_color = mix(o_fg_color, o_fg_color_alt, o_fg_color_mix);
+  colorMask = vec4(1.0);
   if (o_has_color == 3.0) {
     // Solid color block
     color = fg_color;
@@ -154,6 +168,15 @@ void main() {
   }
 
   color = apply_hsv(color, o_hsv);
+
+  if (o_clip_enabled > 0.5) {
+    float clip_mask = rounded_rect_mask(o_position, o_clip_rect, o_clip_radius);
+    color.a *= clip_mask;
+    colorMask *= clip_mask;
+    if (color.a <= 0.0 && colorMask.a <= 0.0) {
+      discard;
+    }
+  }
 
   // We MUST output SRGB and tell glium that we do that (outputs_srgb),
   // otherwise something in glium over-gamma-corrects depending on the gl setup.

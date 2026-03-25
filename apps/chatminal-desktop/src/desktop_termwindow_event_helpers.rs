@@ -116,7 +116,7 @@ impl TermWindow {
     }
 
     fn check_for_dirty_lines_and_invalidate_selection(&mut self, pane: &Arc<dyn OverlayPane>) {
-        let dims = pane.get_dimensions();
+        let dims = self.renderable_dimensions_for_pane(pane);
         let viewport = self
             .get_viewport(pane.pane_id() as u64)
             .unwrap_or(dims.physical_top);
@@ -815,25 +815,6 @@ impl TermWindow {
         self.show_launcher_impl(args, active_tab_idx);
     }
 
-    fn show_launcher(&mut self) {
-        let title = "Launcher".to_string();
-        let mut flags = LauncherFlags::LAUNCH_MENU_ITEMS
-            | LauncherFlags::DOMAINS
-            | LauncherFlags::KEY_ASSIGNMENTS
-            | LauncherFlags::COMMANDS;
-        if !self.is_session_ui_mode() {
-            flags |= LauncherFlags::WORKSPACES;
-        }
-        let args = LauncherActionArgs {
-            title: Some(title),
-            flags,
-            help_text: None,
-            fuzzy_help_text: None,
-            alphabet: None,
-        };
-        self.show_launcher_impl(args, 0);
-    }
-
     fn show_launcher_impl(&mut self, args: LauncherActionArgs, initial_choice_idx: usize) {
         let engine_window_id = self.window_id;
         let window = self.window.as_ref().unwrap().clone();
@@ -928,7 +909,7 @@ impl TermWindow {
         amount: isize,
         pane: &Arc<dyn OverlayPane>,
     ) -> anyhow::Result<()> {
-        let dims = pane.get_dimensions();
+        let dims = self.renderable_dimensions_for_pane(pane);
         let position = self
             .get_viewport(pane.pane_id() as u64)
             .unwrap_or(dims.physical_top);
@@ -951,7 +932,7 @@ impl TermWindow {
     }
 
     fn scroll_by_page(&mut self, amount: f64, pane: &Arc<dyn OverlayPane>) -> anyhow::Result<()> {
-        let dims = pane.get_dimensions();
+        let dims = self.renderable_dimensions_for_pane(pane);
         let position = self
             .get_viewport(pane.pane_id() as u64)
             .unwrap_or(dims.physical_top) as f64
@@ -982,7 +963,7 @@ impl TermWindow {
         amount: isize,
         pane: &Arc<dyn OverlayPane>,
     ) -> anyhow::Result<()> {
-        let dims = pane.get_dimensions();
+        let dims = self.renderable_dimensions_for_pane(pane);
         let position = self
             .get_viewport(pane.pane_id() as u64)
             .unwrap_or(dims.physical_top)
@@ -1017,47 +998,4 @@ impl TermWindow {
         self.move_runtime_entry(entry_idx)
     }
 
-    fn do_open_link_at_mouse_cursor(&self, pane: &Arc<dyn OverlayPane>) {
-        // They clicked on a link, so let's open it!
-        // We need to ensure that we spawn the `open` call outside of the context
-        // of our window loop; on Windows it can cause a panic due to
-        // triggering our WndProc recursively.
-        // We get that assurance for free as part of the async dispatch that we
-        // perform below; here we allow the user to define an `open-uri` event
-        // handler that can bypass the normal `open_url` functionality.
-        if let Some(link) = self.current_highlight.as_ref().cloned() {
-            let window = GuiWin::new(self);
-            let pane_id = pane.pane_id() as u64;
-
-            async fn open_uri(
-                lua: Option<Rc<mlua::Lua>>,
-                window: GuiWin,
-                pane_id: u64,
-                link: String,
-            ) -> anyhow::Result<()> {
-                let default_click = match lua {
-                    Some(lua) => {
-                        let args = lua.pack_multi((window, pane_id, link.clone()))?;
-                        config::lua::emit_event(&lua, ("open-uri".to_string(), args))
-                            .await
-                            .map_err(|e| {
-                                log::error!("while processing open-uri event: {:#}", e);
-                                e
-                            })?
-                    }
-                    None => true,
-                };
-                if default_click {
-                    log::info!("clicking {}", link);
-                    engine_open_url::open_url(&link);
-                }
-                Ok(())
-            }
-
-            promise::spawn::spawn(config::with_lua_config_on_main_thread(move |lua| {
-                open_uri(lua, window, pane_id, link.uri().to_string())
-            }))
-            .detach();
-        }
-    }
 }

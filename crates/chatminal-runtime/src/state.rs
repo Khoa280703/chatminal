@@ -151,7 +151,8 @@ impl RuntimeState {
         }
 
         // Keep disconnected state at startup; clients will reactivate when needed.
-        for session_id in sessions.keys() {
+        for (session_id, entry) in sessions.iter_mut() {
+            entry.session.status = StoredSessionStatus::Disconnected;
             let _ = store.set_session_status(session_id, StoredSessionStatus::Disconnected);
         }
 
@@ -299,6 +300,19 @@ impl RuntimeState {
         inner.session_move_to_profile(session_id, profile_id, target_index)
     }
 
+    pub fn sessions_move_to_profile(
+        &self,
+        session_ids: &[String],
+        profile_id: &str,
+        target_index: Option<usize>,
+    ) -> Result<RuntimeWorkspace, String> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|_| "state lock poisoned".to_string())?;
+        inner.sessions_move_to_profile(session_ids, profile_id, target_index)
+    }
+
     pub fn session_rename(&self, session_id: &str, name: &str) -> Result<RuntimeWorkspace, String> {
         let mut inner = self
             .inner
@@ -441,6 +455,12 @@ impl RuntimeState {
 
         match activation {
             Activation::Existing(runtime, profile_id) => {
+                log::warn!(
+                    "session_activate(existing): session={} size={}x{}",
+                    session_id,
+                    cols,
+                    rows
+                );
                 runtime
                     .lock()
                     .map_err(|_| "session runtime lock poisoned".to_string())?
@@ -462,6 +482,18 @@ impl RuntimeState {
             }
             Activation::Spawn(plan) => self.commit_spawned_session(plan),
         }
+    }
+
+    pub fn session_focus(&self, session_id: &str) -> Result<(), String> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|_| "state lock poisoned".to_string())?;
+        let Some(entry) = inner.sessions.get(session_id) else {
+            return Err("session not found".to_string());
+        };
+        let profile_id = entry.session.profile_id.clone();
+        inner.set_active_session_and_publish(&profile_id, session_id)
     }
 
     pub fn session_snapshot_get(
@@ -974,11 +1006,435 @@ fn snapshot_trailing_fragment(snapshot: &StoredSessionSnapshot) -> Option<String
     (!fragment.is_empty()).then_some(fragment)
 }
 
+fn normalize_session_snapshot(mut snapshot: StoredSessionSnapshot) -> StoredSessionSnapshot {
+    snapshot.content = collapse_trailing_duplicate_prompt_redraws(&snapshot.content);
+    snapshot.content = collapse_trailing_prompt_only_lines(&snapshot.content);
+    snapshot
+}
+
+fn visible_terminal_fragment(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\x1b' => {
+                i += 1;
+                match bytes.get(i).copied() {
+                    Some(b'[') => {
+                        i += 1;
+                        while i < bytes.len() {
+                            let byte = bytes[i];
+                            i += 1;
+                            if (0x40..=0x7e).contains(&byte) {
+                                break;
+                            }
+                        }
+                    }
+                    Some(b']') => {
+                        i += 1;
+                        while i < bytes.len() {
+                            match bytes[i] {
+                                0x07 => {
+                                    i += 1;
+                                    break;
+                                }
+                                0x1b if bytes.get(i + 1) == Some(&b'\\') => {
+                                    i += 2;
+                                    break;
+                                }
+                                _ => i += 1,
+                            }
+                        }
+                    }
+                    Some(_) => {
+                        i += 1;
+                    }
+                    None => break,
+                }
+            }
+            b'\r' | b'\n' => {
+                i += 1;
+            }
+            byte if byte.is_ascii_control() => {
+                i += 1;
+            }
+            byte => {
+                out.push(byte);
+                i += 1;
+            }
+        }
+    }
+
+    String::from_utf8_lossy(&out).to_string()
+}
+
+#[cfg(test)]
+fn normalize_terminal_fragment_for_compare(value: &str) -> String {
+    visible_terminal_fragment(value).trim().to_string()
+}
+
+fn looks_like_shell_prompt_fragment(value: &str) -> bool {
+    let visible = visible_terminal_fragment(value);
+    if !visible.ends_with(' ') {
+        return false;
+    }
+    let trimmed = visible.trim_end();
+    if trimmed.is_empty() {
+        return false;
+    }
+    match trimmed.chars().last() {
+        Some('%') => trimmed.contains('@') || trimmed.contains('~'),
+        Some('$') | Some('#') => {
+            trimmed.contains('@')
+                || trimmed.starts_with("PS ")
+                || trimmed.contains(":~")
+                || trimmed.contains(":/")
+                || trimmed.contains(":\\")
+        }
+        Some('>') => trimmed.starts_with("PS ") || trimmed.contains('@'),
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+fn is_duplicate_restored_prompt_fragment(restored: &str, chunk: &str) -> bool {
+    strip_duplicate_restored_prompt_prefix(restored, chunk)
+        .is_some_and(|remainder| remainder.is_empty())
+}
+
+fn visible_prefix_end_for_fragment(chunk: &str, expected_visible: &str) -> Option<usize> {
+    let expected_chars: Vec<char> = expected_visible.chars().collect();
+    if expected_chars.is_empty() {
+        return None;
+    }
+
+    let chars: Vec<(usize, char)> = chunk.char_indices().collect();
+    let mut idx = 0usize;
+    let mut matched = 0usize;
+    while idx < chars.len() {
+        let (byte_idx, ch) = chars[idx];
+        if ch == '\u{1b}' {
+            idx += 1;
+            if idx >= chars.len() {
+                break;
+            }
+            match chars[idx].1 {
+                '[' => {
+                    idx += 1;
+                    while idx < chars.len() {
+                        let c = chars[idx].1;
+                        idx += 1;
+                        if ('@'..='~').contains(&c) {
+                            break;
+                        }
+                    }
+                }
+                ']' => {
+                    idx += 1;
+                    while idx < chars.len() {
+                        let c = chars[idx].1;
+                        idx += 1;
+                        if c == '\u{7}' {
+                            break;
+                        }
+                        if c == '\u{1b}' && idx < chars.len() && chars[idx].1 == '\\' {
+                            idx += 1;
+                            break;
+                        }
+                    }
+                }
+                _ => {
+                    idx += 1;
+                }
+            }
+            continue;
+        }
+
+        idx += 1;
+        if ch == '\r' || ch == '\n' || ch.is_control() {
+            continue;
+        }
+        if expected_chars.get(matched) != Some(&ch) {
+            return None;
+        }
+        matched += 1;
+        if matched == expected_chars.len() {
+            return Some(byte_idx + ch.len_utf8());
+        }
+    }
+
+    None
+}
+
+fn strip_duplicate_restored_prompt_prefix(restored: &str, chunk: &str) -> Option<String> {
+    let expected_visible = visible_terminal_fragment(restored);
+    if !looks_like_shell_prompt_fragment(restored) {
+        return None;
+    }
+    let prefix_end = visible_prefix_end_for_fragment(chunk, &expected_visible)?;
+    Some(chunk[prefix_end..].to_string())
+}
+
+fn collapse_trailing_duplicate_prompt_redraws(content: &str) -> String {
+    if content.is_empty() {
+        return String::new();
+    }
+
+    let line_start = content
+        .rfind('\n')
+        .map(|index| index.saturating_add(1))
+        .unwrap_or(0);
+    let tail_raw = &content[line_start..];
+    let tail_visible = visible_terminal_fragment(tail_raw);
+    let Some((cluster_visible_start, prompt_visible)) =
+        find_repeated_trailing_prompt_suffix(&tail_visible)
+    else {
+        return content.to_string();
+    };
+
+    let Some(cluster_raw_start) = raw_index_for_visible_offset(tail_raw, cluster_visible_start)
+    else {
+        return content.to_string();
+    };
+    let last_prompt_visible_start = tail_visible.len().saturating_sub(prompt_visible.len());
+    let Some(last_prompt_raw_start) =
+        raw_index_for_visible_offset(tail_raw, last_prompt_visible_start)
+    else {
+        return content.to_string();
+    };
+
+    format!(
+        "{}{}{}",
+        &content[..line_start],
+        &tail_raw[..cluster_raw_start],
+        &tail_raw[last_prompt_raw_start..]
+    )
+}
+
+fn collapse_trailing_prompt_only_lines(content: &str) -> String {
+    if content.is_empty() {
+        return String::new();
+    }
+
+    let lines = split_lines_with_endings(content);
+    if lines.is_empty() {
+        return content.to_string();
+    }
+
+    let mut cluster_start = lines.len();
+    let mut prompt_count = 0usize;
+    let mut last_prompt_index = None;
+
+    for index in (0..lines.len()).rev() {
+        let line = &lines[index];
+        let visible = visible_terminal_fragment(line.content.as_ref());
+        if visible.trim().is_empty() {
+            cluster_start = index;
+            continue;
+        }
+        if looks_like_shell_prompt_fragment(line.content.as_ref()) {
+            cluster_start = index;
+            prompt_count += 1;
+            if last_prompt_index.is_none() {
+                last_prompt_index = Some(index);
+            }
+            continue;
+        }
+        break;
+    }
+
+    if prompt_count < 2 {
+        return content.to_string();
+    }
+
+    let Some(last_prompt_index) = last_prompt_index else {
+        return content.to_string();
+    };
+
+    let prefix = lines[..cluster_start]
+        .iter()
+        .map(|line| line.raw)
+        .collect::<String>();
+    let preserved_prompt = lines[last_prompt_index].raw;
+    format!("{prefix}{preserved_prompt}")
+}
+
+struct SnapshotLine<'a> {
+    content: &'a str,
+    raw: &'a str,
+}
+
+fn split_lines_with_endings(content: &str) -> Vec<SnapshotLine<'_>> {
+    let bytes = content.as_bytes();
+    let mut out = Vec::new();
+    let mut start = 0usize;
+    let mut idx = 0usize;
+
+    while idx < bytes.len() {
+        match bytes[idx] {
+            b'\r' => {
+                let mut end = idx + 1;
+                if bytes.get(end) == Some(&b'\n') {
+                    end += 1;
+                }
+                out.push(SnapshotLine {
+                    content: &content[start..idx],
+                    raw: &content[start..end],
+                });
+                start = end;
+                idx = end;
+            }
+            b'\n' => {
+                let end = idx + 1;
+                out.push(SnapshotLine {
+                    content: &content[start..idx],
+                    raw: &content[start..end],
+                });
+                start = end;
+                idx = end;
+            }
+            _ => idx += 1,
+        }
+    }
+
+    if start < content.len() {
+        out.push(SnapshotLine {
+            content: &content[start..],
+            raw: &content[start..],
+        });
+    }
+
+    out
+}
+
+fn find_repeated_trailing_prompt_suffix(line: &str) -> Option<(usize, String)> {
+    if line.is_empty() {
+        return None;
+    }
+
+    let mut boundaries = line.char_indices().map(|(index, _)| index).collect::<Vec<_>>();
+    boundaries.push(line.len());
+
+    for &start in boundaries.iter().rev().skip(1) {
+        let candidate = &line[start..];
+        if !looks_like_shell_prompt_fragment(candidate) {
+            continue;
+        }
+        if !line[..start].ends_with(candidate) {
+            continue;
+        }
+
+        let mut cluster_start = start;
+        while let Some(prefix) = line[..cluster_start].strip_suffix(candidate) {
+            cluster_start = prefix.len();
+        }
+        return Some((cluster_start, candidate.to_string()));
+    }
+
+    None
+}
+
+fn raw_index_for_visible_offset(raw: &str, target_visible_offset: usize) -> Option<usize> {
+    if target_visible_offset == 0 {
+        return Some(0);
+    }
+
+    let chars: Vec<(usize, char)> = raw.char_indices().collect();
+    let mut idx = 0usize;
+    let mut visible_offset = 0usize;
+
+    while idx < chars.len() {
+        let (byte_idx, ch) = chars[idx];
+        if ch == '\u{1b}' {
+            idx += 1;
+            if idx >= chars.len() {
+                break;
+            }
+            match chars[idx].1 {
+                '[' => {
+                    idx += 1;
+                    while idx < chars.len() {
+                        let next = chars[idx].1;
+                        idx += 1;
+                        if ('@'..='~').contains(&next) {
+                            break;
+                        }
+                    }
+                }
+                ']' => {
+                    idx += 1;
+                    while idx < chars.len() {
+                        let next = chars[idx].1;
+                        idx += 1;
+                        if next == '\u{7}' {
+                            break;
+                        }
+                        if next == '\u{1b}' && idx < chars.len() && chars[idx].1 == '\\' {
+                            idx += 1;
+                            break;
+                        }
+                    }
+                }
+                _ => {
+                    idx += 1;
+                }
+            }
+            continue;
+        }
+
+        idx += 1;
+        if ch == '\r' || ch == '\n' || ch.is_control() {
+            continue;
+        }
+
+        if visible_offset == target_visible_offset {
+            return Some(byte_idx);
+        }
+        visible_offset += ch.len_utf8();
+    }
+
+    (visible_offset == target_visible_offset).then_some(raw.len())
+}
+
 fn prepend_run_boundary(chunk: &str) -> String {
     if chunk.is_empty() || chunk.starts_with('\n') || chunk.starts_with("\r\n") {
         return chunk.to_string();
     }
     format!("\r\n{chunk}")
+}
+
+fn strip_zsh_prompt_spacer_artifact(value: &str) -> String {
+    const PREFIX: &str = "\u{1b}[1m\u{1b}[7m%\u{1b}[27m\u{1b}[1m\u{1b}[0m";
+    let bytes = value.as_bytes();
+    let prefix = PREFIX.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if bytes[i..].starts_with(prefix) {
+            let mut j = i + prefix.len();
+            while j < bytes.len() && bytes[j] == b' ' {
+                j += 1;
+            }
+            if bytes.get(j) == Some(&b'\r') {
+                j += 1;
+                if bytes.get(j) == Some(&b' ') {
+                    j += 1;
+                }
+                if bytes.get(j) == Some(&b'\r') {
+                    i = j + 1;
+                    continue;
+                }
+            }
+        }
+
+        out.push(bytes[i]);
+        i += 1;
+    }
+
+    String::from_utf8_lossy(&out).to_string()
 }
 
 fn kill_runtime_handle(runtime: Option<RuntimeHandle>) {

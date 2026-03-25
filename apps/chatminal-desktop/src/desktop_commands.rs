@@ -1,6 +1,4 @@
-use crate::chatminal_runtime::{
-    host_domain_menu_entries, host_workspace_name, host_workspace_names,
-};
+use crate::chatminal_runtime::{host_workspace_name, host_workspace_names};
 use crate::inputmap::InputMap;
 use config::keyassignment::*;
 use config::window::WindowLevel;
@@ -312,56 +310,6 @@ impl CommandDef {
                 menubar: &["Shell"],
                 icon: Some("md_tab_plus".into()),
             });
-        }
-
-        // Generate some stuff based on the runtime state
-        let domains = host_domain_menu_entries();
-        for dom in &domains {
-            let name = dom.name.as_str();
-            let label = dom.label.as_str();
-
-            if dom.is_attached {
-                result.push(ExpandedCommand {
-                    brief: format!("New Session (Domain {label})").into(),
-                    doc: "".into(),
-                    keys: vec![],
-                    action: KeyAssignment::SpawnCommandInNewSession(SpawnCommand {
-                        domain: SpawnSessionDomain::DomainName(name.to_string()),
-                        ..SpawnCommand::default()
-                    }),
-                    menubar: &["Shell"],
-                    icon: Some("md_tab_plus".into()),
-                });
-            } else {
-                result.push(ExpandedCommand {
-                    brief: format!("Attach Domain {label}").into(),
-                    doc: "".into(),
-                    keys: vec![],
-                    action: KeyAssignment::AttachDomain(name.to_string()),
-                    menubar: &["Shell", "Attach"],
-                    icon: Some("md_pipe".into()),
-                });
-            }
-        }
-        for dom in &domains {
-            let name = dom.name.as_str();
-            let label = dom.label.as_str();
-
-            if dom.is_attached {
-                if name == "local" {
-                    continue;
-                }
-                result.push(ExpandedCommand {
-                    brief: format!("Detach Domain {label}").into(),
-                    doc: "".into(),
-                    keys: vec![],
-                    action: KeyAssignment::DetachDomain(SpawnSessionDomain::DomainName(
-                        name.to_string(),
-                    )),
-                    menubar: &["Shell", "Detach"],
-                    icon: Some("md_pipe_disconnected".into()),
-                });
-            }
         }
 
         let active_workspace = host_workspace_name();
@@ -692,6 +640,7 @@ fn label_string(action: &KeyAssignment, candidate: String) -> String {
 /// but can also be used to describe user-provided commands
 pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<CommandDef> {
     Some(match action {
+        SpawnWindow => return None,
         PasteFrom(ClipboardPasteSource::PrimarySelection) => CommandDef {
             brief: "Paste primary selection".into(),
             doc: "Pastes text from the primary selection".into(),
@@ -824,14 +773,6 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             args: &[],
             menubar: &["Chatminal"],
             icon: None,
-        },
-        SpawnWindow => CommandDef {
-            brief: "New Window".into(),
-            doc: "Launches the default program into a new window".into(),
-            keys: vec![(Modifiers::SUPER, "n".into())],
-            args: &[],
-            menubar: &["Shell"],
-            icon: Some("cod_empty_window"),
         },
         ClearScrollback(ScrollbackEraseMode::ScrollbackOnly) => CommandDef {
             brief: "Clear scrollback".into(),
@@ -1021,36 +962,15 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
         },
         SpawnSession(SpawnSessionDomain::CurrentSessionDomain) => CommandDef {
             brief: "New Session".into(),
-            doc: "Create a new session in the same domain as the current session view".into(),
+            doc: "Create a new session".into(),
             keys: vec![(Modifiers::SUPER, "t".into())],
             args: &[ArgType::ActiveWindow],
             menubar: &["Shell"],
             icon: Some("md_tab_plus"),
         },
-        SpawnSession(SpawnSessionDomain::DefaultDomain) => CommandDef {
-            brief: "New Session (Default Domain)".into(),
-            doc: "Create a new session in the default domain".into(),
-            keys: vec![],
-            args: &[ArgType::ActiveWindow],
-            menubar: &["Shell"],
-            icon: Some("md_tab_plus"),
-        },
-        SpawnSession(SpawnSessionDomain::DomainName(name)) => CommandDef {
-            brief: format!("New Session (`{name}` Domain)").into(),
-            doc: format!("Create a new session in the domain named {name}").into(),
-            keys: vec![],
-            args: &[ArgType::ActiveWindow],
-            menubar: &["Shell"],
-            icon: Some("md_tab_plus"),
-        },
-        SpawnSession(SpawnSessionDomain::DomainId(id)) => CommandDef {
-            brief: format!("New Session (Domain with id {id})").into(),
-            doc: format!("Create a new session in the domain with id {id}").into(),
-            keys: vec![],
-            args: &[ArgType::ActiveWindow],
-            menubar: &["Shell"],
-            icon: Some("md_tab_plus"),
-        },
+        SpawnSession(SpawnSessionDomain::DefaultDomain) => return None,
+        SpawnSession(SpawnSessionDomain::DomainName(_)) => return None,
+        SpawnSession(SpawnSessionDomain::DomainId(_)) => return None,
         SpawnCommandInNewSession(cmd) => CommandDef {
             brief: label_string(action, format!("Spawn a new Session with {cmd:?}").to_string())
                 .into(),
@@ -1142,8 +1062,8 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             icon: None,
         },
         CloseCurrentSession { confirm: true } => CommandDef {
-            brief: "Close current Session".into(),
-            doc: "Closes the current session, terminating all the \
+            brief: "Delete current session".into(),
+            doc: "Deletes the current session, terminating all the \
             processes that are running in its terminal instances."
                 .into(),
             keys: vec![(Modifiers::SUPER, "w".into())],
@@ -1152,8 +1072,8 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             icon: Some("md_close_box_outline"),
         },
         CloseCurrentSession { confirm: false } => CommandDef {
-            brief: "Close current Session".into(),
-            doc: "Closes the current session, terminating all the \
+            brief: "Delete current session".into(),
+            doc: "Deletes the current session, terminating all the \
             processes that are running in its terminal instances."
                 .into(),
             keys: vec![],
@@ -1672,22 +1592,8 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             menubar: &["Edit"],
             icon: None,
         },
-        OpenLinkAtMouseCursor => CommandDef {
-            brief: "Open link at mouse cursor".into(),
-            doc: "If there is no link under the mouse cursor, has no effect.".into(),
-            keys: vec![],
-            args: &[ArgType::ActiveTerminal],
-            menubar: &["Shell"],
-            icon: None,
-        },
-        ShowLauncherArgs(_) | ShowLauncher => CommandDef {
-            brief: "Show the launcher".into(),
-            doc: "Shows the launcher menu".into(),
-            keys: vec![],
-            args: &[ArgType::ActiveWindow],
-            menubar: &["Shell"],
-            icon: None,
-        },
+        OpenLinkAtMouseCursor => return None,
+        ShowLauncherArgs(_) | ShowLauncher => return None,
         ShowSessionNavigator => CommandDef {
             brief: "Navigate sessions".into(),
             doc: "Shows the session navigator".into(),
@@ -1696,38 +1602,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             menubar: &["Window", "Select Session"],
             icon: Some("cod_list_flat"),
         },
-        DetachDomain(SpawnSessionDomain::CurrentSessionDomain) => CommandDef {
-            brief: "Detach the domain of the active session view".into(),
-            doc: "Detaches (disconnects from) the domain of the active session view".into(),
-            keys: vec![],
-            args: &[ArgType::ActiveTerminal],
-            menubar: &["Shell", "Detach"],
-            icon: Some("md_pipe_disconnected"),
-        },
-        DetachDomain(SpawnSessionDomain::DefaultDomain) => CommandDef {
-            brief: "Detach the default domain".into(),
-            doc: "Detaches (disconnects from) the default domain".into(),
-            keys: vec![],
-            args: &[ArgType::ActiveTerminal],
-            menubar: &["Shell", "Detach"],
-            icon: Some("md_pipe_disconnected"),
-        },
-        DetachDomain(SpawnSessionDomain::DomainName(name)) => CommandDef {
-            brief: format!("Detach the `{name}` domain").into(),
-            doc: format!("Detaches (disconnects from) the domain named `{name}`").into(),
-            keys: vec![],
-            args: &[ArgType::ActiveTerminal],
-            menubar: &["Shell", "Detach"],
-            icon: Some("md_pipe_disconnected"),
-        },
-        DetachDomain(SpawnSessionDomain::DomainId(id)) => CommandDef {
-            brief: format!("Detach the domain with id {id}").into(),
-            doc: format!("Detaches (disconnects from) the domain with id {id}").into(),
-            keys: vec![],
-            args: &[ArgType::ActiveTerminal],
-            menubar: &["Shell", "Detach"],
-            icon: Some("md_pipe_disconnected"),
-        },
+        DetachDomain(_) => return None,
         OpenUri(uri) => match uri.as_ref() {
             "https://github.com/Khoa280703/chatminal" => CommandDef {
                 brief: "Documentation".into(),
@@ -1856,14 +1731,10 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             icon: None,
         },
         CompleteSelectionOrOpenLinkAtMouseCursor(destination) => CommandDef {
-            brief: format!(
-                "Open a URL or Completes selection \
-            by copying to {destination:?}"
-            )
-            .into(),
+            brief: format!("Completes selection, and copy {destination:?}").into(),
             doc: format!(
-                "If the mouse is over a link, open it, otherwise, completes \
-                text selection using the mouse, and copies to {destination:?}"
+                "Completes text selection using the mouse, and copies \
+                to {destination:?}"
             )
             .into(),
             keys: vec![],
@@ -2011,14 +1882,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             menubar: &[],
             icon: None,
         },
-        AttachDomain(name) => CommandDef {
-            brief: format!("Attach domain `{name}`").into(),
-            doc: format!("Attach domain `{name}`").into(),
-            keys: vec![],
-            args: &[ArgType::ActiveTerminal],
-            menubar: &["Shell", "Attach"],
-            icon: Some("md_pipe"),
-        },
+        AttachDomain(_) => return None,
         CopyMode(copy_mode) => CommandDef {
             brief: format!("{copy_mode:?}").into(),
             doc: "".into(),
@@ -2054,8 +1918,8 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             }
         }
         ResetTerminal => CommandDef {
-            brief: "Reset the terminal emulation state in the current session view".into(),
-            doc: "Reset the terminal emulation state in the current session view".into(),
+            brief: "Reset terminal display state".into(),
+            doc: "Reset terminal display state".into(),
             keys: vec![],
             args: &[ArgType::ActiveTerminal],
             menubar: &["Shell"],
@@ -2085,7 +1949,6 @@ fn compute_default_actions() -> Vec<KeyAssignment> {
         QuitApplication,
         // ----------------- Shell
         SpawnSession(SpawnSessionDomain::CurrentSessionDomain),
-        SpawnWindow,
         SplitVertical(SpawnCommand {
             domain: SpawnSessionDomain::CurrentSessionDomain,
             ..Default::default()
@@ -2096,7 +1959,6 @@ fn compute_default_actions() -> Vec<KeyAssignment> {
         }),
         CloseCurrentSession { confirm: true },
         CloseCurrentSession { confirm: true },
-        DetachDomain(SpawnSessionDomain::CurrentSessionDomain),
         ResetTerminal,
         // ----------------- Edit
         #[cfg(not(target_os = "macos"))]
@@ -2192,12 +2054,10 @@ fn compute_default_actions() -> Vec<KeyAssignment> {
         ActivateSessionDirection(SessionDirection::Down),
         ToggleTerminalZoomState,
         ActivateLastSession,
-        ShowLauncher,
         ShowSessionNavigator,
         // ----------------- Help
         ShowDebugOverlay,
         // ----------------- Misc
-        OpenLinkAtMouseCursor,
     ];
 }
 

@@ -330,7 +330,16 @@ impl super::TermWindow {
 
         self.terminal_size = size;
 
-        crate::chatminal_runtime::resize_host_window_tabs(self.window_id, size);
+        // Session-native windows manage per-session sizes from WorkspaceLayoutState.
+        // Resizing legacy mux tabs here would force compatibility shims back to
+        // full-window dimensions and temporarily break split-pane scroll semantics.
+        if !self.chatminal_sidebar.is_enabled() {
+            crate::chatminal_runtime::resize_host_window_tabs(self.window_id, size);
+        }
+        let _ = crate::chatminal_runtime::desktop_resize_visible_sessions(
+            self.window_id as crate::scripting::guiwin::DesktopWindowId,
+            size,
+        );
         self.resize_overlays();
         self.invalidate_fancy_tab_bar();
         self.update_title();

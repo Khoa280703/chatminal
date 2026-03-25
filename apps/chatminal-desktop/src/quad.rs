@@ -41,13 +41,26 @@ pub struct Vertex {
     pub hsv: [f32; 3],
     pub has_color: f32,
     pub mix_value: f32,
+    pub clip_rect: [f32; 4],
+    pub clip_radius: f32,
+    pub clip_enabled: f32,
 }
 ::window::glium::implement_vertex!(
-    Vertex, position, tex, fg_color, alt_color, hsv, has_color, mix_value
+    Vertex,
+    position,
+    tex,
+    fg_color,
+    alt_color,
+    hsv,
+    has_color,
+    mix_value,
+    clip_rect,
+    clip_radius,
+    clip_enabled
 );
 
 impl Vertex {
-    const ATTRIBS: [wgpu::VertexAttribute; 7] = wgpu::vertex_attr_array![
+    const ATTRIBS: [wgpu::VertexAttribute; 10] = wgpu::vertex_attr_array![
     0 => Float32x2,
     1 => Float32x2,
     2 => Float32x4,
@@ -55,6 +68,9 @@ impl Vertex {
     4 => Float32x3,
     5 => Float32,
     6 => Float32,
+    7 => Float32x4,
+    8 => Float32,
+    9 => Float32,
     ];
 
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
@@ -106,6 +122,7 @@ pub trait QuadTrait {
 
     fn set_hsv(&mut self, hsv: Option<HsbTransform>);
     fn set_position(&mut self, left: f32, top: f32, right: f32, bottom: f32);
+    fn set_rounded_clip(&mut self, left: f32, top: f32, right: f32, bottom: f32, radius: f32);
 }
 
 pub enum QuadImpl<'a> {
@@ -153,6 +170,13 @@ impl<'a> QuadTrait for QuadImpl<'a> {
         match self {
             Self::Vert(q) => q.set_position(left, top, right, bottom),
             Self::Boxed(q) => q.set_position(left, top, right, bottom),
+        }
+    }
+
+    fn set_rounded_clip(&mut self, left: f32, top: f32, right: f32, bottom: f32, radius: f32) {
+        match self {
+            Self::Vert(q) => q.set_rounded_clip(left, top, right, bottom, radius),
+            Self::Boxed(q) => q.set_rounded_clip(left, top, right, bottom, radius),
         }
     }
 }
@@ -206,6 +230,14 @@ impl<'a> QuadTrait for Quad<'a> {
         self.vert[V_BOT_LEFT].position = [left, bottom];
         self.vert[V_BOT_RIGHT].position = [right, bottom];
     }
+
+    fn set_rounded_clip(&mut self, left: f32, top: f32, right: f32, bottom: f32, radius: f32) {
+        for vert in self.vert.iter_mut() {
+            vert.clip_rect = [left, top, right, bottom];
+            vert.clip_radius = radius;
+            vert.clip_enabled = 1.0;
+        }
+    }
 }
 
 pub trait QuadAllocator {
@@ -232,6 +264,9 @@ pub struct BoxedQuad {
     hsv: [f32; 3],
     has_color: f32,
     mix_value: f32,
+    clip_rect: [f32; 4],
+    clip_radius: f32,
+    clip_enabled: f32,
 }
 
 impl QuadTrait for BoxedQuad {
@@ -260,6 +295,12 @@ impl QuadTrait for BoxedQuad {
     fn set_position(&mut self, left: f32, top: f32, right: f32, bottom: f32) {
         self.position = (left, top, right, bottom);
     }
+
+    fn set_rounded_clip(&mut self, left: f32, top: f32, right: f32, bottom: f32, radius: f32) {
+        self.clip_rect = [left, top, right, bottom];
+        self.clip_radius = radius;
+        self.clip_enabled = 1.0;
+    }
 }
 
 impl BoxedQuad {
@@ -277,6 +318,9 @@ impl BoxedQuad {
             fg_color: verts[V_TOP_LEFT].fg_color,
             hsv: verts[V_TOP_LEFT].hsv,
             mix_value: verts[V_TOP_LEFT].mix_value,
+            clip_rect: verts[V_TOP_LEFT].clip_rect,
+            clip_radius: verts[V_TOP_LEFT].clip_radius,
+            clip_enabled: verts[V_TOP_LEFT].clip_enabled,
         }
     }
 
@@ -304,6 +348,10 @@ impl BoxedQuad {
             self.fg_color[3],
         ));
         quad.set_alt_color_and_mix_value(self.alt_color.into(), self.mix_value);
+        if self.clip_enabled > 0.0 {
+            let [left, top, right, bottom] = self.clip_rect;
+            quad.set_rounded_clip(left, top, right, bottom, self.clip_radius);
+        }
 
         vert
     }
@@ -451,6 +499,6 @@ impl<'a> TripleLayerQuadAllocatorTrait for TripleLayerQuadAllocator<'a> {
 #[cfg(test)]
 #[test]
 fn size() {
-    assert_eq!(std::mem::size_of::<Vertex>() * VERTICES_PER_CELL, 272);
-    assert_eq!(std::mem::size_of::<BoxedQuad>(), 84);
+    assert_eq!(std::mem::size_of::<Vertex>() * VERTICES_PER_CELL, 400);
+    assert_eq!(std::mem::size_of::<BoxedQuad>(), 112);
 }

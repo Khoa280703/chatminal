@@ -108,6 +108,7 @@ impl StatefulSessionEngine {
         generation: u64,
         command: CommandBuilder,
         size: TerminalSize,
+        initial_scrollback: Option<String>,
     ) -> Result<SessionRuntimeState, String> {
         // Check if runtime already exists in core state
         let existing_runtime_id = self
@@ -124,7 +125,7 @@ impl StatefulSessionEngine {
         }
 
         // No existing runtime - spawn a new one (native path)
-        self.spawn_detached_runtime(session_id, generation, command, size, None)
+        self.spawn_detached_runtime(session_id, generation, command, size, initial_scrollback)
     }
 
     pub fn spawn_detached_runtime(

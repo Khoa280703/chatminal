@@ -11,6 +11,9 @@ in float has_color;
 in float mix_value;
 in vec3 hsv;
 in vec4 alt_color;
+in vec4 clip_rect;
+in float clip_radius;
+in float clip_enabled;
 
 uniform mat4 projection;
 
@@ -20,6 +23,10 @@ out vec3 o_hsv;
 out vec4 o_fg_color;
 out vec4 o_fg_color_alt;
 out float o_fg_color_mix;
+out vec2 o_position;
+out vec4 o_clip_rect;
+out float o_clip_radius;
+out float o_clip_enabled;
 
 void pass_through_vertex() {
   o_tex = tex;
@@ -28,6 +35,10 @@ void pass_through_vertex() {
   o_fg_color_alt = alt_color;
   o_fg_color_mix = mix_value;
   o_hsv = hsv;
+  o_position = position;
+  o_clip_rect = clip_rect;
+  o_clip_radius = clip_radius;
+  o_clip_enabled = clip_enabled;
 }
 
 void main() {

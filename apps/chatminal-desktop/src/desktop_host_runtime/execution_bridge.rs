@@ -53,7 +53,9 @@ impl SessionWorkspaceHost for RuntimeStateHost<'_> {
     }
 
     fn activate_session(&self, session_id: &str) -> Result<(), String> {
-        self.0.session_activate_with_default_size(session_id)
+        // Desktop host already owns live runtime focus. On this bridge path we only
+        // need to sync workspace metadata, never spawn or resize the PTY again.
+        self.0.session_focus(session_id)
     }
 }
 
@@ -263,7 +265,8 @@ impl RuntimeExecutionAdapter for DesktopRuntimeExecutionBridge {
     ) -> Result<(), String> {
         let bus = DesktopSessionEventBus;
         SessionRuntimeBridge::new(&RuntimeStateHost(host), &bus)
-            .on_session_activated(session_id, runtime_id)
+            .on_session_activated(session_id, runtime_id)?;
+        host.mark_session_running_and_publish(session_id)
     }
 
     fn notify_session_closed(

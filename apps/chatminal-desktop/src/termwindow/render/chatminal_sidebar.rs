@@ -1,4 +1,8 @@
-use crate::chatminal_sidebar::{SidebarProfile, SidebarSession, SidebarSnapshot};
+use crate::chatminal_sidebar::{
+    SidebarProfile, SidebarSession, SidebarSessionDragState, SidebarSessionDropTarget,
+    SidebarSnapshot,
+};
+use crate::customglyph::{BlockAlpha, BlockCoord, Poly, PolyCommand, PolyStyle};
 use crate::lucide_icons::LucideIcon;
 use crate::termwindow::box_model::{
     BorderColor, BoxDimension, Corners, Element, ElementCell, ElementColors, ElementContent, Float,
@@ -19,7 +23,11 @@ const SIDEBAR_SCROLLBAR_WIDTH_PX: f32 = 4.0;
 const SIDEBAR_SCROLLBAR_MIN_THUMB_HEIGHT_PX: f32 = 28.0;
 const SIDEBAR_COMPACT_TITLE_HIDE_WIDTH_PX: f32 = 120.0;
 const SIDEBAR_TOOLTIP_GAP_PX: f32 = 6.0;
-const SIDEBAR_CONTEXT_MENU_WIDTH_PX: f32 = 152.0;
+const SIDEBAR_CONTEXT_MENU_WIDTH_PX: f32 = 228.0;
+const SIDEBAR_CONTEXT_MENU_ITEM_CONTENT_WIDTH_PX: f32 = 204.0;
+const SIDEBAR_JOIN_CONNECTOR_WIDTH_PX: f32 = 14.0;
+const SIDEBAR_JOIN_CONNECTOR_SLOT_WIDTH_PX: f32 = 18.0;
+const SIDEBAR_JOIN_CONNECTOR_HEIGHT_OVERLAP_PX: f32 = 10.0;
 
 #[derive(Clone)]
 enum SidebarTreeRow {
@@ -42,6 +50,80 @@ impl SidebarTreeRow {
         }
     }
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum JoinedSessionMarker {
+    Start,
+    Middle,
+    End,
+}
+
+impl JoinedSessionMarker {
+    fn poly(self) -> &'static [Poly] {
+        match self {
+            Self::Start => SIDEBAR_JOIN_CONNECTOR_START,
+            Self::Middle => SIDEBAR_JOIN_CONNECTOR_MIDDLE,
+            Self::End => SIDEBAR_JOIN_CONNECTOR_END,
+        }
+    }
+}
+
+const SIDEBAR_JOIN_CONNECTOR_START: &[Poly] = &[
+    Poly {
+        path: &[
+            PolyCommand::MoveTo(BlockCoord::Frac(1, 2), BlockCoord::Frac(1, 2)),
+            PolyCommand::LineTo(BlockCoord::Frac(1, 2), BlockCoord::One),
+        ],
+        intensity: BlockAlpha::Full,
+        style: PolyStyle::Outline,
+    },
+    Poly {
+        path: &[
+            PolyCommand::MoveTo(BlockCoord::Frac(1, 2), BlockCoord::Frac(1, 2)),
+            PolyCommand::LineTo(BlockCoord::One, BlockCoord::Frac(1, 2)),
+        ],
+        intensity: BlockAlpha::Full,
+        style: PolyStyle::Outline,
+    },
+];
+
+const SIDEBAR_JOIN_CONNECTOR_MIDDLE: &[Poly] = &[
+    Poly {
+        path: &[
+            PolyCommand::MoveTo(BlockCoord::Frac(1, 2), BlockCoord::Zero),
+            PolyCommand::LineTo(BlockCoord::Frac(1, 2), BlockCoord::One),
+        ],
+        intensity: BlockAlpha::Full,
+        style: PolyStyle::Outline,
+    },
+    Poly {
+        path: &[
+            PolyCommand::MoveTo(BlockCoord::Frac(1, 2), BlockCoord::Frac(1, 2)),
+            PolyCommand::LineTo(BlockCoord::One, BlockCoord::Frac(1, 2)),
+        ],
+        intensity: BlockAlpha::Full,
+        style: PolyStyle::Outline,
+    },
+];
+
+const SIDEBAR_JOIN_CONNECTOR_END: &[Poly] = &[
+    Poly {
+        path: &[
+            PolyCommand::MoveTo(BlockCoord::Frac(1, 2), BlockCoord::Zero),
+            PolyCommand::LineTo(BlockCoord::Frac(1, 2), BlockCoord::Frac(1, 2)),
+        ],
+        intensity: BlockAlpha::Full,
+        style: PolyStyle::Outline,
+    },
+    Poly {
+        path: &[
+            PolyCommand::MoveTo(BlockCoord::Frac(1, 2), BlockCoord::Frac(1, 2)),
+            PolyCommand::LineTo(BlockCoord::One, BlockCoord::Frac(1, 2)),
+        ],
+        intensity: BlockAlpha::Full,
+        style: PolyStyle::Outline,
+    },
+];
 
 fn ordered_sidebar_snapshot(
     term_window: &crate::TermWindow,
@@ -261,6 +343,7 @@ impl crate::TermWindow {
         let muted = LinearRgba::with_components(0.549, 0.549, 0.549, 1.0);
         let accent = LinearRgba::with_components(0.212, 0.580, 0.196, 1.0);
         let session_active_bg = LinearRgba::with_components(0.016, 0.224, 0.369, 1.0);
+        let session_selected_bg = LinearRgba::with_components(0.071, 0.102, 0.141, 1.0);
         let hover_bg = LinearRgba::with_components(0.165, 0.176, 0.180, 1.0);
         let offline = LinearRgba::with_components(0.549, 0.549, 0.549, 1.0);
         let error_fg = LinearRgba::with_components(0.973, 0.502, 0.439, 1.0);
@@ -278,6 +361,7 @@ impl crate::TermWindow {
             muted,
             accent,
             session_active_bg,
+            session_selected_bg,
             hover_bg,
             offline,
             error_fg,
@@ -553,45 +637,70 @@ impl crate::TermWindow {
         else {
             return Ok(None);
         };
+        let selected_session_ids = self.chatminal_sidebar.selected_session_ids();
+        let selected_session_count = selected_session_ids.len();
+        let can_join_selected_sessions =
+            selected_session_count >= 2 && selected_sessions_share_profile(&snapshot, &selected_session_ids);
+        let is_joined = joined_session_markers(self).contains_key(&session.session_id);
 
         let body_font = self.sidebar_text_font()?;
         let text = LinearRgba::with_components(0.92, 0.92, 0.92, 1.0);
         let hover_bg = LinearRgba::with_components(0.20, 0.24, 0.28, 1.0);
         let bg = LinearRgba::with_components(0.03, 0.03, 0.03, 0.995);
-        let border = LinearRgba::with_components(0.16, 0.16, 0.16, 1.0);
+        let border = bg;
+        let menu_item = |label: &str, item_type| {
+            Element::new(&body_font, ElementContent::Text(label.to_string()))
+                .display(crate::termwindow::box_model::DisplayType::Block)
+                .item_type(item_type)
+                .padding(BoxDimension {
+                    left: Dimension::Pixels(10.0),
+                    right: Dimension::Pixels(10.0),
+                    top: Dimension::Pixels(6.0),
+                    bottom: Dimension::Pixels(6.0),
+                })
+                .min_width(Some(Dimension::Pixels(
+                    SIDEBAR_CONTEXT_MENU_ITEM_CONTENT_WIDTH_PX,
+                )))
+                .max_width(Some(Dimension::Pixels(
+                    SIDEBAR_CONTEXT_MENU_ITEM_CONTENT_WIDTH_PX,
+                )))
+                .colors(filled_colors(LinearRgba::TRANSPARENT, text))
+                .hover_colors(Some(filled_colors(hover_bg, text)))
+        };
+        let mut entries: Vec<(&str, UIItemType)> = Vec::new();
+        if can_join_selected_sessions {
+            entries.push((
+                "Join session",
+                UIItemType::ChatminalSidebarSessionMenuJoin(session.session_id.clone()),
+            ));
+        }
+        if is_joined {
+            entries.push((
+                "Unjoin session",
+                UIItemType::ChatminalSidebarSessionMenuUnjoin(session.session_id.clone()),
+            ));
+        }
+        entries.push((
+            "Đổi tên",
+            UIItemType::ChatminalSidebarSessionMenuRename(session.session_id.clone()),
+        ));
+        entries.push((
+            "Xoá",
+            UIItemType::ChatminalSidebarSessionMenuDelete(session.session_id.clone()),
+        ));
 
-        let rename = Element::new(&body_font, ElementContent::Text("Đổi tên".to_string()))
-            .display(crate::termwindow::box_model::DisplayType::Block)
-            .item_type(UIItemType::ChatminalSidebarSessionMenuRename(
-                session.session_id.clone(),
-            ))
-            .padding(BoxDimension {
-                left: Dimension::Pixels(10.0),
-                right: Dimension::Pixels(10.0),
-                top: Dimension::Pixels(6.0),
-                bottom: Dimension::Pixels(6.0),
-            })
-            .colors(filled_colors(LinearRgba::TRANSPARENT, text))
-            .hover_colors(Some(filled_colors(hover_bg, text)));
+        let item_count = entries.len();
+        let children = entries
+            .into_iter()
+            .map(|(label, item_type)| menu_item(label, item_type))
+            .collect();
 
-        let delete = Element::new(&body_font, ElementContent::Text("Xoá".to_string()))
-            .display(crate::termwindow::box_model::DisplayType::Block)
-            .item_type(UIItemType::ChatminalSidebarSessionMenuDelete(
-                session.session_id.clone(),
-            ))
-            .padding(BoxDimension {
-                left: Dimension::Pixels(10.0),
-                right: Dimension::Pixels(10.0),
-                top: Dimension::Pixels(6.0),
-                bottom: Dimension::Pixels(8.0),
-            })
-            .colors(filled_colors(LinearRgba::TRANSPARENT, text))
-            .hover_colors(Some(filled_colors(hover_bg, text)));
-
-        let root = Element::new(&body_font, ElementContent::Children(vec![rename, delete]))
+        let root = Element::new(&body_font, ElementContent::Children(children))
         .display(crate::termwindow::box_model::DisplayType::Block)
         .item_type(UIItemType::ChatminalSidebarSessionMenu)
+        .padding(BoxDimension::default())
         .border(BoxDimension::new(Dimension::Pixels(1.0)))
+        .border_corners(Some(rounded_corners(7.0)))
         .colors(ElementColors {
             border: BorderColor::new(border),
             bg: bg.into(),
@@ -601,7 +710,7 @@ impl crate::TermWindow {
         .max_width(Some(Dimension::Pixels(SIDEBAR_CONTEXT_MENU_WIDTH_PX)));
 
         let width = SIDEBAR_CONTEXT_MENU_WIDTH_PX;
-        let estimated_height = 72.0;
+        let estimated_height = 8.0 + item_count as f32 * 32.0;
         let x = menu
             .anchor_x_px
             .clamp(
@@ -647,10 +756,13 @@ impl crate::TermWindow {
         muted: LinearRgba,
         accent: LinearRgba,
         session_active_bg: LinearRgba,
+        session_selected_bg: LinearRgba,
         hover_bg: LinearRgba,
         offline: LinearRgba,
         error_fg: LinearRgba,
     ) -> anyhow::Result<Vec<Element>> {
+        let suppress_hover = self.chatminal_sidebar.session_context_menu().is_some();
+        let drag_state = self.chatminal_sidebar.session_drag_state();
         rows.iter()
             .map(|row| match row {
                 SidebarTreeRow::Error(message) => Ok(Element::new(
@@ -668,9 +780,11 @@ impl crate::TermWindow {
                     body_font,
                     profile,
                     *is_expanded,
+                    drag_state.as_ref(),
                     text,
                     muted,
                     hover_bg,
+                    suppress_hover,
                 ),
                 SidebarTreeRow::EmptyNestedHint(label) => {
                     Ok(empty_nested_hint(body_font, label, muted))
@@ -683,8 +797,11 @@ impl crate::TermWindow {
                     muted,
                     accent,
                     session_active_bg,
+                    session_selected_bg,
+                    drag_state.as_ref(),
                     hover_bg,
                     offline,
+                    suppress_hover,
                 ),
             })
             .collect()
@@ -695,9 +812,11 @@ impl crate::TermWindow {
         body_font: &std::rc::Rc<engine_font::LoadedFont>,
         profile: &SidebarProfile,
         is_expanded: bool,
+        drag_state: Option<&SidebarSessionDragState>,
         text: LinearRgba,
         muted: LinearRgba,
         hover_bg: LinearRgba,
+        suppress_hover: bool,
     ) -> anyhow::Result<Element> {
         let fg = if profile.is_active {
             text
@@ -706,6 +825,25 @@ impl crate::TermWindow {
         };
         let chevron_fg = LinearRgba::with_components(muted.0, muted.1, muted.2, 0.95);
         let folder_fg = LinearRgba::with_components(0.773, 0.773, 0.773, 0.92);
+        let is_append_target = drag_state
+            .and_then(|drag| drag.drop_target.as_ref())
+            .is_some_and(|target| {
+                matches!(
+                    target,
+                    SidebarSessionDropTarget::ProfileAppend { profile_id }
+                        if profile_id == &profile.profile_id
+                )
+            });
+        let row_bg = if is_append_target {
+            LinearRgba::with_components(0.038, 0.086, 0.129, 0.98)
+        } else {
+            LinearRgba::TRANSPARENT
+        };
+        let row_border = if is_append_target {
+            LinearRgba::with_components(0.329, 0.608, 0.941, 1.0)
+        } else {
+            LinearRgba::TRANSPARENT
+        };
         let chevron = self.sidebar_icon_element(
             if is_expanded {
                 LucideIcon::ChevronDown
@@ -750,9 +888,19 @@ impl crate::TermWindow {
             top: Dimension::Pixels(4.0),
             bottom: Dimension::Pixels(4.0),
         })
+        .border(BoxDimension {
+            left: Dimension::Pixels(if is_append_target { 2.0 } else { 0.0 }),
+            right: Dimension::Pixels(0.0),
+            top: Dimension::Pixels(0.0),
+            bottom: Dimension::Pixels(0.0),
+        })
         .margin(block_margin(0.0, 0.0))
-        .colors(filled_colors(LinearRgba::TRANSPARENT, fg))
-        .hover_colors(Some(filled_colors(hover_bg, text))))
+        .colors(ElementColors {
+            border: BorderColor::new(row_border),
+            bg: row_bg.into(),
+            text: fg.into(),
+        })
+        .hover_colors((!suppress_hover).then_some(filled_colors(hover_bg, text))))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -765,12 +913,18 @@ impl crate::TermWindow {
         _muted: LinearRgba,
         accent: LinearRgba,
         session_active_bg: LinearRgba,
+        session_selected_bg: LinearRgba,
+        drag_state: Option<&SidebarSessionDragState>,
         hover_bg: LinearRgba,
         offline: LinearRgba,
+        suppress_hover: bool,
     ) -> anyhow::Result<Element> {
         let is_running = session.status == "running";
+        let is_selected = self.chatminal_sidebar.is_session_selected(&session.session_id);
         let row_bg = if session.is_active {
             session_active_bg
+        } else if is_selected {
+            session_selected_bg
         } else {
             LinearRgba::with_components(0.0, 0.0, 0.0, 0.0)
         };
@@ -784,6 +938,24 @@ impl crate::TermWindow {
         } else {
             offline
         };
+        let is_insert_target = drag_state
+            .and_then(|drag| drag.drop_target.as_ref())
+            .is_some_and(|target| {
+                matches!(
+                    target,
+                    SidebarSessionDropTarget::SessionInsertBefore {
+                        session_id,
+                        ..
+                    } if session_id == &session.session_id
+                )
+            });
+        let is_dragged = drag_state
+            .map(|drag| {
+                drag.session_ids
+                    .iter()
+                    .any(|session_id| session_id == &session.session_id)
+            })
+            .unwrap_or(false);
         let terminal_fg = if session.is_active {
             LinearRgba::with_components(1.0, 1.0, 1.0, 0.96)
         } else {
@@ -791,6 +963,8 @@ impl crate::TermWindow {
         };
         let terminal = self
             .sidebar_icon_element(LucideIcon::SquareTerminal, self.sidebar_icon_size_px())?;
+        let joined_markers = joined_session_markers(self);
+        let joined_marker = joined_markers.get(&session.session_id).copied();
         let inline_rename = self.chatminal_sidebar.inline_rename_state();
         let is_inline_rename = inline_rename
             .as_ref()
@@ -808,10 +982,7 @@ impl crate::TermWindow {
         let status_suffix = if is_inline_rename {
             None
         } else {
-            Some(format!(
-                " ({})",
-                if is_running { "Online" } else { "Offline" }
-            ))
+            Some(format!(" ({})", if is_running { "Online" } else { "Offline" }))
         };
         let rename_bg = if is_inline_rename_selected {
             LinearRgba::with_components(0.086, 0.322, 0.620, 1.0)
@@ -829,7 +1000,68 @@ impl crate::TermWindow {
             name_color
         };
 
+        let connector_color = if session.is_active {
+            LinearRgba::with_components(0.80, 0.80, 0.80, 0.92)
+        } else {
+            LinearRgba::with_components(0.46, 0.46, 0.46, 0.92)
+        };
+        let indicator_border = if is_insert_target {
+            LinearRgba::with_components(0.329, 0.608, 0.941, 1.0)
+        } else {
+            LinearRgba::TRANSPARENT
+        };
+        let row_bg = if is_insert_target && !session.is_active && !is_selected {
+            LinearRgba::with_components(0.030, 0.072, 0.108, 0.72)
+        } else {
+            row_bg
+        };
+        let row_bg = if is_dragged {
+            LinearRgba::with_components(row_bg.0, row_bg.1, row_bg.2, 0.55)
+        } else {
+            row_bg
+        };
         let mut children = vec![
+            match joined_marker {
+                Some(marker) => Element::new(
+                    body_font,
+                    ElementContent::Poly {
+                        line_width: 2,
+                        poly: SizedPoly {
+                            poly: marker.poly(),
+                            width: Dimension::Pixels(SIDEBAR_JOIN_CONNECTOR_WIDTH_PX),
+                            height: Dimension::Pixels(
+                                self.render_metrics.cell_size.height as f32
+                                    + SIDEBAR_JOIN_CONNECTOR_HEIGHT_OVERLAP_PX,
+                            ),
+                        },
+                    },
+                )
+                .display(crate::termwindow::box_model::DisplayType::Inline)
+                .vertical_align(VerticalAlign::Middle)
+                .min_width(Some(Dimension::Pixels(
+                    SIDEBAR_JOIN_CONNECTOR_SLOT_WIDTH_PX,
+                )))
+                .margin(BoxDimension {
+                    left: Dimension::Pixels(0.0),
+                    right: Dimension::Pixels(2.0),
+                    top: Dimension::Pixels(0.0),
+                    bottom: Dimension::Pixels(0.0),
+                })
+                .colors(text_colors(connector_color)),
+                None => Element::new(body_font, ElementContent::Text(String::new()))
+                    .display(crate::termwindow::box_model::DisplayType::Inline)
+                    .vertical_align(VerticalAlign::Middle)
+                    .min_width(Some(Dimension::Pixels(
+                        SIDEBAR_JOIN_CONNECTOR_SLOT_WIDTH_PX,
+                    )))
+                    .margin(BoxDimension {
+                        left: Dimension::Pixels(0.0),
+                        right: Dimension::Pixels(2.0),
+                        top: Dimension::Pixels(0.0),
+                        bottom: Dimension::Pixels(0.0),
+                    })
+                    .colors(text_colors(connector_color)),
+            },
             inline_icon(terminal.colors(text_colors(terminal_fg)), 7.0),
             Element::new(body_font, ElementContent::Text(session_label))
                 .display(crate::termwindow::box_model::DisplayType::Inline)
@@ -879,6 +1111,12 @@ impl crate::TermWindow {
             top: Dimension::Pixels(4.0),
             bottom: Dimension::Pixels(4.0),
         })
+        .border(BoxDimension {
+            left: Dimension::Pixels(0.0),
+            right: Dimension::Pixels(0.0),
+            top: Dimension::Pixels(if is_insert_target { 3.0 } else { 0.0 }),
+            bottom: Dimension::Pixels(0.0),
+        })
         .margin(BoxDimension {
             left: Dimension::Pixels(22.0),
             right: Dimension::Pixels(0.0),
@@ -886,11 +1124,11 @@ impl crate::TermWindow {
             bottom: Dimension::Pixels(0.0),
         })
         .colors(ElementColors {
-            border: BorderColor::default(),
+            border: BorderColor::new(indicator_border),
             bg: row_bg.into(),
             text: name_color.into(),
         })
-        .hover_colors(Some(filled_colors(hover_bg, text))))
+        .hover_colors((!suppress_hover).then_some(filled_colors(hover_bg, text))))
     }
 
     #[allow(dead_code)]
@@ -1205,6 +1443,147 @@ fn sidebar_tree_rows(
         }
     }
     rows
+}
+
+fn joined_session_markers(
+    _term_window: &crate::TermWindow,
+) -> std::collections::BTreeMap<String, JoinedSessionMarker> {
+    let snapshot = _term_window.chatminal_sidebar.snapshot();
+    let active_profile_id = snapshot.active_profile_id.as_deref();
+    let mut groups = Vec::new();
+    let mut seen_group_keys = std::collections::BTreeSet::new();
+
+    for profile in &snapshot.profiles {
+        let mut workspace_ids = std::collections::BTreeSet::from([
+            crate::chatminal_layout::workspace_store::DesktopWorkspaceLayoutStore::profile_workspace_id(
+                &profile.profile_id,
+            ),
+        ]);
+        for session in snapshot
+            .sessions
+            .iter()
+            .filter(|session| session.profile_id == profile.profile_id)
+        {
+            workspace_ids.insert(
+                crate::chatminal_layout::workspace_store::DesktopWorkspaceLayoutStore::profile_group_workspace_id(
+                    &profile.profile_id,
+                    &session.session_id,
+                ),
+            );
+        }
+        if active_profile_id == Some(profile.profile_id.as_str()) {
+            workspace_ids.insert(
+                crate::chatminal_layout::workspace_store::DEFAULT_LAYOUT_WORKSPACE_ID.to_string(),
+            );
+        }
+        for workspace_id in workspace_ids {
+            let Some(layout) = crate::chatminal_layout::workspace_store::DesktopWorkspaceLayoutStore::new(
+                workspace_id,
+            )
+            .snapshot_or_restore() else {
+                continue;
+            };
+            if layout.views.len() <= 1 {
+                continue;
+            }
+            let joined_session_ids = layout
+                .views
+                .into_iter()
+                .map(|view| view.session_id)
+                .collect::<Vec<_>>();
+            let mut dedupe_key = joined_session_ids.clone();
+            dedupe_key.sort();
+            if !seen_group_keys.insert(dedupe_key.join("\u{1f}")) {
+                continue;
+            }
+
+            let joined_members = joined_session_ids
+                .iter()
+                .map(String::as_str)
+                .collect::<std::collections::BTreeSet<_>>();
+            let ordered_group = snapshot
+                .sessions
+                .iter()
+                .filter(|session| session.profile_id == profile.profile_id)
+                .filter(|session| joined_members.contains(session.session_id.as_str()))
+                .map(|session| session.session_id.clone())
+                .collect::<Vec<_>>();
+            if ordered_group.len() > 1 {
+                groups.push(ordered_group);
+            }
+        }
+    }
+
+    joined_session_markers_from_groups(&groups)
+}
+
+fn joined_session_markers_from_groups(
+    groups: &[Vec<String>],
+) -> std::collections::BTreeMap<String, JoinedSessionMarker> {
+    let mut markers = std::collections::BTreeMap::new();
+
+    for group in groups {
+        if group.len() <= 1 {
+            continue;
+        }
+        for (index, session_id) in group.iter().enumerate() {
+            let marker = if index == 0 {
+                JoinedSessionMarker::Start
+            } else if index + 1 == group.len() {
+                JoinedSessionMarker::End
+            } else {
+                JoinedSessionMarker::Middle
+            };
+            markers.insert(session_id.clone(), marker);
+        }
+    }
+
+    markers
+}
+
+fn selected_sessions_share_profile(
+    snapshot: &SidebarSnapshot,
+    selected_session_ids: &[String],
+) -> bool {
+    let mut profile_id: Option<&str> = None;
+    for session_id in selected_session_ids {
+        let Some(session) = snapshot
+            .sessions
+            .iter()
+            .find(|session| session.session_id == *session_id)
+        else {
+            return false;
+        };
+        match profile_id {
+            Some(current) if current != session.profile_id => return false,
+            Some(_) => {}
+            None => profile_id = Some(session.profile_id.as_str()),
+        }
+    }
+    profile_id.is_some()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{joined_session_markers_from_groups, JoinedSessionMarker};
+
+    #[test]
+    fn joined_session_markers_assigns_visual_positions_per_group() {
+        let markers = joined_session_markers_from_groups(&[
+            vec!["session-1".to_string(), "session-2".to_string()],
+            vec![
+                "session-3".to_string(),
+                "session-4".to_string(),
+                "session-5".to_string(),
+            ],
+        ]);
+
+        assert_eq!(markers.get("session-1"), Some(&JoinedSessionMarker::Start));
+        assert_eq!(markers.get("session-2"), Some(&JoinedSessionMarker::End));
+        assert_eq!(markers.get("session-3"), Some(&JoinedSessionMarker::Start));
+        assert_eq!(markers.get("session-4"), Some(&JoinedSessionMarker::Middle));
+        assert_eq!(markers.get("session-5"), Some(&JoinedSessionMarker::End));
+    }
 }
 
 fn clamp_ui_item_to_rect(

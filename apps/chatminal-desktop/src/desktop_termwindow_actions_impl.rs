@@ -81,9 +81,6 @@
             SpawnSession(spawn_where) => {
                 self.spawn_runtime_entry(spawn_where);
             }
-            SpawnWindow => {
-                self.spawn_command(&SpawnCommand::default(), SpawnWhere::NewWindow);
-            }
             SpawnCommandInNewSession(spawn) => {
                 self.spawn_command(spawn, SpawnWhere::NewSession);
             }
@@ -205,18 +202,6 @@
             ScrollToBottom => self.scroll_to_bottom(pane),
             ShowSessionNavigator => self.show_runtime_entry_navigator(),
             ShowDebugOverlay => self.show_debug_overlay(),
-            ShowLauncher => self.show_launcher(),
-            ShowLauncherArgs(args) => {
-                let title = args.title.clone().unwrap_or("Launcher".to_string());
-                let args = LauncherActionArgs {
-                    title: Some(title),
-                    flags: args.flags,
-                    help_text: args.help_text.clone(),
-                    fuzzy_help_text: args.fuzzy_help_text.clone(),
-                    alphabet: args.alphabet.clone(),
-                };
-                self.show_launcher_impl(args, 0);
-            }
             HideApplication => {
                 let con = Connection::get().expect("call on gui thread");
                 con.hide_application();
@@ -234,9 +219,6 @@
             StartWindowDrag => {
                 self.window_drag_position = self.current_mouse_event.clone();
             }
-            OpenLinkAtMouseCursor => {
-                self.do_open_link_at_mouse_cursor(pane);
-            }
             EmitEvent(name) => {
                 self.emit_window_event(name, None);
             }
@@ -246,8 +228,6 @@
                     self.copy_to_clipboard(*dest, text);
                     let window = self.window.as_ref().unwrap();
                     window.invalidate();
-                } else {
-                    self.do_open_link_at_mouse_cursor(pane);
                 }
             }
             CompleteSelection(dest) => {
@@ -540,9 +520,14 @@
                 self.set_modal(Rc::new(modal));
             }
             ResetTerminal => {
-                pane.perform_actions(vec![termwiz::escape::Action::Esc(
-                    termwiz::escape::Esc::Code(termwiz::escape::EscCode::FullReset),
-                )]);
+                if let Ok(session_pane) = pane
+                    .clone()
+                    .downcast_arc::<crate::desktop_host_runtime::ChatminalSessionPane>()
+                {
+                    session_pane.reset_display_state_with_flash();
+                } else {
+                    pane.reset_display_state();
+                }
             }
             OpenUri(link) => {
                 engine_open_url::open_url(link);

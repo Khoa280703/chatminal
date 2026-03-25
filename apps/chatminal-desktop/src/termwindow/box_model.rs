@@ -486,6 +486,36 @@ pub enum ComputedElementContent {
     },
 }
 
+#[derive(Debug, Clone, Copy)]
+struct RoundedClip {
+    rect: RectF,
+    radius: f32,
+}
+
+fn rounded_clip_for_element(element: &ComputedElement) -> Option<RoundedClip> {
+    let corners = element.border_corners?;
+    let radii = [
+        corners.top_left.width.min(corners.top_left.height),
+        corners.top_right.width.min(corners.top_right.height),
+        corners.bottom_left.width.min(corners.bottom_left.height),
+        corners.bottom_right.width.min(corners.bottom_right.height),
+    ];
+    let radius = radii[0];
+    if radius <= 0.0 {
+        return None;
+    }
+    if radii
+        .iter()
+        .any(|candidate| (*candidate - radius).abs() > f32::EPSILON)
+    {
+        return None;
+    }
+    Some(RoundedClip {
+        rect: element.border_rect,
+        radius,
+    })
+}
+
 #[derive(Debug, Clone)]
 pub enum ElementCell {
     Sprite(Sprite),
@@ -872,7 +902,7 @@ impl super::TermWindow {
         gl_state: &RenderState,
         inherited_colors: Option<&ElementColors>,
     ) -> anyhow::Result<()> {
-        self.render_element_impl(element, gl_state, inherited_colors, None)
+        self.render_element_impl(element, gl_state, inherited_colors, None, None)
     }
 
     pub fn render_element_clipped<'a>(
@@ -882,7 +912,7 @@ impl super::TermWindow {
         inherited_colors: Option<&ElementColors>,
         clip_rect: RectF,
     ) -> anyhow::Result<()> {
-        self.render_element_impl(element, gl_state, inherited_colors, Some(clip_rect))
+        self.render_element_impl(element, gl_state, inherited_colors, Some(clip_rect), None)
     }
 
     fn render_element_impl<'a>(
@@ -891,6 +921,7 @@ impl super::TermWindow {
         gl_state: &RenderState,
         inherited_colors: Option<&ElementColors>,
         clip_rect: Option<RectF>,
+        inherited_rounded_clip: Option<RoundedClip>,
     ) -> anyhow::Result<()> {
         let colors = match &element.hover_colors {
             Some(hc) => {
@@ -919,8 +950,21 @@ impl super::TermWindow {
             let mut heap = HeapQuadAllocator::default();
             {
                 let mut layers = TripleLayerQuadAllocator::Heap(&mut heap);
-                self.render_element_background(element, colors, &mut layers, inherited_colors)?;
-                self.render_element_content(element, colors, &mut layers, inherited_colors)?;
+                let rounded_clip = rounded_clip_for_element(element).or(inherited_rounded_clip);
+                self.render_element_background(
+                    element,
+                    colors,
+                    &mut layers,
+                    inherited_colors,
+                    rounded_clip,
+                )?;
+                self.render_element_content(
+                    element,
+                    colors,
+                    &mut layers,
+                    inherited_colors,
+                    rounded_clip,
+                )?;
             }
             let centered_clip_rect = euclid::rect(
                 clip_rect.min_x() - self.dimensions.pixel_width as f32 / 2.0,
@@ -935,13 +979,28 @@ impl super::TermWindow {
         } else {
             let layer = gl_state.layer_for_zindex(element.zindex)?;
             let mut layers = layer.quad_allocator();
-            self.render_element_background(element, colors, &mut layers, inherited_colors)?;
-            self.render_element_content(element, colors, &mut layers, inherited_colors)?;
+            let rounded_clip =
+                rounded_clip_for_element(element).or(inherited_rounded_clip);
+            self.render_element_background(
+                element,
+                colors,
+                &mut layers,
+                inherited_colors,
+                rounded_clip,
+            )?;
+            self.render_element_content(
+                element,
+                colors,
+                &mut layers,
+                inherited_colors,
+                rounded_clip,
+            )?;
         }
 
         if let ComputedElementContent::Children(kids) = &element.content {
+            let rounded_clip = rounded_clip_for_element(element).or(inherited_rounded_clip);
             for kid in kids {
-                self.render_element_impl(kid, gl_state, Some(colors), clip_rect)?;
+                self.render_element_impl(kid, gl_state, Some(colors), clip_rect, rounded_clip)?;
             }
         }
 
@@ -954,6 +1013,7 @@ impl super::TermWindow {
         colors: &ElementColors,
         layers: &mut TripleLayerQuadAllocator,
         inherited_colors: Option<&ElementColors>,
+        rounded_clip: Option<RoundedClip>,
     ) -> anyhow::Result<()> {
         let left = self.dimensions.pixel_width as f32 / -2.0;
         let top = self.dimensions.pixel_height as f32 / -2.0;
@@ -981,6 +1041,7 @@ impl super::TermWindow {
                                 pos_x + left + width as f32,
                                 pos_y + height as f32,
                             );
+                            self.apply_rounded_clip_to_quad(&mut quad, rounded_clip);
                             self.resolve_text(colors, inherited_colors).apply(&mut quad);
                             quad.set_texture(sprite.texture_coords());
                             quad.set_hsv(None);
@@ -1008,6 +1069,7 @@ impl super::TermWindow {
                                     pos_x + left + width,
                                     pos_y + height,
                                 );
+                                self.apply_rounded_clip_to_quad(&mut quad, rounded_clip);
                                 self.resolve_text(colors, inherited_colors).apply(&mut quad);
                                 quad.set_texture(texture.texture_coords());
                                 quad.set_has_color(glyph.has_color);
@@ -1029,12 +1091,32 @@ impl super::TermWindow {
                         euclid::size2(poly.width, poly.height),
                         LinearRgba::TRANSPARENT,
                     )?;
+                    self.apply_rounded_clip_to_quad(&mut quad, rounded_clip);
                     self.resolve_text(colors, inherited_colors).apply(&mut quad);
                 }
             }
             ComputedElementContent::Children(_) => {}
         }
         Ok(())
+    }
+
+    fn apply_rounded_clip_to_quad(
+        &self,
+        quad: &mut QuadImpl<'_>,
+        rounded_clip: Option<RoundedClip>,
+    ) {
+        let Some(rounded_clip) = rounded_clip else {
+            return;
+        };
+        let left_offset = self.dimensions.pixel_width as f32 / 2.0;
+        let top_offset = self.dimensions.pixel_height as f32 / 2.0;
+        quad.set_rounded_clip(
+            rounded_clip.rect.min_x() - left_offset,
+            rounded_clip.rect.min_y() - top_offset,
+            rounded_clip.rect.max_x() - left_offset,
+            rounded_clip.rect.max_y() - top_offset,
+            rounded_clip.radius,
+        );
     }
 
     fn resolve_text(
@@ -1105,6 +1187,7 @@ impl super::TermWindow {
         colors: &ElementColors,
         layers: &mut TripleLayerQuadAllocator,
         inherited_colors: Option<&ElementColors>,
+        rounded_clip: Option<RoundedClip>,
     ) -> anyhow::Result<()> {
         let mut top_left_width = 0.;
         let mut top_left_height = 0.;
@@ -1128,7 +1211,7 @@ impl super::TermWindow {
             bottom_right_height = c.bottom_right.height;
 
             if top_left_width > 0. && top_left_height > 0. {
-                self.poly_quad(
+                let mut quad = self.poly_quad(
                     layers,
                     0,
                     element.border_rect.origin,
@@ -1136,11 +1219,12 @@ impl super::TermWindow {
                     element.border.top as isize,
                     euclid::size2(top_left_width, top_left_height),
                     colors.border.top,
-                )?
-                .set_grayscale();
+                )?;
+                self.apply_rounded_clip_to_quad(&mut quad, rounded_clip);
+                quad.set_grayscale();
             }
             if top_right_width > 0. && top_right_height > 0. {
-                self.poly_quad(
+                let mut quad = self.poly_quad(
                     layers,
                     0,
                     euclid::point2(
@@ -1151,11 +1235,12 @@ impl super::TermWindow {
                     element.border.top as isize,
                     euclid::size2(top_right_width, top_right_height),
                     colors.border.top,
-                )?
-                .set_grayscale();
+                )?;
+                self.apply_rounded_clip_to_quad(&mut quad, rounded_clip);
+                quad.set_grayscale();
             }
             if bottom_left_width > 0. && bottom_left_height > 0. {
-                self.poly_quad(
+                let mut quad = self.poly_quad(
                     layers,
                     0,
                     euclid::point2(
@@ -1166,11 +1251,12 @@ impl super::TermWindow {
                     element.border.bottom as isize,
                     euclid::size2(bottom_left_width, bottom_left_height),
                     colors.border.bottom,
-                )?
-                .set_grayscale();
+                )?;
+                self.apply_rounded_clip_to_quad(&mut quad, rounded_clip);
+                quad.set_grayscale();
             }
             if bottom_right_width > 0. && bottom_right_height > 0. {
-                self.poly_quad(
+                let mut quad = self.poly_quad(
                     layers,
                     0,
                     euclid::point2(
@@ -1181,8 +1267,9 @@ impl super::TermWindow {
                     element.border.bottom as isize,
                     euclid::size2(bottom_right_width, bottom_right_height),
                     colors.border.bottom,
-                )?
-                .set_grayscale();
+                )?;
+                self.apply_rounded_clip_to_quad(&mut quad, rounded_clip);
+                quad.set_grayscale();
             }
 
             // Filling the background is more complex because we can't
@@ -1209,6 +1296,7 @@ impl super::TermWindow {
                 ),
                 LinearRgba::TRANSPARENT,
             )?;
+            self.apply_rounded_clip_to_quad(&mut quad, rounded_clip);
             self.resolve_bg(colors, inherited_colors).apply(&mut quad);
 
             // The `B` piece
@@ -1223,6 +1311,7 @@ impl super::TermWindow {
                 ),
                 LinearRgba::TRANSPARENT,
             )?;
+            self.apply_rounded_clip_to_quad(&mut quad, rounded_clip);
             self.resolve_bg(colors, inherited_colors).apply(&mut quad);
 
             // The `L` piece
@@ -1237,6 +1326,7 @@ impl super::TermWindow {
                 ),
                 LinearRgba::TRANSPARENT,
             )?;
+            self.apply_rounded_clip_to_quad(&mut quad, rounded_clip);
             self.resolve_bg(colors, inherited_colors).apply(&mut quad);
 
             // The `R` piece
@@ -1251,6 +1341,7 @@ impl super::TermWindow {
                 ),
                 LinearRgba::TRANSPARENT,
             )?;
+            self.apply_rounded_clip_to_quad(&mut quad, rounded_clip);
             self.resolve_bg(colors, inherited_colors).apply(&mut quad);
 
             // The `C` piece
@@ -1267,10 +1358,12 @@ impl super::TermWindow {
                 ),
                 LinearRgba::TRANSPARENT,
             )?;
+            self.apply_rounded_clip_to_quad(&mut quad, rounded_clip);
             self.resolve_bg(colors, inherited_colors).apply(&mut quad);
         } else if colors.bg != InheritableColor::Color(LinearRgba::TRANSPARENT) {
             let mut quad =
                 self.filled_rectangle(layers, 0, element.padding, LinearRgba::TRANSPARENT)?;
+            self.apply_rounded_clip_to_quad(&mut quad, rounded_clip);
             self.resolve_bg(colors, inherited_colors).apply(&mut quad);
         }
 
@@ -1280,7 +1373,7 @@ impl super::TermWindow {
         }
 
         if element.border.top > 0. && colors.border.top != LinearRgba::TRANSPARENT {
-            self.filled_rectangle(
+            let mut quad = self.filled_rectangle(
                 layers,
                 0,
                 euclid::rect(
@@ -1291,9 +1384,10 @@ impl super::TermWindow {
                 ),
                 colors.border.top,
             )?;
+            self.apply_rounded_clip_to_quad(&mut quad, rounded_clip);
         }
         if element.border.bottom > 0. && colors.border.bottom != LinearRgba::TRANSPARENT {
-            self.filled_rectangle(
+            let mut quad = self.filled_rectangle(
                 layers,
                 0,
                 euclid::rect(
@@ -1304,9 +1398,10 @@ impl super::TermWindow {
                 ),
                 colors.border.bottom,
             )?;
+            self.apply_rounded_clip_to_quad(&mut quad, rounded_clip);
         }
         if element.border.left > 0. && colors.border.left != LinearRgba::TRANSPARENT {
-            self.filled_rectangle(
+            let mut quad = self.filled_rectangle(
                 layers,
                 0,
                 euclid::rect(
@@ -1317,9 +1412,10 @@ impl super::TermWindow {
                 ),
                 colors.border.left,
             )?;
+            self.apply_rounded_clip_to_quad(&mut quad, rounded_clip);
         }
         if element.border.right > 0. && colors.border.right != LinearRgba::TRANSPARENT {
-            self.filled_rectangle(
+            let mut quad = self.filled_rectangle(
                 layers,
                 0,
                 euclid::rect(
@@ -1330,6 +1426,7 @@ impl super::TermWindow {
                 ),
                 colors.border.right,
             )?;
+            self.apply_rounded_clip_to_quad(&mut quad, rounded_clip);
         }
 
         Ok(())

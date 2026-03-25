@@ -4,7 +4,7 @@
 // internals. They live here so `chatminal-runtime` is the single source of truth for
 // workspace state without depending on `desktop_host_runtime::session_engine`.
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
@@ -201,6 +201,28 @@ impl WorkspaceLayoutState {
         .expect("active view must exist before ensuring session view")
     }
 
+    pub fn grouped_sessions(session_ids: &[String]) -> Option<Self> {
+        let (anchor_session_id, rest) = session_ids.split_first()?;
+        let mut layout = Self::new_single(anchor_session_id.clone());
+        let anchor_view_id = layout.active_view_id;
+        let mut pending = VecDeque::from([(anchor_view_id, 0usize)]);
+
+        for session_id in rest {
+            let (target_view_id, depth) = pending.pop_front()?;
+            let axis = if depth % 2 == 0 {
+                WorkspaceSplitAxis::Vertical
+            } else {
+                WorkspaceSplitAxis::Horizontal
+            };
+            let new_view_id = layout.split_view(target_view_id, axis, session_id.clone())?;
+            pending.push_back((target_view_id, depth + 1));
+            pending.push_back((new_view_id, depth + 1));
+        }
+
+        let _ = layout.focus_view(anchor_view_id);
+        Some(layout)
+    }
+
     pub fn retain_sessions<'a, I>(&mut self, valid_session_ids: I) -> bool
     where
         I: IntoIterator<Item = &'a str>,
@@ -322,11 +344,7 @@ fn rebuild_node(
     }
 }
 
-fn collect_rebuilt(
-    rebuilt: &RebuiltNode,
-    nodes: &mut Vec<WorkspaceLayoutNodeSnapshot>,
-    views: &mut Vec<SessionViewSnapshot>,
-) {
+fn collect_rebuilt(rebuilt: &RebuiltNode, nodes: &mut Vec<WorkspaceLayoutNodeSnapshot>, views: &mut Vec<SessionViewSnapshot>) {
     match rebuilt {
         RebuiltNode::View(view, node_id) => {
             nodes.push(WorkspaceLayoutNodeSnapshot {
@@ -556,4 +574,25 @@ mod tests {
             crate::WorkspaceLayoutNodeKind::Split { ratio: 700, .. }
         ));
     }
+
+    #[test]
+    fn grouped_sessions_builds_balanced_join_layout() {
+        let sessions = vec![
+            "session-a".to_string(),
+            "session-b".to_string(),
+            "session-c".to_string(),
+            "session-d".to_string(),
+        ];
+        let layout = WorkspaceLayoutState::grouped_sessions(&sessions).expect("grouped layout");
+
+        assert_eq!(layout.views.len(), 4);
+        assert_eq!(
+            layout.view(layout.active_view_id).expect("active view").session_id,
+            "session-a"
+        );
+        assert!(layout.view_for_session("session-b").is_some());
+        assert!(layout.view_for_session("session-c").is_some());
+        assert!(layout.view_for_session("session-d").is_some());
+    }
+
 }

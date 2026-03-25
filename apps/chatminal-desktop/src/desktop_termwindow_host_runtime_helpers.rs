@@ -145,15 +145,51 @@ impl TermWindow {
         self.perform_key_assignment(&pane, assignment).map(|_| ())
     }
 
-    fn focus_active_session_terminal_instance(&self, pane: &Arc<dyn OverlayPane>) -> bool {
+    fn focus_active_session_terminal_instance(&mut self, pane: &Arc<dyn OverlayPane>) -> bool {
         if !self.chatminal_sidebar.is_enabled() {
             return false;
         }
-        crate::chatminal_runtime::desktop_focus_session_terminal_handle(
+        let terminal_handle =
+            crate::chatminal_runtime::SessionTerminalHandle::new(pane.pane_id() as u64);
+        let focused = crate::chatminal_runtime::desktop_focus_session_terminal_handle(
             self.window_id as DesktopWindowId,
-            crate::chatminal_runtime::SessionTerminalHandle::new(pane.pane_id() as u64),
+            terminal_handle,
         )
-        .is_some()
+        .is_some();
+        if focused {
+            log::warn!(
+                "focus_active_session_terminal_instance: pane={} resolved_via_handle_focus",
+                terminal_handle.as_u64()
+            );
+            if let Some(binding) = crate::chatminal_runtime::desktop_session_terminal_binding(
+                self.window_id as DesktopWindowId,
+                terminal_handle,
+            ) {
+                if let Err(err) = crate::chatminal_runtime::notify_runtime_session_activated(
+                    &binding.session_id,
+                    binding.runtime_id,
+                ) {
+                    log::error!(
+                        "failed to notify runtime bridge about pane-focus activation: {err}"
+                    );
+                }
+                self.chatminal_sidebar
+                    .set_active_session_local(&binding.session_id);
+                self.chatminal_sidebar
+                    .set_session_status_local(&binding.session_id, "running");
+                self.chatminal_sidebar
+                    .select_single_session(&binding.session_id);
+            }
+            return true;
+        }
+        let Some(session_id) = crate::chatminal_runtime::desktop_session_id_for_terminal_handle(
+            self.window_id as DesktopWindowId,
+            terminal_handle,
+        ) else {
+            return false;
+        };
+        self.activate_chatminal_session_target(&session_id, None)
+            .is_some()
     }
 
     fn focus_terminal_handle(&self, pane: &Arc<dyn OverlayPane>) -> bool {
@@ -355,7 +391,7 @@ impl TermWindow {
         crate::desktop_host_runtime::host_rotate_render_scope_terminals(render_scope_id, direction)
     }
 
-    pub(crate) fn activate_terminal_handle_in_active_runtime(&self, terminal_handle: TerminalUiKey) -> bool {
+    pub(crate) fn activate_terminal_handle_in_active_runtime(&mut self, terminal_handle: TerminalUiKey) -> bool {
         if self.chatminal_sidebar.is_enabled() {
             return self
                 .resolve_terminal_handle(terminal_handle)

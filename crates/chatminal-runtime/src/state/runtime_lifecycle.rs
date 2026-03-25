@@ -3,8 +3,9 @@ use std::sync::mpsc as std_mpsc;
 use chatminal_store::{StoredSession, StoredSessionStatus};
 
 use super::{
-    RuntimeState, SessionEntry, SessionSpawnPlan, StateInner, kill_runtime_handle, now_millis,
-    runtime_bridge::RuntimeHandle, snapshot_requires_run_boundary, snapshot_trailing_fragment,
+    RuntimeState, SessionEntry, SessionSpawnPlan, StateInner, kill_runtime_handle,
+    normalize_session_snapshot, now_millis, runtime_bridge::RuntimeHandle,
+    snapshot_requires_run_boundary, snapshot_trailing_fragment,
 };
 use crate::api::{
     RuntimeEvent, RuntimeSessionStatus, RuntimeSessionUpdatedEvent, RuntimeWorkspaceUpdatedEvent,
@@ -142,10 +143,12 @@ impl RuntimeState {
                         SpawnCommitOutcome::Stale
                     }
                     Some(_) => {
-                        let snapshot = inner
-                            .store
-                            .session_snapshot(&plan.session_id, 1)
-                            .map_err(|err| err.to_string())?;
+                        let snapshot = normalize_session_snapshot(
+                            inner
+                                .store
+                                .session_snapshot(&plan.session_id, 1)
+                                .map_err(|err| err.to_string())?,
+                        );
                         let prepend_run_boundary_on_next_output =
                             snapshot_requires_run_boundary(&snapshot);
                         let restored_trailing_fragment = snapshot_trailing_fragment(&snapshot);

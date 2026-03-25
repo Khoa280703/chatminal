@@ -42,6 +42,7 @@ use crate::chatminal_runtime::overlay_compat::{
 };
 
 const EVENT_POLL_TIMEOUT: Duration = Duration::from_millis(50);
+const DISPLAY_RESET_FLASH_DURATION: Duration = Duration::from_millis(75);
 
 #[derive(Clone)]
 struct SessionPaneWriter {
@@ -91,6 +92,7 @@ pub(crate) struct ChatminalSessionPane {
     runtime_id: RuntimeId,
     terminal_instance_id: TerminalInstanceId,
     shared: Arc<SessionEngineShared>,
+    display_state: Mutex<()>,
     parser: Mutex<EscapeParser>,
     terminal: Mutex<Terminal>,
     writer: Mutex<SessionPaneWriter>,
@@ -115,6 +117,7 @@ impl ChatminalSessionPane {
             runtime_id,
             terminal_instance_id,
             shared,
+            display_state: Mutex::new(()),
             parser: Mutex::new(EscapeParser::new()),
             terminal: Mutex::new(Terminal::new(
                 size,
@@ -137,6 +140,68 @@ impl ChatminalSessionPane {
         if let Some(replay) = self.shared.replay_output(self.terminal_instance_id) {
             self.apply_output(&replay);
         }
+    }
+
+    fn reset_display_state_and_replay(&self) {
+        let _display_state = self.display_state.lock();
+        let replay = self.shared.replay_output(self.terminal_instance_id);
+        let mut parser = self.parser.lock();
+        let mut terminal = self.terminal.lock();
+
+        *parser = EscapeParser::new();
+        terminal.perform_actions(vec![Action::Esc(termwiz::escape::Esc::Code(
+            termwiz::escape::EscCode::FullReset,
+        ))]);
+
+        if let Some(replay) = replay.as_deref() {
+            let replay_actions = parse_output_actions(&mut parser, replay.as_bytes());
+            if !replay_actions.is_empty() {
+                terminal.perform_actions(replay_actions);
+            }
+        }
+
+        HostMux::get().notify(crate::chatminal_runtime::RuntimeNotification::PaneOutput(
+            self.pane_id,
+        ));
+    }
+
+    pub(crate) fn reset_display_state_with_flash(self: &Arc<Self>) {
+        let pane = Arc::clone(self);
+        thread::spawn(move || {
+            let replay = pane.shared.replay_output(pane.terminal_instance_id);
+            let _display_state = pane.display_state.lock();
+
+            {
+                let mut parser = pane.parser.lock();
+                let mut terminal = pane.terminal.lock();
+                *parser = EscapeParser::new();
+                terminal.perform_actions(vec![Action::Esc(termwiz::escape::Esc::Code(
+                    termwiz::escape::EscCode::FullReset,
+                ))]);
+            }
+
+            HostMux::get().notify(crate::chatminal_runtime::RuntimeNotification::PaneOutput(
+                pane.pane_id,
+            ));
+
+            thread::sleep(DISPLAY_RESET_FLASH_DURATION);
+
+            let replay_actions = {
+                let mut parser = pane.parser.lock();
+                replay
+                    .as_deref()
+                    .map(|replay| parse_output_actions(&mut parser, replay.as_bytes()))
+                    .unwrap_or_default()
+            };
+
+            if !replay_actions.is_empty() {
+                pane.terminal.lock().perform_actions(replay_actions);
+            }
+
+            HostMux::get().notify(crate::chatminal_runtime::RuntimeNotification::PaneOutput(
+                pane.pane_id,
+            ));
+        });
     }
 
     fn spawn_event_loop(self: &Arc<Self>) -> anyhow::Result<()> {
@@ -215,6 +280,7 @@ impl ChatminalSessionPane {
     }
 
     fn apply_output(&self, message: &str) {
+        let _display_state = self.display_state.lock();
         let actions = {
             let mut parser = self.parser.lock();
             parse_output_actions(&mut parser, message.as_bytes())
@@ -277,7 +343,9 @@ mod parser_tests {
     }
 }
 
-fn pane_id_for_terminal_instance(terminal_instance_id: TerminalInstanceId) -> HostTerminalHandle {
+pub(crate) fn pane_id_for_terminal_instance(
+    terminal_instance_id: TerminalInstanceId,
+) -> HostTerminalHandle {
     usize::try_from(terminal_instance_id.as_u64()).unwrap_or_else(|_| alloc_host_terminal_handle())
 }
 
@@ -391,6 +459,9 @@ impl HostTerminal for ChatminalSessionPane {
     }
     fn perform_actions(&self, actions: Vec<Action>) {
         self.terminal.lock().perform_actions(actions)
+    }
+    fn reset_display_state(&self) {
+        self.reset_display_state_and_replay();
     }
     fn is_dead(&self) -> bool {
         *self.dead.lock()
@@ -510,7 +581,37 @@ fn decode_input_payload_chunks(pending: &mut Vec<u8>, payload: &[u8]) -> Vec<Str
 
 #[cfg(test)]
 mod tests {
-    use super::decode_input_payload_chunks;
+    use std::sync::mpsc;
+    use std::sync::{Arc, Mutex};
+
+    use portable_pty::CommandBuilder;
+
+    use super::super::session_engine::{
+        LayoutNodeId, RuntimeId, SessionCoreState, SessionEngineShared, SessionLayoutSnapshot,
+        TerminalInstanceId,
+    };
+    use super::super::{build_initial_host_mux, shutdown_host_mux};
+    use super::{
+        Action, ChatminalSessionPane, HostTerminal, TerminalSize, decode_input_payload_chunks,
+    };
+
+    fn shell_command(script: &str) -> CommandBuilder {
+        let mut command = CommandBuilder::new("/bin/sh");
+        command.arg("-lc");
+        command.arg(script);
+        command
+    }
+
+    fn rendered_text(pane: &ChatminalSessionPane) -> String {
+        let terminal = pane.terminal.lock();
+        terminal
+            .screen()
+            .lines_in_phys_range(0..terminal.screen().scrollback_rows())
+            .iter()
+            .map(|line| line.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 
     #[test]
     fn decode_input_payload_chunks_keeps_partial_utf8_until_complete() {
@@ -518,5 +619,78 @@ mod tests {
         assert!(decode_input_payload_chunks(&mut pending, &[0xE1, 0xBB]).is_empty());
         let chunks = decode_input_payload_chunks(&mut pending, &[0x8B, b'a']);
         assert_eq!(chunks, vec!["ịa".to_string()]);
+    }
+
+    #[test]
+    fn reset_display_state_replays_existing_output_immediately() {
+        build_initial_host_mux(&config::configuration(), None, None).expect("init host mux");
+        let runtime_id = RuntimeId::new(7);
+        let terminal_instance_id = TerminalInstanceId::new(11);
+        let core_state = Arc::new(Mutex::new(SessionCoreState::default()));
+        core_state.lock().unwrap().sync_runtime_layout(
+            "session-a",
+            runtime_id,
+            &SessionLayoutSnapshot::single_terminal_instance(
+                LayoutNodeId::new(1),
+                terminal_instance_id,
+                None,
+            ),
+        );
+        let shared = Arc::new(SessionEngineShared::new(Arc::clone(&core_state)));
+        let (events_tx, _events_rx) = mpsc::sync_channel(32);
+
+        shared
+            .leaf_runtimes()
+            .spawn_for_runtime(
+                &core_state,
+                "session-a",
+                1,
+                runtime_id,
+                terminal_instance_id,
+                shell_command("sleep 1"),
+                chatminal_terminal_core::TerminalSize {
+                    rows: 12,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                    dpi: 96,
+                },
+                Some("restored-line-1\nrestored-line-2\n".to_string()),
+                events_tx,
+            )
+            .expect("spawn runtime");
+
+        let pane = ChatminalSessionPane::new(
+            Arc::clone(&shared),
+            1,
+            "session-a".to_string(),
+            runtime_id,
+            terminal_instance_id,
+            TerminalSize {
+                rows: 12,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+                dpi: 96,
+            },
+        )
+        .expect("create pane");
+
+        let initial = rendered_text(&pane);
+        assert!(initial.contains("restored-line-1"));
+        assert!(initial.contains("restored-line-2"));
+
+        pane.perform_actions(vec![Action::Esc(termwiz::escape::Esc::Code(
+            termwiz::escape::EscCode::FullReset,
+        ))]);
+        let cleared = rendered_text(&pane);
+        assert!(!cleared.contains("restored-line-1"));
+
+        pane.reset_display_state();
+        let restored = rendered_text(&pane);
+        assert!(restored.contains("restored-line-1"));
+        assert!(restored.contains("restored-line-2"));
+
+        shutdown_host_mux();
     }
 }

@@ -1,6 +1,9 @@
 use chatminal_store::StoredSessionStatus;
 
-use super::{RuntimeState, prepend_run_boundary, trim_live_output};
+use super::{
+    RuntimeState, prepend_run_boundary, strip_duplicate_restored_prompt_prefix,
+    strip_zsh_prompt_spacer_artifact, trim_live_output,
+};
 use crate::api::{
     RuntimeEvent, RuntimePtyErrorEvent, RuntimePtyExitedEvent, RuntimePtyOutputEvent,
 };
@@ -30,15 +33,27 @@ impl RuntimeState {
                         return;
                     }
                     if entry.prepend_run_boundary_on_next_output && !output_chunk.is_empty() {
-                        let duplicate_restored_fragment = entry
+                        let stripped_duplicate_prompt = entry
                             .restored_trailing_fragment
                             .as_deref()
-                            == Some(output_chunk.as_str());
-                        output_chunk = prepend_run_boundary(&output_chunk);
-                        entry.prepend_run_boundary_on_next_output = false;
-                        entry.restored_trailing_fragment = None;
-                        if duplicate_restored_fragment {
-                            return;
+                            .and_then(|fragment| {
+                                strip_duplicate_restored_prompt_prefix(fragment, &output_chunk)
+                            });
+                        if let Some(stripped_chunk) = stripped_duplicate_prompt {
+                            if stripped_chunk.is_empty() {
+                                // Keep the restore-dedupe state armed until we see either
+                                // real output or a prompt-prefixed chunk that carries new
+                                // content. Some shells redraw the prompt multiple times
+                                // immediately after startup/restore.
+                                return;
+                            }
+                            entry.prepend_run_boundary_on_next_output = false;
+                            entry.restored_trailing_fragment = None;
+                            output_chunk = prepend_run_boundary(&stripped_chunk);
+                        } else {
+                            entry.prepend_run_boundary_on_next_output = false;
+                            entry.restored_trailing_fragment = None;
+                            output_chunk = prepend_run_boundary(&output_chunk);
                         }
                     } else if !output_chunk.is_empty() {
                         entry.restored_trailing_fragment = None;
@@ -77,10 +92,11 @@ impl RuntimeState {
                         }));
                     }
                     if persist_history {
+                        let persisted_chunk = strip_zsh_prompt_spacer_artifact(&output_chunk);
                         if let Err(err) =
                             inner
                                 .store
-                                .append_scrollback_chunk(&session_id, seq, &output_chunk, ts)
+                                .append_scrollback_chunk(&session_id, seq, &persisted_chunk, ts)
                         {
                             inner.broadcast_event(RuntimeEvent::PtyError(RuntimePtyErrorEvent {
                                 session_id: session_id.clone(),

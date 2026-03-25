@@ -77,6 +77,10 @@ impl crate::TermWindow {
     }
 
     pub(super) fn layout_positioned_panes(&self) -> Vec<TerminalPaneLayout> {
+        // Render/layout pass must stay side-effect free: it may project runtime/overlay
+        // snapshots into UI geometry, but it must not mutate the underlying PTY/terminal.
+        // Resizing a live pane from here can emit terminal redraws during paint and make
+        // interactive input appear to "disappear" as shells repaint their prompt.
         let mut panes = Vec::new();
         let cell_width = self.render_metrics.cell_size.width.max(0) as usize;
         let cell_height = self.render_metrics.cell_size.height.max(0) as usize;
@@ -191,6 +195,15 @@ impl crate::TermWindow {
             target.node_id,
             ratio,
         )?;
+        // Divider drag mutates only the persisted workspace ratio. We must eagerly
+        // push the derived per-session terminal sizes as part of the same gesture;
+        // otherwise pane viewports/scroll regions stay at the prior size until some
+        // later action (such as switching sessions) happens to refresh them.
+        let _ = crate::chatminal_runtime::desktop_resize_visible_sessions(
+            self.window_id as DesktopWindowId,
+            self.terminal_size,
+        );
+        self.resize_overlays();
         self.workspace_split_targets()
             .into_iter()
             .find(|candidate| candidate.node_id == target.node_id)
@@ -418,6 +431,8 @@ fn map_render_pane_geometry(
     cell_width: usize,
     cell_height: usize,
 ) -> RenderPaneGeometry {
+    // Pure projection only. Any lifecycle mutation such as PTY resize belongs in
+    // activation/window-resize/layout-commit paths, never in layout paint.
     let source_cols = source_size.cols.max(1);
     let source_rows = source_size.rows.max(1);
     let width = map_span(render_pane.left, render_pane.width, source_cols, target.width);

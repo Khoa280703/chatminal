@@ -19,8 +19,12 @@ use crate::api::{RuntimeSessionBridgeAction, RuntimeSessionLookup as RuntimeOwne
 use crate::session::{InputWriteStats, WriteInputError};
 use crate::workspace_ids::{RuntimeId, TerminalInstanceId};
 use crate::workspace_layout::WorkspaceLayoutRegistry;
+use chatminal_store::StoredSessionStatus;
 
-use super::{RuntimeState, StateInner};
+use super::{
+    RuntimeState, StateInner, normalize_session_snapshot, snapshot_requires_run_boundary,
+    snapshot_trailing_fragment,
+};
 
 // ─── handle ────────────────────────────────────────────────────────────────
 
@@ -140,6 +144,14 @@ impl RuntimeState {
     ) -> Option<(RuntimeId, TerminalInstanceId)> {
         self.execution.attachment(session_id)
     }
+
+    pub fn mark_session_running_and_publish(&self, session_id: &str) -> Result<(), String> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|_| "state lock poisoned".to_string())?;
+        inner.mark_session_running_and_publish(session_id)
+    }
 }
 
 impl StateInner {
@@ -156,6 +168,28 @@ impl StateInner {
         self.store
             .set_active_session(profile_id, Some(session_id))?;
         self.publish_session_and_workspace_updated(session_id);
+        Ok(())
+    }
+
+    pub(super) fn mark_session_running_and_publish(
+        &mut self,
+        session_id: &str,
+    ) -> Result<(), String> {
+        let snapshot = normalize_session_snapshot(self.store.session_snapshot(session_id, 1)?);
+        let prepend_run_boundary_on_next_output = snapshot_requires_run_boundary(&snapshot);
+        let restored_trailing_fragment = snapshot_trailing_fragment(&snapshot);
+        let Some(entry) = self.sessions.get_mut(session_id) else {
+            return Err("session not found".to_string());
+        };
+        if entry.session.status == StoredSessionStatus::Running {
+            return Ok(());
+        }
+        entry.session.status = StoredSessionStatus::Running;
+        entry.prepend_run_boundary_on_next_output = prepend_run_boundary_on_next_output;
+        entry.restored_trailing_fragment = restored_trailing_fragment;
+        self.store
+            .set_session_status(session_id, StoredSessionStatus::Running)?;
+        self.publish_session_updated_for(session_id);
         Ok(())
     }
 }

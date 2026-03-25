@@ -17,13 +17,52 @@ pub(crate) fn spawn_reader_loop(
 ) {
     thread::spawn(move || {
         let mut buffer = vec![0u8; 64 * 1024];
+        let mut restored_prompt_fragment = spawn
+            .initial_scrollback
+            .as_deref()
+            .and_then(snapshot_trailing_fragment)
+            .filter(|fragment| looks_like_shell_prompt_fragment(fragment));
+        let mut last_visible_prompt = restored_prompt_fragment
+            .as_deref()
+            .map(visible_terminal_fragment)
+            .filter(|visible| !visible.is_empty());
         loop {
             match reader.read(&mut buffer) {
                 Ok(0) => break,
                 Ok(read) => {
-                    let sanitized = sanitize_zsh_prompt_spacer(&buffer[..read]);
-                    terminal.lock().unwrap().advance_bytes(&sanitized);
-                    let chunk = String::from_utf8_lossy(&sanitized).to_string();
+                    let raw_chunk = String::from_utf8_lossy(&buffer[..read]).to_string();
+                    let mut chunk = raw_chunk.clone();
+                    if let Some(restored) = restored_prompt_fragment.as_deref() {
+                        if visible_terminal_fragment(&chunk).is_empty() {
+                            // Keep prompt-dedupe armed across pure control-sequence chunks.
+                        } else if let Some(stripped) =
+                            strip_duplicate_restored_prompt_prefix(restored, &chunk)
+                        {
+                            if stripped.is_empty() {
+                                continue;
+                            }
+                            chunk = stripped;
+                            restored_prompt_fragment = None;
+                        } else {
+                            restored_prompt_fragment = None;
+                        }
+                    }
+
+                    let visible = visible_terminal_fragment(&chunk);
+                    if visible.is_empty() {
+                        if chunk.contains('\r') || chunk.contains('\n') {
+                            last_visible_prompt = None;
+                        }
+                    } else if looks_like_shell_prompt_fragment(&chunk) {
+                        if last_visible_prompt.as_deref() == Some(visible.as_str()) {
+                            continue;
+                        }
+                        last_visible_prompt = Some(visible);
+                    } else {
+                        last_visible_prompt = None;
+                    }
+
+                    terminal.lock().unwrap().advance_bytes(chunk.as_bytes());
                     output_history.lock().unwrap().push(chunk.clone());
                     let _ = events.send(TerminalInstanceRuntimeEvent::Output {
                         session_id: spawn.session_id.clone(),
@@ -141,9 +180,179 @@ pub(crate) fn sanitize_zsh_prompt_spacer(bytes: &[u8]) -> Vec<u8> {
     out
 }
 
+fn snapshot_trailing_fragment(content: &str) -> Option<String> {
+    if content.is_empty() || content.ends_with('\n') || content.ends_with('\r') {
+        return None;
+    }
+
+    let cut = content
+        .rfind(['\n', '\r'])
+        .map(|index| index.saturating_add(1))
+        .unwrap_or(0);
+    let fragment = content[cut..].to_string();
+    (!fragment.is_empty()).then_some(fragment)
+}
+
+fn visible_terminal_fragment(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\x1b' => {
+                i += 1;
+                match bytes.get(i).copied() {
+                    Some(b'[') => {
+                        i += 1;
+                        while i < bytes.len() {
+                            let byte = bytes[i];
+                            i += 1;
+                            if (0x40..=0x7e).contains(&byte) {
+                                break;
+                            }
+                        }
+                    }
+                    Some(b']') => {
+                        i += 1;
+                        while i < bytes.len() {
+                            match bytes[i] {
+                                0x07 => {
+                                    i += 1;
+                                    break;
+                                }
+                                0x1b if bytes.get(i + 1) == Some(&b'\\') => {
+                                    i += 2;
+                                    break;
+                                }
+                                _ => i += 1,
+                            }
+                        }
+                    }
+                    Some(_) => {
+                        i += 1;
+                    }
+                    None => break,
+                }
+            }
+            b'\r' | b'\n' => {
+                i += 1;
+            }
+            byte if byte.is_ascii_control() => {
+                i += 1;
+            }
+            byte => {
+                out.push(byte);
+                i += 1;
+            }
+        }
+    }
+
+    String::from_utf8_lossy(&out).to_string()
+}
+
+fn looks_like_shell_prompt_fragment(value: &str) -> bool {
+    let visible = visible_terminal_fragment(value);
+    if !visible.ends_with(' ') {
+        return false;
+    }
+    let trimmed = visible.trim_end();
+    if trimmed.is_empty() {
+        return false;
+    }
+    match trimmed.chars().last() {
+        Some('%') => trimmed.contains('@') || trimmed.contains('~'),
+        Some('$') | Some('#') => {
+            trimmed.contains('@')
+                || trimmed.starts_with("PS ")
+                || trimmed.contains(":~")
+                || trimmed.contains(":/")
+                || trimmed.contains(":\\")
+        }
+        Some('>') => trimmed.starts_with("PS ") || trimmed.contains('@'),
+        _ => false,
+    }
+}
+
+fn visible_prefix_end_for_fragment(chunk: &str, expected_visible: &str) -> Option<usize> {
+    let expected_chars: Vec<char> = expected_visible.chars().collect();
+    if expected_chars.is_empty() {
+        return None;
+    }
+
+    let chars: Vec<(usize, char)> = chunk.char_indices().collect();
+    let mut idx = 0usize;
+    let mut matched = 0usize;
+    while idx < chars.len() {
+        let (byte_idx, ch) = chars[idx];
+        if ch == '\u{1b}' {
+            idx += 1;
+            if idx >= chars.len() {
+                break;
+            }
+            match chars[idx].1 {
+                '[' => {
+                    idx += 1;
+                    while idx < chars.len() {
+                        let c = chars[idx].1;
+                        idx += 1;
+                        if ('@'..='~').contains(&c) {
+                            break;
+                        }
+                    }
+                }
+                ']' => {
+                    idx += 1;
+                    while idx < chars.len() {
+                        let c = chars[idx].1;
+                        idx += 1;
+                        if c == '\u{7}' {
+                            break;
+                        }
+                        if c == '\u{1b}' && idx < chars.len() && chars[idx].1 == '\\' {
+                            idx += 1;
+                            break;
+                        }
+                    }
+                }
+                _ => {
+                    idx += 1;
+                }
+            }
+            continue;
+        }
+
+        idx += 1;
+        if ch == '\r' || ch == '\n' || ch.is_control() {
+            continue;
+        }
+        if expected_chars.get(matched) != Some(&ch) {
+            return None;
+        }
+        matched += 1;
+        if matched == expected_chars.len() {
+            return Some(byte_idx + ch.len_utf8());
+        }
+    }
+
+    None
+}
+
+fn strip_duplicate_restored_prompt_prefix(restored: &str, chunk: &str) -> Option<String> {
+    let expected_visible = visible_terminal_fragment(restored);
+    if !looks_like_shell_prompt_fragment(restored) {
+        return None;
+    }
+    let prefix_end = visible_prefix_end_for_fragment(chunk, &expected_visible)?;
+    Some(chunk[prefix_end..].to_string())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::sanitize_zsh_prompt_spacer;
+    use super::{
+        looks_like_shell_prompt_fragment, sanitize_zsh_prompt_spacer, snapshot_trailing_fragment,
+        strip_duplicate_restored_prompt_prefix,
+    };
 
     #[test]
     fn strips_zsh_prompt_spacer_artifact() {
@@ -157,5 +366,32 @@ mod tests {
         let raw = b"\r\r\x1b[0m\x1b[27m\x1b[24m\x1b[Juser@host % ";
         let sanitized = sanitize_zsh_prompt_spacer(raw);
         assert_eq!(sanitized, raw);
+    }
+
+    #[test]
+    fn extracts_snapshot_trailing_prompt_fragment() {
+        assert_eq!(
+            snapshot_trailing_fragment("echo hi\nuser@host ~ % "),
+            Some("user@host ~ % ".to_string())
+        );
+        assert_eq!(snapshot_trailing_fragment("echo hi\n"), None);
+    }
+
+    #[test]
+    fn strips_duplicate_prompt_redraw_prefix_from_runtime_chunk() {
+        let stripped = strip_duplicate_restored_prompt_prefix(
+            "user@host ~ % ",
+            "\r\x1b[0m\x1b[27m\x1b[24m\x1b[Juser@host ~ % ",
+        )
+        .expect("prompt prefix stripped");
+        assert_eq!(stripped, "");
+    }
+
+    #[test]
+    fn prompt_like_fragment_detection_matches_real_shell_prompt() {
+        assert!(looks_like_shell_prompt_fragment(
+            "\r\x1b[0m\x1b[27m\x1b[24m\x1b[Juser@host ~ % \x1b[K"
+        ));
+        assert!(!looks_like_shell_prompt_fragment("command output\n"));
     }
 }

@@ -244,7 +244,7 @@ impl TermWindow {
             }
         }
 
-        let dims = pane.get_dimensions();
+        let dims = self.renderable_dimensions_for_pane(pane);
 
         // Scroll viewport when mouse mouves out of its vertical bounds
         if position.row == 0 && position.y_pixel_offset < 0 {

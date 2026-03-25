@@ -1,4 +1,26 @@
 impl TermWindow {
+    pub fn renderable_dimensions_for_pane(
+        &self,
+        pane: &Arc<dyn OverlayPane>,
+    ) -> RenderableDimensions {
+        let dims = pane.get_dimensions();
+        let Some(layout) = self
+            .get_panes_to_render()
+            .into_iter()
+            .find(|pos| pos.pane.pane_id() == pane.pane_id())
+        else {
+            return dims;
+        };
+
+        RenderableDimensions {
+            cols: layout.width.max(1).min(dims.cols.max(1)),
+            viewport_rows: layout.height.max(1).min(dims.viewport_rows.max(1)),
+            pixel_width: layout.pixel_width.max(1).min(dims.pixel_width.max(1)),
+            pixel_height: layout.pixel_height.max(1).min(dims.pixel_height.max(1)),
+            ..dims
+        }
+    }
+
     pub fn terminal_ui_state(&self, pane_id: TerminalUiKey) -> RefMut<'_, TerminalUiState> {
         RefMut::map(self.terminal_ui_state_by_handle.borrow_mut(), |state| {
             state.entry(pane_id).or_insert_with(TerminalUiState::default)
@@ -21,9 +43,9 @@ impl TermWindow {
             }
         }
         for (pane_id, state) in self.terminal_ui_state_by_handle.borrow().iter() {
-            if let Some(overlay) = state.overlay.as_ref().map(|o| &o.pane) {
+                if let Some(overlay) = state.overlay.as_ref().map(|o| &o.pane) {
                 if let Some(pane) = self.terminal_handle_arc(*pane_id) {
-                    let dims = pane.get_dimensions();
+                    let dims = self.renderable_dimensions_for_pane(&pane);
                     overlay
                         .resize(TerminalSize {
                             cols: dims.cols,
@@ -87,7 +109,7 @@ impl TermWindow {
     }
 
     fn scroll_to_top(&mut self, pane: &Arc<dyn OverlayPane>) {
-        let dims = pane.get_dimensions();
+        let dims = self.renderable_dimensions_for_pane(pane);
         self.set_viewport(pane.pane_id() as u64, Some(dims.scrollback_top), dims);
     }
 

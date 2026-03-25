@@ -30,6 +30,19 @@ struct PanePixelRects {
     content_top: f32,
 }
 
+fn clamp_renderable_dimensions_to_layout(
+    dims: RenderableDimensions,
+    pos: &TerminalPaneLayout,
+) -> RenderableDimensions {
+    RenderableDimensions {
+        cols: pos.width.max(1).min(dims.cols.max(1)),
+        viewport_rows: pos.height.max(1).min(dims.viewport_rows.max(1)),
+        pixel_width: pos.pixel_width.max(1).min(dims.pixel_width.max(1)),
+        pixel_height: pos.pixel_height.max(1).min(dims.pixel_height.max(1)),
+        ..dims
+    }
+}
+
 impl crate::TermWindow {
     fn pane_pixel_rects(&self, pos: &TerminalPaneLayout) -> PanePixelRects {
         let sb = self.shell_bounds();
@@ -147,7 +160,7 @@ impl crate::TermWindow {
 
         let pane_id = pos.pane.pane_id() as u64;
         let current_viewport = self.get_viewport(pane_id);
-        let dims = pos.pane.get_dimensions();
+        let dims = clamp_renderable_dimensions_to_layout(pos.pane.get_dimensions(), pos);
 
         let gl_state = self.render_state.as_ref().unwrap();
 
@@ -453,7 +466,7 @@ impl crate::TermWindow {
                         cursor,
                         shape_hash,
                         top_pixel_y: NotNan::new(self.top_pixel_y).unwrap()
-                            + (line_idx + self.pos.top) as f32
+                            + line_idx as f32
                                 * self.term_window.render_metrics.cell_size.height as f32,
                         left_pixel_x: NotNan::new(self.left_pixel_x).unwrap(),
                         phys_line_idx: line_idx,

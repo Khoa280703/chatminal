@@ -8,9 +8,9 @@ use chatminal_runtime::{RuntimeCreatedSession, RuntimeProfile, RuntimeWorkspace}
 
 use crate::chatminal_runtime::DESKTOP_LAYOUT_WORKSPACE_ID;
 use crate::chatminal_runtime::{
-    activate_runtime_session, close_runtime_session, create_runtime_profile,
-    create_runtime_session, desktop_workspace_subscribe, load_desktop_sidebar_sessions_from_store,
-    move_runtime_session_to_profile, rename_runtime_session, switch_runtime_profile,
+    build_desktop_sidebar_sessions, close_runtime_session, create_runtime_profile,
+    create_runtime_session, desktop_workspace_subscribe, move_runtime_session_to_profile,
+    move_runtime_sessions_to_profile, rename_runtime_session, switch_runtime_profile,
 };
 pub use crate::chatminal_runtime::{
     DesktopSidebarProfile as SidebarProfile, DesktopSidebarSession as SidebarSession,
@@ -38,16 +38,31 @@ pub struct SidebarInlineRenameState {
     pub select_all: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SidebarSessionDropTarget {
+    ProfileAppend { profile_id: String },
+    SessionInsertBefore { profile_id: String, session_id: String },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SidebarSessionDragState {
+    pub anchor_session_id: String,
+    pub session_ids: Vec<String>,
+    pub drop_target: Option<SidebarSessionDropTarget>,
+}
+
 #[derive(Debug)]
 struct SharedState {
     snapshot: SidebarSnapshot,
     expanded_profile_ids: BTreeSet<String>,
+    selected_session_ids: BTreeSet<String>,
     seed_active_profile_on_first_snapshot: bool,
     scroll_offset_px: f32,
     max_scroll_offset_px: f32,
     width_override_px: Option<f32>,
     session_context_menu: Option<SidebarSessionContextMenu>,
     inline_rename: Option<SidebarInlineRenameState>,
+    session_drag: Option<SidebarSessionDragState>,
 }
 
 impl Default for SharedState {
@@ -55,12 +70,14 @@ impl Default for SharedState {
         Self {
             snapshot: SidebarSnapshot::default(),
             expanded_profile_ids: BTreeSet::new(),
+            selected_session_ids: BTreeSet::new(),
             seed_active_profile_on_first_snapshot: true,
             scroll_offset_px: 0.0,
             max_scroll_offset_px: 0.0,
             width_override_px: None,
             session_context_menu: None,
             inline_rename: None,
+            session_drag: None,
         }
     }
 }
@@ -115,15 +132,6 @@ impl ChatminalSidebar {
         thread::spawn(move || run_sync_loop(shared));
     }
 
-    pub fn activate_session(
-        &self,
-        session_id: &str,
-        cols: usize,
-        rows: usize,
-    ) -> Result<(), String> {
-        activate_runtime_session(session_id, cols, rows)
-    }
-
     pub fn create_session(
         &self,
         cols: usize,
@@ -175,6 +183,93 @@ impl ChatminalSidebar {
             return false;
         }
         state.session_context_menu = Some(next);
+        state.snapshot.version = state.snapshot.version.saturating_add(1);
+        true
+    }
+
+    pub fn selected_session_ids(&self) -> Vec<String> {
+        self.shared
+            .lock()
+            .map(|state| state.selected_session_ids.iter().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    pub fn is_session_selected(&self, session_id: &str) -> bool {
+        self.shared
+            .lock()
+            .map(|state| state.selected_session_ids.contains(session_id))
+            .unwrap_or(false)
+    }
+
+    pub fn select_single_session(&self, session_id: &str) -> bool {
+        let Ok(mut state) = self.shared.lock() else {
+            return false;
+        };
+        if !state
+            .snapshot
+            .sessions
+            .iter()
+            .any(|session| session.session_id == session_id)
+        {
+            return false;
+        }
+
+        let changed = state.selected_session_ids.len() != 1
+            || !state.selected_session_ids.contains(session_id);
+        if !changed {
+            return false;
+        }
+
+        state.selected_session_ids.clear();
+        state.selected_session_ids.insert(session_id.to_string());
+        state.snapshot.version = state.snapshot.version.saturating_add(1);
+        true
+    }
+
+    pub fn toggle_session_selected(&self, session_id: &str) -> bool {
+        let Ok(mut state) = self.shared.lock() else {
+            return false;
+        };
+        if !state
+            .snapshot
+            .sessions
+            .iter()
+            .any(|session| session.session_id == session_id)
+        {
+            return false;
+        }
+
+        let changed = if state.selected_session_ids.contains(session_id) {
+            state.selected_session_ids.remove(session_id)
+        } else {
+            state.selected_session_ids.insert(session_id.to_string())
+        };
+        if !changed {
+            return false;
+        }
+        state.snapshot.version = state.snapshot.version.saturating_add(1);
+        true
+    }
+
+    pub fn ensure_context_menu_session_selected(&self, session_id: &str) -> bool {
+        let Ok(mut state) = self.shared.lock() else {
+            return false;
+        };
+        if !state
+            .snapshot
+            .sessions
+            .iter()
+            .any(|session| session.session_id == session_id)
+        {
+            return false;
+        }
+
+        if state.selected_session_ids.len() > 1 && state.selected_session_ids.contains(session_id) {
+            return false;
+        }
+
+        state.selected_session_ids.clear();
+        state.selected_session_ids.insert(session_id.to_string());
         state.snapshot.version = state.snapshot.version.saturating_add(1);
         true
     }
@@ -311,6 +406,70 @@ impl ChatminalSidebar {
         Some((rename.session_id, rename.input))
     }
 
+    pub fn session_drag_state(&self) -> Option<SidebarSessionDragState> {
+        self.shared
+            .lock()
+            .ok()
+            .and_then(|state| state.session_drag.clone())
+    }
+
+    pub fn start_session_drag(&self, anchor_session_id: &str, session_ids: Vec<String>) -> bool {
+        if session_ids.is_empty() {
+            return false;
+        }
+        let Ok(mut state) = self.shared.lock() else {
+            return false;
+        };
+        if !session_ids.iter().all(|session_id| {
+            state
+                .snapshot
+                .sessions
+                .iter()
+                .any(|session| session.session_id == *session_id)
+        }) {
+            return false;
+        }
+        let next = SidebarSessionDragState {
+            anchor_session_id: anchor_session_id.to_string(),
+            session_ids,
+            drop_target: None,
+        };
+        if state.session_drag.as_ref() == Some(&next) {
+            return false;
+        }
+        state.session_context_menu = None;
+        state.inline_rename = None;
+        state.session_drag = Some(next);
+        state.snapshot.version = state.snapshot.version.saturating_add(1);
+        true
+    }
+
+    pub fn set_session_drag_target(&self, target: Option<SidebarSessionDropTarget>) -> bool {
+        let Ok(mut state) = self.shared.lock() else {
+            return false;
+        };
+        let Some(drag) = state.session_drag.as_mut() else {
+            return false;
+        };
+        if drag.drop_target == target {
+            return false;
+        }
+        drag.drop_target = target;
+        state.snapshot.version = state.snapshot.version.saturating_add(1);
+        true
+    }
+
+    pub fn clear_session_drag(&self) -> bool {
+        let Ok(mut state) = self.shared.lock() else {
+            return false;
+        };
+        if state.session_drag.take().is_none() {
+            return false;
+        }
+        state.snapshot.version = state.snapshot.version.saturating_add(1);
+        true
+    }
+
     pub fn toggle_profile_expanded(&self, profile_id: &str) {
         let Ok(mut state) = self.shared.lock() else {
             return;
@@ -336,6 +495,26 @@ impl ChatminalSidebar {
             .lock()
             .map(|state| state.expanded_profile_ids.contains(profile_id))
             .unwrap_or(false)
+    }
+
+    pub fn ensure_profile_expanded(&self, profile_id: &str) -> bool {
+        let Ok(mut state) = self.shared.lock() else {
+            return false;
+        };
+        if !state
+            .snapshot
+            .profiles
+            .iter()
+            .any(|profile| profile.profile_id == profile_id)
+        {
+            return false;
+        }
+        if !state.expanded_profile_ids.insert(profile_id.to_string()) {
+            return false;
+        }
+        state.seed_active_profile_on_first_snapshot = false;
+        state.snapshot.version = state.snapshot.version.saturating_add(1);
+        true
     }
 
     pub fn scroll_offset_px(&self) -> f32 {
@@ -415,6 +594,15 @@ impl ChatminalSidebar {
         move_runtime_session_to_profile(session_id, profile_id, target_index)
     }
 
+    pub fn move_sessions_to_profile(
+        &self,
+        session_ids: &[String],
+        profile_id: &str,
+        target_index: Option<usize>,
+    ) -> Result<RuntimeWorkspace, String> {
+        move_runtime_sessions_to_profile(session_ids, profile_id, target_index)
+    }
+
     pub fn switch_profile(&self, profile_id: &str) -> Result<RuntimeWorkspace, String> {
         switch_runtime_profile(profile_id)
     }
@@ -429,6 +617,26 @@ impl ChatminalSidebar {
 
     pub fn set_active_session_local(&self, session_id: &str) {
         self.mark_active_session(session_id);
+    }
+
+    pub fn set_session_status_local(&self, session_id: &str, status: &str) {
+        let Ok(mut state) = self.shared.lock() else {
+            return;
+        };
+        let mut next = state.snapshot.clone();
+        let Some(session) = next
+            .sessions
+            .iter_mut()
+            .find(|session| session.session_id == session_id)
+        else {
+            return;
+        };
+        if session.status == status {
+            return;
+        }
+        session.status = status.to_string();
+        next.version = next.version.saturating_add(1);
+        state.snapshot = next;
     }
 
     fn mark_active_session(&self, session_id: &str) {
@@ -544,25 +752,11 @@ fn refresh_snapshot(
 fn replace_workspace(shared: &Arc<Mutex<SharedState>>, workspace: RuntimeWorkspace) {
     let active_profile_id = workspace.active_profile_id.clone();
     let active_session_id = workspace.active_session_id.clone();
-    let fallback_sessions = workspace.sessions.clone();
-    let sessions =
-        load_desktop_sidebar_sessions_from_store(&workspace.profiles, active_session_id.as_deref())
-            .unwrap_or_else(|err| {
-                log::warn!(
-                    "sidebar: using workspace session fallback during apply_workspace: {err}"
-                );
-                fallback_sessions
-                    .into_iter()
-                    .map(|session| SidebarSession {
-                        profile_id: session.profile_id,
-                        is_active: active_session_id.as_deref()
-                            == Some(session.session_id.as_str()),
-                        session_id: session.session_id,
-                        name: session.name,
-                        status: format!("{:?}", session.status).to_lowercase(),
-                    })
-                    .collect()
-            });
+    let sessions = build_desktop_sidebar_sessions(
+        &workspace.profiles,
+        &workspace.sessions,
+        active_session_id.as_deref(),
+    );
     let next = SidebarSnapshot {
         active_profile_id: active_profile_id.clone(),
         active_session_id: active_session_id.clone(),
@@ -616,6 +810,9 @@ fn replace_snapshot(shared: &Arc<Mutex<SharedState>>, mut next: SidebarSnapshot)
         .iter()
         .map(|session| session.session_id.as_str())
         .collect();
+    state
+        .selected_session_ids
+        .retain(|session_id| valid_session_ids.contains(session_id.as_str()));
     if state
         .session_context_menu
         .as_ref()
@@ -629,6 +826,17 @@ fn replace_snapshot(shared: &Arc<Mutex<SharedState>>, mut next: SidebarSnapshot)
         .is_some_and(|rename| !valid_session_ids.contains(rename.session_id.as_str()))
     {
         state.inline_rename = None;
+    }
+    if state
+        .session_drag
+        .as_ref()
+        .is_some_and(|drag| {
+            drag.session_ids
+                .iter()
+                .any(|session_id| !valid_session_ids.contains(session_id.as_str()))
+        })
+    {
+        state.session_drag = None;
     }
     let changed = state.snapshot.active_profile_id != next.active_profile_id
         || state.snapshot.active_session_id != next.active_session_id

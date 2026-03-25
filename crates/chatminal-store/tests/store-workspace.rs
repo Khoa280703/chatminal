@@ -496,3 +496,163 @@ fn move_session_to_profile_reparents_without_losing_order_contract() {
     assert_eq!(workspace.active_profile_id, default_profile_id);
     assert_eq!(workspace.active_session_id.as_deref(), Some(first.session_id.as_str()));
 }
+
+#[test]
+fn move_sessions_to_profile_keeps_relative_order_within_same_profile() {
+    let temp = TempDb::new();
+    let store = Store::initialize(&temp.path).expect("initialize store");
+    let profile_id = store
+        .load_workspace()
+        .expect("load workspace")
+        .active_profile_id;
+
+    let first = store
+        .create_session(
+            &profile_id,
+            Some("First".to_string()),
+            "/tmp".to_string(),
+            "/bin/bash".to_string(),
+            true,
+        )
+        .expect("create first");
+    let second = store
+        .create_session(
+            &profile_id,
+            Some("Second".to_string()),
+            "/tmp".to_string(),
+            "/bin/bash".to_string(),
+            true,
+        )
+        .expect("create second");
+    let third = store
+        .create_session(
+            &profile_id,
+            Some("Third".to_string()),
+            "/tmp".to_string(),
+            "/bin/bash".to_string(),
+            true,
+        )
+        .expect("create third");
+    let fourth = store
+        .create_session(
+            &profile_id,
+            Some("Fourth".to_string()),
+            "/tmp".to_string(),
+            "/bin/bash".to_string(),
+            true,
+        )
+        .expect("create fourth");
+
+    store
+        .move_sessions_to_profile(
+            &[second.session_id.clone(), third.session_id.clone()],
+            &profile_id,
+            Some(2),
+        )
+        .expect("reorder grouped sessions");
+
+    let ordered_ids = store
+        .list_sessions_by_profile(&profile_id)
+        .expect("list sessions")
+        .into_iter()
+        .map(|session| session.session_id)
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        ordered_ids,
+        vec![
+            first.session_id,
+            fourth.session_id,
+            second.session_id,
+            third.session_id,
+        ]
+    );
+}
+
+#[test]
+fn move_sessions_to_profile_moves_group_transactionally_across_profiles() {
+    let temp = TempDb::new();
+    let store = Store::initialize(&temp.path).expect("initialize store");
+    let source_profile_id = store
+        .load_workspace()
+        .expect("load workspace")
+        .active_profile_id;
+    let target_profile = store
+        .create_profile(Some("Target".to_string()))
+        .expect("create target profile");
+
+    let first = store
+        .create_session(
+            &source_profile_id,
+            Some("First".to_string()),
+            "/tmp".to_string(),
+            "/bin/bash".to_string(),
+            true,
+        )
+        .expect("create first");
+    let second = store
+        .create_session(
+            &source_profile_id,
+            Some("Second".to_string()),
+            "/tmp".to_string(),
+            "/bin/bash".to_string(),
+            true,
+        )
+        .expect("create second");
+    let third = store
+        .create_session(
+            &source_profile_id,
+            Some("Third".to_string()),
+            "/tmp".to_string(),
+            "/bin/bash".to_string(),
+            true,
+        )
+        .expect("create third");
+    let target_existing = store
+        .create_session(
+            &target_profile.profile_id,
+            Some("Target existing".to_string()),
+            "/tmp".to_string(),
+            "/bin/bash".to_string(),
+            true,
+        )
+        .expect("create target existing");
+
+    store
+        .set_active_session(&source_profile_id, Some(&second.session_id))
+        .expect("set source active session");
+
+    store
+        .move_sessions_to_profile(
+            &[second.session_id.clone(), third.session_id.clone()],
+            &target_profile.profile_id,
+            Some(0),
+        )
+        .expect("move grouped sessions");
+
+    let source_ids = store
+        .list_sessions_by_profile(&source_profile_id)
+        .expect("list source")
+        .into_iter()
+        .map(|session| session.session_id)
+        .collect::<Vec<_>>();
+    let target_ids = store
+        .list_sessions_by_profile(&target_profile.profile_id)
+        .expect("list target")
+        .into_iter()
+        .map(|session| session.session_id)
+        .collect::<Vec<_>>();
+    let workspace = store.load_workspace().expect("reload workspace");
+
+    assert_eq!(source_ids, vec![first.session_id.clone()]);
+    assert_eq!(
+        target_ids,
+        vec![
+            second.session_id.clone(),
+            third.session_id.clone(),
+            target_existing.session_id,
+        ]
+    );
+    assert_eq!(workspace.active_profile_id, source_profile_id);
+    assert_eq!(workspace.active_session_id.as_deref(), Some(first.session_id.as_str()));
+}

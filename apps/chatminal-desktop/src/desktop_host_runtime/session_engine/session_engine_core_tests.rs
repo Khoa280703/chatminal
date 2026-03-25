@@ -293,6 +293,7 @@ fn ensure_session_runtime_native_focuses_existing_runtime_without_spawn() {
                 pixel_height: 0,
                 dpi: 96,
             },
+            None,
         )
         .expect("first ensure");
     let _ = events.recv_timeout(Duration::from_secs(1)); // drain RuntimeAttached
@@ -310,6 +311,7 @@ fn ensure_session_runtime_native_focuses_existing_runtime_without_spawn() {
                 pixel_height: 0,
                 dpi: 96,
             },
+            None,
         )
         .expect("second ensure");
 

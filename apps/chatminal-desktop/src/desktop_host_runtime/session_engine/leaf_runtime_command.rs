@@ -40,18 +40,18 @@ fn ensure_macos_zsh_startup_shim_dir() -> Result<PathBuf, String> {
     std::fs::create_dir_all(&dir)
         .map_err(|err| format!("create zsh startup shim dir failed: {err}"))?;
 
-    let zshenv = r#"typeset -gx CHATMINAL_SHIM_ZDOTDIR=\"$ZDOTDIR\"
-if [ -n \"${CHATMINAL_ORIGINAL_ZDOTDIR:-}\" ] && [ -r \"${CHATMINAL_ORIGINAL_ZDOTDIR}/.zshenv\" ]; then
-  source \"${CHATMINAL_ORIGINAL_ZDOTDIR}/.zshenv\"
-elif [ -r \"$HOME/.zshenv\" ]; then
-  source \"$HOME/.zshenv\"
+    let zshenv = r#"typeset -gx CHATMINAL_SHIM_ZDOTDIR="$ZDOTDIR"
+if [ -n "${CHATMINAL_ORIGINAL_ZDOTDIR:-}" ] && [ -r "${CHATMINAL_ORIGINAL_ZDOTDIR}/.zshenv" ]; then
+  source "${CHATMINAL_ORIGINAL_ZDOTDIR}/.zshenv"
+elif [ -r "$HOME/.zshenv" ]; then
+  source "$HOME/.zshenv"
 fi
-typeset -gx ZDOTDIR=\"$CHATMINAL_SHIM_ZDOTDIR\"
+typeset -gx ZDOTDIR="$CHATMINAL_SHIM_ZDOTDIR"
 "#;
-    let zshrc = r#"if [ -n \"${CHATMINAL_ORIGINAL_ZDOTDIR:-}\" ] && [ -r \"${CHATMINAL_ORIGINAL_ZDOTDIR}/.zshrc\" ]; then
-  source \"${CHATMINAL_ORIGINAL_ZDOTDIR}/.zshrc\"
-elif [ -r \"$HOME/.zshrc\" ]; then
-  source \"$HOME/.zshrc\"
+    let zshrc = r#"if [ -n "${CHATMINAL_ORIGINAL_ZDOTDIR:-}" ] && [ -r "${CHATMINAL_ORIGINAL_ZDOTDIR}/.zshrc" ]; then
+  source "${CHATMINAL_ORIGINAL_ZDOTDIR}/.zshrc"
+elif [ -r "$HOME/.zshrc" ]; then
+  source "$HOME/.zshrc"
 fi
 unsetopt PROMPT_SP
 unsetopt PROMPT_CR

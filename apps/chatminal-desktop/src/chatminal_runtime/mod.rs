@@ -13,7 +13,6 @@ use crate::scripting::guiwin::DesktopWindowId;
 use chatminal_runtime::{
     RuntimeCreatedSession, RuntimeEvent, RuntimeProfile, RuntimeSessionSnapshot, RuntimeWorkspace,
 };
-use chatminal_store::Store;
 
 pub use crate::desktop_host_runtime::session_engine::SessionEngineShared;
 pub(crate) use crate::desktop_host_runtime::*;
@@ -58,6 +57,20 @@ pub struct DesktopWorkspaceSnapshot {
 pub struct DesktopWorkspaceSubscription {
     client: ChatminalRuntimeClient,
     workspace_id: String,
+}
+
+#[derive(Clone, Copy)]
+struct LayoutResizeBounds {
+    left: usize,
+    top: usize,
+    width: usize,
+    height: usize,
+}
+
+#[derive(Clone)]
+struct DesktopSessionResizeTarget {
+    session_id: String,
+    size: engine_term::TerminalSize,
 }
 
 #[derive(Clone, Debug)]
@@ -182,18 +195,15 @@ fn remember_desktop_last_active_session(
 
 fn desktop_focus_layout_session(session_id: &str) {
     let store = DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID);
+    focus_layout_session_in_store(&store, session_id);
+}
+
+fn focus_layout_session_in_store(store: &DesktopWorkspaceLayoutStore, session_id: &str) {
     if let Some(view_id) = store.view_id_for_session(session_id) {
         let _ = store.focus_view(view_id);
         return;
     }
-    if let Some(layout) = store.snapshot_or_restore() {
-        let active_view_id = layout.active_view_id;
-        if store.attach_session(active_view_id, session_id).is_some() {
-            let _ = store.focus_view(active_view_id);
-            return;
-        }
-    }
-    let _ = store.ensure_for_session(session_id);
+    let _ = store.replace_layout(WorkspaceLayoutState::new_single(session_id.to_string()));
 }
 
 fn desktop_close_layout_session(session_id: &str) -> Option<String> {
@@ -278,14 +288,35 @@ pub fn desktop_session_terminal_binding(
     })
 }
 
+pub fn desktop_session_id_for_terminal_handle(
+    window_id: DesktopWindowId,
+    terminal_handle: SessionTerminalHandle,
+) -> Option<String> {
+    if let Some(binding) = desktop_session_terminal_binding(window_id, terminal_handle) {
+        return Some(binding.session_id);
+    }
+
+    let layout = workspace_layout_snapshot(DEFAULT_LAYOUT_WORKSPACE_ID)
+        .ok()
+        .flatten()?;
+    for view in layout.views {
+        let Some(pane) = desktop_pane_for_session(window_id, &view.session_id) else {
+            continue;
+        };
+        if pane.pane_id_value() as u64 == terminal_handle.as_u64() {
+            return Some(view.session_id);
+        }
+    }
+    None
+}
+
 impl DesktopWorkspaceSnapshot {
     pub fn active_session_id(&self) -> Option<String> {
-        self.workspace.active_session_id.clone().or_else(|| {
-            self.layout
-                .as_ref()
-                .and_then(|layout| layout.view(layout.active_view_id))
-                .map(|view| view.session_id.clone())
-        })
+        self.layout
+            .as_ref()
+            .and_then(|layout| layout.view(layout.active_view_id))
+            .map(|view| view.session_id.clone())
+            .or_else(|| self.workspace.active_session_id.clone())
     }
 
     pub fn active_view_id(&self) -> Option<SessionViewId> {
@@ -312,24 +343,11 @@ pub fn load_desktop_sidebar_snapshot(workspace_id: &str) -> Result<DesktopSideba
     let snapshot = load_desktop_workspace_snapshot(workspace_id)?;
     let active_profile_id = snapshot.workspace.active_profile_id.clone();
     let active_session_id = snapshot.active_session_id();
-    let fallback_sessions = snapshot.workspace.sessions.clone();
-    let sessions = load_desktop_sidebar_sessions_from_store(
+    let sessions = build_desktop_sidebar_sessions(
         &snapshot.workspace.profiles,
+        &snapshot.workspace.sessions,
         active_session_id.as_deref(),
-    )
-    .unwrap_or_else(|err| {
-        log::warn!("sidebar: falling back to workspace sessions because store read failed: {err}");
-        fallback_sessions
-            .into_iter()
-            .map(|session| DesktopSidebarSession {
-                profile_id: session.profile_id,
-                is_active: active_session_id.as_deref() == Some(session.session_id.as_str()),
-                session_id: session.session_id,
-                name: session.name,
-                status: format!("{:?}", session.status).to_lowercase(),
-            })
-            .collect()
-    });
+    );
     Ok(DesktopSidebarSnapshot {
         active_profile_id: active_profile_id.clone(),
         active_session_id: active_session_id.clone(),
@@ -349,24 +367,24 @@ pub fn load_desktop_sidebar_snapshot(workspace_id: &str) -> Result<DesktopSideba
     })
 }
 
-pub(crate) fn load_desktop_sidebar_sessions_from_store(
+pub(crate) fn build_desktop_sidebar_sessions(
     profiles: &[RuntimeProfile],
+    sessions: &[chatminal_runtime::RuntimeSession],
     active_session_id: Option<&str>,
-) -> Result<Vec<DesktopSidebarSession>, String> {
-    let store = Store::initialize_default()?;
-    let mut sessions = Vec::new();
+) -> Vec<DesktopSidebarSession> {
+    let mut sidebar_sessions = Vec::new();
     for profile in profiles {
-        for session in store.list_sessions_by_profile(&profile.profile_id)? {
-            sessions.push(DesktopSidebarSession {
-                profile_id: session.profile_id,
+        for session in sessions.iter().filter(|session| session.profile_id == profile.profile_id) {
+            sidebar_sessions.push(DesktopSidebarSession {
+                profile_id: session.profile_id.clone(),
                 is_active: active_session_id == Some(session.session_id.as_str()),
-                session_id: session.session_id,
-                name: session.name,
+                session_id: session.session_id.clone(),
+                name: session.name.clone(),
                 status: format!("{:?}", session.status).to_lowercase(),
             });
         }
     }
-    Ok(sessions)
+    sidebar_sessions
 }
 
 impl DesktopWorkspaceSubscription {
@@ -423,33 +441,111 @@ pub(crate) fn desktop_session_host(window_id: DesktopWindowId) -> Option<Arc<Des
 fn desktop_prepare_host_layout(
     window_id: DesktopWindowId,
     size: engine_term::TerminalSize,
+    focus_session_id: Option<&str>,
+    apply_layout_focus: bool,
+    resize_visible_sessions: bool,
 ) -> Option<Arc<DesktopSessionHost>> {
     let host = desktop_session_host(window_id)?;
     let Some(layout) =
         DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID).snapshot_or_restore()
     else {
+        // No persisted layout yet. Do not prune the current host view set here:
+        // desktop_activate_session may be in the middle of switching profiles and
+        // will attach/focus the target session immediately afterwards. Pruning to
+        // empty first can make the host window temporarily empty and allow mux
+        // window pruning before the target session is attached.
         return Some(host);
     };
 
-    let active_session_id = layout
-        .view(layout.active_view_id)
-        .map(|view| view.session_id.clone());
+    let visible_session_ids: std::collections::HashSet<String> = layout
+        .views
+        .iter()
+        .map(|view| view.session_id.clone())
+        .collect();
+    let enforce_layout_sizes = layout.views.len() > 1;
+
+    let active_session_id = focus_session_id
+        .filter(|session_id| visible_session_ids.contains(*session_id))
+        .map(str::to_string)
+        .or_else(|| {
+            apply_layout_focus
+                .then(|| layout.view(layout.active_view_id).map(|view| view.session_id.clone()))
+                .flatten()
+        });
 
     for view in &layout.views {
-        if desktop_runtime_id_for_session(&view.session_id).is_none() {
-            let _ = host.attach_layout_session(&view.session_id, size, false);
+        let target_size =
+            terminal_size_for_layout_session(Some(&layout), size, &view.session_id);
+        match desktop_runtime_id_for_session(&view.session_id) {
+            Some(runtime_id) => {
+                if desktop_render_state_for_session(window_id, &view.session_id).is_none() {
+                    let _ = host.hydrate_runtime(runtime_id);
+                }
+                if enforce_layout_sizes {
+                    let _ = host.resize_runtime(&view.session_id, runtime_id, target_size);
+                }
+            }
+            None if active_session_id.as_deref() == Some(view.session_id.as_str()) => {
+                let _ = host.attach_layout_session(&view.session_id, target_size, false);
+            }
+            None => {}
         }
     }
 
     if let Some(active_session_id) = active_session_id {
         if let Some(runtime_id) = desktop_runtime_id_for_session(&active_session_id) {
-            let _ = host.focus_runtime(&active_session_id, runtime_id);
+            let target_size =
+                terminal_size_for_layout_session(Some(&layout), size, &active_session_id);
+            let focused = host.focus_runtime(&active_session_id, runtime_id);
+            if enforce_layout_sizes {
+                let _ = host.resize_runtime(&active_session_id, runtime_id, target_size)
+                    .or(focused);
+            }
         } else {
             desktop_focus_layout_session(&active_session_id);
         }
     }
 
+    if resize_visible_sessions {
+        let _ = resize_session_targets_for_layout(&host, window_id, size, Some(&layout));
+    }
+
+    // Reconcile stale sessions only after the next visible layout is attached.
+    // During profile/session switches we may replace the entire visible set; pruning
+    // first can make the host window temporarily empty and allow the underlying mux
+    // to prune that window before the new session-native tab shims are attached.
+    host.reconcile_visible_sessions(&visible_session_ids);
+
     Some(host)
+}
+
+pub fn desktop_prepare_workspace_layout(
+    window_id: DesktopWindowId,
+    size: engine_term::TerminalSize,
+) -> bool {
+    let resize_visible_sessions = DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID)
+        .snapshot_or_restore()
+        .map(|layout| layout.views.len() > 1)
+        .unwrap_or(false);
+    desktop_prepare_host_layout(
+        window_id,
+        size,
+        None,
+        false,
+        resize_visible_sessions,
+    )
+    .is_some()
+}
+
+pub fn desktop_resize_visible_sessions(
+    window_id: DesktopWindowId,
+    size: engine_term::TerminalSize,
+) -> bool {
+    let Some(host) = desktop_session_host(window_id) else {
+        return false;
+    };
+    let layout = DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID).snapshot_or_restore();
+    resize_session_targets_for_layout(&host, window_id, size, layout.as_ref())
 }
 
 #[cfg(test)]
@@ -725,6 +821,14 @@ pub fn move_runtime_session_to_profile(
     runtime_client()?.session_move_to_profile(session_id, profile_id, target_index)
 }
 
+pub fn move_runtime_sessions_to_profile(
+    session_ids: &[String],
+    profile_id: &str,
+    target_index: Option<usize>,
+) -> Result<RuntimeWorkspace, String> {
+    runtime_client()?.sessions_move_to_profile(session_ids, profile_id, target_index)
+}
+
 pub fn rename_runtime_session(session_id: &str, name: &str) -> Result<RuntimeWorkspace, String> {
     runtime_client()?.session_rename(session_id, name)
 }
@@ -822,18 +926,29 @@ pub fn desktop_activate_session(
     size: engine_term::TerminalSize,
 ) -> Option<DesktopSessionRuntimeSummary> {
     let previous_session_id = desktop_current_active_session_id(window_id);
-    let host = desktop_prepare_host_layout(window_id, size)?;
+    let target_size = terminal_size_for_layout_session(
+        DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID)
+            .snapshot_or_restore()
+            .as_ref(),
+        size,
+        session_id,
+    );
+    let host = desktop_prepare_host_layout(window_id, size, Some(session_id), true, false)?;
     if let Some(runtime_id) =
         preferred_runtime_id.or_else(|| desktop_runtime_id_for_session(session_id))
     {
-        let result = host.focus_runtime(session_id, runtime_id).map(|state| {
-            DesktopSessionRuntimeSummary::from_session(
-                window_id,
-                DEFAULT_LAYOUT_WORKSPACE_ID,
-                session_id,
-                state.snapshot.runtime_id,
-            )
-        });
+        let focused_state = host.focus_runtime(session_id, runtime_id);
+        let result = host
+            .resize_runtime(session_id, runtime_id, target_size)
+            .or(focused_state)
+            .map(|state| {
+                DesktopSessionRuntimeSummary::from_session(
+                    window_id,
+                    DEFAULT_LAYOUT_WORKSPACE_ID,
+                    session_id,
+                    state.snapshot.runtime_id,
+                )
+            });
         if result.is_some() {
             desktop_focus_layout_session(session_id);
             remember_desktop_last_active_session(window_id, previous_session_id, Some(session_id));
@@ -842,7 +957,7 @@ pub fn desktop_activate_session(
     }
     let command = native_session_command(session_id).ok()?;
     let result = host
-        .ensure_runtime(session_id, 0, command, size)
+        .ensure_runtime(session_id, 0, command, target_size)
         .map(|state| {
             DesktopSessionRuntimeSummary::from_session(
                 window_id,
@@ -862,7 +977,16 @@ pub fn desktop_focus_session_view(
     window_id: DesktopWindowId,
     view_id: SessionViewId,
 ) -> Option<String> {
-    let previous_session_id = desktop_current_active_session_id(window_id);
+    desktop_focus_session_view_with_previous(window_id, view_id, None)
+}
+
+pub fn desktop_focus_session_view_with_previous(
+    window_id: DesktopWindowId,
+    view_id: SessionViewId,
+    previous_session_id: Option<String>,
+) -> Option<String> {
+    let previous_session_id =
+        previous_session_id.or_else(|| desktop_current_active_session_id(window_id));
     let layout =
         DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID).focus_view(view_id)?;
     let session_id = layout.view(view_id)?.session_id.clone();
@@ -972,6 +1096,12 @@ pub fn desktop_create_split_session_view(
         let _ = close_runtime_session(&created.session_id);
         anyhow::bail!("failed to split active session view");
     }
+    if let Some(active_profile_id) = load_workspace_passive()
+        .map_err(anyhow::Error::msg)?
+        .active_profile_id
+    {
+        let _ = layout_store.save_as_profile_layout(&active_profile_id);
+    }
 
     let state = desktop_activate_session(window_id, &created.session_id, None, size)
         .ok_or_else(|| anyhow::anyhow!("failed to ensure session runtime for split view"))?;
@@ -1018,4 +1148,336 @@ pub fn desktop_resize_layout_split(
 ) -> Option<WorkspaceLayoutState> {
     let _ = window_id;
     DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID).resize_split(node_id, ratio)
+}
+
+fn resize_session_targets_for_layout(
+    host: &DesktopSessionHost,
+    window_id: DesktopWindowId,
+    size: engine_term::TerminalSize,
+    layout: Option<&WorkspaceLayoutState>,
+) -> bool {
+    let fallback_active_session = desktop_current_active_session_id(window_id);
+    let targets = collect_session_resize_targets(layout, size, fallback_active_session.as_deref());
+    if targets.is_empty() {
+        return false;
+    }
+
+    let mut resized_any = false;
+    for target in targets {
+        let Some(runtime_id) = desktop_runtime_id_for_session(&target.session_id) else {
+            continue;
+        };
+        if host
+            .resize_runtime(&target.session_id, runtime_id, target.size)
+            .is_some()
+        {
+            resized_any = true;
+        }
+    }
+
+    resized_any
+}
+
+fn collect_session_resize_targets(
+    layout: Option<&WorkspaceLayoutState>,
+    size: engine_term::TerminalSize,
+    fallback_active_session_id: Option<&str>,
+) -> Vec<DesktopSessionResizeTarget> {
+    let bounds = LayoutResizeBounds {
+        left: 0,
+        top: 0,
+        width: size.cols as usize,
+        height: size.rows as usize,
+    };
+
+    let Some(layout) = layout else {
+        return fallback_active_session_id
+            .map(|session_id| {
+                vec![DesktopSessionResizeTarget {
+                    session_id: session_id.to_string(),
+                    size,
+                }]
+            })
+            .unwrap_or_default();
+    };
+
+    if layout.views.len() <= 1 {
+        return layout
+            .view(layout.active_view_id)
+            .or_else(|| layout.views.first())
+            .map(|view| {
+                vec![DesktopSessionResizeTarget {
+                    session_id: view.session_id.clone(),
+                    size,
+                }]
+            })
+            .unwrap_or_default();
+    }
+
+    let mut targets = Vec::new();
+    collect_resize_targets(layout, layout.root_node_id, bounds, size, &mut targets);
+    targets
+}
+
+fn terminal_size_for_layout_session(
+    layout: Option<&WorkspaceLayoutState>,
+    size: engine_term::TerminalSize,
+    session_id: &str,
+) -> engine_term::TerminalSize {
+    collect_session_resize_targets(layout, size, Some(session_id))
+        .into_iter()
+        .find(|target| target.session_id == session_id)
+        .map(|target| target.size)
+        .unwrap_or(size)
+}
+
+fn collect_resize_targets(
+    layout: &WorkspaceLayoutState,
+    node_id: WorkspaceNodeId,
+    bounds: LayoutResizeBounds,
+    size: engine_term::TerminalSize,
+    targets: &mut Vec<DesktopSessionResizeTarget>,
+) {
+    if bounds.width == 0 || bounds.height == 0 {
+        return;
+    }
+    let Some(node) = layout.nodes.iter().find(|node| node.node_id == node_id) else {
+        return;
+    };
+    match node.kind {
+        WorkspaceLayoutNodeKind::View { view_id } => {
+            let Some(view) = layout.view(view_id) else {
+                return;
+            };
+            targets.push(DesktopSessionResizeTarget {
+                session_id: view.session_id.clone(),
+                size: layout_terminal_size_for_bounds(bounds, size),
+            });
+        }
+        WorkspaceLayoutNodeKind::Split {
+            axis,
+            first,
+            second,
+            ratio,
+        } => {
+            let (first_bounds, second_bounds) = resize_split_bounds(bounds, axis, ratio);
+            collect_resize_targets(layout, first, first_bounds, size, targets);
+            collect_resize_targets(layout, second, second_bounds, size, targets);
+        }
+    }
+}
+
+fn resize_split_bounds(
+    bounds: LayoutResizeBounds,
+    axis: WorkspaceSplitAxis,
+    ratio: u16,
+) -> (LayoutResizeBounds, LayoutResizeBounds) {
+    match axis {
+        WorkspaceSplitAxis::Horizontal => {
+            let divider = usize::from(bounds.width > 1);
+            let usable = bounds.width.saturating_sub(divider);
+            let first = resize_split_length(usable, ratio);
+            let second = usable.saturating_sub(first);
+            (
+                LayoutResizeBounds {
+                    width: first,
+                    ..bounds
+                },
+                LayoutResizeBounds {
+                    left: bounds.left + first + divider,
+                    width: second,
+                    ..bounds
+                },
+            )
+        }
+        WorkspaceSplitAxis::Vertical => {
+            let divider = usize::from(bounds.height > 1);
+            let usable = bounds.height.saturating_sub(divider);
+            let first = resize_split_length(usable, ratio);
+            let second = usable.saturating_sub(first);
+            (
+                LayoutResizeBounds {
+                    height: first,
+                    ..bounds
+                },
+                LayoutResizeBounds {
+                    top: bounds.top + first + divider,
+                    height: second,
+                    ..bounds
+                },
+            )
+        }
+    }
+}
+
+fn resize_split_length(usable: usize, ratio: u16) -> usize {
+    if usable <= 1 {
+        return usable;
+    }
+    let scaled = ((usable as u64) * (ratio as u64)) / 1000;
+    (scaled as usize).clamp(1, usable.saturating_sub(1))
+}
+
+fn layout_terminal_size_for_bounds(
+    bounds: LayoutResizeBounds,
+    size: engine_term::TerminalSize,
+) -> engine_term::TerminalSize {
+    let cols = bounds.width.max(1);
+    let rows = bounds.height.max(1);
+    let cell_width = size.pixel_width / size.cols.max(1);
+    let cell_height = size.pixel_height / size.rows.max(1);
+    engine_term::TerminalSize {
+        cols,
+        rows,
+        pixel_width: cols * cell_width,
+        pixel_height: rows * cell_height,
+        dpi: size.dpi.max(1),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use crate::chatminal_layout::workspace_store::DEFAULT_LAYOUT_WORKSPACE_ID;
+    use crate::desktop_host_runtime::session_engine::SessionCoreState;
+
+    use super::{
+        collect_session_resize_targets, focus_layout_session_in_store,
+        terminal_size_for_layout_session, DesktopWorkspaceLayoutStore, SessionEngineShared,
+        SessionViewId, WorkspaceLayoutState, WorkspaceSplitAxis,
+    };
+    use engine_term::TerminalSize;
+
+    #[test]
+    fn focusing_existing_session_preserves_joined_layout_bindings() {
+        let shared = Arc::new(SessionEngineShared::new(Arc::new(Mutex::new(
+            SessionCoreState::default(),
+        ))));
+        let store = DesktopWorkspaceLayoutStore::with_shared(shared, DEFAULT_LAYOUT_WORKSPACE_ID);
+
+        let initial = store.ensure_for_session("session-a");
+        let split = store
+            .split_view(
+                initial.active_view_id,
+                WorkspaceSplitAxis::Vertical,
+                "session-b",
+            )
+            .expect("split");
+        let top_view_id = SessionViewId::new(1);
+        let bottom_view_id = split.view_for_session("session-b").expect("session-b view");
+
+        focus_layout_session_in_store(&store, "session-a");
+        let focused_a = store.snapshot().expect("snapshot after focus a");
+        assert_eq!(focused_a.view(top_view_id).expect("top view").session_id, "session-a");
+        assert_eq!(
+            focused_a.view(bottom_view_id).expect("bottom view").session_id,
+            "session-b"
+        );
+
+        focus_layout_session_in_store(&store, "session-b");
+        let focused_b = store.snapshot().expect("snapshot after focus b");
+        assert_eq!(focused_b.view(top_view_id).expect("top view").session_id, "session-a");
+        assert_eq!(
+            focused_b.view(bottom_view_id).expect("bottom view").session_id,
+            "session-b"
+        );
+        assert_eq!(focused_b.active_view_id, bottom_view_id);
+    }
+
+    #[test]
+    fn focusing_unjoined_session_collapses_back_to_single_view() {
+        let shared = Arc::new(SessionEngineShared::new(Arc::new(Mutex::new(
+            SessionCoreState::default(),
+        ))));
+        let store = DesktopWorkspaceLayoutStore::with_shared(shared, DEFAULT_LAYOUT_WORKSPACE_ID);
+
+        let initial = store.ensure_for_session("session-a");
+        store
+            .split_view(
+                initial.active_view_id,
+                WorkspaceSplitAxis::Vertical,
+                "session-b",
+            )
+            .expect("split");
+
+        focus_layout_session_in_store(&store, "session-c");
+
+        let collapsed = store.snapshot().expect("snapshot after focus c");
+        assert_eq!(collapsed.views.len(), 1);
+        assert_eq!(collapsed.views[0].session_id, "session-c");
+        assert_eq!(collapsed.active_view_id, collapsed.views[0].view_id);
+    }
+
+    #[test]
+    fn resize_targets_use_full_terminal_size_for_single_view() {
+        let layout = WorkspaceLayoutState::new_single("session-a".to_string());
+        let size = TerminalSize {
+            cols: 120,
+            rows: 40,
+            pixel_width: 1200,
+            pixel_height: 800,
+            dpi: 96,
+        };
+
+        let targets = collect_session_resize_targets(Some(&layout), size, None);
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].session_id, "session-a");
+        assert_eq!(targets[0].size, size);
+    }
+
+    #[test]
+    fn resize_targets_partition_joined_layout_by_workspace_bounds() {
+        let mut layout = WorkspaceLayoutState::new_single("session-a".to_string());
+        layout
+            .split_view(layout.active_view_id, WorkspaceSplitAxis::Vertical, "session-b".to_string())
+            .expect("split");
+        let size = TerminalSize {
+            cols: 100,
+            rows: 50,
+            pixel_width: 1000,
+            pixel_height: 500,
+            dpi: 96,
+        };
+
+        let targets = collect_session_resize_targets(Some(&layout), size, None);
+        assert_eq!(targets.len(), 2);
+        assert_eq!(targets[0].session_id, "session-a");
+        assert_eq!(targets[0].size.cols, 100);
+        assert_eq!(targets[0].size.rows, 24);
+        assert_eq!(targets[0].size.pixel_width, 1000);
+        assert_eq!(targets[0].size.pixel_height, 240);
+        assert_eq!(targets[1].session_id, "session-b");
+        assert_eq!(targets[1].size.cols, 100);
+        assert_eq!(targets[1].size.rows, 25);
+        assert_eq!(targets[1].size.pixel_width, 1000);
+        assert_eq!(targets[1].size.pixel_height, 250);
+    }
+
+    #[test]
+    fn terminal_size_for_layout_session_uses_split_bounds_for_active_session() {
+        let mut layout = WorkspaceLayoutState::new_single("session-a".to_string());
+        layout
+            .split_view(
+                layout.active_view_id,
+                WorkspaceSplitAxis::Vertical,
+                "session-b".to_string(),
+            )
+            .expect("split");
+        let size = TerminalSize {
+            cols: 100,
+            rows: 50,
+            pixel_width: 1000,
+            pixel_height: 500,
+            dpi: 96,
+        };
+
+        let session_a = terminal_size_for_layout_session(Some(&layout), size, "session-a");
+        let session_b = terminal_size_for_layout_session(Some(&layout), size, "session-b");
+
+        assert_eq!(session_a.rows, 24);
+        assert_eq!(session_a.pixel_height, 240);
+        assert_eq!(session_b.rows, 25);
+        assert_eq!(session_b.pixel_height, 250);
+    }
 }

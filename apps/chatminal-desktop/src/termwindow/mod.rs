@@ -13,7 +13,7 @@ use crate::chatminal_runtime::{
     DesktopSessionBridgeAction, RuntimeId, RuntimeNotification, RuntimeWindow, RuntimeWindowId,
     RuntimeWindowId as EngineWindowId, SessionViewId, TerminalInstanceId,
 };
-use crate::chatminal_sidebar::ChatminalSidebar;
+use crate::chatminal_sidebar::{ChatminalSidebar, SidebarSessionDropTarget};
 use crate::colorease::ColorEase;
 use crate::desktop_overlay_actions::show_close_runtime_entry_overlay;
 use crate::desktop_termwindow_types::{TerminalPaneLayout, TerminalSplit, TerminalUiKey};
@@ -64,7 +64,7 @@ use mlua::{FromLua, LuaSerdeExt, UserData, UserDataFields};
 use smol::channel::Sender;
 use smol::Timer;
 use std::cell::{RefCell, RefMut};
-use std::collections::{HashMap, LinkedList};
+use std::collections::{BTreeSet, HashMap, LinkedList};
 use std::convert::TryFrom;
 use std::ops::Add;
 use std::rc::Rc;
@@ -196,6 +196,8 @@ pub enum UIItemType {
     ChatminalSidebarCreateSession,
     ChatminalSidebarSession(String),
     ChatminalSidebarSessionMenu,
+    ChatminalSidebarSessionMenuJoin(String),
+    ChatminalSidebarSessionMenuUnjoin(String),
     ChatminalSidebarSessionMenuRename(String),
     ChatminalSidebarSessionMenuDelete(String),
 }
@@ -768,6 +770,225 @@ impl TermWindow {
         self.switch_chatminal_session_target(session_id, None);
     }
 
+    fn ordered_selected_chatminal_session_ids(&self, anchor_session_id: &str) -> Vec<String> {
+        let selected_ids = self.chatminal_sidebar.selected_session_ids();
+        if selected_ids.is_empty() {
+            return Vec::new();
+        }
+        let snapshot = self.chatminal_sidebar.snapshot();
+        let Some(anchor_profile_id) = snapshot
+            .sessions
+            .iter()
+            .find(|session| session.session_id == anchor_session_id)
+            .map(|session| session.profile_id.as_str())
+        else {
+            return Vec::new();
+        };
+        if selected_ids.iter().any(|session_id| {
+            snapshot
+                .sessions
+                .iter()
+                .find(|session| session.session_id == *session_id)
+                .map(|session| session.profile_id.as_str())
+                != Some(anchor_profile_id)
+        }) {
+            return Vec::new();
+        }
+        let layout_store = DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID);
+        let mut expanded_selected_ids = selected_ids.clone();
+        for session_id in &selected_ids {
+            for joined_session_id in
+                layout_store.profile_group_session_ids(anchor_profile_id, session_id)
+            {
+                if !expanded_selected_ids
+                    .iter()
+                    .any(|existing| existing == &joined_session_id)
+                {
+                    expanded_selected_ids.push(joined_session_id);
+                }
+            }
+        }
+
+        let selected: BTreeSet<_> = expanded_selected_ids.iter().map(String::as_str).collect();
+        let mut ordered: Vec<String> = self
+            .ordered_chatminal_session_ids()
+            .into_iter()
+            .filter(|session_id| selected.contains(session_id.as_str()))
+            .collect();
+
+        for session_id in expanded_selected_ids {
+            if !ordered.iter().any(|existing| existing == &session_id) {
+                ordered.push(session_id);
+            }
+        }
+
+        if let Some(index) = ordered
+            .iter()
+            .position(|session_id| session_id == anchor_session_id)
+        {
+            ordered.swap(0, index);
+        }
+
+        ordered
+    }
+
+    fn move_chatminal_sessions_to_sidebar_target(
+        &mut self,
+        session_ids: &[String],
+        target: &SidebarSessionDropTarget,
+    ) -> bool {
+        if session_ids.is_empty() {
+            return false;
+        }
+
+        let snapshot = self.chatminal_sidebar.snapshot();
+        let Some(source_profile_id) = snapshot
+            .sessions
+            .iter()
+            .find(|session| session.session_id == session_ids[0])
+            .map(|session| session.profile_id.clone())
+        else {
+            return false;
+        };
+        if !session_ids.iter().all(|session_id| {
+            snapshot
+                .sessions
+                .iter()
+                .find(|session| session.session_id == *session_id)
+                .map(|session| session.profile_id.as_str())
+                == Some(source_profile_id.as_str())
+        }) {
+            return false;
+        }
+
+        let (target_profile_id, target_index) = match target {
+            SidebarSessionDropTarget::ProfileAppend { profile_id } => {
+                let target_index = snapshot
+                    .sessions
+                    .iter()
+                    .filter(|session| session.profile_id == *profile_id)
+                    .filter(|session| !session_ids.iter().any(|dragged| dragged == &session.session_id))
+                    .count();
+                (profile_id.clone(), target_index)
+            }
+            SidebarSessionDropTarget::SessionInsertBefore {
+                profile_id,
+                session_id,
+            } => {
+                let target_index = snapshot
+                    .sessions
+                    .iter()
+                    .filter(|session| session.profile_id == *profile_id)
+                    .filter(|session| !session_ids.iter().any(|dragged| dragged == &session.session_id))
+                    .position(|session| session.session_id == *session_id)
+                    .unwrap_or_else(|| {
+                        snapshot
+                            .sessions
+                            .iter()
+                            .filter(|session| session.profile_id == *profile_id)
+                            .filter(|session| {
+                                !session_ids
+                                    .iter()
+                                    .any(|dragged| dragged == &session.session_id)
+                            })
+                            .count()
+                    });
+                (profile_id.clone(), target_index)
+            }
+        };
+
+        let moved = match self.chatminal_sidebar.move_sessions_to_profile(
+            session_ids,
+            &target_profile_id,
+            Some(target_index),
+        ) {
+            Ok(workspace) => workspace,
+            Err(err) => {
+                log::error!("failed to move dragged sessions: {err}");
+                return false;
+            }
+        };
+        self.chatminal_sidebar.apply_workspace(moved);
+
+        if source_profile_id != target_profile_id && session_ids.len() > 1 {
+            let source_store = DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID);
+            source_store.clear_profile_group_layouts(
+                &source_profile_id,
+                session_ids.iter().map(String::as_str),
+            );
+            if let Some(layout) =
+                crate::chatminal_runtime::WorkspaceLayoutState::grouped_sessions(session_ids)
+            {
+                for session_id in session_ids {
+                    let _ = DesktopWorkspaceLayoutStore::new(
+                        DesktopWorkspaceLayoutStore::profile_group_workspace_id(
+                            &target_profile_id,
+                            session_id,
+                        ),
+                    )
+                    .replace_layout(layout.clone());
+                }
+            }
+        }
+
+        true
+    }
+
+    fn join_chatminal_selected_sessions(&mut self, anchor_session_id: &str) {
+        if !self.chatminal_sidebar.is_enabled() {
+            return;
+        }
+
+        let snapshot = self.chatminal_sidebar.snapshot();
+        let ordered_session_ids = self.ordered_selected_chatminal_session_ids(anchor_session_id);
+        if ordered_session_ids.len() < 2 {
+            return;
+        }
+
+        let anchor_session_id = ordered_session_ids[0].clone();
+        let Some(anchor_profile_id) = snapshot
+            .sessions
+            .iter()
+            .find(|session| session.session_id == anchor_session_id)
+            .map(|session| session.profile_id.clone())
+        else {
+            return;
+        };
+        let is_active_profile =
+            snapshot.active_profile_id.as_deref() == Some(anchor_profile_id.as_str());
+        let workspace_id = if is_active_profile {
+            DEFAULT_LAYOUT_WORKSPACE_ID.to_string()
+        } else {
+            DesktopWorkspaceLayoutStore::profile_workspace_id(&anchor_profile_id)
+        };
+        let layout_store = DesktopWorkspaceLayoutStore::new(workspace_id);
+        if is_active_profile {
+            let _ = DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID)
+                .save_as_profile_layout(&anchor_profile_id);
+        }
+        let Some(layout) =
+            crate::chatminal_runtime::WorkspaceLayoutState::grouped_sessions(&ordered_session_ids)
+        else {
+            log::error!("failed to build joined session layout");
+            return;
+        };
+        layout_store.replace_layout(layout);
+        if is_active_profile {
+            let _ = DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID)
+                .save_as_profile_layout(&anchor_profile_id);
+            let _ = crate::chatminal_runtime::desktop_prepare_workspace_layout(
+                self.window_id as DesktopWindowId,
+                self.terminal_size,
+            );
+        } else {
+            let _ = layout_store.save_as_profile_layout(&anchor_profile_id);
+        }
+        self.switch_chatminal_session_target(&anchor_session_id, None);
+        if let Some(window) = self.window.as_ref() {
+            window.invalidate();
+        }
+    }
+
     fn ordered_chatminal_session_ids(&self) -> Vec<String> {
         let snapshot = self.chatminal_sidebar.snapshot();
         let workspace_ids: Vec<String> = snapshot
@@ -880,30 +1101,45 @@ impl TermWindow {
             .iter()
             .find(|session| session.session_id == session_id)
             .map(|session| session.profile_id.clone());
+        let layout_store = DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID);
         if let Some(profile_id) = target_profile_id.as_deref() {
             if sidebar_snapshot.active_profile_id.as_deref() != Some(profile_id) {
-                if let Err(err) = self.chatminal_sidebar.switch_profile(profile_id) {
-                    log::error!(
-                        "failed to sync active profile {profile_id} for session {session_id}: {err}"
-                    );
-                    return;
+                match self.chatminal_sidebar.switch_profile(profile_id) {
+                    Ok(workspace) => {
+                        let _ = layout_store.swap_profile_layout(
+                            sidebar_snapshot.active_profile_id.as_deref(),
+                            profile_id,
+                            Some(session_id),
+                        );
+                        self.chatminal_sidebar.apply_workspace(workspace);
+                    }
+                    Err(err) => {
+                        log::error!(
+                            "failed to sync active profile {profile_id} for session {session_id}: {err}"
+                        );
+                        return;
+                    }
                 }
+            } else if layout_store.view_id_for_session(session_id).is_none()
+                && {
+                    let _ = layout_store.save_as_profile_layout(profile_id);
+                    layout_store
+                        .restore_profile_layout_if_contains(profile_id, session_id)
+                        .is_some()
+                }
+            {
+                let _ = crate::chatminal_runtime::desktop_prepare_workspace_layout(
+                    self.window_id as DesktopWindowId,
+                    self.terminal_size,
+                );
             }
         }
-        if let Err(err) = self.chatminal_sidebar.activate_session(
-            session_id,
-            self.terminal_size.cols.max(20),
-            self.terminal_size.rows.max(5),
-        ) {
-            log::error!("failed to activate sidebar session {session_id}: {err}");
-            return;
-        }
-
         if self
             .activate_chatminal_session_target(session_id, preferred_runtime_id)
             .is_some()
         {
             self.chatminal_sidebar.set_active_session_local(session_id);
+            self.chatminal_sidebar.select_single_session(session_id);
         }
     }
 
@@ -931,6 +1167,10 @@ impl TermWindow {
             ) {
                 log::error!("failed to notify runtime bridge about session activation: {err}");
             }
+            self.chatminal_sidebar.set_active_session_local(session_id);
+            self.chatminal_sidebar
+                .set_session_status_local(session_id, "running");
+            self.chatminal_sidebar.select_single_session(session_id);
             if let Some(window) = self.window.as_ref() {
                 window.invalidate();
             }
@@ -960,6 +1200,11 @@ impl TermWindow {
         if !self.chatminal_sidebar.is_enabled() {
             return None;
         }
+        if let Some(layout) = self.chatminal_workspace_layout_snapshot() {
+            if let Some(view) = layout.view(layout.active_view_id) {
+                return Some(view.session_id.clone());
+            }
+        }
         let snapshot = self.chatminal_sidebar.snapshot();
         if let Some(session_id) = snapshot.active_session_id.clone() {
             return Some(session_id);
@@ -971,11 +1216,6 @@ impl TermWindow {
             .map(|session| session.session_id.clone())
         {
             return Some(session_id);
-        }
-        if let Some(layout) = self.chatminal_workspace_layout_snapshot() {
-            if let Some(view) = layout.view(layout.active_view_id) {
-                return Some(view.session_id.clone());
-            }
         }
         None
     }
@@ -1112,6 +1352,77 @@ impl TermWindow {
         true
     }
 
+    fn unjoin_chatminal_session_by_id(&mut self, session_id: &str) -> bool {
+        if !self.chatminal_sidebar.is_enabled() {
+            return false;
+        }
+
+        let snapshot = self.chatminal_sidebar.snapshot();
+        let Some(target_session) = snapshot
+            .sessions
+            .iter()
+            .find(|session| session.session_id == session_id)
+        else {
+            return false;
+        };
+
+        let workspace_id = if snapshot.active_profile_id.as_deref()
+            == Some(target_session.profile_id.as_str())
+        {
+            DEFAULT_LAYOUT_WORKSPACE_ID.to_string()
+        } else {
+            DesktopWorkspaceLayoutStore::profile_workspace_id(&target_session.profile_id)
+        };
+        let store = DesktopWorkspaceLayoutStore::new(workspace_id);
+        let Some(layout) = store.snapshot_or_restore() else {
+            return false;
+        };
+        if layout.views.len() <= 1 {
+            return false;
+        }
+
+        let Some(view_id) = store.view_id_for_session(session_id) else {
+            return false;
+        };
+
+        let is_active_profile = snapshot.active_profile_id.as_deref()
+            == Some(target_session.profile_id.as_str());
+
+        let updated = match store.close_view(view_id) {
+            Some(updated) => updated,
+            None => return false,
+        };
+        let joined_session_ids = layout
+            .views
+            .iter()
+            .map(|view| view.session_id.as_str())
+            .collect::<Vec<_>>();
+        store.clear_profile_group_layouts(&target_session.profile_id, joined_session_ids);
+
+        if is_active_profile {
+            if let Some(next_active_view) = updated.view(updated.active_view_id) {
+                let _ = DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID)
+                    .save_as_profile_layout(&target_session.profile_id);
+                let _ = crate::chatminal_runtime::desktop_focus_session_view_with_previous(
+                    self.window_id as DesktopWindowId,
+                    next_active_view.view_id,
+                    Some(session_id.to_string()),
+                );
+                self.chatminal_sidebar
+                    .set_active_session_local(&next_active_view.session_id);
+                self.chatminal_sidebar
+                    .select_single_session(&next_active_view.session_id);
+            }
+        } else {
+            let _ = store.save_as_profile_layout(&target_session.profile_id);
+        }
+
+        if let Some(window) = self.window.as_ref() {
+            window.invalidate();
+        }
+        true
+    }
+
     fn close_chatminal_view_or_session_by_id(&mut self, session_id: &str) -> bool {
         let can_close_view_only = crate::chatminal_runtime::desktop_can_close_view_only(
             self.window_id as DesktopWindowId,
@@ -1157,18 +1468,19 @@ impl TermWindow {
         if !self.chatminal_sidebar.is_enabled() {
             return;
         }
-        if self
-            .chatminal_sidebar
-            .snapshot()
-            .active_profile_id
-            .as_deref()
-            == Some(profile_id)
-        {
+        let snapshot = self.chatminal_sidebar.snapshot();
+        if snapshot.active_profile_id.as_deref() == Some(profile_id) {
             return;
         }
 
         match self.chatminal_sidebar.switch_profile(profile_id) {
             Ok(workspace) => {
+                let _ = DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID)
+                    .swap_profile_layout(
+                        snapshot.active_profile_id.as_deref(),
+                        profile_id,
+                        workspace.active_session_id.as_deref(),
+                    );
                 self.apply_chatminal_profile_workspace(workspace);
             }
             Err(err) => {
@@ -1401,7 +1713,9 @@ impl TermWindow {
                 size,
                 terminal_size,
             );
-            crate::chatminal_runtime::resize_host_window_tabs(engine_window_id, terminal_size);
+            if !chatminal_sidebar.is_enabled() {
+                crate::chatminal_runtime::resize_host_window_tabs(engine_window_id, terminal_size);
+            }
         }
 
         let h_context = DimensionContext {

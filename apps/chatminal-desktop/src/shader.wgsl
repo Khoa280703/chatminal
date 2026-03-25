@@ -8,6 +8,9 @@ struct VertexInput {
     @location(4) hsv: vec3<f32>,
     @location(5) has_color: f32,
     @location(6) mix_value: f32,
+    @location(7) clip_rect: vec4<f32>,
+    @location(8) clip_radius: f32,
+    @location(9) clip_enabled: f32,
 };
 
 struct VertexOutput {
@@ -16,6 +19,10 @@ struct VertexOutput {
     @location(1) fg_color: vec4<f32>,
     @location(2) hsv: vec3<f32>,
     @location(3) has_color: f32,
+    @location(4) position: vec2<f32>,
+    @location(5) clip_rect: vec4<f32>,
+    @location(6) clip_radius: f32,
+    @location(7) clip_enabled: f32,
 };
 
 // a regular monochrome text glyph
@@ -81,8 +88,21 @@ fn vs_main(
     out.hsv = model.hsv;
     out.has_color = model.has_color;
     out.fg_color = mix(model.fg_color, model.alt_color, model.mix_value);
+    out.position = model.position;
+    out.clip_rect = model.clip_rect;
+    out.clip_radius = model.clip_radius;
+    out.clip_enabled = model.clip_enabled;
     out.clip_position = uniforms.projection * vec4<f32>(model.position, 0.0, 1.0);
     return out;
+}
+
+fn rounded_rect_mask(position: vec2<f32>, rect: vec4<f32>, radius: f32) -> f32 {
+  let center = (rect.xy + rect.zw) * 0.5;
+  let half_size = max((rect.zw - rect.xy) * 0.5, vec2<f32>(0.0, 0.0));
+  let clamped_radius = min(radius, min(half_size.x, half_size.y));
+  let q = abs(position - center) - (half_size - vec2<f32>(clamped_radius, clamped_radius));
+  let distance = length(max(q, vec2<f32>(0.0, 0.0))) + min(max(q.x, q.y), 0.0) - clamped_radius;
+  return 1.0 - smoothstep(0.0, 1.0, distance);
 }
 
 // Fragment shader
@@ -119,6 +139,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
   }
 
   color = apply_hsv(color, hsv);
+
+  if in.clip_enabled > 0.5 {
+    let clip_mask = rounded_rect_mask(in.position, in.clip_rect, in.clip_radius);
+    color.a *= clip_mask;
+    if color.a <= 0.0 {
+      discard;
+    }
+  }
 
   return color;
 }

@@ -103,7 +103,7 @@ impl Store {
             .or_else(|| profiles.first().map(|value| value.profile_id.clone()))
             .ok_or_else(|| "no profile available".to_string())?;
 
-        let sessions = self.list_sessions_by_profile_with_conn(&conn, &active_profile_id)?;
+        let sessions = self.list_sessions_with_conn(&conn)?;
         let active_session_id = self.active_session_with_conn(&conn, &active_profile_id)?;
         Ok(StoredWorkspace {
             profiles,
@@ -686,6 +686,99 @@ impl Store {
         Ok(())
     }
 
+    pub fn move_sessions_to_profile(
+        &self,
+        session_ids: &[String],
+        target_profile_id: &str,
+        target_index: Option<usize>,
+    ) -> Result<(), String> {
+        if session_ids.is_empty() {
+            return Ok(());
+        }
+
+        let mut conn = self.open_connection()?;
+        let tx = conn
+            .transaction()
+            .map_err(|err| format!("open move sessions transaction failed: {err}"))?;
+
+        let target_exists: i64 = tx
+            .query_row(
+                "SELECT COUNT(1) FROM profiles WHERE id = ?1",
+                params![target_profile_id],
+                |row| row.get(0),
+            )
+            .map_err(|err| format!("validate target profile failed: {err}"))?;
+        if target_exists == 0 {
+            return Err("target profile not found".to_string());
+        }
+
+        let mut source_profile_id: Option<String> = None;
+        let mut moved_ids = Vec::with_capacity(session_ids.len());
+        let mut seen = std::collections::BTreeSet::new();
+        for session_id in session_ids {
+            if !seen.insert(session_id.as_str()) {
+                continue;
+            }
+            let current_profile_id: String = tx
+                .query_row(
+                    "SELECT profile_id FROM sessions WHERE id = ?1",
+                    params![session_id],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|err| format!("load source profile failed: {err}"))?
+                .ok_or_else(|| "session not found".to_string())?;
+            match source_profile_id.as_deref() {
+                Some(existing) if existing != current_profile_id => {
+                    return Err("all sessions must belong to the same profile".to_string());
+                }
+                Some(_) => {}
+                None => source_profile_id = Some(current_profile_id),
+            }
+            moved_ids.push(session_id.clone());
+        }
+        let Some(source_profile_id) = source_profile_id else {
+            return Ok(());
+        };
+
+        let mut source_ids = self.session_ids_by_profile_with_conn(&tx, &source_profile_id)?;
+        let moved_lookup: std::collections::BTreeSet<&str> =
+            moved_ids.iter().map(String::as_str).collect();
+        let source_active_session_id = self.active_session_with_conn(&tx, &source_profile_id)?;
+        let original_source_len = source_ids.len();
+        source_ids.retain(|id| !moved_lookup.contains(id.as_str()));
+        if source_ids.len() + moved_ids.len() != original_source_len {
+            return Err("session not found in source profile".to_string());
+        }
+
+        if source_profile_id == target_profile_id {
+            let insert_at = target_index.unwrap_or(source_ids.len()).min(source_ids.len());
+            source_ids.splice(insert_at..insert_at, moved_ids.iter().cloned());
+            self.resequence_sessions_for_profile_with_conn(&tx, &source_profile_id, &source_ids)?;
+        } else {
+            let mut target_ids = self.session_ids_by_profile_with_conn(&tx, target_profile_id)?;
+            let insert_at = target_index.unwrap_or(target_ids.len()).min(target_ids.len());
+            target_ids.splice(insert_at..insert_at, moved_ids.iter().cloned());
+            self.resequence_sessions_for_profile_with_conn(&tx, &source_profile_id, &source_ids)?;
+            self.resequence_sessions_for_profile_with_conn(&tx, target_profile_id, &target_ids)?;
+
+            if source_active_session_id
+                .as_deref()
+                .is_some_and(|session_id| moved_lookup.contains(session_id))
+            {
+                self.set_active_session_with_conn(
+                    &tx,
+                    &source_profile_id,
+                    source_ids.first().map(|value| value.as_str()),
+                )?;
+            }
+        }
+
+        tx.commit()
+            .map_err(|err| format!("commit move sessions failed: {err}"))?;
+        Ok(())
+    }
+
     pub fn set_active_session(
         &self,
         profile_id: &str,
@@ -1003,6 +1096,36 @@ impl Store {
         while let Some(row) = rows
             .next()
             .map_err(|err| format!("read session row failed: {err}"))?
+        {
+            sessions.push(StoredSessionSummary {
+                session_id: row.get(0).unwrap_or_default(),
+                profile_id: row.get(1).unwrap_or_default(),
+                name: row.get(2).unwrap_or_default(),
+                cwd: row.get(3).unwrap_or_default(),
+                status: status_from_db(row.get::<_, String>(4).unwrap_or_default().as_str()),
+                persist_history: row.get::<_, i64>(5).unwrap_or_default() != 0,
+                seq: row.get::<_, i64>(6).unwrap_or_default().max(0) as u64,
+            });
+        }
+
+        Ok(sessions)
+    }
+
+    fn list_sessions_with_conn(&self, conn: &Connection) -> Result<Vec<StoredSessionSummary>, String> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, profile_id, name, cwd, status, persist_history, last_seq FROM sessions ORDER BY profile_id ASC, sort_order ASC, created_at ASC, rowid ASC",
+            )
+            .map_err(|err| format!("prepare list all sessions failed: {err}"))?;
+
+        let mut rows = stmt
+            .query([])
+            .map_err(|err| format!("query all sessions failed: {err}"))?;
+
+        let mut sessions = Vec::new();
+        while let Some(row) = rows
+            .next()
+            .map_err(|err| format!("read all session row failed: {err}"))?
         {
             sessions.push(StoredSessionSummary {
                 session_id: row.get(0).unwrap_or_default(),

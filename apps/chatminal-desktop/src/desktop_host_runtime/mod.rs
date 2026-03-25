@@ -739,33 +739,6 @@ pub(crate) async fn host_launcher_domains() -> Vec<HostLauncherDomainEntry> {
     entries
 }
 
-pub(crate) fn host_domain_menu_entries() -> Vec<HostLauncherDomainEntry> {
-    let mut domains = Mux::get().iter_domains();
-    domains.sort_by(|a, b| {
-        let a_state = a.state();
-        let b_state = b.state();
-        if a_state != b_state {
-            use std::cmp::Ordering;
-            return if a_state == DomainState::Attached {
-                Ordering::Less
-            } else {
-                Ordering::Greater
-            };
-        }
-        a.domain_id().cmp(&b.domain_id())
-    });
-    domains
-        .into_iter()
-        .filter(|domain| domain.spawnable())
-        .map(|domain| HostLauncherDomainEntry {
-            domain_id: domain.domain_id(),
-            name: domain.domain_name().to_string(),
-            is_attached: domain.state() == DomainState::Attached,
-            label: domain.domain_name().to_string(),
-        })
-        .collect()
-}
-
 pub(crate) async fn attach_host_domain(
     domain: &HostDomainHandle,
     window_id: Option<u64>,
