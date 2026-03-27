@@ -1,15 +1,17 @@
-use std::io::{Read, Write};
+use std::io::Read;
 use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use chatminal_terminal_core::{Terminal, TerminalSize};
+use chatminal_terminal_core::{Terminal as CoreTerminal, TerminalSize};
+use engine_term::Terminal as IoTerminal;
 use portable_pty::{Child, CommandBuilder, PtySize};
 
 use super::leaf_runtime::{TerminalInstanceRuntimeEvent, TerminalInstanceRuntimeSpawn};
 
 pub(crate) fn spawn_reader_loop(
-    terminal: Arc<Mutex<Terminal>>,
+    terminal: Arc<Mutex<CoreTerminal>>,
+    io_terminal: Arc<Mutex<IoTerminal>>,
     output_history: Arc<Mutex<Vec<String>>>,
     spawn: TerminalInstanceRuntimeSpawn,
     events: std_mpsc::SyncSender<TerminalInstanceRuntimeEvent>,
@@ -31,12 +33,13 @@ pub(crate) fn spawn_reader_loop(
                 Ok(0) => break,
                 Ok(read) => {
                     let raw_chunk = String::from_utf8_lossy(&buffer[..read]).to_string();
+                    io_terminal.lock().unwrap().advance_bytes(raw_chunk.as_bytes());
                     let mut chunk = raw_chunk.clone();
                     if let Some(restored) = restored_prompt_fragment.as_deref() {
                         if visible_terminal_fragment(&chunk).is_empty() {
                             // Keep prompt-dedupe armed across pure control-sequence chunks.
                         } else if let Some(stripped) =
-                            strip_duplicate_restored_prompt_prefix(restored, &chunk)
+                            strip_duplicate_restored_prompt_redraws(restored, &chunk)
                         {
                             if stripped.is_empty() {
                                 continue;
@@ -82,28 +85,6 @@ pub(crate) fn spawn_reader_loop(
                     });
                     break;
                 }
-            }
-        }
-    });
-}
-
-pub(crate) fn spawn_writer_loop(
-    spawn: TerminalInstanceRuntimeSpawn,
-    events: std_mpsc::SyncSender<TerminalInstanceRuntimeEvent>,
-    mut writer: Box<dyn Write + Send>,
-    input_rx: std_mpsc::Receiver<Vec<u8>>,
-) {
-    thread::spawn(move || {
-        while let Ok(chunk) = input_rx.recv() {
-            if let Err(err) = writer.write_all(&chunk).and_then(|_| writer.flush()) {
-                let _ = events.send(TerminalInstanceRuntimeEvent::Error {
-                    session_id: spawn.session_id.clone(),
-                    generation: spawn.generation,
-                    runtime_id: spawn.runtime_id,
-                    terminal_instance_id: spawn.terminal_instance_id,
-                    message: format!("pty write failed: {err}"),
-                });
-                break;
             }
         }
     });
@@ -229,6 +210,18 @@ fn visible_terminal_fragment(value: &str) -> String {
                             }
                         }
                     }
+                    Some(b'P') | Some(b'^') | Some(b'_') | Some(b'X') => {
+                        i += 1;
+                        while i < bytes.len() {
+                            match bytes[i] {
+                                0x1b if bytes.get(i + 1) == Some(&b'\\') => {
+                                    i += 2;
+                                    break;
+                                }
+                                _ => i += 1,
+                            }
+                        }
+                    }
                     Some(_) => {
                         i += 1;
                     }
@@ -315,6 +308,17 @@ fn visible_prefix_end_for_fragment(chunk: &str, expected_visible: &str) -> Optio
                         }
                     }
                 }
+                'P' | '^' | '_' | 'X' => {
+                    idx += 1;
+                    while idx < chars.len() {
+                        let c = chars[idx].1;
+                        idx += 1;
+                        if c == '\u{1b}' && idx < chars.len() && chars[idx].1 == '\\' {
+                            idx += 1;
+                            break;
+                        }
+                    }
+                }
                 _ => {
                     idx += 1;
                 }
@@ -338,20 +342,31 @@ fn visible_prefix_end_for_fragment(chunk: &str, expected_visible: &str) -> Optio
     None
 }
 
-fn strip_duplicate_restored_prompt_prefix(restored: &str, chunk: &str) -> Option<String> {
+fn strip_duplicate_restored_prompt_redraws(restored: &str, chunk: &str) -> Option<String> {
     let expected_visible = visible_terminal_fragment(restored);
     if !looks_like_shell_prompt_fragment(restored) {
         return None;
     }
-    let prefix_end = visible_prefix_end_for_fragment(chunk, &expected_visible)?;
-    Some(chunk[prefix_end..].to_string())
+    let mut remainder = chunk.to_string();
+    let mut stripped_any = false;
+
+    while let Some(prefix_end) = visible_prefix_end_for_fragment(&remainder, &expected_visible) {
+        stripped_any = true;
+        remainder = remainder[prefix_end..].to_string();
+        let remaining_visible = visible_terminal_fragment(&remainder);
+        if remaining_visible.is_empty() || !remaining_visible.starts_with(&expected_visible) {
+            break;
+        }
+    }
+
+    stripped_any.then_some(remainder)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
         looks_like_shell_prompt_fragment, sanitize_zsh_prompt_spacer, snapshot_trailing_fragment,
-        strip_duplicate_restored_prompt_prefix,
+        strip_duplicate_restored_prompt_redraws, visible_terminal_fragment,
     };
 
     #[test]
@@ -379,12 +394,42 @@ mod tests {
 
     #[test]
     fn strips_duplicate_prompt_redraw_prefix_from_runtime_chunk() {
-        let stripped = strip_duplicate_restored_prompt_prefix(
+        let stripped = strip_duplicate_restored_prompt_redraws(
             "user@host ~ % ",
             "\r\x1b[0m\x1b[27m\x1b[24m\x1b[Juser@host ~ % ",
         )
         .expect("prompt prefix stripped");
         assert_eq!(stripped, "");
+    }
+
+    #[test]
+    fn strips_repeated_duplicate_prompt_redraws_from_runtime_chunk() {
+        let stripped = strip_duplicate_restored_prompt_redraws(
+            "user@host ~ % ",
+            "\r\x1b[0muser@host ~ % \r\n\x1b[0muser@host ~ % ",
+        )
+        .expect("duplicate prompt redraws stripped");
+        assert_eq!(stripped, "");
+    }
+
+    #[test]
+    fn preserves_real_output_after_duplicate_prompt_redraw() {
+        let stripped = strip_duplicate_restored_prompt_redraws(
+            "user@host ~ % ",
+            "\r\x1b[0muser@host ~ % \r\nls\r\nfile.txt\r\n",
+        )
+        .expect("leading prompt redraw stripped");
+        assert_eq!(stripped, "\r\nls\r\nfile.txt\r\n");
+    }
+
+    #[test]
+    fn ignores_dcs_xtversion_when_computing_visible_fragment() {
+        let value = concat!(
+            "\x1bP>|Chatminal 20260327-085528-1b1caf5365\x1b\\",
+            "\x1b[?65;4;6;18;22;52c",
+            "\r\x1b[0muser@host ~ % "
+        );
+        assert_eq!(visible_terminal_fragment(value), "user@host ~ % ");
     }
 
     #[test]

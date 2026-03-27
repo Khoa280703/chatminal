@@ -95,7 +95,7 @@ pub(crate) struct ChatminalSessionPane {
     display_state: Mutex<()>,
     parser: Mutex<EscapeParser>,
     terminal: Mutex<Terminal>,
-    writer: Mutex<SessionPaneWriter>,
+    input_writer: Mutex<SessionPaneWriter>,
     dead: Mutex<bool>,
     config: Mutex<Option<Arc<dyn TerminalConfiguration>>>,
 }
@@ -108,7 +108,7 @@ impl ChatminalSessionPane {
         terminal_instance_id: TerminalInstanceId,
         size: TerminalSize,
     ) -> anyhow::Result<Arc<Self>> {
-        let writer = SessionPaneWriter::new(Arc::clone(&shared), terminal_instance_id);
+        let input_writer = SessionPaneWriter::new(Arc::clone(&shared), terminal_instance_id);
         let pane = Arc::new(Self {
             pane_id: pane_id_for_terminal_instance(terminal_instance_id),
             session_id,
@@ -122,9 +122,9 @@ impl ChatminalSessionPane {
                 Arc::new(TermConfig::new()),
                 "Chatminal",
                 config::engine_version(),
-                Box::new(writer.clone()),
+                Box::new(std::io::sink()),
             )),
-            writer: Mutex::new(writer),
+            input_writer: Mutex::new(input_writer),
             dead: Mutex::new(false),
             config: Mutex::new(None),
         });
@@ -347,6 +347,40 @@ pub(crate) fn pane_id_for_terminal_instance(
     usize::try_from(terminal_instance_id.as_u64()).unwrap_or_else(|_| alloc_host_terminal_handle())
 }
 
+fn looks_like_chatminal_internal_title(title: &str) -> bool {
+    let trimmed = title.trim();
+    if trimmed.is_empty() || trimmed == "Chatminal" {
+        return true;
+    }
+
+    let marker = trimmed
+        .strip_prefix(">|Chatminal ")
+        .or_else(|| trimmed.strip_prefix("Chatminal "))
+        .unwrap_or(trimmed);
+
+    let mut parts = marker.split('-');
+    let Some(date) = parts.next() else {
+        return false;
+    };
+    let Some(time) = parts.next() else {
+        return false;
+    };
+    let Some(suffix) = parts.next() else {
+        return false;
+    };
+
+    if parts.next().is_some() {
+        return false;
+    }
+
+    date.len() == 8
+        && date.bytes().all(|b| b.is_ascii_digit())
+        && time.len() == 6
+        && time.bytes().all(|b| b.is_ascii_digit())
+        && suffix.len() >= 8
+        && suffix.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
 #[async_trait::async_trait(?Send)]
 impl HostTerminal for ChatminalSessionPane {
     fn pane_id(&self) -> HostTerminalHandle {
@@ -406,8 +440,8 @@ impl HostTerminal for ChatminalSessionPane {
     }
     fn get_title(&self) -> String {
         let title = self.terminal.lock().get_title().to_string();
-        if title.is_empty() || title == "Chatminal" {
-            self.session_id.clone()
+        if looks_like_chatminal_internal_title(&title) {
+            "Chatminal".to_string()
         } else {
             title
         }
@@ -416,13 +450,15 @@ impl HostTerminal for ChatminalSessionPane {
         self.terminal.lock().get_progress()
     }
     fn send_paste(&self, text: &str) -> anyhow::Result<()> {
-        self.terminal.lock().send_paste(text)
+        self.shared
+            .paste_terminal_input(self.terminal_instance_id, text)
+            .map_err(anyhow::Error::msg)
     }
     fn reader(&self) -> anyhow::Result<Option<Box<dyn std::io::Read + Send>>> {
         Ok(None)
     }
     fn writer(&self) -> MappedMutexGuard<'_, dyn std::io::Write> {
-        MutexGuard::map(self.writer.lock(), |writer| {
+        MutexGuard::map(self.input_writer.lock(), |writer| {
             let w: &mut dyn std::io::Write = writer;
             w
         })
@@ -445,15 +481,21 @@ impl HostTerminal for ChatminalSessionPane {
     }
     fn key_down(&self, key: KeyCode, mods: KeyModifiers) -> anyhow::Result<()> {
         HostMux::get().record_input_for_current_identity();
-        self.terminal.lock().key_down(key, mods)
+        self.shared
+            .key_down_terminal_input(self.terminal_instance_id, key, mods)
+            .map_err(anyhow::Error::msg)
     }
     fn key_up(&self, key: KeyCode, mods: KeyModifiers) -> anyhow::Result<()> {
         HostMux::get().record_input_for_current_identity();
-        self.terminal.lock().key_up(key, mods)
+        self.shared
+            .key_up_terminal_input(self.terminal_instance_id, key, mods)
+            .map_err(anyhow::Error::msg)
     }
     fn mouse_event(&self, event: MouseEvent) -> anyhow::Result<()> {
         HostMux::get().record_input_for_current_identity();
-        self.terminal.lock().mouse_event(event)
+        self.shared
+            .mouse_terminal_input(self.terminal_instance_id, event)
+            .map_err(anyhow::Error::msg)
     }
     fn perform_actions(&self, actions: Vec<Action>) {
         self.terminal.lock().perform_actions(actions)
@@ -734,8 +776,9 @@ fn decode_input_payload_chunks(pending: &mut Vec<u8>, payload: &[u8]) -> Vec<Str
 mod tests {
     use std::sync::mpsc;
     use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
 
-    use engine_term::StableRowIndex;
+    use engine_term::{KeyCode, KeyModifiers, StableRowIndex};
     use host_runtime::pane::Pattern;
     use portable_pty::CommandBuilder;
 
@@ -746,6 +789,7 @@ mod tests {
     use super::super::{build_initial_host_mux, shutdown_host_mux};
     use super::{
         Action, ChatminalSessionPane, HostTerminal, TerminalSize, decode_input_payload_chunks,
+        looks_like_chatminal_internal_title,
     };
 
     fn shell_command(script: &str) -> CommandBuilder {
@@ -772,6 +816,31 @@ mod tests {
         assert!(decode_input_payload_chunks(&mut pending, &[0xE1, 0xBB]).is_empty());
         let chunks = decode_input_payload_chunks(&mut pending, &[0x8B, b'a']);
         assert_eq!(chunks, vec!["ịa".to_string()]);
+    }
+
+    #[test]
+    fn internal_title_filter_detects_chatminal_marker_titles() {
+        assert!(looks_like_chatminal_internal_title(
+            "Chatminal 20260327-085528-1b1caf5365"
+        ));
+        assert!(looks_like_chatminal_internal_title(
+            ">|Chatminal 20260327-085528-1b1caf5365"
+        ));
+        assert!(looks_like_chatminal_internal_title("20260327-085528-1b1caf5365"));
+        assert!(!looks_like_chatminal_internal_title("claude"));
+        assert!(!looks_like_chatminal_internal_title("npm run dev"));
+    }
+
+    #[test]
+    fn marker_title_falls_back_to_chatminal_title() {
+        let title = "Chatminal 20260327-085528-1b1caf5365";
+        let user_facing = if looks_like_chatminal_internal_title(title) {
+            "Chatminal".to_string()
+        } else {
+            title.to_string()
+        };
+
+        assert_eq!(user_facing, "Chatminal");
     }
 
     #[test]
@@ -913,5 +982,259 @@ mod tests {
         assert!(!results.is_empty(), "expected search matches in replayed output");
 
         shutdown_host_mux();
+    }
+
+    #[test]
+    fn pane_key_input_is_forwarded_to_runtime() {
+        build_initial_host_mux(&config::configuration(), None).expect("init host mux");
+        let runtime_id = RuntimeId::new(21);
+        let terminal_instance_id = TerminalInstanceId::new(22);
+        let core_state = Arc::new(Mutex::new(SessionCoreState::default()));
+        core_state.lock().unwrap().sync_runtime_layout(
+            "session-a",
+            runtime_id,
+            &SessionLayoutSnapshot::single_terminal_instance(
+                LayoutNodeId::new(1),
+                terminal_instance_id,
+                None,
+            ),
+        );
+        let shared = Arc::new(SessionEngineShared::new(Arc::clone(&core_state)));
+        let (events_tx, _events_rx) = mpsc::sync_channel(32);
+
+        shared
+            .leaf_runtimes()
+            .spawn_for_runtime(
+                &core_state,
+                "session-a",
+                1,
+                runtime_id,
+                terminal_instance_id,
+                shell_command("stty raw -echo; dd bs=1 count=1 2>/dev/null"),
+                chatminal_terminal_core::TerminalSize {
+                    rows: 12,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                    dpi: 96,
+                },
+                None,
+                events_tx,
+            )
+            .expect("spawn runtime");
+
+        let pane = ChatminalSessionPane::new(
+            Arc::clone(&shared),
+            "session-a".to_string(),
+            runtime_id,
+            terminal_instance_id,
+            TerminalSize {
+                rows: 12,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+                dpi: 96,
+            },
+        )
+        .expect("create pane");
+
+        pane.key_down(KeyCode::Char('Z'), KeyModifiers::default())
+            .expect("forward key input");
+
+        let started = Instant::now();
+        while started.elapsed() < Duration::from_secs(3) {
+            if shared
+                .replay_output(terminal_instance_id)
+                .as_deref()
+                .is_some_and(|output| output.contains('Z'))
+            {
+                shutdown_host_mux();
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+
+        shutdown_host_mux();
+        panic!("expected pane key input to reach runtime output");
+    }
+
+    #[test]
+    fn pane_direct_writer_input_is_forwarded_to_runtime() {
+        build_initial_host_mux(&config::configuration(), None).expect("init host mux");
+        let runtime_id = RuntimeId::new(31);
+        let terminal_instance_id = TerminalInstanceId::new(32);
+        let core_state = Arc::new(Mutex::new(SessionCoreState::default()));
+        core_state.lock().unwrap().sync_runtime_layout(
+            "session-a",
+            runtime_id,
+            &SessionLayoutSnapshot::single_terminal_instance(
+                LayoutNodeId::new(1),
+                terminal_instance_id,
+                None,
+            ),
+        );
+        let shared = Arc::new(SessionEngineShared::new(Arc::clone(&core_state)));
+        let (events_tx, _events_rx) = mpsc::sync_channel(32);
+
+        shared
+            .leaf_runtimes()
+            .spawn_for_runtime(
+                &core_state,
+                "session-a",
+                1,
+                runtime_id,
+                terminal_instance_id,
+                shell_command("stty raw -echo; dd bs=1 count=1 2>/dev/null"),
+                chatminal_terminal_core::TerminalSize {
+                    rows: 12,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                    dpi: 96,
+                },
+                None,
+                events_tx,
+            )
+            .expect("spawn runtime");
+
+        let pane = ChatminalSessionPane::new(
+            Arc::clone(&shared),
+            "session-a".to_string(),
+            runtime_id,
+            terminal_instance_id,
+            TerminalSize {
+                rows: 12,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+                dpi: 96,
+            },
+        )
+        .expect("create pane");
+
+        pane.writer()
+            .write_all(b"Z")
+            .expect("forward direct writer input");
+
+        let started = Instant::now();
+        while started.elapsed() < Duration::from_secs(3) {
+            if shared
+                .replay_output(terminal_instance_id)
+                .as_deref()
+                .is_some_and(|output| output.contains('Z'))
+            {
+                shutdown_host_mux();
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+
+        shutdown_host_mux();
+        panic!("expected pane direct writer input to reach runtime output");
+    }
+
+    fn assert_key_input_hex(key: KeyCode, expected_hex: &str) {
+        build_initial_host_mux(&config::configuration(), None).expect("init host mux");
+        let runtime_id = RuntimeId::new(41);
+        let terminal_instance_id = TerminalInstanceId::new(42);
+        let core_state = Arc::new(Mutex::new(SessionCoreState::default()));
+        core_state.lock().unwrap().sync_runtime_layout(
+            "session-a",
+            runtime_id,
+            &SessionLayoutSnapshot::single_terminal_instance(
+                LayoutNodeId::new(1),
+                terminal_instance_id,
+                None,
+            ),
+        );
+        let shared = Arc::new(SessionEngineShared::new(Arc::clone(&core_state)));
+        let (events_tx, _events_rx) = mpsc::sync_channel(32);
+
+        shared
+            .leaf_runtimes()
+            .spawn_for_runtime(
+                &core_state,
+                "session-a",
+                1,
+                runtime_id,
+                terminal_instance_id,
+                shell_command("printf 'ready\\n'; stty raw -echo; dd bs=1 count=1 2>/dev/null | od -An -t x1"),
+                chatminal_terminal_core::TerminalSize {
+                    rows: 12,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                    dpi: 96,
+                },
+                None,
+                events_tx,
+            )
+            .expect("spawn runtime");
+
+        let pane = ChatminalSessionPane::new(
+            Arc::clone(&shared),
+            "session-a".to_string(),
+            runtime_id,
+            terminal_instance_id,
+            TerminalSize {
+                rows: 12,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+                dpi: 96,
+            },
+        )
+        .expect("create pane");
+
+        let started = Instant::now();
+        while started.elapsed() < Duration::from_secs(3) {
+            if shared
+                .replay_output(terminal_instance_id)
+                .as_deref()
+                .is_some_and(|output| output.contains("ready"))
+            {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+
+        pane.key_down(key, KeyModifiers::default())
+            .expect("forward special key input");
+
+        let started = Instant::now();
+        while started.elapsed() < Duration::from_secs(3) {
+            if shared
+                .replay_output(terminal_instance_id)
+                .as_deref()
+                .is_some_and(|output| output.contains(expected_hex))
+            {
+                shutdown_host_mux();
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+
+        let observed = shared.replay_output(terminal_instance_id).unwrap_or_default();
+        shutdown_host_mux();
+        panic!(
+            "expected hex {} in runtime output, got {:?}",
+            expected_hex,
+            observed
+        );
+    }
+
+    #[test]
+    fn pane_space_key_is_forwarded_to_runtime() {
+        assert_key_input_hex(KeyCode::Char(' '), "20");
+    }
+
+    #[test]
+    fn pane_enter_key_is_forwarded_to_runtime() {
+        assert_key_input_hex(KeyCode::Enter, "0d");
+    }
+
+    #[test]
+    fn pane_backspace_key_is_forwarded_to_runtime() {
+        assert_key_input_hex(KeyCode::Backspace, "7f");
     }
 }

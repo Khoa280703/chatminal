@@ -2,6 +2,7 @@ use chatminal_store::StoredSessionStatus;
 
 use super::{
     RuntimeState, prepend_run_boundary, strip_duplicate_restored_prompt_prefix,
+    strip_volatile_terminal_control_sequences,
     strip_zsh_prompt_spacer_artifact, trim_live_output,
 };
 use crate::api::{
@@ -92,7 +93,9 @@ impl RuntimeState {
                         }));
                     }
                     if persist_history {
-                        let persisted_chunk = strip_zsh_prompt_spacer_artifact(&output_chunk);
+                        let persisted_chunk = strip_volatile_terminal_control_sequences(
+                            &strip_zsh_prompt_spacer_artifact(&output_chunk),
+                        );
                         if let Err(err) =
                             inner
                                 .store

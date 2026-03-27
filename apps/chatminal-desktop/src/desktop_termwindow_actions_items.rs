@@ -361,63 +361,9 @@ impl TermWindow {
                     return Ok(PerformAssignmentResult::Handled);
                 }
             }
-            SwitchWorkspaceRelative(delta) => {
-                if self.is_session_ui_mode() {
-                    self.activate_chatminal_session_relative(*delta, true)?;
-                    return Ok(PerformAssignmentResult::Handled);
-                }
-                let workspace = Self::host_workspace_name();
-                let workspaces = Self::host_workspace_names();
-                let idx = workspaces.iter().position(|w| *w == workspace).unwrap_or(0);
-                let new_idx = idx as isize + delta;
-                let new_idx = if new_idx < 0 {
-                    workspaces.len() as isize + new_idx
-                } else {
-                    new_idx
-                };
-                let new_idx = new_idx as usize % workspaces.len();
-                if let Some(w) = workspaces.get(new_idx) {
-                    front_end().switch_workspace(w);
-                }
-            }
-            SwitchToWorkspace { name, spawn } => {
-                if self.is_session_ui_mode() {
-                    log::warn!(
-                        "ignoring SwitchToWorkspace in session UI mode; use session switching instead"
-                    );
-                    return Ok(PerformAssignmentResult::Handled);
-                }
-                let activity = crate::chatminal_runtime::start_host_activity();
-                let name = name
-                    .as_ref()
-                    .map(|name| name.to_string())
-                    .unwrap_or_else(Self::generate_host_workspace_name);
-                let switcher = crate::frontend::WorkspaceSwitcher::new(&name);
-                Self::set_host_workspace(&name);
-
-                if !Self::host_workspace_has_windows(&name) {
-                    let spawn = spawn.as_ref().map(|s| s.clone()).unwrap_or_default();
-                    let size = self.terminal_size;
-                    let term_config = Arc::new(TermConfig::with_config(self.config.clone()));
-
-                    promise::spawn::spawn(async move {
-                        if let Err(err) = crate::spawn::spawn_command_internal(
-                            spawn,
-                            SpawnWhere::InitialWindow,
-                            size,
-                            term_config,
-                        )
-                        .await
-                        {
-                            log::error!("Failed to spawn: {:#}", err);
-                        }
-                        switcher.do_switch();
-                        drop(activity);
-                    })
-                    .detach();
-                } else {
-                    switcher.do_switch();
-                }
+            SwitchWorkspaceRelative(_) | SwitchToWorkspace { .. } => {
+                log::warn!("workspace switching has been removed from Chatminal Desktop");
+                return Ok(PerformAssignmentResult::Handled);
             }
             CopyMode(_) => {
                 // NOP here; handled by the overlay directly

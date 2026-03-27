@@ -139,6 +139,20 @@ fn ordered_sidebar_snapshot(
 }
 
 impl crate::TermWindow {
+    fn chatminal_terminal_background_fill(&mut self) -> LinearRgba {
+        if self.window_background.is_empty() {
+            let panes = self.get_panes_to_render();
+            let background = if panes.len() == 1 {
+                panes[0].pane.palette().background
+            } else {
+                self.palette().background
+            };
+            background.to_linear()
+        } else {
+            LinearRgba::TRANSPARENT
+        }
+    }
+
     fn sidebar_text_font(&self) -> anyhow::Result<std::rc::Rc<engine_font::LoadedFont>> {
         let style = sidebar_text_style();
         self.fonts.resolve_font(&style).or_else(|err| {
@@ -168,6 +182,7 @@ impl crate::TermWindow {
             return Ok(());
         }
         let bounds = self.shell_bounds();
+        self.paint_chatminal_sidebar_background(&bounds)?;
         let sidebar_background = self.build_chatminal_sidebar(&bounds)?;
         let sidebar_header = self.build_chatminal_sidebar_header(&bounds)?;
         let (sidebar_tree, tree_clip_rect) = self.build_chatminal_sidebar_tree(&bounds)?;
@@ -192,6 +207,45 @@ impl crate::TermWindow {
             self.append_and_render_overlay(&footer_background)?;
             self.append_and_render_overlay(&footer_content)?;
         }
+        self.paint_chatminal_sidebar_divider(&bounds)?;
+        Ok(())
+    }
+
+    fn paint_chatminal_sidebar_background(
+        &mut self,
+        sb: &crate::shell_bounds::ShellBounds,
+    ) -> anyhow::Result<()> {
+        let background = self.chatminal_terminal_background_fill();
+        let gl_state = self.render_state.as_ref().unwrap();
+        let layer = gl_state.layer_for_zindex(1)?;
+        let mut layers = layer.quad_allocator();
+        self.filled_rectangle(
+            &mut layers,
+            0,
+            euclid::rect(sb.sidebar_x, sb.sidebar_y, sb.sidebar_width, sb.sidebar_height),
+            background,
+        )?;
+        Ok(())
+    }
+
+    fn paint_chatminal_sidebar_divider(
+        &mut self,
+        sb: &crate::shell_bounds::ShellBounds,
+    ) -> anyhow::Result<()> {
+        let gl_state = self.render_state.as_ref().unwrap();
+        let layer = gl_state.layer_for_zindex(10)?;
+        let mut layers = layer.quad_allocator();
+        self.filled_rectangle(
+            &mut layers,
+            0,
+            euclid::rect(
+                sb.sidebar_x + sb.sidebar_width,
+                sb.sidebar_y,
+                1.0,
+                sb.sidebar_height,
+            ),
+            LinearRgba::with_components(0.46, 0.46, 0.46, 0.42),
+        )?;
         Ok(())
     }
 
@@ -228,20 +282,18 @@ impl crate::TermWindow {
         let sidebar_height = sb.sidebar_height;
         let body_font = self.sidebar_text_font()?;
 
-        let panel_bg = LinearRgba::with_components(0.007, 0.007, 0.007, 1.0);
-        let root_border = LinearRgba::with_components(0.053, 0.053, 0.053, 1.0);
         let text = LinearRgba::with_components(0.800, 0.800, 0.800, 1.0);
         let root = Element::new(&body_font, ElementContent::Children(vec![]))
             .display(crate::termwindow::box_model::DisplayType::Block)
             .item_type(UIItemType::ChatminalSidebarBackground)
             .colors(ElementColors {
-                border: BorderColor::new(root_border),
-                bg: panel_bg.into(),
+                border: BorderColor::default(),
+                bg: LinearRgba::TRANSPARENT.into(),
                 text: text.into(),
             })
             .border(BoxDimension {
                 left: Dimension::Pixels(0.0),
-                right: Dimension::Pixels(1.0),
+                right: Dimension::Pixels(0.0),
                 top: Dimension::Pixels(0.0),
                 bottom: Dimension::Pixels(0.0),
             })

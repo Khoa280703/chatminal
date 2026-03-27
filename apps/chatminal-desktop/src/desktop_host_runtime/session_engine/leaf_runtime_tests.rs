@@ -105,3 +105,30 @@ fn leaf_runtime_seeds_terminal_from_initial_scrollback() {
     assert!(rendered.contains("restored-line-2"));
     assert!(runtime.replay_output().contains("restored-line-1"));
 }
+
+#[test]
+fn leaf_runtime_write_input_reaches_child_immediately() {
+    let (events_tx, events_rx) = mpsc::sync_channel(32);
+    let runtime = TerminalInstanceRuntime::spawn(
+        runtime_spawn("stty raw -echo; dd bs=1 count=1 2>/dev/null"),
+        events_tx,
+    )
+    .expect("spawn runtime");
+
+    runtime.write_input(b"Z").expect("write input");
+
+    let started = Instant::now();
+    let mut saw_output = false;
+    while started.elapsed() < Duration::from_secs(3) {
+        if let Ok(TerminalInstanceRuntimeEvent::Output { chunk, .. }) =
+            events_rx.recv_timeout(Duration::from_millis(200))
+        {
+            if chunk.contains('Z') {
+                saw_output = true;
+                break;
+            }
+        }
+    }
+
+    assert!(saw_output, "expected child to echo immediate input back");
+}

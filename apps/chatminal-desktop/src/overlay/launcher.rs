@@ -38,8 +38,6 @@ pub struct LauncherArgs {
     session_ui_mode: bool,
     pane_id: u64,
     title: String,
-    active_workspace: String,
-    workspaces: Vec<String>,
     help_text: String,
     fuzzy_help_text: String,
     alphabet: String,
@@ -55,14 +53,6 @@ impl LauncherArgs {
         fuzzy_help_text: &str,
         alphabet: &str,
     ) -> Self {
-        let active_workspace = crate::chatminal_runtime::host_workspace_name();
-
-        let workspaces = if flags.contains(LauncherFlags::WORKSPACES) {
-            crate::chatminal_runtime::host_workspace_names()
-        } else {
-            vec![]
-        };
-
         let tabs = if flags.contains(LauncherFlags::TABS) {
             crate::chatminal_runtime::launcher_sessions()
         } else {
@@ -76,8 +66,6 @@ impl LauncherArgs {
             session_ui_mode,
             pane_id,
             title: title.to_string(),
-            workspaces,
-            active_workspace,
             help_text: help_text.to_string(),
             fuzzy_help_text: fuzzy_help_text.to_string(),
             alphabet: alphabet.to_string(),
@@ -159,30 +147,6 @@ impl LauncherState {
                     action: KeyAssignment::SpawnCommandInNewSession(item.clone()),
                 });
             }
-        }
-
-        if args.flags.contains(LauncherFlags::WORKSPACES) {
-            for ws in &args.workspaces {
-                if *ws != args.active_workspace {
-                    self.entries.push(Entry {
-                        label: format!("Switch to workspace: `{}`", ws),
-                        action: KeyAssignment::SwitchToWorkspace {
-                            name: Some(ws.clone()),
-                            spawn: None,
-                        },
-                    });
-                }
-            }
-            self.entries.push(Entry {
-                label: format!(
-                    "Create new Workspace (current is `{}`)",
-                    args.active_workspace
-                ),
-                action: KeyAssignment::SwitchToWorkspace {
-                    name: None,
-                    spawn: None,
-                },
-            });
         }
 
         for tab in &args.tabs {

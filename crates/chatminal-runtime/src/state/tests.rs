@@ -16,7 +16,8 @@ use super::{
     is_duplicate_restored_prompt_fragment, normalize_session_snapshot,
     normalize_terminal_fragment_for_compare, prepend_run_boundary,
     snapshot_requires_run_boundary, snapshot_trailing_fragment,
-    strip_duplicate_restored_prompt_prefix, trim_live_output, visible_terminal_fragment,
+    strip_duplicate_restored_prompt_prefix, strip_volatile_terminal_control_sequences,
+    trim_live_output, visible_terminal_fragment,
 };
 
 struct TempDb {
@@ -203,6 +204,16 @@ fn normalize_terminal_fragment_strips_ansi_and_crlf_noise() {
 }
 
 #[test]
+fn normalize_terminal_fragment_ignores_dcs_xtversion_and_device_attributes() {
+    let value = concat!(
+        "\x1bP>|Chatminal 20260327-085528-1b1caf5365\x1b\\",
+        "\x1b[?65;4;6;18;22;52c",
+        "\r\x1b[0m\x1b[27m\x1b[24m\x1b[Jkhoa2807@host ~ % "
+    );
+    assert_eq!(visible_terminal_fragment(value), "khoa2807@host ~ % ");
+}
+
+#[test]
 fn collapse_trailing_duplicate_prompt_redraws_keeps_only_latest_prompt_instance() {
     let value = concat!(
         "khoa2807@host ~ % ",
@@ -229,6 +240,22 @@ fn normalize_session_snapshot_collapses_duplicate_prompt_tail() {
 }
 
 #[test]
+fn normalize_session_snapshot_does_not_leak_xtversion_payload_into_prompt_tail() {
+    let snapshot = normalize_session_snapshot(chatminal_store::StoredSessionSnapshot {
+        content: concat!(
+            "echo hi\n",
+            "khoa2807@host ~ % ",
+            "\x1bP>|Chatminal 20260327-085528-1b1caf5365\x1b\\",
+            "\x1b[?65;4;6;18;22;52c",
+            "\r\x1b[0m\x1b[27m\x1b[24m\x1b[Jkhoa2807@host ~ % "
+        )
+        .to_string(),
+        seq: 3,
+    });
+    assert_eq!(snapshot.content, "echo hi\nkhoa2807@host ~ % ");
+}
+
+#[test]
 fn normalize_session_snapshot_collapses_trailing_prompt_only_lines() {
     let snapshot = normalize_session_snapshot(chatminal_store::StoredSessionSnapshot {
         content: concat!(
@@ -243,6 +270,39 @@ fn normalize_session_snapshot_collapses_trailing_prompt_only_lines() {
         seq: 6,
     });
     assert_eq!(snapshot.content, "echo hi\nhi\nkhoa2807@host ~ % ");
+}
+
+#[test]
+fn strip_volatile_terminal_control_sequences_removes_title_and_private_modes() {
+    let value = concat!(
+        "\x1b]0;Claude Code\x07",
+        "\x1b]2;Claude Code\x1b\\",
+        "\x1b[?25l",
+        "\x1b[?1049h",
+        "echo hi\n",
+        "khoa2807@host ~ % "
+    );
+
+    assert_eq!(
+        strip_volatile_terminal_control_sequences(value),
+        "echo hi\nkhoa2807@host ~ % "
+    );
+}
+
+#[test]
+fn normalize_session_snapshot_strips_title_and_cursor_state_from_restore() {
+    let snapshot = normalize_session_snapshot(chatminal_store::StoredSessionSnapshot {
+        content: concat!(
+            "\x1b]0;Claude Code\x07",
+            "\x1b[?25l",
+            "echo hi\n",
+            "khoa2807@host ~ % "
+        )
+        .to_string(),
+        seq: 2,
+    });
+
+    assert_eq!(snapshot.content, "echo hi\nkhoa2807@host ~ % ");
 }
 
 #[test]

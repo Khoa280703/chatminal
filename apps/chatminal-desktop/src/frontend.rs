@@ -506,10 +506,6 @@ impl WorkspaceSwitcher {
             new_name: new_name.to_string(),
         }
     }
-
-    pub fn do_switch(self) {
-        // Drop is invoked, which will complete the switch
-    }
 }
 
 impl Drop for WorkspaceSwitcher {

@@ -478,14 +478,6 @@ pub(crate) fn host_workspace_name() -> String {
     Mux::get().active_workspace().to_string()
 }
 
-pub(crate) fn host_workspace_names() -> Vec<String> {
-    Mux::get().iter_workspaces()
-}
-
-pub(crate) fn generate_host_workspace_name() -> String {
-    Mux::get().generate_workspace_name()
-}
-
 pub(crate) fn set_host_workspace(name: &str) {
     Mux::get().set_active_workspace(name);
     let _ = with_host_window_mut(|window| {

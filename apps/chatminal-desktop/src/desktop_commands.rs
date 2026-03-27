@@ -1,4 +1,3 @@
-use crate::chatminal_runtime::{host_workspace_name, host_workspace_names};
 use crate::inputmap::InputMap;
 use config::keyassignment::*;
 use config::window::WindowLevel;
@@ -310,34 +309,6 @@ impl CommandDef {
                 icon: Some("md_tab_plus".into()),
             });
         }
-
-        let active_workspace = host_workspace_name();
-        for workspace in host_workspace_names() {
-            if workspace != active_workspace {
-                result.push(ExpandedCommand {
-                    brief: format!("Switch to workspace {workspace}").into(),
-                    doc: "".into(),
-                    keys: vec![],
-                    action: KeyAssignment::SwitchToWorkspace {
-                        name: Some(workspace.clone()),
-                        spawn: None,
-                    },
-                    menubar: &["Window", "Workspace"],
-                    icon: None,
-                });
-            }
-        }
-        result.push(ExpandedCommand {
-            brief: "Create new Workspace".into(),
-            doc: "".into(),
-            keys: vec![],
-            action: KeyAssignment::SwitchToWorkspace {
-                name: None,
-                spawn: None,
-            },
-            menubar: &["Window", "Workspace"],
-            icon: None,
-        });
 
         // And sweep to pick up stuff from their key assignments
         let inputmap = InputMap::new(config);
@@ -1608,94 +1579,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
                 icon: None,
             }
         }
-        SwitchToWorkspace {
-            name: None,
-            spawn: None,
-        } => CommandDef {
-            brief: format!(
-                "Spawn the default program into a new \
-                           workspace and switch to it"
-            )
-            .into(),
-            doc: format!(
-                "Spawn the default program into a new \
-                         workspace and switch to it"
-            )
-            .into(),
-            keys: vec![],
-            args: &[],
-            menubar: &["Window", "Workspace"],
-            icon: None,
-        },
-        SwitchToWorkspace {
-            name: Some(name),
-            spawn: None,
-        } => CommandDef {
-            brief: format!(
-                "Switch to workspace `{name}`, spawn the \
-                           default program if that workspace doesn't already exist"
-            )
-            .into(),
-            doc: format!(
-                "Switch to workspace `{name}`, spawn the \
-                         default program if that workspace doesn't already exist"
-            )
-            .into(),
-            keys: vec![],
-            args: &[],
-            menubar: &["Window", "Workspace"],
-            icon: None,
-        },
-        SwitchToWorkspace {
-            name: Some(name),
-            spawn: Some(prog),
-        } => CommandDef {
-            brief: format!(
-                "Switch to workspace `{name}`, spawn {prog:?} \
-                           if that workspace doesn't already exist"
-            )
-            .into(),
-            doc: format!(
-                "Switch to workspace `{name}`, spawn {prog:?} \
-                         if that workspace doesn't already exist"
-            )
-            .into(),
-            keys: vec![],
-            args: &[],
-            menubar: &["Window", "Workspace"],
-            icon: None,
-        },
-        SwitchToWorkspace {
-            name: None,
-            spawn: Some(prog),
-        } => CommandDef {
-            brief: format!("Spawn the {prog:?} into a new workspace and switch to it").into(),
-            doc: format!("Spawn the {prog:?} into a new workspace and switch to it").into(),
-            keys: vec![],
-            args: &[],
-            menubar: &["Window", "Workspace"],
-            icon: None,
-        },
-        SwitchWorkspaceRelative(n) => {
-            let (direction, amount) = if *n < 0 {
-                ("previous", -n)
-            } else {
-                ("next", *n)
-            };
-            let ordinal = english_ordinal(amount);
-            CommandDef {
-                brief: format!("Switch to {ordinal} {direction} workspace").into(),
-                doc: format!(
-                    "Switch to the {ordinal} {direction} workspace, \
-                             ordered lexicographically by workspace name"
-                )
-                .into(),
-                keys: vec![],
-                args: &[ArgType::ActiveTerminal],
-                menubar: &["Window", "Workspace"],
-                icon: None,
-            }
-        }
+        SwitchToWorkspace { .. } | SwitchWorkspaceRelative(_) => return None,
         ActivateKeyTable { name, .. } => CommandDef {
             brief: format!("Activate key table `{name}`").into(),
             doc: format!("Activate key table `{name}`").into(),

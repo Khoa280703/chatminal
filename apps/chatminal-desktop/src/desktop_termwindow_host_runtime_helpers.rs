@@ -78,22 +78,6 @@ impl TermWindow {
         crate::chatminal_runtime::host_workspace_name()
     }
 
-    fn host_workspace_names() -> Vec<String> {
-        crate::chatminal_runtime::host_workspace_names()
-    }
-
-    fn generate_host_workspace_name() -> String {
-        crate::chatminal_runtime::generate_host_workspace_name()
-    }
-
-    fn set_host_workspace(name: &str) {
-        crate::chatminal_runtime::set_host_workspace(name);
-    }
-
-    fn host_workspace_has_windows(name: &str) -> bool {
-        crate::chatminal_runtime::host_workspace_has_windows(name)
-    }
-
     pub(crate) fn resolve_terminal_handle(
         &self,
         terminal_handle: u64,

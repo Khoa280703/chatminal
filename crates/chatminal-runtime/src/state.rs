@@ -1007,9 +1007,89 @@ fn snapshot_trailing_fragment(snapshot: &StoredSessionSnapshot) -> Option<String
 }
 
 fn normalize_session_snapshot(mut snapshot: StoredSessionSnapshot) -> StoredSessionSnapshot {
+    snapshot.content = strip_volatile_terminal_control_sequences(&snapshot.content);
     snapshot.content = collapse_trailing_duplicate_prompt_redraws(&snapshot.content);
     snapshot.content = collapse_trailing_prompt_only_lines(&snapshot.content);
     snapshot
+}
+
+fn strip_volatile_terminal_control_sequences(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if bytes[i] != 0x1b {
+            out.push(bytes[i]);
+            i += 1;
+            continue;
+        }
+
+        let Some(next) = bytes.get(i + 1).copied() else {
+            out.push(bytes[i]);
+            break;
+        };
+
+        match next {
+            b']' => {
+                let start = i;
+                i += 2;
+                let command_start = i;
+                while i < bytes.len() && bytes[i].is_ascii_digit() {
+                    i += 1;
+                }
+                let command = &bytes[command_start..i];
+                let has_separator = bytes.get(i) == Some(&b';');
+                if has_separator {
+                    i += 1;
+                }
+
+                while i < bytes.len() {
+                    match bytes[i] {
+                        0x07 => {
+                            i += 1;
+                            break;
+                        }
+                        0x1b if bytes.get(i + 1) == Some(&b'\\') => {
+                            i += 2;
+                            break;
+                        }
+                        _ => i += 1,
+                    }
+                }
+
+                let is_title_command = matches!(command, b"0" | b"1" | b"2");
+                if !(has_separator && is_title_command) {
+                    out.extend_from_slice(&bytes[start..i]);
+                }
+            }
+            b'[' => {
+                let start = i;
+                i += 2;
+                let private_mode = bytes.get(i) == Some(&b'?');
+                if private_mode {
+                    i += 1;
+                }
+                while i < bytes.len() {
+                    let byte = bytes[i];
+                    i += 1;
+                    if (0x40..=0x7e).contains(&byte) {
+                        let is_mode_toggle = private_mode && matches!(byte, b'h' | b'l');
+                        if !is_mode_toggle {
+                            out.extend_from_slice(&bytes[start..i]);
+                        }
+                        break;
+                    }
+                }
+            }
+            _ => {
+                out.push(bytes[i]);
+                i += 1;
+            }
+        }
+    }
+
+    String::from_utf8_lossy(&out).to_string()
 }
 
 fn visible_terminal_fragment(value: &str) -> String {
@@ -1040,6 +1120,18 @@ fn visible_terminal_fragment(value: &str) -> String {
                                     i += 1;
                                     break;
                                 }
+                                0x1b if bytes.get(i + 1) == Some(&b'\\') => {
+                                    i += 2;
+                                    break;
+                                }
+                                _ => i += 1,
+                            }
+                        }
+                    }
+                    Some(b'P') | Some(b'^') | Some(b'_') | Some(b'X') => {
+                        i += 1;
+                        while i < bytes.len() {
+                            match bytes[i] {
                                 0x1b if bytes.get(i + 1) == Some(&b'\\') => {
                                     i += 2;
                                     break;
@@ -1139,6 +1231,17 @@ fn visible_prefix_end_for_fragment(chunk: &str, expected_visible: &str) -> Optio
                         if c == '\u{7}' {
                             break;
                         }
+                        if c == '\u{1b}' && idx < chars.len() && chars[idx].1 == '\\' {
+                            idx += 1;
+                            break;
+                        }
+                    }
+                }
+                'P' | '^' | '_' | 'X' => {
+                    idx += 1;
+                    while idx < chars.len() {
+                        let c = chars[idx].1;
+                        idx += 1;
                         if c == '\u{1b}' && idx < chars.len() && chars[idx].1 == '\\' {
                             idx += 1;
                             break;
@@ -1371,6 +1474,17 @@ fn raw_index_for_visible_offset(raw: &str, target_visible_offset: usize) -> Opti
                         if next == '\u{7}' {
                             break;
                         }
+                        if next == '\u{1b}' && idx < chars.len() && chars[idx].1 == '\\' {
+                            idx += 1;
+                            break;
+                        }
+                    }
+                }
+                'P' | '^' | '_' | 'X' => {
+                    idx += 1;
+                    while idx < chars.len() {
+                        let next = chars[idx].1;
+                        idx += 1;
                         if next == '\u{1b}' && idx < chars.len() && chars[idx].1 == '\\' {
                             idx += 1;
                             break;

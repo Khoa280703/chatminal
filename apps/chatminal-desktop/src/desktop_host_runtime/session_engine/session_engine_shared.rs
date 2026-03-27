@@ -4,6 +4,7 @@ use std::thread;
 
 use chatminal_runtime::WorkspaceLayoutRegistry;
 use chatminal_terminal_core::TerminalSize;
+use engine_term::{KeyCode, KeyModifiers, MouseEvent};
 
 use super::leaf_runtime::TerminalInstanceRuntimeEvent;
 use super::leaf_runtime_registry::TerminalInstanceRuntimeRegistry;
@@ -145,6 +146,52 @@ impl SessionEngineShared {
             .runtime(terminal_instance_id)
             .ok_or_else(|| format!("terminal instance runtime {terminal_instance_id} missing"))?
             .resize(size)
+    }
+
+    pub fn key_down_terminal_input(
+        &self,
+        terminal_instance_id: TerminalInstanceId,
+        key: KeyCode,
+        mods: KeyModifiers,
+    ) -> Result<(), String> {
+        self.leaf_runtimes
+            .runtime(terminal_instance_id)
+            .ok_or_else(|| format!("terminal instance runtime {terminal_instance_id} missing"))?
+            .key_down(key, mods)
+    }
+
+    pub fn key_up_terminal_input(
+        &self,
+        terminal_instance_id: TerminalInstanceId,
+        key: KeyCode,
+        mods: KeyModifiers,
+    ) -> Result<(), String> {
+        self.leaf_runtimes
+            .runtime(terminal_instance_id)
+            .ok_or_else(|| format!("terminal instance runtime {terminal_instance_id} missing"))?
+            .key_up(key, mods)
+    }
+
+    pub fn paste_terminal_input(
+        &self,
+        terminal_instance_id: TerminalInstanceId,
+        text: &str,
+    ) -> Result<(), String> {
+        self.leaf_runtimes
+            .runtime(terminal_instance_id)
+            .ok_or_else(|| format!("terminal instance runtime {terminal_instance_id} missing"))?
+            .send_paste(text)
+    }
+
+    pub fn mouse_terminal_input(
+        &self,
+        terminal_instance_id: TerminalInstanceId,
+        event: MouseEvent,
+    ) -> Result<(), String> {
+        self.leaf_runtimes
+            .runtime(terminal_instance_id)
+            .ok_or_else(|| format!("terminal instance runtime {terminal_instance_id} missing"))?
+            .mouse_event(event)
     }
 }
 
