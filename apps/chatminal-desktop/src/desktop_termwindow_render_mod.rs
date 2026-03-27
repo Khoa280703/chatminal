@@ -1,15 +1,15 @@
+use crate::chatminal_runtime::overlay_compat::{
+    OverlayPane, RenderableDimensions, StableCursorPosition,
+};
 use crate::colorease::ColorEase;
 use crate::customglyph::{BlockKey, *};
+use crate::desktop_termwindow_types::TerminalUiKey;
 use crate::glyphcache::{CachedGlyph, GlyphCache};
 use crate::quad::{
     HeapQuadAllocator, QuadAllocator, QuadImpl, QuadTrait, TripleLayerQuadAllocator,
     TripleLayerQuadAllocatorTrait,
 };
-use crate::chatminal_runtime::overlay_compat::{
-    OverlayPane, RenderableDimensions, StableCursorPosition,
-};
 use crate::shapecache::*;
-use crate::desktop_termwindow_types::TerminalUiKey;
 use crate::termwindow::render::paint::AllowImage;
 use crate::termwindow::{BorrowedShapeCacheKey, RenderState, ShapedInfo, TermWindowNotif};
 use crate::utilsprites::RenderMetrics;
@@ -359,6 +359,7 @@ impl crate::TermWindow {
             &self.render_metrics,
             &self.dimensions,
             self.chatminal_sidebar_width(),
+            self.show_terminal_footer,
             self.terminal_size.pixel_width,
             self.terminal_size.pixel_height,
         );

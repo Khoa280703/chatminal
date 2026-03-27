@@ -1,7 +1,5 @@
 use crate::connection::ConnectionOps;
-use crate::macos::menu::RepresentedItem;
 use crate::macos::{nsstring, nsstring_to_str};
-use crate::menu::{Menu, MenuItem};
 use crate::{ApplicationEvent, Connection};
 use cocoa::appkit::NSApplicationTerminateReply;
 use cocoa::base::id;
@@ -85,31 +83,12 @@ extern "C" fn application_open_untitled_file(
     if let Some(conn) = Connection::get() {
         if launched == YES {
             conn.dispatch_app_event(ApplicationEvent::PerformKeyAssignment(
-                KeyAssignment::SpawnWindow,
+                KeyAssignment::SpawnSession,
             ));
         }
         return YES;
     }
     NO
-}
-
-extern "C" fn chatminal_perform_key_assignment(
-    _self: &mut Object,
-    _sel: Sel,
-    menu_item: *mut Object,
-) {
-    let menu_item = crate::os::macos::menu::MenuItem::with_menu_item(menu_item);
-    // Safe because chatminalPerformKeyAssignment: is only used with KeyAssignment
-    let action = menu_item.get_represented_item();
-    log::debug!("chatminal_perform_key_assignment {action:?}",);
-    match action {
-        Some(RepresentedItem::KeyAssignment(action)) => {
-            if let Some(conn) = Connection::get() {
-                conn.dispatch_app_event(ApplicationEvent::PerformKeyAssignment(action));
-            }
-        }
-        None => {}
-    }
 }
 
 extern "C" fn application_open_file(
@@ -126,20 +105,6 @@ extern "C" fn application_open_file(
             conn.dispatch_app_event(ApplicationEvent::OpenCommandScript(file_name));
         }
     }
-}
-
-extern "C" fn application_dock_menu(
-    _self: &mut Object,
-    _sel: Sel,
-    _app: *mut Object,
-) -> *mut Object {
-    let dock_menu = Menu::new_with_title("");
-    let new_window_item =
-        MenuItem::new_with("New Window", Some(sel!(chatminalPerformKeyAssignment:)), "");
-    new_window_item
-        .set_represented_item(RepresentedItem::KeyAssignment(KeyAssignment::SpawnWindow));
-    dock_menu.add_item(&new_window_item);
-    dock_menu.autorelease()
 }
 
 fn get_class() -> &'static Class {
@@ -165,15 +130,6 @@ fn get_class() -> &'static Class {
             cls.add_method(
                 sel!(application:openFile:),
                 application_open_file as extern "C" fn(&mut Object, Sel, *mut Object, *mut Object),
-            );
-            cls.add_method(
-                sel!(applicationDockMenu:),
-                application_dock_menu
-                    as extern "C" fn(&mut Object, Sel, *mut Object) -> *mut Object,
-            );
-            cls.add_method(
-                sel!(chatminalPerformKeyAssignment:),
-                chatminal_perform_key_assignment as extern "C" fn(&mut Object, Sel, *mut Object),
             );
             cls.add_method(
                 sel!(applicationOpenUntitledFile:),

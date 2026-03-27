@@ -84,8 +84,7 @@ pub fn is_supported_in_session_ui(assignment: &KeyAssignment) -> bool {
         KeyAssignment::SessionSelect(SessionSelectArguments {
             mode: SessionSelectMode::SwapWithActive
                 | SessionSelectMode::SwapWithActiveKeepFocus
-                | SessionSelectMode::MoveToNewSession
-                | SessionSelectMode::MoveToNewWindow,
+                | SessionSelectMode::MoveToNewSession,
             ..
         }) | KeyAssignment::ActivateSessionDirection(_)
             | KeyAssignment::AdjustSplitSize(_, _)
@@ -104,8 +103,8 @@ fn session_ui_mode_for_menubar() -> bool {
     crate::frontend::try_front_end()
         .map(|front_end| {
             front_end.gui_windows().into_iter().any(|window| {
-                crate::chatminal_runtime::desktop_current_active_session_id(window.window_id)
-                    .is_some()
+                let _ = window;
+                crate::chatminal_runtime::desktop_current_active_session_id().is_some()
             })
         })
         .unwrap_or(false)
@@ -421,6 +420,17 @@ impl CommandDef {
             }
         }
 
+        fn prune_empty_submenus(menu: &Menu) {
+            for item in menu.items() {
+                if let Some(submenu) = item.get_sub_menu() {
+                    prune_empty_submenus(&submenu);
+                    if submenu.items().is_empty() {
+                        menu.remove_item(&item);
+                    }
+                }
+            }
+        }
+
         let main_menu = match Menu::get_main_menu() {
             Some(existing) => {
                 mark_candidates(
@@ -461,10 +471,6 @@ impl CommandDef {
 
                 let mut submenu = main_menu.get_or_create_sub_menu(&cmd.menubar[0], |menu| {
                     if cmd.menubar[0] == "Window" {
-                        menu.assign_as_windows_menu();
-                        // macOS will insert stuff at the top and bottom, so we add
-                        // a separator to tidy things up a bit
-                        menu.add_item(&MenuItem::new_separator());
                     } else if cmd.menubar[0] == "Chatminal" {
                         menu.assign_as_app_menu();
 
@@ -598,6 +604,8 @@ impl CommandDef {
                 item.get_menu().map(|menu| menu.remove_item(&item));
             }
         }
+
+        prune_empty_submenus(&main_menu);
     }
 }
 
@@ -620,7 +628,6 @@ fn spawn_command_from_action(action: &KeyAssignment) -> Option<&SpawnCommand> {
         SplitSession(config::keyassignment::SplitSession { command, .. }) => Some(command),
         SplitHorizontal(command)
         | SplitVertical(command)
-        | SpawnCommandInNewWindow(command)
         | SpawnCommandInNewSession(command) => Some(command),
         _ => None,
     }
@@ -640,7 +647,6 @@ fn label_string(action: &KeyAssignment, candidate: String) -> String {
 /// but can also be used to describe user-provided commands
 pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<CommandDef> {
     Some(match action {
-        SpawnWindow => return None,
         PasteFrom(ClipboardPasteSource::PrimarySelection) => CommandDef {
             brief: "Paste primary selection".into(),
             doc: "Pastes text from the primary selection".into(),
@@ -839,17 +845,6 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             icon: None,
         },
         SessionSelect(SessionSelectArguments {
-            mode: SessionSelectMode::Activate,
-            ..
-        }) => CommandDef {
-            brief: "Open Pane Picker".into(),
-            doc: "Pick a pane from the current window".into(),
-            keys: vec![], // FIXME: find a new assignment
-            args: &[ArgType::ActiveTerminal],
-            menubar: &["Window"],
-            icon: Some("cod_multiple_windows"),
-        },
-        SessionSelect(SessionSelectArguments {
             mode: SessionSelectMode::SwapWithActive,
             ..
         }) => CommandDef {
@@ -877,17 +872,6 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
         }) => CommandDef {
             brief: "Move Pane To New Session".into(),
             doc: "Pick a pane and move it into its own session".into(),
-            keys: vec![], // FIXME: find a new assignment
-            args: &[ArgType::ActiveTerminal],
-            menubar: &["Window"],
-            icon: Some("cod_multiple_windows"),
-        },
-        SessionSelect(SessionSelectArguments {
-            mode: SessionSelectMode::MoveToNewWindow,
-            ..
-        }) => CommandDef {
-            brief: "Move Pane To New Window".into(),
-            doc: "Pick a pane and move it into its own window".into(),
             keys: vec![], // FIXME: find a new assignment
             args: &[ArgType::ActiveTerminal],
             menubar: &["Window"],
@@ -950,18 +934,6 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             args: &[],
             menubar: &[],
             icon: Some("md_tab_plus"),
-        },
-        SpawnCommandInNewWindow(cmd) => CommandDef {
-            brief: label_string(
-                action,
-                format!("Spawn a new Window with {cmd:?}").to_string(),
-            )
-            .into(),
-            doc: format!("Spawn a new Window with {cmd:?}").into(),
-            keys: vec![],
-            args: &[],
-            menubar: &[],
-            icon: Some("md_open_in_new"),
         },
         ActivateSession(-1) => CommandDef {
             brief: "Activate right-most session".into(),
@@ -1052,94 +1024,6 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             menubar: &[],
             icon: Some("md_close_box_outline"),
         },
-        ActivateWindow(n) => {
-            let n = *n;
-            let ordinal = english_ordinal(n as isize + 1);
-            CommandDef {
-                brief: format!("Activate {ordinal} Window").into(),
-                doc: format!("Activates the {ordinal} window").into(),
-                keys: vec![],
-                args: &[ArgType::ActiveWindow],
-                menubar: &["Window", "Select Window"],
-                icon: None,
-            }
-        }
-        ActivateWindowRelative(-1) => CommandDef {
-            brief: "Activate the preceeding window".into(),
-            doc: "Activates the preceeding window. If this is the first \
-            window then cycles around and activates last window"
-                .into(),
-            keys: vec![],
-            args: &[ArgType::ActiveWindow],
-            menubar: &["Window", "Select Window"],
-            icon: None,
-        },
-        ActivateWindowRelative(1) => CommandDef {
-            brief: "Activate the next window".into(),
-            doc: "Activates the next window. If this is the last \
-            window then cycles around and activates first window"
-                .into(),
-            keys: vec![],
-            args: &[ArgType::ActiveWindow],
-            menubar: &["Window", "Select Window"],
-            icon: None,
-        },
-        ActivateWindowRelative(n) => {
-            let (direction, amount) = if *n < 0 {
-                ("backwards", -n)
-            } else {
-                ("forwards", *n)
-            };
-            let ordinal = english_ordinal(amount + 1);
-            CommandDef {
-                brief: format!("Activate the {ordinal} window {direction}").into(),
-                doc: format!(
-                    "Activates the {ordinal} window, moving {direction}. \
-                         Wraps around to the other end"
-                )
-                .into(),
-                keys: vec![],
-                args: &[ArgType::ActiveWindow],
-                menubar: &[],
-                icon: None,
-            }
-        }
-        ActivateWindowRelativeNoWrap(-1) => CommandDef {
-            brief: "Activate the preceeding window".into(),
-            doc: "Activates the preceeding window, stopping at the first \
-            window"
-                .into(),
-            keys: vec![],
-            args: &[ArgType::ActiveWindow],
-            menubar: &["Window", "Select Window"],
-            icon: None,
-        },
-        ActivateWindowRelativeNoWrap(1) => CommandDef {
-            brief: "Activate the next window".into(),
-            doc: "Activates the next window, stopping at the last \
-            window"
-                .into(),
-            keys: vec![],
-            args: &[ArgType::ActiveWindow],
-            menubar: &["Window", "Select Window"],
-            icon: None,
-        },
-        ActivateWindowRelativeNoWrap(n) => {
-            let (direction, amount) = if *n < 0 {
-                ("backwards", -n)
-            } else {
-                ("forwards", *n)
-            };
-            let ordinal = english_ordinal(amount + 1);
-            CommandDef {
-                brief: format!("Activate the {ordinal} window {direction}").into(),
-                doc: format!("Activates the {ordinal} window, moving {direction}.").into(),
-                keys: vec![],
-                args: &[ArgType::ActiveWindow],
-                menubar: &[],
-                icon: None,
-            }
-        }
         ActivateSessionRelative(-1) => CommandDef {
             brief: "Activate the session to the left".into(),
             doc: "Activates the session to the left. If this is the left-most \
@@ -1378,6 +1262,14 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             args: &[ArgType::ActiveTerminal],
             menubar: &["View"],
             icon: Some("md_format_align_bottom"),
+        },
+        ToggleRealtimeFooter => CommandDef {
+            brief: "Toggle realtime footer".into(),
+            doc: "Shows or hides the realtime footer at the bottom of the shell".into(),
+            keys: vec![],
+            args: &[ArgType::ActiveWindow],
+            menubar: &["View"],
+            icon: None,
         },
         ScrollToTop => CommandDef {
             brief: "Scroll to the top".into(),
@@ -1911,6 +1803,7 @@ fn compute_default_actions() -> Vec<KeyAssignment> {
         ScrollByPage(NotNan::new(1.0).unwrap()),
         ScrollToTop,
         ScrollToBottom,
+        ToggleRealtimeFooter,
         // ----------------- Window
         ToggleFullScreen,
         ToggleAlwaysOnTop,
@@ -1920,11 +1813,6 @@ fn compute_default_actions() -> Vec<KeyAssignment> {
         SetWindowLevel(WindowLevel::AlwaysOnTop),
         Hide,
         Search(Pattern::CurrentSelectionOrEmptyString),
-        SessionSelect(SessionSelectArguments {
-            alphabet: String::new(),
-            mode: SessionSelectMode::Activate,
-            show_session_ids: false,
-        }),
         SessionSelect(SessionSelectArguments {
             alphabet: String::new(),
             mode: SessionSelectMode::SwapWithActive,
@@ -1940,11 +1828,6 @@ fn compute_default_actions() -> Vec<KeyAssignment> {
             mode: SessionSelectMode::MoveToNewSession,
             show_session_ids: false,
         }),
-        SessionSelect(SessionSelectArguments {
-            alphabet: String::new(),
-            mode: SessionSelectMode::MoveToNewWindow,
-            show_session_ids: false,
-        }),
         RotatePanes(RotationDirection::Clockwise),
         RotatePanes(RotationDirection::CounterClockwise),
         ActivateSession(0),
@@ -1958,18 +1841,6 @@ fn compute_default_actions() -> Vec<KeyAssignment> {
         ActivateSession(-1),
         ActivateSessionRelative(-1),
         ActivateSessionRelative(1),
-        ActivateWindow(0),
-        ActivateWindow(1),
-        ActivateWindow(2),
-        ActivateWindow(3),
-        ActivateWindow(4),
-        ActivateWindow(5),
-        ActivateWindow(6),
-        ActivateWindow(7),
-        ActivateWindow(8),
-        ActivateWindow(9),
-        ActivateWindowRelative(-1),
-        ActivateWindowRelative(1),
         MoveSessionRelative(-1),
         MoveSessionRelative(1),
         AdjustSplitSize(SessionDirection::Left, 1),

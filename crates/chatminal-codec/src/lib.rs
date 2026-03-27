@@ -19,13 +19,11 @@ use host_runtime::client::{ClientId, ClientInfo};
 use host_runtime::pane::PaneId;
 use host_runtime::renderable::{RenderableDimensions, StableCursorPosition};
 use host_runtime::tab::{PaneNode, SerdeUrl, SplitRequest, TabId};
-use host_runtime::window::WindowId;
 use portable_pty::CommandBuilder;
 use rangeset::*;
 use serde::{Deserialize, Serialize};
 use smol::io::AsyncWriteExt;
 use smol::prelude::*;
-use std::collections::HashMap;
 use std::convert::TryInto;
 use std::io::Cursor;
 use std::ops::Range;
@@ -645,7 +643,6 @@ pub struct ListPanes {}
 pub struct ListPanesResponse {
     pub tabs: Vec<PaneNode>,
     pub tab_titles: Vec<String>,
-    pub window_titles: HashMap<WindowId, String>,
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Debug)]
@@ -662,20 +659,16 @@ pub struct SplitPane {
 #[derive(Deserialize, Serialize, PartialEq, Debug)]
 pub struct MovePaneToNewTab {
     pub pane_id: PaneId,
-    pub window_id: Option<WindowId>,
     pub workspace_for_new_window: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Debug)]
 pub struct MovePaneToNewTabResponse {
     pub tab_id: TabId,
-    pub window_id: WindowId,
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Debug)]
 pub struct SpawnV2 {
-    /// If None, create a new window for this new tab
-    pub window_id: Option<WindowId>,
     pub command: Option<CommandBuilder>,
     pub command_dir: Option<String>,
     pub size: TerminalSize,
@@ -696,7 +689,6 @@ pub struct KillPane {
 pub struct SpawnResponse {
     pub tab_id: TabId,
     pub pane_id: PaneId,
-    pub window_id: WindowId,
     pub size: TerminalSize,
 }
 
@@ -768,7 +760,6 @@ pub struct SetClipboard {
 
 #[derive(Deserialize, Serialize, PartialEq, Debug)]
 pub struct SetWindowWorkspace {
-    pub window_id: WindowId,
     pub workspace: String,
 }
 
@@ -796,7 +787,6 @@ pub struct NotifyAlert {
 #[derive(Deserialize, Serialize, PartialEq, Debug)]
 pub struct TabAddedToWindow {
     pub tab_id: TabId,
-    pub window_id: WindowId,
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Debug)]
@@ -812,7 +802,6 @@ pub struct TabTitleChanged {
 
 #[derive(Deserialize, Serialize, PartialEq, Debug)]
 pub struct WindowTitleChanged {
-    pub window_id: WindowId,
     pub title: String,
 }
 
@@ -823,7 +812,6 @@ pub struct PaneFocused {
 
 #[derive(Deserialize, Serialize, PartialEq, Debug)]
 pub struct WindowWorkspaceChanged {
-    pub window_id: WindowId,
     pub workspace: String,
 }
 

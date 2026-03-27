@@ -4,7 +4,7 @@ impl TermWindow {
         spawn: &SpawnCommand,
         spawn_where: crate::spawn::SpawnWhere,
     ) {
-        let size = if spawn_where == crate::spawn::SpawnWhere::NewWindow {
+        let size = if spawn_where == crate::spawn::SpawnWhere::InitialWindow {
             self.config.initial_size(
                 self.dimensions.dpi as u32,
                 crate::cell_pixel_dims(&self.config, self.dimensions.dpi as f64).ok(),
@@ -18,7 +18,6 @@ impl TermWindow {
             spawn,
             spawn_where,
             size,
-            Some(self.window_id as crate::scripting::guiwin::DesktopWindowId),
             term_config,
         )
     }

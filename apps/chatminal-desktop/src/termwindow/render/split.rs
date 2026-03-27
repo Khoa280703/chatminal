@@ -1,5 +1,5 @@
-use crate::desktop_termwindow_types::{TerminalSplit, TerminalSplitDirection};
 use crate::chatminal_runtime::overlay_compat::OverlayPane;
+use crate::desktop_termwindow_types::{TerminalSplit, TerminalSplitDirection};
 use crate::termwindow::render::TripleLayerQuadAllocator;
 use crate::termwindow::{UIItem, UIItemType};
 use std::sync::Arc;

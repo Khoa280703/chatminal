@@ -345,7 +345,9 @@ pub fn window_button_element(
     let colors = window_button_colors_fn(background_lightness, foreground, window_button);
 
     let element = element
-        .item_type(UIItemType::SessionBar(SessionBarItem::WindowButton(window_button)))
+        .item_type(UIItemType::SessionBar(SessionBarItem::WindowButton(
+            window_button,
+        )))
         .colors(colors.colors)
         .hover_colors(Some(colors.hover_colors));
 

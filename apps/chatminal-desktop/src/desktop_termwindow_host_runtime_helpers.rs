@@ -4,12 +4,7 @@ impl TermWindow {
             return self
                 .active_session_id()
                 .as_deref()
-                .and_then(|session_id| {
-                    crate::chatminal_runtime::desktop_render_state_for_session(
-                        self.window_id as DesktopWindowId,
-                        session_id,
-                    )
-                })
+                .and_then(crate::chatminal_runtime::desktop_render_state_for_session)
                 .and_then(|render_state| {
                     render_state
                         .panes
@@ -53,42 +48,30 @@ impl TermWindow {
         }
     }
 
-    fn kill_host_window(&self) {
-        crate::chatminal_runtime::kill_host_window(self.window_id);
-    }
-
     fn with_host_window<R, F>(&self, func: F) -> Option<R>
     where
         F: FnOnce(&RuntimeWindow) -> R,
     {
-        let window = Self::with_host_window_by_id(self.window_id, func)?;
-        Some(window)
-    }
-
-    fn with_host_window_by_id<R, F>(window_id: EngineWindowId, func: F) -> Option<R>
-    where
-        F: FnOnce(&RuntimeWindow) -> R,
-    {
-        crate::chatminal_runtime::with_host_window(window_id, func)
+        crate::chatminal_runtime::with_host_window(func)
     }
 
     fn with_host_window_mut<R, F>(&self, func: F) -> Option<R>
     where
         F: FnOnce(&mut RuntimeWindow) -> R,
     {
-        crate::chatminal_runtime::with_host_window_mut(self.window_id, func)
+        crate::chatminal_runtime::with_host_window_mut(func)
     }
 
     fn remove_runtime_entry_scope(&self, render_scope_id: u64) {
         crate::chatminal_runtime::remove_runtime_entry_scope(render_scope_id);
     }
 
-    fn host_window_exists(window_id: EngineWindowId) -> bool {
-        crate::chatminal_runtime::host_window_exists(window_id)
+    fn host_window_exists() -> bool {
+        crate::chatminal_runtime::host_window_exists()
     }
 
-    fn host_window_contains_render_scope(window_id: EngineWindowId, render_scope_id: u64) -> bool {
-        crate::chatminal_runtime::host_window_contains_render_scope(window_id, render_scope_id)
+    fn host_window_contains_render_scope(render_scope_id: u64) -> bool {
+        crate::chatminal_runtime::host_window_contains_render_scope(render_scope_id)
     }
 
     fn host_workspace_name() -> String {
@@ -151,20 +134,17 @@ impl TermWindow {
         }
         let terminal_handle =
             crate::chatminal_runtime::SessionTerminalHandle::new(pane.pane_id() as u64);
-        let focused = crate::chatminal_runtime::desktop_focus_session_terminal_handle(
-            self.window_id as DesktopWindowId,
-            terminal_handle,
-        )
-        .is_some();
+        let focused =
+            crate::chatminal_runtime::desktop_focus_session_terminal_handle(terminal_handle)
+                .is_some();
         if focused {
             log::warn!(
                 "focus_active_session_terminal_instance: pane={} resolved_via_handle_focus",
                 terminal_handle.as_u64()
             );
-            if let Some(binding) = crate::chatminal_runtime::desktop_session_terminal_binding(
-                self.window_id as DesktopWindowId,
-                terminal_handle,
-            ) {
+            if let Some(binding) =
+                crate::chatminal_runtime::desktop_session_terminal_binding(terminal_handle)
+            {
                 if let Err(err) = crate::chatminal_runtime::notify_runtime_session_activated(
                     &binding.session_id,
                     binding.runtime_id,
@@ -182,10 +162,9 @@ impl TermWindow {
             }
             return true;
         }
-        let Some(session_id) = crate::chatminal_runtime::desktop_session_id_for_terminal_handle(
-            self.window_id as DesktopWindowId,
-            terminal_handle,
-        ) else {
+        let Some(session_id) =
+            crate::chatminal_runtime::desktop_session_id_for_terminal_handle(terminal_handle)
+        else {
             return false;
         };
         self.activate_chatminal_session_target(&session_id, None)
@@ -236,12 +215,9 @@ impl TermWindow {
         if !self.chatminal_sidebar.is_enabled() {
             return None;
         }
-        let render_scope_id = crate::chatminal_runtime::desktop_render_state_for_session(
-            self.window_id as DesktopWindowId,
-            session_id,
-        )?
-        .render_target_id()
-        .as_u64();
+        let render_scope_id = crate::chatminal_runtime::desktop_render_state_for_session(session_id)?
+            .render_target_id()
+            .as_u64();
         self.render_target_overlay(render_scope_id)
     }
 
@@ -320,7 +296,6 @@ impl TermWindow {
             return None;
         }
         crate::chatminal_runtime::desktop_session_entry_binding_for_render_target(
-            self.window_id as DesktopWindowId,
             crate::chatminal_runtime::SessionRenderTargetId::new(render_scope_id),
         )
         .map(|entry| entry.session_id)
@@ -328,21 +303,15 @@ impl TermWindow {
 
     fn session_pane_for_render_target(&self, render_scope_id: u64) -> Option<Arc<dyn OverlayPane>> {
         let session_id = self.session_id_for_render_target(render_scope_id)?;
-        crate::chatminal_runtime::desktop_pane_for_session(
-            self.window_id as DesktopWindowId,
-            &session_id,
-        )
-        .map(|pane| pane as Arc<dyn OverlayPane>)
+        crate::chatminal_runtime::desktop_pane_for_session(&session_id)
+            .map(|pane| pane as Arc<dyn OverlayPane>)
     }
 
     fn render_scope_size(&self, render_scope_id: u64) -> Option<TerminalSize> {
         if self.chatminal_sidebar.is_enabled() {
             let session_id = self.session_id_for_render_target(render_scope_id)?;
-            return crate::chatminal_runtime::desktop_render_state_for_session(
-                self.window_id as DesktopWindowId,
-                &session_id,
-            )
-            .map(|state| state.terminal_size);
+            return crate::chatminal_runtime::desktop_render_state_for_session(&session_id)
+                .map(|state| state.terminal_size);
         }
         crate::desktop_host_runtime::host_render_scope_size(render_scope_id)
     }
@@ -418,23 +387,6 @@ impl TermWindow {
             return false;
         };
         crate::desktop_host_runtime::host_rotate_render_scope_terminals(render_scope_id, direction)
-    }
-
-    pub(crate) fn activate_terminal_handle_in_active_runtime(&mut self, terminal_handle: TerminalUiKey) -> bool {
-        if self.chatminal_sidebar.is_enabled() {
-            return self
-                .resolve_terminal_handle(terminal_handle)
-                .ok()
-                .map(|pane| self.focus_active_session_terminal_instance(&pane))
-                .unwrap_or(false);
-        }
-        let Some(render_scope_id) = self.active_render_scope_id() else {
-            return false;
-        };
-        crate::desktop_host_runtime::host_activate_terminal_handle_in_render_scope(
-            render_scope_id,
-            terminal_handle,
-        )
     }
 
     pub(crate) fn swap_active_with_terminal_handle_in_active_runtime(

@@ -32,9 +32,7 @@ impl TermWindow {
 
     fn close_current_runtime_entry(&mut self, confirm: bool) {
         if self.chatminal_sidebar.is_enabled() {
-            let active_entry = crate::chatminal_runtime::desktop_active_session_entry_binding(
-                self.window_id as DesktopWindowId,
-            );
+            let active_entry = crate::chatminal_runtime::desktop_active_session_entry_binding();
             if !confirm {
                 if let Some(session_id) = active_entry.as_ref().map(|entry| entry.session_id.clone()) {
                     self.close_chatminal_view_or_session_by_id(&session_id);

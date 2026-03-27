@@ -10,7 +10,6 @@ use crate::commands::derive_command_from_key_assignment;
 use crate::inputmap::InputMap;
 use crate::overlay::quickselect;
 use crate::overlay::selector::{matcher_pattern, matcher_score};
-use crate::scripting::guiwin::DesktopWindowId;
 use crate::termwindow::TermWindowNotif;
 use config::configuration;
 use config::keyassignment::KeyAssignment;
@@ -51,7 +50,6 @@ impl LauncherArgs {
     pub async fn new(
         title: &str,
         flags: LauncherFlags,
-        window_id: DesktopWindowId,
         pane_id: u64,
         help_text: &str,
         fuzzy_help_text: &str,
@@ -66,12 +64,11 @@ impl LauncherArgs {
         };
 
         let tabs = if flags.contains(LauncherFlags::TABS) {
-            crate::chatminal_runtime::launcher_sessions(window_id)
+            crate::chatminal_runtime::launcher_sessions()
         } else {
             vec![]
         };
-        let session_ui_mode =
-            crate::chatminal_runtime::desktop_current_active_session_id(window_id).is_some();
+        let session_ui_mode = crate::chatminal_runtime::desktop_current_active_session_id().is_some();
 
         Self {
             flags,

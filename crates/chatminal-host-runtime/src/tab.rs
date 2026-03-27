@@ -1,6 +1,6 @@
 use crate::pane::*;
 use crate::renderable::StableCursorPosition;
-use crate::{Mux, MuxNotification, WindowId};
+use crate::{Mux, MuxNotification};
 use bintree::PathBranch;
 use config::configuration;
 use config::keyassignment::SessionDirection;
@@ -215,7 +215,6 @@ fn is_pane(pane: &Arc<dyn Pane>, other: &Option<&Arc<dyn Pane>>) -> bool {
 fn pane_tree(
     tree: &Tree,
     tab_id: TabId,
-    window_id: WindowId,
     active: Option<&Arc<dyn Pane>>,
     zoomed: Option<&Arc<dyn Pane>>,
     workspace: &str,
@@ -228,12 +227,11 @@ fn pane_tree(
             let data = data.unwrap();
             PaneNode::Split {
                 left: Box::new(pane_tree(
-                    &*left, tab_id, window_id, active, zoomed, workspace, left_col, top_row,
+                    &*left, tab_id, active, zoomed, workspace, left_col, top_row,
                 )),
                 right: Box::new(pane_tree(
                     &*right,
                     tab_id,
-                    window_id,
                     active,
                     zoomed,
                     workspace,
@@ -257,7 +255,6 @@ fn pane_tree(
             let cursor_pos = pane.get_cursor_position();
 
             PaneNode::Leaf(PaneEntry {
-                window_id,
                 tab_id,
                 pane_id: pane.pane_id(),
                 title: pane.get_title(),
@@ -816,38 +813,16 @@ impl TabInner {
     fn codec_pane_tree(&mut self) -> PaneNode {
         let mux = Mux::get();
         let tab_id = self.id;
-        let window_id = match mux.window_containing_tab(tab_id) {
-            Some(w) => w,
-            None => {
-                log::error!("no window contains tab {}", tab_id);
-                return PaneNode::Empty;
-            }
-        };
-
-        let workspace = match mux
-            .get_window(window_id)
-            .map(|w| w.get_workspace().to_string())
-        {
-            Some(ws) => ws,
-            None => {
-                log::error!("window id {} doesn't have a window!?", window_id);
-                return PaneNode::Empty;
-            }
-        };
+        if mux.get_tab(tab_id).is_none() {
+            log::error!("no root window contains tab {}", tab_id);
+            return PaneNode::Empty;
+        }
+        let workspace = mux.root_window().get_workspace().to_string();
 
         let active = self.get_active_pane();
         let zoomed = self.zoomed.as_ref();
         if let Some(root) = self.pane.as_ref() {
-            pane_tree(
-                root,
-                tab_id,
-                window_id,
-                active.as_ref(),
-                zoomed,
-                &workspace,
-                0,
-                0,
-            )
+            pane_tree(root, tab_id, active.as_ref(), zoomed, &workspace, 0, 0)
         } else {
             PaneNode::Empty
         }
@@ -1441,10 +1416,7 @@ impl TabInner {
         if let Some(panel_idx) = self.get_pane_direction(direction, false) {
             self.set_active_idx(panel_idx);
         }
-        let mux = Mux::get();
-        if let Some(window_id) = mux.window_containing_tab(self.id) {
-            mux.notify(MuxNotification::WindowInvalidated(window_id));
-        }
+        Mux::get().notify(MuxNotification::WindowInvalidated);
     }
 
     fn get_pane_direction(&mut self, direction: SessionDirection, ignore_zoom: bool) -> Option<usize> {
@@ -2120,14 +2092,14 @@ impl PaneNode {
         }
     }
 
-    pub fn window_and_tab_ids(&self) -> Option<(WindowId, TabId)> {
+    pub fn tab_id(&self) -> Option<TabId> {
         match self {
             PaneNode::Empty => None,
-            PaneNode::Split { left, right, .. } => match left.window_and_tab_ids() {
-                Some(res) => Some(res),
-                None => right.window_and_tab_ids(),
+            PaneNode::Split { left, right, .. } => match left.tab_id() {
+                Some(tab_id) => Some(tab_id),
+                None => right.tab_id(),
             },
-            PaneNode::Leaf(entry) => Some((entry.window_id, entry.tab_id)),
+            PaneNode::Leaf(entry) => Some(entry.tab_id),
         }
     }
 }
@@ -2136,7 +2108,6 @@ impl PaneNode {
 /// the codec version if you change this
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
 pub struct PaneEntry {
-    pub window_id: WindowId,
     pub tab_id: TabId,
     pub pane_id: PaneId,
     pub title: String,

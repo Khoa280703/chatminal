@@ -1,12 +1,11 @@
 use config::lua::mlua::{self, Lua, UserData, UserDataMethods, Value as LuaValue};
 use config::lua::{get_or_create_module, get_or_create_sub_module};
 use engine_dynamic::{FromDynamic, ToDynamic, Value};
-use engine_term::TerminalSize;
 use luahelper::impl_lua_conversion_dynamic;
 use host_runtime::pane::Pane;
 use host_runtime::spawn_target::SplitSource;
 use host_runtime::tab::{SplitDirection, SplitRequest, SplitSize, Tab};
-use host_runtime::window::{Window, WindowId};
+use host_runtime::window::Window;
 use host_runtime::Mux;
 use portable_pty::CommandBuilder;
 use std::collections::HashMap;
@@ -117,42 +116,18 @@ pub fn register(lua: &Lua) -> anyhow::Result<()> {
 
     session_module.set(
         "get_window",
-        lua.create_function(|_, window_id: WindowId| {
-            let mux = get_mux()?;
-            let window = WindowRef(window_id);
-            let _resolved = window.resolve(&mux)?;
-            Ok(window)
-        })?,
-    )?;
-
-    session_module.set(
-        "spawn_window",
-        lua.create_async_function(|_, spawn: SpawnWindow| async move { spawn.spawn().await })?,
-    )?;
-
-    session_module.set(
-        "all_windows",
-        lua.create_function(|_, _: ()| {
-            let mux = get_mux()?;
-            Ok(mux
-                .iter_windows()
-                .into_iter()
-                .map(WindowRef)
-                .collect::<Vec<WindowRef>>())
-        })?,
+        lua.create_function(|_, _: ()| Ok(WindowRef::root()))?,
     )?;
 
     session_module.set(
         "all_sessions",
         lua.create_function(|_, _: ()| {
             let mux = get_mux()?;
-            let mut sessions = vec![];
-            for window_id in mux.iter_windows() {
-                if let Some(window) = mux.get_window(window_id) {
-                    sessions.extend(window.iter().filter_map(|tab| make_session_ref(tab)));
-                }
-            }
-            Ok(sessions)
+            let window = mux.root_window();
+            Ok(window
+                .iter()
+                .filter_map(|tab| make_session_ref(tab))
+                .collect::<Vec<SessionRef>>())
         })?,
     )?;
 
@@ -160,13 +135,11 @@ pub fn register(lua: &Lua) -> anyhow::Result<()> {
         "list_sessions",
         lua.create_function(|_, _: ()| {
             let mux = get_mux()?;
-            let mut sessions = vec![];
-            for window_id in mux.iter_windows() {
-                if let Some(window) = mux.get_window(window_id) {
-                    sessions.extend(window.iter().filter_map(|tab| make_session_ref(tab)));
-                }
-            }
-            Ok(sessions)
+            let window = mux.root_window();
+            Ok(window
+                .iter()
+                .filter_map(|tab| make_session_ref(tab))
+                .collect::<Vec<SessionRef>>())
         })?,
     )?;
 
@@ -226,51 +199,6 @@ impl Default for SessionSplitDirection {
 }
 
 #[derive(Debug, FromDynamic, ToDynamic)]
-struct SpawnWindow {
-    width: Option<usize>,
-    height: Option<usize>,
-    workspace: Option<String>,
-    position: Option<config::GuiPosition>,
-    #[dynamic(flatten)]
-    cmd_builder: CommandBuilderFrag,
-}
-impl_lua_conversion_dynamic!(SpawnWindow);
-
-impl SpawnWindow {
-    async fn spawn(self) -> mlua::Result<(SessionRef, TerminalRef, WindowRef)> {
-        let mux = get_mux()?;
-
-        let size = match (self.width, self.height) {
-            (Some(cols), Some(rows)) => TerminalSize {
-                rows,
-                cols,
-                ..Default::default()
-            },
-            _ => config::configuration().initial_size(0, None),
-        };
-
-        let (cmd_builder, cwd) = self.cmd_builder.to_command_builder();
-        let (tab, pane, window_id) = mux
-            .spawn_tab_or_window(
-                None,
-                cmd_builder,
-                cwd,
-                size,
-                None,
-                self.workspace.unwrap_or_else(|| mux.active_workspace()),
-                self.position,
-            )
-            .await
-            .map_err(|e| mlua::Error::external(format!("{:#?}", e)))?;
-
-        let session_ref = make_session_ref(&tab).ok_or_else(|| {
-            mlua::Error::external("spawned session has no chatminal session_id")
-        })?;
-        Ok((session_ref, TerminalRef(pane.pane_id()), WindowRef(window_id)))
-    }
-}
-
-#[derive(Debug, FromDynamic, ToDynamic)]
 struct SpawnSession {
     #[dynamic(flatten)]
     cmd_builder: CommandBuilderFrag,
@@ -297,23 +225,15 @@ impl SpawnSession {
 
         let (cmd_builder, cwd) = self.cmd_builder.to_command_builder();
 
-        let (tab, pane, window_id) = mux
-            .spawn_tab_or_window(
-                Some(window.0),
-                cmd_builder,
-                cwd,
-                size,
-                pane,
-                String::new(),
-                None, // optional gui window position
-            )
+        let (tab, pane) = mux
+            .spawn_tab(cmd_builder, cwd, size, pane)
             .await
             .map_err(|e| mlua::Error::external(format!("{:#?}", e)))?;
 
         let session_ref = make_session_ref(&tab).ok_or_else(|| {
             mlua::Error::external("spawned session has no chatminal session_id")
         })?;
-        Ok((session_ref, TerminalRef(pane.pane_id()), WindowRef(window_id)))
+        Ok((session_ref, TerminalRef(pane.pane_id()), *window))
     }
 }
 

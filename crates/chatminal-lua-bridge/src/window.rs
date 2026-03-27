@@ -2,42 +2,46 @@ use super::*;
 use parking_lot::{MappedRwLockReadGuard, MappedRwLockWriteGuard};
 
 #[derive(Clone, Copy, Debug)]
-pub struct WindowRef(pub WindowId);
+pub struct WindowRef;
 
 impl WindowRef {
+    pub fn root() -> Self {
+        Self
+    }
+
     pub fn resolve<'a>(
         &self,
         mux: &'a Arc<Mux>,
     ) -> mlua::Result<MappedRwLockReadGuard<'a, Window>> {
-        mux.get_window(self.0)
-            .ok_or_else(|| mlua::Error::external(format!("window id {} not found in mux", self.0)))
+        Ok(mux.root_window())
     }
 
     pub fn resolve_mut<'a>(
         &self,
         mux: &'a Arc<Mux>,
     ) -> mlua::Result<MappedRwLockWriteGuard<'a, Window>> {
-        mux.get_window_mut(self.0)
-            .ok_or_else(|| mlua::Error::external(format!("window id {} not found in mux", self.0)))
+        Ok(mux.root_window_mut())
     }
 }
 
 impl UserData for WindowRef {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
-        methods.add_meta_method(mlua::MetaMethod::ToString, |_, this, _: ()| {
-            Ok(format!("WindowRef(window_id:{}, pid:{})", this.0, unsafe {
+        methods.add_meta_method(mlua::MetaMethod::ToString, |_, _this, _: ()| {
+            Ok(format!("WindowRef(root, pid:{})", unsafe {
                 libc::getpid()
             }))
         });
-        methods.add_method("window_id", |_, this, _: ()| Ok(this.0));
-        methods.add_async_method("gui_window", |lua, this, _: ()| async move {
+        methods.add_method("primary_window_id", |_, _this, _: ()| {
+            Ok(host_runtime::window::ROOT_WINDOW_ID)
+        });
+        methods.add_async_method("gui_window", |lua, _this, _: ()| async move {
             // Weakly bound to the gui module; mux cannot hard-depend
             // on chatminal-desktop, but we can runtime resolve the appropriate module
             let api_mod = get_or_create_module(lua, "chatminal")
                 .map_err(|err| mlua::Error::external(format!("{err:#}")))?;
             let gui: mlua::Table = api_mod.get("gui")?;
-            let func: mlua::Function = gui.get("gui_window_for_window_id")?;
-            func.call_async::<_, mlua::Value>(this.0).await
+            let func: mlua::Function = gui.get("gui_window")?;
+            func.call_async::<_, mlua::Value>(()).await
         });
         methods.add_method("get_workspace", |_, this, _: ()| {
             let mux = get_mux()?;

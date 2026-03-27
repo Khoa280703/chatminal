@@ -132,7 +132,7 @@ impl UserData for TerminalRef {
             let mux = get_mux()?;
             Ok(mux
                 .resolve_pane_id(this.0)
-                .map(|(window_id, _tab_id)| WindowRef(window_id)))
+                .map(|_| WindowRef::root()))
         });
         methods.add_method("session", |_, this, _: ()| {
             let mux = get_mux()?;
@@ -363,51 +363,17 @@ impl UserData for TerminalRef {
             this.get_text_from_semantic_zone(zone)
         });
 
-        methods.add_async_method("move_to_new_session", |_lua, this, ()| async move {
-            let mux = Mux::get();
-            let (window_id, _tab) = mux
-                .resolve_pane_id(this.0)
-                .ok_or_else(|| mlua::Error::external(format!("leaf {} not found", this.0)))?;
-            let (tab, window) = mux
-                .move_pane_to_new_tab(this.0, Some(window_id), None)
-                .await
-                .map_err(|e| mlua::Error::external(format!("{:#?}", e)))?;
-
-            let session_ref = make_session_ref(&tab).ok_or_else(|| {
-                mlua::Error::external("moved session has no chatminal session_id")
-            })?;
-            Ok((session_ref, WindowRef(window)))
-        });
-
-        methods.add_async_method(
-            "move_to_new_window",
-            |_lua, this, workspace: Option<String>| async move {
-                let mux = Mux::get();
-                let (tab, window) = mux
-                    .move_pane_to_new_tab(this.0, None, workspace)
-                    .await
-                    .map_err(|e| mlua::Error::external(format!("{:#?}", e)))?;
-
-                let session_ref = make_session_ref(&tab).ok_or_else(|| {
-                    mlua::Error::external("moved session has no chatminal session_id")
-                })?;
-                Ok((session_ref, WindowRef(window)))
-            },
-        );
-
         methods.add_method("activate", move |_lua, this, ()| {
             let mux = Mux::get();
             let pane = this.resolve(&mux)?;
-            let (window_id, tab_id) = mux
+            let tab_id = mux
                 .resolve_pane_id(this.0)
                 .ok_or_else(|| mlua::Error::external(format!("leaf {} not found", this.0)))?;
             {
-                let mut window = mux.get_window_mut(window_id).ok_or_else(|| {
-                    mlua::Error::external(format!("window {window_id} not found"))
-                })?;
+                let mut window = mux.root_window_mut();
                 let tab_idx = window.idx_by_id(tab_id).ok_or_else(|| {
                     mlua::Error::external(format!(
-                        "session handle {tab_id} is not attached to window {window_id}"
+                        "session handle {tab_id} is not attached to root window"
                     ))
                 })?;
                 window.save_and_then_set_active(tab_idx);

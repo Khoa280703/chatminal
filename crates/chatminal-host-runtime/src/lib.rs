@@ -1,9 +1,9 @@
 use crate::client::{ClientId, ClientInfo};
 use crate::pane::{CachePolicy, Pane, PaneId};
 use crate::tab::{SplitRequest, Tab, TabId};
-use crate::window::{Window, WindowId};
+use crate::window::Window;
 use anyhow::{anyhow, Context, Error};
-use config::{configuration, ExitBehavior, GuiPosition};
+use config::{configuration, ExitBehavior};
 use spawn_target::{SpawnTarget, SplitSource};
 use engine_term::{Clipboard, ClipboardSelection, DownloadHandler, TerminalSize};
 use filedescriptor::{poll, pollfd, socketpair, AsRawSocketDescriptor, FileDescriptor, POLLIN};
@@ -58,10 +58,8 @@ pub enum MuxNotification {
     PaneOutput(PaneId),
     PaneAdded(PaneId),
     PaneRemoved(PaneId),
-    WindowCreated(WindowId),
-    WindowRemoved(WindowId),
-    WindowInvalidated(WindowId),
-    WindowWorkspaceChanged(WindowId),
+    WindowInvalidated,
+    WindowWorkspaceChanged,
     ActiveWorkspaceChanged(Arc<ClientId>),
     Alert {
         pane_id: PaneId,
@@ -77,20 +75,14 @@ pub enum MuxNotification {
         name: Option<String>,
         data: Arc<Vec<u8>>,
     },
-    TabAddedToWindow {
-        tab_id: TabId,
-        window_id: WindowId,
-    },
+    TabAddedToWindow { tab_id: TabId },
     PaneFocused(PaneId),
     TabResized(TabId),
     TabTitleChanged {
         tab_id: TabId,
         title: String,
     },
-    WindowTitleChanged {
-        window_id: WindowId,
-        title: String,
-    },
+    WindowTitleChanged { title: String },
     WorkspaceRenamed {
         old_workspace: String,
         new_workspace: String,
@@ -102,7 +94,7 @@ static SUB_ID: AtomicUsize = AtomicUsize::new(0);
 pub struct Mux {
     tabs: RwLock<HashMap<TabId, Arc<Tab>>>,
     panes: RwLock<HashMap<PaneId, Arc<dyn Pane>>>,
-    windows: RwLock<HashMap<WindowId, Window>>,
+    window: RwLock<Window>,
     primary_spawn_target: RwLock<Option<Arc<dyn SpawnTarget>>>,
     subscribers: RwLock<HashMap<usize, Box<dyn Fn(MuxNotification) -> bool + Send + Sync>>>,
     banner: RwLock<Option<String>>,
@@ -372,60 +364,18 @@ lazy_static::lazy_static! {
     static ref MUX: Mutex<Option<Arc<Mux>>> = Mutex::new(None);
 }
 
-pub struct MuxWindowBuilder {
-    window_id: WindowId,
-    activity: Option<Activity>,
-    notified: bool,
-}
-
-impl MuxWindowBuilder {
-    fn notify(&mut self) {
-        if self.notified {
-            return;
-        }
-        self.notified = true;
-        let activity = self.activity.take().unwrap();
-        let window_id = self.window_id;
-        let mux = Mux::get();
-        if mux.is_main_thread() {
-            // If we're already on the mux thread, just send the notification
-            // immediately.
-            // This is super important for Wayland; if we push it to the
-            // spawn queue below then the extra milliseconds of delay
-            // causes it to get confused and shutdown the connection!?
-            mux.notify(MuxNotification::WindowCreated(window_id));
-        } else {
-            promise::spawn::spawn_into_main_thread(async move {
-                if let Some(mux) = Mux::try_get() {
-                    mux.notify(MuxNotification::WindowCreated(window_id));
-                    drop(activity);
-                }
-            })
-            .detach();
-        }
-    }
-}
-
-impl Drop for MuxWindowBuilder {
-    fn drop(&mut self) {
-        self.notify();
-    }
-}
-
-impl std::ops::Deref for MuxWindowBuilder {
-    type Target = WindowId;
-
-    fn deref(&self) -> &WindowId {
-        &self.window_id
-    }
-}
-
 impl Mux {
     pub fn new(primary_spawn_target: Option<Arc<dyn SpawnTarget>>) -> Self {
+        let config = configuration();
+        let workspace = config
+            .default_workspace
+            .as_deref()
+            .unwrap_or(DEFAULT_WORKSPACE)
+            .to_string();
         Self {
             tabs: RwLock::new(HashMap::new()),
             panes: RwLock::new(HashMap::new()),
-            windows: RwLock::new(HashMap::new()),
+            window: RwLock::new(Window::new(workspace, None)),
             primary_spawn_target: RwLock::new(primary_spawn_target),
             subscribers: RwLock::new(HashMap::new()),
             banner: RwLock::new(None),
@@ -452,17 +402,16 @@ impl Mux {
 
     fn recompute_pane_count(&self) {
         let mut count = HashMap::new();
-        for window in self.windows.read().values() {
-            let workspace = window.get_workspace();
-            for tab in window.iter() {
-                *count.entry(workspace.to_string()).or_insert(0) += match tab.count_panes() {
-                    Some(n) => n,
-                    None => {
-                        // Busy: abort this and we'll retry later
-                        return;
-                    }
-                };
-            }
+        let window = self.window.read();
+        let workspace = window.get_workspace();
+        for tab in window.iter() {
+            *count.entry(workspace.to_string()).or_insert(0) += match tab.count_panes() {
+                Some(n) => n,
+                None => {
+                    // Busy: abort this and we'll retry later
+                    return;
+                }
+            };
         }
         *self.num_panes_by_workspace.write() = count;
     }
@@ -488,10 +437,10 @@ impl Mux {
     pub fn resolve_focused_pane(
         &self,
         client_id: &ClientId,
-    ) -> Option<(WindowId, TabId, PaneId)> {
+    ) -> Option<(TabId, PaneId)> {
         let pane_id = self.clients.read().get(client_id)?.focused_pane_id?;
-        let (window, tab) = self.resolve_pane_id(pane_id)?;
-        Some((window, tab, pane_id))
+        let tab = self.resolve_pane_id(pane_id)?;
+        Some((tab, pane_id))
     }
 
     pub fn record_focus_for_client(&self, client_id: &ClientId, pane_id: PaneId) {
@@ -522,18 +471,16 @@ impl Mux {
             .get_pane(pane_id)
             .ok_or_else(|| anyhow::anyhow!("pane {pane_id} not found"))?;
 
-        let (window_id, tab_id) = self
+        let tab_id = self
             .resolve_pane_id(pane_id)
             .ok_or_else(|| anyhow::anyhow!("can't find {pane_id} in the mux"))?;
 
         // Focus/activate the containing tab within its window
         {
-            let mut win = self
-                .get_window_mut(window_id)
-                .ok_or_else(|| anyhow::anyhow!("window_id {window_id} not found"))?;
+            let mut win = self.window.write();
             let tab_idx = win
                 .idx_by_id(tab_id)
-                .ok_or_else(|| anyhow::anyhow!("tab {tab_id} not in {window_id}"))?;
+                .ok_or_else(|| anyhow::anyhow!("tab {tab_id} not in root window"))?;
             win.save_and_then_set_active(tab_idx);
         }
 
@@ -562,17 +509,9 @@ impl Mux {
     }
 
     /// Returns a list of the unique workspace names known to the mux.
-    /// This is taken from all known windows.
+    /// In single-window mode this is just the root window workspace.
     pub fn iter_workspaces(&self) -> Vec<String> {
-        let mut names: Vec<String> = self
-            .windows
-            .read()
-            .values()
-            .map(|w| w.get_workspace().to_string())
-            .collect();
-        names.sort();
-        names.dedup();
-        names
+        vec![self.window.read().get_workspace().to_string()]
     }
 
     /// Generate a new unique workspace name
@@ -622,6 +561,7 @@ impl Mux {
         if let Some(ident) = self.identity.read().clone() {
             self.set_active_workspace_for_client(&ident, workspace);
         }
+        self.window.write().set_workspace(workspace);
     }
 
     pub fn rename_workspace(&self, old_workspace: &str, new_workspace: &str) {
@@ -633,10 +573,9 @@ impl Mux {
             new_workspace: new_workspace.to_string(),
         });
 
-        for window in self.windows.write().values_mut() {
-            if window.get_workspace() == old_workspace {
-                window.set_workspace(new_workspace);
-            }
+        let mut window = self.window.write();
+        if window.get_workspace() == old_workspace {
+            window.set_workspace(new_workspace);
         }
         self.recompute_pane_count();
         for client in self.clients.write().values_mut() {
@@ -742,7 +681,7 @@ impl Mux {
     /// Returns None for SSH/serial/legacy sessions that carry no chatminal session_id.
     pub fn get_tab_by_chatminal_session_id(&self, session_id: &str) -> Option<Arc<Tab>> {
         let pane_id = *self.chatminal_session_id_index.read().get(session_id)?;
-        let (_window_id, tab_id) = self.resolve_pane_id(pane_id)?;
+        let tab_id = self.resolve_pane_id(pane_id)?;
         self.get_tab(tab_id)
     }
 
@@ -826,10 +765,8 @@ impl Mux {
 
         let tab = self.tabs.write().remove(&tab_id)?;
 
-        if let Some(mut windows) = self.windows.try_write() {
-            for w in windows.values_mut() {
-                w.remove_by_id(tab_id);
-            }
+        if let Some(mut window) = self.window.try_write() {
+            window.remove_by_id(tab_id);
         }
 
         let mut pane_ids = vec![];
@@ -845,15 +782,11 @@ impl Mux {
         Some(tab)
     }
 
-    fn remove_window_internal(&self, window_id: WindowId) {
-        log::debug!("remove_window_internal {}", window_id);
-
-        let window = self.windows.write().remove(&window_id);
-        if let Some(window) = window {
-            for tab in window.iter() {
-                self.remove_tab_internal(tab.tab_id());
-            }
-            self.notify(MuxNotification::WindowRemoved(window_id));
+    fn clear_root_window_internal(&self) {
+        log::debug!("clear_root_window_internal");
+        let tab_ids: Vec<TabId> = self.window.read().iter().map(|tab| tab.tab_id()).collect();
+        for tab_id in tab_ids {
+            self.remove_tab_internal(tab_id);
         }
         self.recompute_pane_count();
     }
@@ -875,24 +808,21 @@ impl Mux {
             return;
         }
         let live_tab_ids: Vec<TabId> = self.tabs.read().keys().cloned().collect();
-        let mut dead_windows = vec![];
+        let mut root_window_empty = false;
         let dead_tab_ids: Vec<TabId>;
 
         {
-            let mut windows = match self.windows.try_write() {
+            let mut window = match self.window.try_write() {
                 Some(w) => w,
                 None => {
-                    // It's ok if our caller already locked it; we can prune later.
-                    log::trace!("prune_dead_windows: self.windows already borrowed");
+                    log::trace!("prune_dead_windows: self.window already borrowed");
                     return;
                 }
             };
-            for (window_id, win) in windows.iter_mut() {
-                win.prune_dead_tabs(&live_tab_ids);
-                if win.is_empty() {
-                    log::trace!("prune_dead_windows: window is now empty");
-                    dead_windows.push(*window_id);
-                }
+            window.prune_dead_tabs(&live_tab_ids);
+            if window.is_empty() {
+                log::trace!("prune_dead_windows: root window is now empty");
+                root_window_empty = true;
             }
 
             dead_tab_ids = self
@@ -908,9 +838,9 @@ impl Mux {
             self.remove_tab_internal(tab_id);
         }
 
-        for window_id in dead_windows {
-            log::trace!("window {} is dead", window_id);
-            self.remove_window_internal(window_id);
+        if root_window_empty {
+            log::trace!("root window is dead");
+            self.clear_root_window_internal();
         }
 
         if self.is_empty() {
@@ -921,74 +851,28 @@ impl Mux {
         }
     }
 
-    pub fn kill_window(&self, window_id: WindowId) {
-        self.remove_window_internal(window_id);
-        self.prune_dead_windows();
+    pub fn root_window(&self) -> MappedRwLockReadGuard<'_, Window> {
+        RwLockReadGuard::map(self.window.read(), |window| window)
     }
 
-    pub fn get_window(&self, window_id: WindowId) -> Option<MappedRwLockReadGuard<'_, Window>> {
-        if !self.windows.read().contains_key(&window_id) {
-            return None;
-        }
-        Some(RwLockReadGuard::map(self.windows.read(), |windows| {
-            windows.get(&window_id).unwrap()
-        }))
+    pub fn root_window_mut(&self) -> MappedRwLockWriteGuard<'_, Window> {
+        RwLockWriteGuard::map(self.window.write(), |window| window)
     }
 
-    pub fn get_window_mut(
-        &self,
-        window_id: WindowId,
-    ) -> Option<MappedRwLockWriteGuard<'_, Window>> {
-        if !self.windows.read().contains_key(&window_id) {
-            return None;
-        }
-        Some(RwLockWriteGuard::map(self.windows.write(), |windows| {
-            windows.get_mut(&window_id).unwrap()
-        }))
-    }
-
-    pub fn get_active_tab_for_window(&self, window_id: WindowId) -> Option<Arc<Tab>> {
-        let window = self.get_window(window_id)?;
+    pub fn root_active_tab(&self) -> Option<Arc<Tab>> {
+        let window = self.root_window();
         window.get_active().map(Arc::clone)
     }
 
-    pub fn new_empty_window(
-        &self,
-        workspace: Option<String>,
-        position: Option<GuiPosition>,
-    ) -> MuxWindowBuilder {
-        let window = Window::new(workspace, position);
-        let window_id = window.window_id();
-        self.windows.write().insert(window_id, window);
-        MuxWindowBuilder {
-            window_id,
-            activity: Some(Activity::new()),
-            notified: false,
-        }
-    }
-
-    pub fn add_tab_to_window(&self, tab: &Arc<Tab>, window_id: WindowId) -> anyhow::Result<()> {
+    pub fn attach_tab(&self, tab: &Arc<Tab>) -> anyhow::Result<()> {
         let tab_id = tab.tab_id();
         {
-            let mut window = self
-                .get_window_mut(window_id)
-                .ok_or_else(|| anyhow!("add_tab_to_window: no such window_id {}", window_id))?;
+            let mut window = self.root_window_mut();
             window.push(tab);
         }
         self.recompute_pane_count();
-        self.notify(MuxNotification::TabAddedToWindow { tab_id, window_id });
+        self.notify(MuxNotification::TabAddedToWindow { tab_id });
         Ok(())
-    }
-
-    pub fn window_containing_tab(&self, tab_id: TabId) -> Option<WindowId> {
-        for w in self.windows.read().values() {
-            for t in w.iter() {
-                if t.tab_id() == tab_id {
-                    return Some(w.window_id());
-                }
-            }
-        }
-        None
     }
 
     pub fn is_empty(&self) -> bool {
@@ -1017,29 +901,7 @@ impl Mux {
             .collect()
     }
 
-    pub fn iter_windows_in_workspace(&self, workspace: &str) -> Vec<WindowId> {
-        let mut windows: Vec<WindowId> = self
-            .windows
-            .read()
-            .iter()
-            .filter_map(|(k, w)| {
-                if w.get_workspace() == workspace {
-                    Some(k)
-                } else {
-                    None
-                }
-            })
-            .cloned()
-            .collect();
-        windows.sort();
-        windows
-    }
-
-    pub fn iter_windows(&self) -> Vec<WindowId> {
-        self.windows.read().keys().cloned().collect()
-    }
-
-    pub fn resolve_pane_id(&self, pane_id: PaneId) -> Option<(WindowId, TabId)> {
+    pub fn resolve_pane_id(&self, pane_id: PaneId) -> Option<TabId> {
         let mut tab_id = None;
         for tab in self.tabs.read().values() {
             for p in tab.iter_panes_ignoring_zoom() {
@@ -1049,9 +911,7 @@ impl Mux {
                 }
             }
         }
-        let tab_id = tab_id?;
-        let window_id = self.window_containing_tab(tab_id)?;
-        Some((window_id, tab_id))
+        tab_id
     }
 
     pub fn set_banner(&self, banner: Option<String>) {
@@ -1105,7 +965,7 @@ impl Mux {
         request: SplitRequest,
         source: SplitSource,
     ) -> anyhow::Result<(Arc<dyn Pane>, TerminalSize)> {
-        let (_window_id, tab_id) = self
+        let tab_id = self
             .resolve_pane_id(pane_id)
             .ok_or_else(|| anyhow!("pane_id {} invalid", pane_id))?;
 
@@ -1156,99 +1016,25 @@ impl Mux {
         Ok((pane, size))
     }
 
-    pub async fn move_pane_to_new_tab(
+    pub async fn spawn_tab(
         &self,
-        pane_id: PaneId,
-        window_id: Option<WindowId>,
-        workspace_for_new_window: Option<String>,
-    ) -> anyhow::Result<(Arc<Tab>, WindowId)> {
-        let (_src_window, src_tab) = self
-            .resolve_pane_id(pane_id)
-            .ok_or_else(|| anyhow::anyhow!("pane {} not found", pane_id))?;
-
-        let spawn_target = self.resolve_spawn_target(Some(pane_id))?;
-
-        if let Some((tab, window_id)) = spawn_target
-            .move_pane_to_new_tab(pane_id, window_id, workspace_for_new_window.clone())
-            .await?
-        {
-            return Ok((tab, window_id));
-        }
-
-        let src_tab = match self.get_tab(src_tab) {
-            Some(t) => t,
-            None => anyhow::bail!("Invalid tab id {}", src_tab),
-        };
-
-        let window_builder;
-        let (window_id, size) = if let Some(window_id) = window_id {
-            let window = self
-                .get_window_mut(window_id)
-                .ok_or_else(|| anyhow!("window_id {} not found on this server", window_id))?;
-            let tab = window
-                .get_active()
-                .ok_or_else(|| anyhow!("window {} has no tabs", window_id))?;
-            let size = tab.get_size();
-
-            (window_id, size)
-        } else {
-            window_builder = self.new_empty_window(workspace_for_new_window, None);
-            (*window_builder, src_tab.get_size())
-        };
-
-        let pane = src_tab
-            .remove_pane(pane_id)
-            .ok_or_else(|| anyhow::anyhow!("pane {} wasn't in its containing tab!?", pane_id))?;
-
-        let tab = Arc::new(Tab::new(&size));
-        tab.assign_pane(&pane);
-        pane.resize(size)?;
-        self.add_tab_and_active_pane(&tab)?;
-        self.add_tab_to_window(&tab, window_id)?;
-
-        if src_tab.is_dead() {
-            self.remove_tab(src_tab.tab_id());
-        }
-
-        Ok((tab, window_id))
-    }
-
-    pub async fn spawn_tab_or_window(
-        &self,
-        window_id: Option<WindowId>,
         command: Option<CommandBuilder>,
         command_dir: Option<String>,
         size: TerminalSize,
         current_pane_id: Option<PaneId>,
-        workspace_for_new_window: String,
-        window_position: Option<GuiPosition>,
-    ) -> anyhow::Result<(Arc<Tab>, Arc<dyn Pane>, WindowId)> {
+    ) -> anyhow::Result<(Arc<Tab>, Arc<dyn Pane>)> {
         let spawn_target = self
             .resolve_spawn_target(current_pane_id)
             .context("resolve_spawn_target")?;
 
-        let window_builder;
-        let term_config;
-
-        let (window_id, size) = if let Some(window_id) = window_id {
-            let window = self
-                .get_window_mut(window_id)
-                .ok_or_else(|| anyhow!("window_id {} not found on this server", window_id))?;
-            let tab = window
-                .get_active()
-                .ok_or_else(|| anyhow!("window {} has no tabs", window_id))?;
-            let pane = tab
-                .get_active_pane()
-                .ok_or_else(|| anyhow!("active tab in window {} has no panes", window_id))?;
-            term_config = pane.get_config();
-
-            let size = tab.get_size();
-
-            (window_id, size)
-        } else {
-            term_config = None;
-            window_builder = self.new_empty_window(Some(workspace_for_new_window), window_position);
-            (*window_builder, size)
+        let (term_config, size) = match self.root_active_tab() {
+            Some(tab) => {
+                let pane = tab
+                    .get_active_pane()
+                    .ok_or_else(|| anyhow!("active tab in root window has no panes"))?;
+                (pane.get_config(), tab.get_size())
+            }
+            None => (None, size),
         };
 
         let cwd = self.resolve_cwd(
@@ -1261,7 +1047,7 @@ impl Mux {
         );
 
         let tab = spawn_target
-            .spawn(size, command.clone(), cwd.clone(), window_id)
+            .spawn(size, command.clone(), cwd.clone())
             .await
             .with_context(|| {
                 format!(
@@ -1280,14 +1066,12 @@ impl Mux {
 
         // FIXME: clipboard?
 
-        let mut window = self
-            .get_window_mut(window_id)
-            .ok_or_else(|| anyhow!("no such window!?"))?;
+        let mut window = self.root_window_mut();
         if let Some(idx) = window.idx_by_id(tab.tab_id()) {
             window.save_and_then_set_active(idx);
         }
 
-        Ok((tab, pane, window_id))
+        Ok((tab, pane))
     }
 }
 

@@ -198,8 +198,6 @@ async fn spawn_tab_in_spawn_target_if_mux_is_empty(
         return Ok(());
     }
 
-    let window_id = chatminal_runtime::create_empty_host_window(workspace.clone()) as usize;
-
     let config = config::configuration();
     config.update_ulimit()?;
 
@@ -214,7 +212,6 @@ async fn spawn_tab_in_spawn_target_if_mux_is_empty(
             config.initial_size(dpi as u32, Some(cell_pixel_dims(&config, dpi)?)),
             cmd,
             None,
-            window_id,
         )
         .await?;
     trigger_and_log_gui_attached().await;
@@ -293,8 +290,6 @@ async fn async_run_terminal_gui(
     trigger_and_log_gui_startup(spawn_command).await;
 
     if let Some(spawn_target) = &spawn_target {
-        let window_id = chatminal_runtime::create_empty_host_window(None) as usize;
-
         let config = config::configuration();
         let dpi = config.dpi.unwrap_or_else(|| ::window::default_dpi());
         let tab = spawn_target
@@ -302,10 +297,9 @@ async fn async_run_terminal_gui(
                 config.initial_size(dpi as u32, Some(cell_pixel_dims(&config, dpi)?)),
                 cmd.clone(),
                 None,
-                window_id,
             )
             .await?;
-        chatminal_runtime::activate_host_runtime_entry(window_id as u64, tab.tab_id() as u64)?;
+        chatminal_runtime::activate_host_runtime_entry(tab.tab_id() as u64)?;
         trigger_and_log_gui_attached().await;
     }
     spawn_tab_in_spawn_target_if_mux_is_empty(cmd, spawn_target, opts.workspace).await

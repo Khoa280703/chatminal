@@ -1,5 +1,5 @@
-use crate::quad::TripleLayerQuadAllocator;
 use crate::chatminal_runtime::overlay_compat::RenderableDimensions;
+use crate::quad::TripleLayerQuadAllocator;
 use crate::termwindow::render::RenderScreenLineParams;
 use crate::utilsprites::RenderMetrics;
 use config::ConfigHandle;

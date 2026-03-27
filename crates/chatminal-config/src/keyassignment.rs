@@ -297,16 +297,14 @@ impl Default for ClipboardPasteSource {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromDynamic, ToDynamic)]
 pub enum SessionSelectMode {
-    Activate,
     SwapWithActive,
     SwapWithActiveKeepFocus,
     MoveToNewSession,
-    MoveToNewWindow,
 }
 
 impl Default for SessionSelectMode {
     fn default() -> Self {
-        Self::Activate
+        Self::SwapWithActive
     }
 }
 
@@ -418,7 +416,6 @@ fn default_message() -> String {
 #[derive(Debug, Clone, PartialEq, FromDynamic, ToDynamic)]
 pub enum KeyAssignment {
     SpawnSession,
-    SpawnWindow,
     ToggleFullScreen,
     ToggleAlwaysOnTop,
     ToggleAlwaysOnBottom,
@@ -455,12 +452,12 @@ pub enum KeyAssignment {
     ScrollToPrompt(isize),
     ScrollToTop,
     ScrollToBottom,
+    ToggleRealtimeFooter,
     ShowSessionNavigator,
     ShowDebugOverlay,
     HideApplication,
     QuitApplication,
     SpawnCommandInNewSession(SpawnCommand),
-    SpawnCommandInNewWindow(SpawnCommand),
     SplitHorizontal(SpawnCommand),
     SplitVertical(SpawnCommand),
     ShowLauncher,
@@ -516,9 +513,6 @@ pub enum KeyAssignment {
     ResetTerminal,
     OpenUri(String),
     ActivateCommandPalette,
-    ActivateWindow(usize),
-    ActivateWindowRelative(isize),
-    ActivateWindowRelativeNoWrap(isize),
     PromptInputLine(PromptInputLine),
     InputSelector(InputSelector),
     Confirmation(Confirmation),

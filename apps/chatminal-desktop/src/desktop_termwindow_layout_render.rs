@@ -5,7 +5,6 @@ use crate::chatminal_runtime::{
     WorkspaceSplitAxis,
 };
 use crate::desktop_termwindow_types::{TerminalPaneLayout, TerminalSplit, TerminalSplitDirection};
-use crate::scripting::guiwin::DesktopWindowId;
 const WORKSPACE_SPLIT_INDEX_BASE: usize = 1_000_000;
 
 #[derive(Clone)]
@@ -74,6 +73,19 @@ impl crate::TermWindow {
         targets
     }
 
+    pub(super) fn layout_render_target_at(
+        &self,
+        column: usize,
+        row: usize,
+    ) -> Option<LayoutRenderTarget> {
+        self.layout_render_targets().into_iter().find(|target| {
+            column >= target.left
+                && column < target.left.saturating_add(target.width)
+                && row >= target.top
+                && row < target.top.saturating_add(target.height)
+        })
+    }
+
     pub(super) fn layout_positioned_panes(&self) -> Vec<TerminalPaneLayout> {
         // Render/layout pass must stay side-effect free: it may project runtime/overlay
         // snapshots into UI geometry, but it must not mutate the underlying PTY/terminal.
@@ -84,10 +96,9 @@ impl crate::TermWindow {
         let cell_height = self.render_metrics.cell_size.height.max(0) as usize;
         let mut next_index = 0;
         for target in self.layout_render_targets() {
-            let Some(render_state) = crate::chatminal_runtime::desktop_render_state_for_session(
-                self.window_id as DesktopWindowId,
-                &target.session_id,
-            ) else {
+            let Some(render_state) =
+                crate::chatminal_runtime::desktop_render_state_for_session(&target.session_id)
+            else {
                 continue;
             };
             if let Some(overlay) = self.session_render_target_overlay(&target.session_id) {
@@ -204,19 +215,12 @@ impl crate::TermWindow {
             .saturating_add_signed(delta)
             .clamp(1, max_first);
         let ratio = ((next_first as u64) * 1000 / (usable as u64)) as u16;
-        crate::chatminal_runtime::desktop_resize_layout_split(
-            self.window_id as DesktopWindowId,
-            target.node_id,
-            ratio,
-        )?;
+        crate::chatminal_runtime::desktop_resize_layout_split(target.node_id, ratio)?;
         // Divider drag mutates only the persisted workspace ratio. We must eagerly
         // push the derived per-session terminal sizes as part of the same gesture;
         // otherwise pane viewports/scroll regions stay at the prior size until some
         // later action (such as switching sessions) happens to refresh them.
-        let _ = crate::chatminal_runtime::desktop_resize_visible_sessions(
-            self.window_id as DesktopWindowId,
-            self.terminal_size,
-        );
+        let _ = crate::chatminal_runtime::desktop_resize_visible_sessions(self.terminal_size);
         self.resize_overlays();
         self.workspace_split_targets()
             .into_iter()

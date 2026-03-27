@@ -1,13 +1,13 @@
 use crate::chatminal_runtime::{
     active_frontend_client, active_workspace_for_client, focus_terminal_handle_by_id,
     frontend_resolve_focused_pane, frontend_resolve_pane, set_active_workspace_for_client,
-    subscribe_frontend_notifications, workspace_is_empty, workspace_names, workspace_window_ids,
-    FrontendClientHandle, RuntimeNotification,
+    subscribe_frontend_notifications, workspace_is_empty, workspace_names,
+    FrontendClientHandle, RuntimeNotification, host_workspace_has_windows,
+    primary_host_window_exists, primary_host_window_id,
 };
-use crate::scripting::guiwin::DesktopWindowId;
+use crate::scripting::guiwin::PrimaryGuiWindowId;
 use crate::scripting::guiwin::GuiWin;
 use crate::spawn::SpawnWhere;
-use crate::termwindow::TermWindowNotif;
 use crate::TermWindow;
 use ::window::*;
 use anyhow::{Context, Error};
@@ -17,17 +17,15 @@ use engine_term::{Alert, ClipboardSelection};
 use engine_toast_notification::*;
 use promise::{Future, Promise};
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashSet};
-use std::convert::TryFrom;
 use std::rc::Rc;
 use std::sync::Arc;
 
 pub struct GuiFrontEnd {
     connection: Rc<Connection>,
     switching_workspaces: RefCell<bool>,
-    closing_window_ids: RefCell<HashSet<DesktopWindowId>>,
-    spawned_window_ids: RefCell<HashSet<DesktopWindowId>>,
-    known_windows: RefCell<BTreeMap<Window, DesktopWindowId>>,
+    closing_primary_window: RefCell<bool>,
+    spawning_primary_window: RefCell<bool>,
+    known_window: RefCell<Option<Window>>,
     client_id: FrontendClientHandle,
     config_subscription: RefCell<Option<ConfigSubscription>>,
     _host_activity_guard: Option<crate::chatminal_runtime::HostActivityGuard>,
@@ -49,9 +47,9 @@ impl GuiFrontEnd {
         let front_end = Rc::new(GuiFrontEnd {
             connection,
             switching_workspaces: RefCell::new(false),
-            closing_window_ids: RefCell::new(HashSet::new()),
-            spawned_window_ids: RefCell::new(HashSet::new()),
-            known_windows: RefCell::new(BTreeMap::new()),
+            closing_primary_window: RefCell::new(false),
+            spawning_primary_window: RefCell::new(false),
+            known_window: RefCell::new(None),
             client_id: client_id.clone(),
             config_subscription: RefCell::new(None),
             _host_activity_guard: crate::chatminal_sidebar::sidebar_enabled_from_env()
@@ -73,10 +71,8 @@ impl GuiFrontEnd {
                         .detach();
                     }
                 }
-                RuntimeNotification::WindowWorkspaceChanged(_)
-                | RuntimeNotification::ActiveWorkspaceChanged(_)
-                | RuntimeNotification::WindowCreated(_)
-                | RuntimeNotification::WindowRemoved(_) => {
+                RuntimeNotification::WindowWorkspaceChanged
+                | RuntimeNotification::ActiveWorkspaceChanged(_) => {
                     promise::spawn::spawn_into_main_thread(async move {
                         let fe = crate::frontend::front_end();
                         if !fe.is_switching_workspace() {
@@ -98,7 +94,7 @@ impl GuiFrontEnd {
                 RuntimeNotification::TabResized(_) => {}
                 RuntimeNotification::TabAddedToWindow { .. } => {}
                 RuntimeNotification::PaneRemoved(_) => {}
-                RuntimeNotification::WindowInvalidated(_) => {}
+                RuntimeNotification::WindowInvalidated => {}
                 RuntimeNotification::PaneOutput(_) => {}
                 RuntimeNotification::PaneAdded(_) => {}
                 RuntimeNotification::Alert {
@@ -123,9 +119,7 @@ impl GuiFrontEnd {
                                 NotificationHandling::SuppressFromFocusedTab => {
                                     focused.runtime_entry_id != resolved.runtime_entry_id
                                 }
-                                NotificationHandling::SuppressFromFocusedWindow => {
-                                    focused.window_id != resolved.window_id
-                                }
+                                NotificationHandling::SuppressFromFocusedWindow => false,
                             };
 
                             if show {
@@ -200,7 +194,7 @@ impl GuiFrontEnd {
                             selection,
                             clipboard
                         );
-                        if let Some(window) = fe.known_windows.borrow().keys().next() {
+                        if let Some(window) = fe.known_window.borrow().as_ref() {
                             window.set_clipboard(
                                 match selection {
                                     ClipboardSelection::Clipboard => Clipboard::Clipboard,
@@ -278,7 +272,7 @@ impl GuiFrontEnd {
                         config.initial_size(dpi as u32, crate::cell_pixel_dims(&config, dpi).ok());
                     let term_config = Arc::new(config::TermConfig::with_config(config));
 
-                    crate::spawn::spawn_command_impl(spawn, spawn_where, size, None, term_config)
+                    crate::spawn::spawn_command_impl(spawn, spawn_where, size, term_config)
                 }
 
                 match action {
@@ -289,13 +283,10 @@ impl GuiFrontEnd {
                         Connection::get().unwrap().terminate_message_loop();
                     }
                     KeyAssignment::SpawnSession => {
-                        spawn_command(&SpawnCommand::default(), SpawnWhere::NewWindow);
+                        spawn_command(&SpawnCommand::default(), SpawnWhere::InitialWindow);
                     }
                     KeyAssignment::SpawnCommandInNewSession(spawn) => {
                         spawn_command(&spawn, SpawnWhere::NewSession);
-                    }
-                    KeyAssignment::SpawnCommandInNewWindow(spawn) => {
-                        spawn_command(&spawn, SpawnWhere::NewWindow);
                     }
                     _ => {
                         log::warn!("unhandled perform: {action:?}");
@@ -312,18 +303,18 @@ impl GuiFrontEnd {
     }
 
     pub fn gui_windows(&self) -> Vec<GuiWin> {
-        let windows = self.known_windows.borrow();
         let active_workspace = active_workspace_for_client(&self.client_id);
-        let mut windows: Vec<GuiWin> = windows
-            .iter()
-            .map(|(window, &window_id)| GuiWin {
-                active_workspace: active_workspace.clone(),
-                window_id: window_id as DesktopWindowId,
-                window: window.clone(),
+        self.known_window
+            .borrow()
+            .as_ref()
+            .map(|window| {
+                vec![GuiWin {
+                    active_workspace,
+                    primary_window_id: primary_host_window_id(),
+                    window: window.clone(),
+                }]
             })
-            .collect();
-        windows.sort_by(|a, b| a.window.cmp(&b.window));
-        windows
+            .unwrap_or_default()
     }
 
     pub fn reconcile_workspace(&self) -> Future<()> {
@@ -350,73 +341,43 @@ impl GuiFrontEnd {
         let workspace = active_workspace_for_client(&self.client_id);
         log::debug!("workspace is {}, fixup windows", workspace);
 
-        let mut workspace_window_ids: Vec<DesktopWindowId> =
-            workspace_window_ids(&workspace).into_iter().collect();
-        self.prune_closing_window_ids();
+        self.prune_closing_primary_window();
+        let desired_primary_window_id =
+            host_workspace_has_windows(&workspace).then(primary_host_window_id);
 
-        // First, repurpose existing windows.
-        // Note that both iter_windows_in_workspace and self.known_windows have a
-        // deterministic iteration order, so switching back and forth should result
-        // in a consistent mux <-> gui window mapping.
-        let known_windows = std::mem::take(&mut *self.known_windows.borrow_mut());
-        let mut windows = BTreeMap::new();
-        let mut unused = BTreeMap::new();
+        let known_window = self.known_window.borrow_mut().take();
 
-        for (window, window_id) in known_windows.into_iter() {
-            if let Some(idx) = workspace_window_ids.iter().position(|&id| id == window_id) {
-                // it already points to the desired mux window
-                windows.insert(window, window_id);
-                workspace_window_ids.remove(idx);
-            } else {
-                unused.insert(window, window_id);
-            }
-        }
-
-        let mut workspace_window_ids = workspace_window_ids.into_iter();
-
-        for (window, old_id) in unused.into_iter() {
-            if let Some(window_id) = workspace_window_ids.next() {
-                window.notify(TermWindowNotif::SwitchToWindowId(window_id));
-                windows.insert(window, window_id);
-            } else {
-                // We have more windows than are in the new workspace;
-                // we no longer need this one!
+        if let Some(window) = known_window {
+            if desired_primary_window_id.is_none() {
                 window.close();
-                front_end().spawned_window_ids.borrow_mut().remove(&old_id);
+                *front_end().spawning_primary_window.borrow_mut() = false;
+            } else {
+                *self.known_window.borrow_mut() = Some(window);
             }
         }
-
-        log::trace!("reconcile: windows -> {:?}", windows);
-        *self.known_windows.borrow_mut() = windows;
 
         let future = promise.get_future().unwrap();
 
-        // then spawn any new windows that are needed
         promise::spawn::spawn(async move {
-            while let Some(window_id) = workspace_window_ids.next() {
-                if front_end().is_closing_window_id(window_id) {
-                    log::debug!("frontend reconcile: skip respawn for closing window {window_id}");
-                    continue;
-                }
-                if front_end().has_window_id(window_id)
-                    || front_end().spawned_window_ids.borrow().contains(&window_id)
-                {
-                    continue;
-                }
-                front_end()
-                    .spawned_window_ids
-                    .borrow_mut()
-                    .insert(window_id);
-                log::trace!("Creating TermWindow for window_id={}", window_id);
-                if let Err(err) = TermWindow::new_window(window_id).await {
-                    log::error!("Failed to create window: {:#}", err);
-                    if let Ok(engine_window_id) = usize::try_from(window_id) {
-                        crate::chatminal_runtime::kill_host_window(engine_window_id);
+            if front_end().known_window.borrow().is_none() {
+                if let Some(primary_window_id) = desired_primary_window_id {
+                    if front_end().is_closing_primary_window(primary_window_id) {
+                        log::debug!(
+                            "frontend reconcile: skip respawn for closing primary window {primary_window_id}"
+                        );
+                    } else if !*front_end().spawning_primary_window.borrow() {
+                        *front_end().spawning_primary_window.borrow_mut() = true;
+                        log::trace!(
+                            "Creating TermWindow for primary_window_id={}",
+                            primary_window_id
+                        );
+                        if let Err(err) =
+                            TermWindow::new_primary_window(primary_window_id).await
+                        {
+                            log::error!("Failed to create window: {:#}", err);
+                            *front_end().spawning_primary_window.borrow_mut() = false;
+                        }
                     }
-                    front_end()
-                        .spawned_window_ids
-                        .borrow_mut()
-                        .remove(&window_id);
                 }
             }
             *front_end().switching_workspaces.borrow_mut() = false;
@@ -426,25 +387,13 @@ impl GuiFrontEnd {
         future
     }
 
-    fn has_window_id(&self, window_id: DesktopWindowId) -> bool {
-        for &known_window_id in self.known_windows.borrow().values() {
-            if known_window_id == window_id {
-                return true;
-            }
-        }
-        false
-    }
-
     fn has_live_host_windows(&self) -> bool {
-        workspace_names()
-            .into_iter()
-            .any(|workspace| !workspace_window_ids(&workspace).is_empty())
+        primary_host_window_exists()
     }
 
     fn can_terminate_on_mux_empty(&self) -> bool {
-        self.prune_closing_window_ids();
-        if !self.known_windows.borrow().is_empty() || !self.spawned_window_ids.borrow().is_empty()
-        {
+        self.prune_closing_primary_window();
+        if self.known_window.borrow().is_some() || *self.spawning_primary_window.borrow() {
             return false;
         }
         !self.has_live_host_windows()
@@ -456,9 +405,35 @@ impl GuiFrontEnd {
         self.reconcile_workspace();
     }
 
-    pub fn record_window_binding(&self, window: Window, window_id: DesktopWindowId) {
-        self.closing_window_ids.borrow_mut().remove(&window_id);
-        self.known_windows.borrow_mut().insert(window, window_id);
+    pub fn record_primary_window_binding(
+        &self,
+        window: Window,
+        primary_window_id: PrimaryGuiWindowId,
+    ) {
+        if primary_window_id != primary_host_window_id() {
+            log::warn!(
+                "single-window mode: closing unexpected GUI binding for non-primary primary_window_id={primary_window_id}"
+            );
+            window.close();
+            return;
+        }
+        *self.closing_primary_window.borrow_mut() = false;
+        *self.spawning_primary_window.borrow_mut() = false;
+        {
+            let mut known_window = self.known_window.borrow_mut();
+            if known_window
+                .as_ref()
+                .is_some_and(|existing| existing != &window)
+            {
+                log::warn!(
+                    "single-window mode: closing unexpected extra GUI window binding for primary_window_id={primary_window_id}"
+                );
+                drop(known_window);
+                window.close();
+                return;
+            }
+            *known_window = Some(window);
+        }
         crate::commands::CommandDef::recreate_menubar(&config::configuration());
         if !self.is_switching_workspace() {
             self.reconcile_workspace();
@@ -466,9 +441,15 @@ impl GuiFrontEnd {
     }
 
     pub fn forget_known_window(&self, window: &Window) {
-        if let Some(window_id) = self.known_windows.borrow_mut().remove(window) {
-            self.closing_window_ids.borrow_mut().insert(window_id);
-            self.spawned_window_ids.borrow_mut().remove(&window_id);
+        let should_forget = self
+            .known_window
+            .borrow()
+            .as_ref()
+            .is_some_and(|known_window| known_window == window);
+        if should_forget {
+            *self.known_window.borrow_mut() = None;
+            *self.closing_primary_window.borrow_mut() = true;
+            *self.spawning_primary_window.borrow_mut() = false;
         }
         crate::commands::CommandDef::recreate_menubar(&config::configuration());
         if !self.is_switching_workspace() {
@@ -480,32 +461,23 @@ impl GuiFrontEnd {
         *self.switching_workspaces.borrow()
     }
 
-    fn is_closing_window_id(&self, window_id: DesktopWindowId) -> bool {
-        self.closing_window_ids.borrow().contains(&window_id)
+    fn is_closing_primary_window(&self, primary_window_id: PrimaryGuiWindowId) -> bool {
+        primary_window_id == primary_host_window_id() && *self.closing_primary_window.borrow()
     }
 
-    fn prune_closing_window_ids(&self) {
-        self.closing_window_ids.borrow_mut().retain(|window_id| {
-            usize::try_from(*window_id)
-                .ok()
-                .map(crate::chatminal_runtime::host_window_exists)
-                .unwrap_or(false)
-        });
-    }
-
-    pub fn gui_window_for_window_id(&self, window_id: DesktopWindowId) -> Option<GuiWin> {
-        let windows = self.known_windows.borrow();
-        let active_workspace = active_workspace_for_client(&self.client_id);
-        for (window, v) in windows.iter() {
-            if *v == window_id {
-                return Some(GuiWin {
-                    active_workspace: active_workspace.clone(),
-                    window_id,
-                    window: window.clone(),
-                });
-            }
+    fn prune_closing_primary_window(&self) {
+        if !crate::chatminal_runtime::host_window_exists() {
+            *self.closing_primary_window.borrow_mut() = false;
         }
-        None
+    }
+
+    pub fn gui_window(&self) -> Option<GuiWin> {
+        let active_workspace = active_workspace_for_client(&self.client_id);
+        self.known_window.borrow().as_ref().map(|window| GuiWin {
+            active_workspace,
+            primary_window_id: primary_host_window_id(),
+            window: window.clone(),
+        })
     }
 }
 

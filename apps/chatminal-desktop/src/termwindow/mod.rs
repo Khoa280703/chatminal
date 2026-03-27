@@ -10,8 +10,8 @@ use crate::chatminal_runtime::overlay_compat::{
     RenderableDimensions,
 };
 use crate::chatminal_runtime::{
-    DesktopSessionBridgeAction, RuntimeId, RuntimeNotification, RuntimeWindow, RuntimeWindowId,
-    RuntimeWindowId as EngineWindowId, SessionViewId, TerminalInstanceId,
+    DesktopSessionBridgeAction, PrimaryHostWindowId, RuntimeId, RuntimeNotification,
+    RuntimeWindow, SessionViewId, TerminalInstanceId,
 };
 use crate::chatminal_sidebar::{ChatminalSidebar, SidebarSessionDropTarget};
 use crate::colorease::ColorEase;
@@ -20,11 +20,11 @@ use crate::desktop_termwindow_types::{TerminalPaneLayout, TerminalSplit, Termina
 use crate::frontend::{front_end, try_front_end};
 use crate::inputmap::InputMap;
 use crate::overlay::{
-    confirm_close_window, confirm_quit_program, launcher, start_overlay, CopyModeParams,
-    CopyOverlay, LauncherArgs, LauncherFlags, QuickSelectOverlay,
+    confirm_quit_program, launcher, start_overlay, CopyModeParams, CopyOverlay, LauncherArgs,
+    LauncherFlags, QuickSelectOverlay,
 };
 use crate::resize_increment_calculator::ResizeIncrementCalculator;
-use crate::scripting::guiwin::DesktopWindowId;
+use crate::scripting::guiwin::PrimaryGuiWindowId;
 use crate::scripting::guiwin::GuiWin;
 use crate::scrollbar::*;
 use crate::selection::{Selection, SelectionMode};
@@ -171,7 +171,6 @@ pub enum TermWindowNotif {
     RuntimeNotification(RuntimeNotification),
     EmitStatusUpdate,
     Apply(Box<dyn FnOnce(&mut TermWindow) + Send + Sync>),
-    SwitchToWindowId(DesktopWindowId),
     SetInnerSize {
         width: usize,
         height: usize,
@@ -255,7 +254,6 @@ pub struct SessionEntryInformation {
     pub is_last_active: bool,
     pub active_terminal_instance: Option<TerminalInstanceInformation>,
     pub terminal_instances: Vec<TerminalInstanceInformation>,
-    pub window_id: DesktopWindowId,
     pub entry_title: String,
     pub session_id: Option<String>,
     pub view_id: Option<SessionViewId>,
@@ -263,8 +261,8 @@ pub struct SessionEntryInformation {
 
 impl SessionEntryInformation {
     fn resolved_window_title(&self) -> mlua::Result<String> {
-        crate::chatminal_runtime::resolved_window_title(self.window_id)
-            .ok_or_else(|| mlua::Error::external(format!("window {} not found", self.window_id)))
+        crate::chatminal_runtime::resolved_window_title()
+            .ok_or_else(|| mlua::Error::external("primary window not found"))
     }
 }
 
@@ -281,7 +279,6 @@ impl UserData for SessionEntryInformation {
         fields.add_field_method_get("terminal_instances", |_, this| {
             Ok(this.terminal_instances.clone())
         });
-        fields.add_field_method_get("window_id", |_, this| Ok(this.window_id));
         fields.add_field_method_get("entry_title", |_, this| Ok(this.entry_title.clone()));
         fields.add_field_method_get("session_id", |_, this| Ok(this.session_id.clone()));
         fields.add_field_method_get("view_id", |_, this| {
@@ -398,8 +395,7 @@ pub struct TermWindow {
     pending_scale_changes: LinkedList<resize::ScaleChange>,
     /// Terminal dimensions
     terminal_size: TerminalSize,
-    pub window_id: RuntimeWindowId,
-    pub window_id_for_subscriptions: Arc<Mutex<RuntimeWindowId>>,
+    pub primary_host_window_id: PrimaryHostWindowId,
     pub render_metrics: RenderMetrics,
     render_state: Option<RenderState>,
     input_map: InputMap,
@@ -408,6 +404,7 @@ pub struct TermWindow {
     dead_key_status: DeadKeyStatus,
     key_table_state: KeyTableState,
     show_session_bar: bool,
+    show_terminal_footer: bool,
     show_scroll_bar: bool,
     tab_bar: SessionBarState,
     fancy_tab_bar: Option<box_model::ComputedElement>,
@@ -508,8 +505,12 @@ impl TermWindow {
         0
     }
 
-    fn chatminal_terminal_footer_height_for_dimensions(pixel_width: usize, dpi: usize) -> usize {
-        if Self::chatminal_shell_enabled_for_dimensions(pixel_width, dpi) {
+    fn chatminal_terminal_footer_height_for_dimensions(
+        pixel_width: usize,
+        dpi: usize,
+        show_terminal_footer: bool,
+    ) -> usize {
+        if show_terminal_footer && Self::chatminal_shell_enabled_for_dimensions(pixel_width, dpi) {
             52
         } else {
             0
@@ -541,6 +542,7 @@ impl TermWindow {
         Self::chatminal_terminal_footer_height_for_dimensions(
             self.dimensions.pixel_width,
             self.dimensions.dpi,
+            self.show_terminal_footer,
         ) as f32
     }
 
@@ -717,11 +719,7 @@ impl TermWindow {
         let Some(session_id) = self.active_session_id() else {
             return;
         };
-        if crate::chatminal_runtime::desktop_render_state_for_session(
-            self.window_id as DesktopWindowId,
-            &session_id,
-        )
-        .is_some()
+        if crate::chatminal_runtime::desktop_render_state_for_session(&session_id).is_some()
         {
             return;
         }
@@ -974,10 +972,7 @@ impl TermWindow {
         if is_active_profile {
             let _ = DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID)
                 .save_as_profile_layout(&anchor_profile_id);
-            let _ = crate::chatminal_runtime::desktop_prepare_workspace_layout(
-                self.window_id as DesktopWindowId,
-                self.terminal_size,
-            );
+            let _ = crate::chatminal_runtime::desktop_prepare_workspace_layout(self.terminal_size);
         } else {
             let _ = layout_store.save_as_profile_layout(&anchor_profile_id);
         }
@@ -1076,9 +1071,7 @@ impl TermWindow {
     }
 
     fn activate_last_chatminal_session(&mut self) -> anyhow::Result<()> {
-        let Some(session_id) = crate::chatminal_runtime::desktop_last_active_session_id(
-            self.window_id as DesktopWindowId,
-        ) else {
+        let Some(session_id) = crate::chatminal_runtime::desktop_last_active_session_id() else {
             return Ok(());
         };
         self.switch_chatminal_session(&session_id);
@@ -1124,10 +1117,8 @@ impl TermWindow {
                     .restore_profile_layout_if_contains(profile_id, session_id)
                     .is_some()
             } {
-                let _ = crate::chatminal_runtime::desktop_prepare_workspace_layout(
-                    self.window_id as DesktopWindowId,
-                    self.terminal_size,
-                );
+                let _ =
+                    crate::chatminal_runtime::desktop_prepare_workspace_layout(self.terminal_size);
             }
         }
         if self
@@ -1146,11 +1137,9 @@ impl TermWindow {
     ) -> Option<crate::chatminal_runtime::DesktopSessionRuntimeSummary> {
         // Session-native path (Phase 04): route entirely through DesktopSessionHost,
         // without touching the legacy global runtime lookup on the active flow.
-        let window_id = self.window_id as DesktopWindowId;
         let size = self.terminal_size;
 
         let runtime_state = crate::chatminal_runtime::desktop_activate_session(
-            window_id,
             session_id,
             preferred_runtime_id,
             size,
@@ -1181,15 +1170,10 @@ impl TermWindow {
             return self
                 .active_session_id()
                 .as_deref()
-                .and_then(|session_id| {
-                    crate::chatminal_runtime::desktop_render_state_for_session(
-                        self.window_id as DesktopWindowId,
-                        session_id,
-                    )
-                })
+                .and_then(crate::chatminal_runtime::desktop_render_state_for_session)
                 .map(|state| state.render_target_id().as_u64());
         }
-        crate::chatminal_runtime::host_active_render_scope_id(self.window_id)
+        crate::chatminal_runtime::host_active_render_scope_id()
     }
 
     pub(crate) fn active_session_id(&self) -> Option<String> {
@@ -1234,9 +1218,7 @@ impl TermWindow {
         if !self.chatminal_sidebar.is_enabled() {
             return;
         }
-        let lookup = match crate::chatminal_runtime::desktop_session_window_snapshot(
-            self.window_id as DesktopWindowId,
-        ) {
+        let lookup = match crate::chatminal_runtime::desktop_session_window_snapshot() {
             Ok(snapshot) => snapshot.lookup,
             Err(err) => {
                 log::error!("failed to load desktop session window snapshot: {err}");
@@ -1261,7 +1243,6 @@ impl TermWindow {
             return false;
         }
         let Some(entry) = crate::chatminal_runtime::desktop_session_entry_binding_for_render_target(
-            self.window_id as DesktopWindowId,
             crate::chatminal_runtime::SessionRenderTargetId::new(render_target_id),
         ) else {
             return false;
@@ -1277,17 +1258,11 @@ impl TermWindow {
         if self.chatminal_sidebar.is_enabled() {
             let session_id =
                 crate::chatminal_runtime::desktop_session_entry_binding_for_render_target(
-                    self.window_id as DesktopWindowId,
                     crate::chatminal_runtime::SessionRenderTargetId::new(render_target_id),
                 )
                 .map(|entry| entry.session_id);
             return session_id
-                .and_then(|session_id| {
-                    crate::chatminal_runtime::desktop_pane_for_session(
-                        self.window_id as DesktopWindowId,
-                        &session_id,
-                    )
-                })
+                .and_then(|session_id| crate::chatminal_runtime::desktop_pane_for_session(&session_id))
                 .map(|pane| pane.can_close_without_prompting(reason))
                 .unwrap_or(false);
         }
@@ -1318,10 +1293,7 @@ impl TermWindow {
             log::error!("failed to close synced session {session_id}: {err}");
             return false;
         }
-        if !crate::chatminal_runtime::desktop_detach_session_runtime_and_notify(
-            self.window_id as DesktopWindowId,
-            session_id,
-        ) {
+        if !crate::chatminal_runtime::desktop_detach_session_runtime_and_notify(session_id) {
             return false;
         }
         if let Some(window) = self.window.as_ref() {
@@ -1335,10 +1307,7 @@ impl TermWindow {
         if !self.chatminal_sidebar.is_enabled() {
             return false;
         }
-        if !crate::chatminal_runtime::desktop_detach_session_runtime_and_notify(
-            self.window_id as DesktopWindowId,
-            session_id,
-        ) {
+        if !crate::chatminal_runtime::desktop_detach_session_runtime_and_notify(session_id) {
             return false;
         }
         if let Some(window) = self.window.as_ref() {
@@ -1399,7 +1368,6 @@ impl TermWindow {
                 let _ = DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID)
                     .save_as_profile_layout(&target_session.profile_id);
                 let _ = crate::chatminal_runtime::desktop_focus_session_view_with_previous(
-                    self.window_id as DesktopWindowId,
                     next_active_view.view_id,
                     Some(session_id.to_string()),
                 );
@@ -1419,9 +1387,7 @@ impl TermWindow {
     }
 
     fn close_chatminal_view_or_session_by_id(&mut self, session_id: &str) -> bool {
-        let can_close_view_only = crate::chatminal_runtime::desktop_can_close_view_only(
-            self.window_id as DesktopWindowId,
-        );
+        let can_close_view_only = crate::chatminal_runtime::desktop_can_close_view_only();
 
         if can_close_view_only {
             return self.close_chatminal_view_by_id(session_id);
@@ -1551,47 +1517,11 @@ impl TermWindow {
         Ok(())
     }
 
-    fn close_requested(&mut self, window: &Window) {
-        if self.chatminal_sidebar.is_enabled() {
-            if let Err(err) = self.request_quit_application() {
-                log::error!("failed to quit application from close request: {err:#}");
-                let con = Connection::get().expect("call on gui thread");
-                con.terminate_message_loop();
-            }
-            return;
-        }
-
-        match self.config.window_close_confirmation {
-            WindowCloseConfirmation::NeverPrompt => {
-                // Immediately kill the tabs and allow the window to close
-                self.kill_host_window();
-                window.close();
-                front_end().forget_known_window(window);
-            }
-            WindowCloseConfirmation::AlwaysPrompt => {
-                let engine_window_id = self.window_id;
-
-                let can_close = self
-                    .with_host_window(|w| w.can_close_without_prompting())
-                    .unwrap_or(false);
-                if can_close {
-                    self.kill_host_window();
-                    window.close();
-                    front_end().forget_known_window(window);
-                    return;
-                }
-                if self.spawn_overlay_on_active_render_scope(move |_tab_id, term| {
-                    confirm_close_window(term, engine_window_id as u64)
-                }) {
-                    return;
-                }
-                self.kill_host_window();
-                window.close();
-                front_end().forget_known_window(window);
-
-                // Don't close right now; let the close happen from
-                // the confirmation overlay
-            }
+    fn close_requested(&mut self, _window: &Window) {
+        if let Err(err) = self.request_quit_application() {
+            log::error!("failed to quit application from close request: {err:#}");
+            let con = Connection::get().expect("call on gui thread");
+            con.terminate_message_loop();
         }
     }
 
@@ -1655,9 +1585,11 @@ impl TermWindow {
 }
 
 impl TermWindow {
-    pub async fn new_window(window_id: DesktopWindowId) -> anyhow::Result<()> {
-        let engine_window_id = RuntimeWindowId::try_from(window_id)
-            .context(format!("invalid desktop window id {window_id}"))?;
+    pub async fn new_primary_window(
+        primary_window_id: PrimaryGuiWindowId,
+    ) -> anyhow::Result<()> {
+        let primary_host_window_id = PrimaryHostWindowId::try_from(primary_window_id)
+            .context(format!("invalid primary gui window id {primary_window_id}"))?;
         let config = configuration();
         let chatminal_sidebar = ChatminalSidebar::from_env();
         let dpi = config.dpi.unwrap_or_else(|| ::window::default_dpi()) as usize;
@@ -1666,7 +1598,7 @@ impl TermWindow {
         let size = if chatminal_sidebar.is_enabled() {
             Default::default()
         } else {
-            match crate::chatminal_runtime::active_host_runtime_entry_size(engine_window_id) {
+            match crate::chatminal_runtime::active_host_runtime_entry_size() {
                 Some(size) => size,
                 None => {
                     log::debug!("new_window has no tabs... yet?");
@@ -1709,7 +1641,7 @@ impl TermWindow {
                 terminal_size,
             );
             if !chatminal_sidebar.is_enabled() {
-                crate::chatminal_runtime::resize_host_window_tabs(engine_window_id, terminal_size);
+                crate::chatminal_runtime::resize_host_window_tabs(terminal_size);
             }
         }
 
@@ -1729,7 +1661,11 @@ impl TermWindow {
         let padding_top = config.window_padding.top.evaluate_as_pixels(v_context) as usize
             + Self::chatminal_terminal_chrome_height_for_dimensions(terminal_size.pixel_width, dpi);
         let padding_bottom = config.window_padding.bottom.evaluate_as_pixels(v_context) as usize
-            + Self::chatminal_terminal_footer_height_for_dimensions(terminal_size.pixel_width, dpi);
+            + Self::chatminal_terminal_footer_height_for_dimensions(
+                terminal_size.pixel_width,
+                dpi,
+                true,
+            );
 
         let mut dimensions = Dimensions {
             pixel_width: (terminal_size.pixel_width + padding_left + padding_right) as usize,
@@ -1748,8 +1684,8 @@ impl TermWindow {
         let window_background = load_background_image(&config, &dimensions, &render_metrics);
 
         log::trace!(
-            "TermWindow::new_window called with window_id {} {:?} {:?}",
-            window_id,
+            "TermWindow::new_primary_window called with primary_window_id {} {:?} {:?}",
+            primary_window_id,
             terminal_size,
             dimensions
         );
@@ -1780,8 +1716,7 @@ impl TermWindow {
             config_overrides: engine_dynamic::Value::default(),
             palette: None,
             focused: None,
-            window_id: engine_window_id,
-            window_id_for_subscriptions: Arc::new(Mutex::new(engine_window_id)),
+            primary_host_window_id,
             fonts: Rc::clone(&fontconfig),
             render_metrics,
             dimensions,
@@ -1795,6 +1730,7 @@ impl TermWindow {
             leader_is_down: None,
             dead_key_status: DeadKeyStatus::None,
             show_session_bar,
+            show_terminal_footer: true,
             show_scroll_bar: config.enable_scroll_bar,
             tab_bar: SessionBarState::default(),
             fancy_tab_bar: None,
@@ -1883,9 +1819,8 @@ impl TermWindow {
         let mut y = None;
         let mut origin = GeometryOrigin::default();
 
-        if let Some(position) =
-            crate::chatminal_runtime::host_window_initial_position(engine_window_id)
-                .or_else(|| POSITION.lock().unwrap().take())
+        if let Some(position) = crate::chatminal_runtime::host_window_initial_position()
+            .or_else(|| POSITION.lock().unwrap().take())
         {
             x.replace(position.x);
             y.replace(position.y);
@@ -1977,7 +1912,7 @@ impl TermWindow {
         }
 
         // update checker disabled — desktop deprecated, WezTerm update endpoint removed
-        front_end().record_window_binding(window, window_id);
+        front_end().record_primary_window_binding(window, primary_window_id);
 
         Ok(())
     }
@@ -2350,10 +2285,7 @@ impl TermWindow {
                     alert: Alert::ToastNotification { .. },
                     ..
                 } => {}
-                RuntimeNotification::TabAddedToWindow {
-                    window_id: _,
-                    tab_id,
-                } => {
+                RuntimeNotification::TabAddedToWindow { tab_id } => {
                     let mut size = self.terminal_size;
                     if let Some(tab_size) = self.render_scope_size(tab_id as u64) {
                         // If we attached to a remote target and loaded in
@@ -2382,12 +2314,9 @@ impl TermWindow {
                 RuntimeNotification::PaneOutput(pane_id) => {
                     self.handle_pane_output_event(pane_id as u64);
                 }
-                RuntimeNotification::WindowInvalidated(_) => {
+                RuntimeNotification::WindowInvalidated => {
                     window.invalidate();
                     self.update_title_post_status();
-                }
-                RuntimeNotification::WindowRemoved(_window_id) => {
-                    // Handled by frontend
                 }
                 RuntimeNotification::AssignClipboard { .. } => {
                     // Handled by frontend
@@ -2409,35 +2338,15 @@ impl TermWindow {
                 RuntimeNotification::PaneAdded(_)
                 | RuntimeNotification::WorkspaceRenamed { .. }
                 | RuntimeNotification::PaneRemoved(_)
-                | RuntimeNotification::WindowWorkspaceChanged(_)
+                | RuntimeNotification::WindowWorkspaceChanged
                 | RuntimeNotification::ActiveWorkspaceChanged(_)
-                | RuntimeNotification::Empty
-                | RuntimeNotification::WindowCreated(_) => {}
+                | RuntimeNotification::Empty => {}
             },
             TermWindowNotif::EmitStatusUpdate => {
                 self.emit_status_event();
             }
             TermWindowNotif::Apply(func) => {
                 func(self);
-            }
-            TermWindowNotif::SwitchToWindowId(window_id) => {
-                let engine_window_id = RuntimeWindowId::try_from(window_id)
-                    .context(format!("invalid desktop window id {window_id}"))?;
-                self.window_id = engine_window_id;
-                *self.window_id_for_subscriptions.lock().unwrap() = engine_window_id;
-
-                self.clear_all_overlays();
-                self.current_highlight.take();
-                self.invalidate_fancy_tab_bar();
-                self.invalidate_modal();
-
-                self.with_host_window(|window| {
-                    for tab in window.iter() {
-                        tab.resize(self.terminal_size);
-                    }
-                });
-                self.update_title();
-                window.invalidate();
             }
             TermWindowNotif::SetInnerSize { width, height } => {
                 self.set_inner_size(window, width, height);
@@ -2541,7 +2450,7 @@ impl TermWindow {
     fn handle_runtime_notification_callback(
         n: RuntimeNotification,
         window: &Window,
-        window_id: RuntimeWindowId,
+        primary_host_window_id: PrimaryHostWindowId,
         dead: &Arc<AtomicBool>,
     ) -> bool {
         if dead.load(Ordering::Relaxed) {
@@ -2571,12 +2480,12 @@ impl TermWindow {
                 // signal for that case, so we just check window validity
                 // here and propagate to the window event handler that
                 // will then do the check with full context.
-                if !Self::host_window_exists(window_id) {
+                if !Self::host_window_exists() {
                     // Something inconsistent: cancel subscription
                     log::debug!(
-                        "PaneOutput: wanted window_id={} from mux, but \
+                        "PaneOutput: wanted primary_host_window_id={} from mux, but \
                          was not found, cancel mux subscription",
-                        window_id
+                        primary_host_window_id
                     );
                     return false;
                 }
@@ -2585,32 +2494,15 @@ impl TermWindow {
             RuntimeNotification::PaneAdded(_pane_id) => {
                 // If some other client spawns a pane inside this window, this
                 // gives us an opportunity to attach it to the clipboard.
-                return Self::host_window_exists(window_id);
+                return Self::host_window_exists();
             }
-            RuntimeNotification::TabAddedToWindow {
-                window_id: notification_window_id,
-                ..
-            }
-            | RuntimeNotification::WindowTitleChanged {
-                window_id: notification_window_id,
-                ..
-            }
-            | RuntimeNotification::WindowInvalidated(notification_window_id) => {
-                if notification_window_id != window_id {
-                    return true;
-                }
-            }
-            RuntimeNotification::WindowRemoved(notification_window_id) => {
-                if notification_window_id != window_id {
-                    return true;
-                }
-                // Set the window as dead to unsubscribe from further notifications
-                dead.store(true, Ordering::Relaxed);
-                return false;
+            RuntimeNotification::TabAddedToWindow { .. }
+            | RuntimeNotification::WindowTitleChanged { .. }
+            | RuntimeNotification::WindowInvalidated => {
             }
             RuntimeNotification::TabResized(tab_id)
             | RuntimeNotification::TabTitleChanged { tab_id, .. } => {
-                if Self::host_window_contains_render_scope(window_id, tab_id as u64) {
+                if Self::host_window_contains_render_scope(tab_id as u64) {
                     // fall through
                 } else {
                     return true;
@@ -2622,11 +2514,10 @@ impl TermWindow {
             }
             | RuntimeNotification::AssignClipboard { .. }
             | RuntimeNotification::SaveToDownloads { .. }
-            | RuntimeNotification::WindowCreated(_)
             | RuntimeNotification::ActiveWorkspaceChanged(_)
             | RuntimeNotification::WorkspaceRenamed { .. }
             | RuntimeNotification::Empty
-            | RuntimeNotification::WindowWorkspaceChanged(_) => return true,
+            | RuntimeNotification::WindowWorkspaceChanged => return true,
             RuntimeNotification::Alert {
                 alert: Alert::PaletteChanged { .. },
                 ..
@@ -2642,17 +2533,21 @@ impl TermWindow {
 
     fn subscribe_to_runtime_updates(&self) {
         let window = self.window.clone().expect("window to be valid on startup");
-        let window_id = Arc::clone(&self.window_id_for_subscriptions);
+        let primary_host_window_id = self.primary_host_window_id;
         let dead = Arc::new(AtomicBool::new(false));
         crate::chatminal_runtime::subscribe_runtime_notifications(move |n| {
             if dead.load(Ordering::Relaxed) {
                 return false;
             }
-            let window_id = *window_id.lock().unwrap();
             let window = window.clone();
             let dead = dead.clone();
             promise::spawn::spawn_into_main_thread(async move {
-                Self::handle_runtime_notification_callback(n, &window, window_id, &dead)
+                Self::handle_runtime_notification_callback(
+                    n,
+                    &window,
+                    primary_host_window_id,
+                    &dead,
+                )
             })
             .detach();
             true
@@ -2665,7 +2560,6 @@ impl TermWindow {
     ) -> TerminalInstanceInformation {
         let host_terminal_handle = pos.pane.pane_id() as u64;
         let terminal_instance_id = crate::chatminal_runtime::desktop_session_terminal_binding(
-            self.window_id as DesktopWindowId,
             crate::chatminal_runtime::SessionTerminalHandle::new(host_terminal_handle),
         )
         .map(|binding| binding.terminal_instance_id.as_u64())
@@ -2695,9 +2589,7 @@ impl TermWindow {
 
     fn get_session_entry_information(&mut self) -> Vec<SessionEntryInformation> {
         if self.chatminal_sidebar.is_enabled() {
-            let entry_bindings = crate::chatminal_runtime::desktop_session_entry_bindings(
-                self.window_id as DesktopWindowId,
-            );
+            let entry_bindings = crate::chatminal_runtime::desktop_session_entry_bindings();
             let leaves_by_session: HashMap<String, Vec<TerminalInstanceInformation>> =
                 entry_bindings
                     .iter()
@@ -2733,7 +2625,6 @@ impl TermWindow {
                         render_target_id: entry.render_target_id.map(|id| id.as_u64()).unwrap_or(0),
                         is_active: entry.is_active,
                         is_last_active: entry.is_last_active,
-                        window_id: self.window_id as DesktopWindowId,
                         entry_title: entry.title,
                         active_terminal_instance,
                         terminal_instances,
@@ -2765,7 +2656,6 @@ impl TermWindow {
                         is_last_active: last_active_idx
                             .map(|last_active| last_active == idx)
                             .unwrap_or(false),
-                        window_id: self.window_id as DesktopWindowId,
                         entry_title: tab.get_title(),
                         active_terminal_instance: terminal_instances
                             .iter()

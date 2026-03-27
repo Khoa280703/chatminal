@@ -200,7 +200,6 @@ pub struct SessionViewBinding {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionWindowBinding {
-    pub window_id: u64,
     pub workspace_id: String,
     pub active_session_id: Option<String>,
     pub active_view_id: Option<SessionViewId>,
@@ -350,7 +349,6 @@ mod tests {
             active_view_id: Some(view_id),
         };
         let window = SessionWindowBinding {
-            window_id: 41,
             workspace_id: "desktop".to_string(),
             active_session_id: Some("session-a".to_string()),
             active_view_id: Some(view_id),

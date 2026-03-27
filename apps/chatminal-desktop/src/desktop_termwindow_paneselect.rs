@@ -7,7 +7,6 @@ use crate::termwindow::render::corners::{
 use crate::termwindow::DimensionContext;
 use crate::utilsprites::RenderMetrics;
 use crate::TermWindow;
-use ::window::WindowOps;
 use config::keyassignment::{KeyAssignment, SessionSelectArguments, SessionSelectMode};
 use config::Dimension;
 use engine_term::{KeyCode, KeyModifiers, MouseEvent};
@@ -170,18 +169,6 @@ impl PaneSelector {
 
         if !term_window.active_runtime_has_overlay() {
             match self.mode {
-                SessionSelectMode::Activate => {
-                    let focused_leaf = term_window.chatminal_sidebar.is_enabled()
-                        && term_window.focus_active_session_terminal_instance(&target.pane);
-                    if focused_leaf {
-                        if let Some(window) = term_window.window.as_ref() {
-                            window.invalidate();
-                        }
-                    } else {
-                        let _ = term_window
-                            .activate_terminal_handle_in_active_runtime(target.pane.pane_id() as u64);
-                    }
-                }
                 SessionSelectMode::SwapWithActiveKeepFocus | SessionSelectMode::SwapWithActive => {
                     if term_window.chatminal_sidebar.is_enabled() {
                         log::warn!(
@@ -194,48 +181,9 @@ impl PaneSelector {
                         );
                     }
                 }
-                SessionSelectMode::MoveToNewWindow => {
-                    if term_window.chatminal_sidebar.is_enabled() {
-                        log::warn!(
-                            "session-native move to new window is no longer supported"
-                        );
-                    } else {
-                        let host_terminal_handle = target.pane.pane_id();
-                        promise::spawn::spawn(async move {
-                            if let Err(err) = crate::chatminal_runtime::move_terminal_handle_to_new_runtime(
-                                host_terminal_handle,
-                                None,
-                            )
-                                .await
-                            {
-                                log::error!("failed to move leaf to new window: {err:#}");
-                            }
-                        })
-                        .detach();
-                    }
-                }
                 SessionSelectMode::MoveToNewSession => {
-                    if term_window.chatminal_sidebar.is_enabled() {
-                        log::warn!(
-                            "session-native move to new session is no longer supported"
-                        );
-                    } else {
-                        let host_terminal_handle = target.pane.pane_id();
-                        let window_id = term_window.window_id;
-                        promise::spawn::spawn(async move {
-                            if let Err(err) = crate::chatminal_runtime::move_terminal_handle_to_new_runtime(
-                                host_terminal_handle,
-                                Some(window_id as u64),
-                            )
-                                .await
-                            {
-                                log::error!("failed to move leaf to new surface: {err:#}");
-                            }
-
-                            let _ = crate::chatminal_runtime::focus_terminal_handle(host_terminal_handle);
-                        })
-                        .detach();
-                    }
+                    let _ = target;
+                    log::warn!("move to new session has been removed in single-window mode");
                 }
             }
         }

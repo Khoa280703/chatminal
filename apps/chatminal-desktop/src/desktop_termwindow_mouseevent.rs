@@ -5,7 +5,7 @@ use crate::chatminal_sidebar::SidebarSessionDropTarget;
 use crate::desktop_termwindow_types::{TerminalSplit, TerminalSplitDirection};
 use crate::tabbar::SessionBarItem;
 use crate::termwindow::{
-    DesktopWindowId, GuiWin, MouseCapture, ScrollHit, TermWindowNotif, UIItem, UIItemType, TMB,
+    GuiWin, MouseCapture, ScrollHit, TermWindowNotif, UIItem, UIItemType, TMB,
 };
 use ::window::{
     MouseButtons as WMB, MouseCursor, MouseEvent, MouseEventKind as WMEK, MousePress,
@@ -1087,10 +1087,7 @@ impl super::TermWindow {
                 } => {
                     if let Some(view_id) = view_id {
                         if let Some(focused_session_id) =
-                            crate::chatminal_runtime::desktop_focus_session_view(
-                                self.window_id as DesktopWindowId,
-                                view_id,
-                            )
+                            crate::chatminal_runtime::desktop_focus_session_view(view_id)
                         {
                             self.switch_chatminal_session_target(&focused_session_id, None);
                             return;
@@ -1311,6 +1308,7 @@ impl super::TermWindow {
             self.current_mouse_capture,
             Some(MouseCapture::TerminalPane(_))
         );
+        let mut matched_rendered_pane = false;
 
         for pos in self.get_panes_to_render() {
             if !is_already_captured
@@ -1319,6 +1317,7 @@ impl super::TermWindow {
                 && column >= pos.left
                 && column <= pos.left + pos.width
             {
+                matched_rendered_pane = true;
                 if pane.pane_id() != pos.pane.pane_id() {
                     // We're over a pane that isn't active
                     match &event.kind {
@@ -1376,6 +1375,22 @@ impl super::TermWindow {
                 }
 
                 break;
+            }
+        }
+
+        if !matched_rendered_pane && self.chatminal_sidebar.is_enabled() && !is_already_captured {
+            if let Some(target) = self.layout_render_target_at(column, row.max(0) as usize) {
+                if matches!(event.kind, WMEK::Press(_))
+                    && self.active_session_id().as_deref() != Some(target.session_id.as_str())
+                {
+                    if self
+                        .activate_chatminal_session_target(&target.session_id, None)
+                        .is_some()
+                    {
+                        context.invalidate();
+                        return;
+                    }
+                }
             }
         }
 

@@ -20,7 +20,7 @@ use host_runtime::activity::Activity;
 use host_runtime::client::ClientId;
 use host_runtime::spawn_target::SpawnTarget;
 use host_runtime::pane::Pane;
-use host_runtime::window::{Window as MuxWindow, WindowId as EngineWindowId};
+use host_runtime::window::{Window as MuxWindow, WindowId as EngineWindowId, ROOT_WINDOW_ID};
 use host_runtime::{Mux, MuxNotification};
 use portable_pty::CommandBuilder;
 use session_engine::TerminalInstanceId;
@@ -83,7 +83,7 @@ pub(crate) struct EmbeddedRuntime {
 pub(crate) type FrontendClientHandle = Arc<ClientId>;
 pub(crate) type RuntimeNotification = MuxNotification;
 pub(crate) type RuntimeWindow = MuxWindow;
-pub(crate) type RuntimeWindowId = EngineWindowId;
+pub(crate) type PrimaryHostWindowId = EngineWindowId;
 pub(crate) type HostMux = Mux;
 pub(crate) use host_runtime::spawn_target::SpawnTarget as HostSpawnTarget;
 pub(crate) use host_runtime::pane::Pane as HostTerminal;
@@ -110,13 +110,11 @@ pub(crate) use host_runtime::renderable::{
 
 #[derive(Clone, Debug)]
 pub(crate) struct FrontendResolvedPane {
-    pub window_id: u64,
     pub runtime_entry_id: u64,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct FrontendFocusedPane {
-    pub window_id: u64,
     pub runtime_entry_id: u64,
     pub pane_id: u64,
 }
@@ -129,6 +127,7 @@ pub(crate) struct LauncherSessionEntry {
 }
 
 static EMBEDDED_RUNTIME: OnceLock<Arc<EmbeddedRuntime>> = OnceLock::new();
+static PRIMARY_HOST_WINDOW_ID: OnceLock<EngineWindowId> = OnceLock::new();
 
 impl EmbeddedRuntime {
     pub(crate) fn session_engine_shared(&self) -> Arc<session_engine::SessionEngineShared> {
@@ -213,10 +212,14 @@ fn terminal_handle_matches_public_id(pane: &dyn Pane, public_id: u64) -> bool {
             .unwrap_or(false)
 }
 
-pub(crate) fn host_active_render_scope_id(window_id: EngineWindowId) -> Option<u64> {
-    Mux::get()
-        .get_active_tab_for_window(window_id)
-        .map(|tab| tab.tab_id() as u64)
+pub(crate) fn host_active_render_scope_id() -> Option<u64> {
+    Mux::get().root_active_tab().map(|tab| tab.tab_id() as u64)
+}
+
+fn primary_host_window_engine_id() -> EngineWindowId {
+    *PRIMARY_HOST_WINDOW_ID
+        .get()
+        .expect("primary host window to be initialized")
 }
 
 pub(crate) fn host_render_scope_capability(render_scope_id: u64) -> Option<Arc<HostRenderScope>> {
@@ -319,23 +322,6 @@ pub(crate) fn host_rotate_render_scope_terminals(
         RotationDirection::CounterClockwise => render_scope.rotate_counter_clockwise(),
     })
     .is_some()
-}
-
-pub(crate) fn host_activate_terminal_handle_in_render_scope(
-    render_scope_id: u64,
-    terminal_handle: u64,
-) -> bool {
-    with_host_render_scope_by_id(render_scope_id, |render_scope| {
-        render_scope
-            .iter_panes()
-            .iter()
-            .position(|positioned| {
-                terminal_handle_matches_public_id(&*positioned.pane, terminal_handle)
-            })
-            .map(|tab_index| render_scope.set_active_idx(tab_index))
-            .is_some()
-    })
-    .unwrap_or(false)
 }
 
 pub(crate) fn host_swap_active_with_terminal_handle_in_render_scope(
@@ -458,25 +444,21 @@ pub(crate) fn remove_terminal_handle(pane_id: HostTerminalHandle) {
     Mux::get().remove_pane(pane_id);
 }
 
-pub(crate) fn kill_host_window(window_id: EngineWindowId) {
-    Mux::get().kill_window(window_id);
-}
-
-pub(crate) fn with_host_window<R, F>(window_id: EngineWindowId, func: F) -> Option<R>
+pub(crate) fn with_host_window<R, F>(func: F) -> Option<R>
 where
     F: FnOnce(&MuxWindow) -> R,
 {
     let mux = Mux::get();
-    let window = mux.get_window(window_id)?;
+    let window = mux.root_window();
     Some(func(&window))
 }
 
-pub(crate) fn with_host_window_mut<R, F>(window_id: EngineWindowId, func: F) -> Option<R>
+pub(crate) fn with_host_window_mut<R, F>(func: F) -> Option<R>
 where
     F: FnOnce(&mut MuxWindow) -> R,
 {
     let mux = Mux::get();
-    let mut window = mux.get_window_mut(window_id)?;
+    let mut window = mux.root_window_mut();
     Some(func(&mut window))
 }
 
@@ -484,15 +466,12 @@ pub(crate) fn remove_runtime_entry_scope(render_scope_id: u64) {
     Mux::get().remove_tab(render_scope_id as _);
 }
 
-pub(crate) fn host_window_exists(window_id: EngineWindowId) -> bool {
-    with_host_window(window_id, |_| ()).is_some()
+pub(crate) fn host_window_exists() -> bool {
+    with_host_window(|_| ()).is_some()
 }
 
-pub(crate) fn host_window_contains_render_scope(
-    window_id: EngineWindowId,
-    render_scope_id: u64,
-) -> bool {
-    Mux::get().window_containing_tab(render_scope_id as _) == Some(window_id)
+pub(crate) fn host_window_contains_render_scope(render_scope_id: u64) -> bool {
+    Mux::get().get_tab(render_scope_id as _).is_some()
 }
 
 pub(crate) fn host_workspace_name() -> String {
@@ -509,6 +488,9 @@ pub(crate) fn generate_host_workspace_name() -> String {
 
 pub(crate) fn set_host_workspace(name: &str) {
     Mux::get().set_active_workspace(name);
+    let _ = with_host_window_mut(|window| {
+        window.set_workspace(name);
+    });
 }
 
 pub(crate) fn configured_default_workspace_name(config: &ConfigHandle) -> String {
@@ -520,7 +502,10 @@ pub(crate) fn configured_default_workspace_name(config: &ConfigHandle) -> String
 }
 
 pub(crate) fn host_workspace_has_windows(name: &str) -> bool {
-    !Mux::get().iter_windows_in_workspace(name).is_empty()
+    with_host_window(|window| {
+        window.get_workspace() == name
+    })
+    .unwrap_or(false)
 }
 
 pub(crate) fn focus_terminal_handle(pane_id: HostTerminalHandle) -> bool {
@@ -531,22 +516,20 @@ pub(crate) fn record_host_focus_for_current_identity(pane_id: HostTerminalHandle
     Mux::get().record_focus_for_current_identity(pane_id);
 }
 
-pub(crate) fn resize_host_window_tabs(window_id: EngineWindowId, size: TerminalSize) {
-    let _ = with_host_window(window_id, |window| {
+pub(crate) fn resize_host_window_tabs(size: TerminalSize) {
+    let _ = with_host_window(|window| {
         for tab in window.iter() {
             tab.resize(size);
         }
     });
 }
 
-pub(crate) fn host_window_initial_position(
-    window_id: EngineWindowId,
-) -> Option<config::GuiPosition> {
-    with_host_window(window_id, |window| window.get_initial_position().clone()).flatten()
+pub(crate) fn host_window_initial_position() -> Option<config::GuiPosition> {
+    with_host_window(|window| window.get_initial_position().clone()).flatten()
 }
 
-pub(crate) fn active_host_runtime_entry_size(window_id: EngineWindowId) -> Option<TerminalSize> {
-    with_host_window(window_id, |window| {
+pub(crate) fn active_host_runtime_entry_size() -> Option<TerminalSize> {
+    with_host_window(|window| {
         window
             .get_by_idx(window.get_active_idx())
             .cloned()
@@ -562,16 +545,8 @@ where
     Mux::get().subscribe(subscriber);
 }
 
-pub(crate) fn kill_host_window_by_public_id(window_id: u64) -> anyhow::Result<()> {
-    let window_id = EngineWindowId::try_from(window_id)
-        .map_err(|_| anyhow!("invalid window id {window_id}"))?;
-    kill_host_window(window_id);
-    Ok(())
-}
-
-pub(crate) fn resolved_window_title(window_id: u64) -> Option<String> {
-    let window_id = EngineWindowId::try_from(window_id).ok()?;
-    with_host_window(window_id, |window| window.get_title().to_string())
+pub(crate) fn resolved_window_title() -> Option<String> {
+    with_host_window(|window| window.get_title().to_string())
 }
 
 pub(crate) fn resolve_public_pane(
@@ -594,11 +569,8 @@ pub(crate) fn resolve_public_pane(
         })
 }
 
-pub(crate) fn launcher_sessions(window_id: u64) -> Vec<LauncherSessionEntry> {
-    let Ok(window_id) = EngineWindowId::try_from(window_id) else {
-        return vec![];
-    };
-    with_host_window(window_id, |window| {
+pub(crate) fn launcher_sessions() -> Vec<LauncherSessionEntry> {
+    with_host_window(|window| {
         window
             .iter()
             .enumerate()
@@ -633,6 +605,14 @@ where
     Mux::get().subscribe(subscriber);
 }
 
+pub(crate) fn primary_host_window_id() -> u64 {
+    primary_host_window_engine_id() as u64
+}
+
+pub(crate) fn primary_host_window_exists() -> bool {
+    host_window_exists()
+}
+
 pub(crate) fn active_workspace_for_client(client_id: &FrontendClientHandle) -> String {
     Mux::get().active_workspace_for_client(client_id)
 }
@@ -649,14 +629,6 @@ pub(crate) fn workspace_names() -> Vec<String> {
     Mux::get().iter_workspaces()
 }
 
-pub(crate) fn workspace_window_ids(workspace: &str) -> Vec<u64> {
-    Mux::get()
-        .iter_windows_in_workspace(workspace)
-        .into_iter()
-        .map(|window_id| window_id as u64)
-        .collect()
-}
-
 pub(crate) fn focus_terminal_handle_by_id(pane_id: u64) -> anyhow::Result<()> {
     let pane_id =
         HostTerminalHandle::try_from(pane_id).map_err(|_| anyhow!("invalid pane id {pane_id}"))?;
@@ -667,9 +639,8 @@ pub(crate) fn focus_terminal_handle_by_id(pane_id: u64) -> anyhow::Result<()> {
 
 pub(crate) fn frontend_resolve_pane(pane_id: u64) -> Option<FrontendResolvedPane> {
     let pane_id = HostTerminalHandle::try_from(pane_id).ok()?;
-    let (window_id, runtime_entry_id) = Mux::get().resolve_pane_id(pane_id)?;
+    let runtime_entry_id = Mux::get().resolve_pane_id(pane_id)?;
     Some(FrontendResolvedPane {
-        window_id: window_id as u64,
         runtime_entry_id: runtime_entry_id as u64,
     })
 }
@@ -677,55 +648,38 @@ pub(crate) fn frontend_resolve_pane(pane_id: u64) -> Option<FrontendResolvedPane
 pub(crate) fn frontend_resolve_focused_pane(
     client_id: &FrontendClientHandle,
 ) -> Option<FrontendFocusedPane> {
-    let (window_id, runtime_entry_id, pane_id) = Mux::get().resolve_focused_pane(client_id)?;
+    let (runtime_entry_id, pane_id) = Mux::get().resolve_focused_pane(client_id)?;
     Some(FrontendFocusedPane {
-        window_id: window_id as u64,
         runtime_entry_id: runtime_entry_id as u64,
         pane_id: pane_id as u64,
     })
 }
 
 pub(crate) async fn spawn_local_shell_runner() -> anyhow::Result<Arc<dyn HostTerminal>> {
-    let workspace = Mux::get().active_workspace();
-    let (_runtime_entry, pane, _window_id) = Mux::get()
-        .spawn_tab_or_window(
-            None,
-            None,
-            None,
-            TerminalSize::default(),
-            None,
-            workspace,
-            None,
-        )
+    let (_runtime_entry, pane) = Mux::get()
+        .spawn_tab(None, None, TerminalSize::default(), None)
         .await?;
     Ok(pane)
 }
 
 pub(crate) async fn spawn_host_runtime_entry(
-    window_id: Option<u64>,
     command: Option<CommandBuilder>,
     command_dir: Option<String>,
     size: TerminalSize,
     current_pane_id: Option<u64>,
     workspace: String,
-    position: Option<config::GuiPosition>,
-) -> anyhow::Result<(Arc<dyn HostTerminal>, u64)> {
-    let engine_window_id = window_id
-        .map(EngineWindowId::try_from)
-        .transpose()
-        .map_err(|_| anyhow!("invalid window id"))?;
-    let (_runtime_entry, pane, result_window_id) = Mux::get()
-        .spawn_tab_or_window(
-            engine_window_id,
+    _position: Option<config::GuiPosition>,
+) -> anyhow::Result<Arc<dyn HostTerminal>> {
+    set_host_workspace(&workspace);
+    let (_runtime_entry, pane) = Mux::get()
+        .spawn_tab(
             command,
             command_dir,
             size,
             current_pane_id.and_then(|pane_id| HostTerminalHandle::try_from(pane_id).ok()),
-            workspace,
-            position,
         )
         .await?;
-    Ok((pane, result_window_id as u64))
+    Ok(pane)
 }
 
 pub(crate) fn set_host_spawn_target(spawn_target: &HostSpawnTargetHandle) {
@@ -751,6 +705,7 @@ pub(crate) fn build_initial_host_mux(
         .map(str::to_string)
         .unwrap_or_else(|| configured_default_workspace_name(config));
     mux.set_active_workspace(&workspace);
+    let _ = PRIMARY_HOST_WINDOW_ID.set(ROOT_WINDOW_ID);
     Ok(())
 }
 
@@ -778,29 +733,16 @@ pub(crate) fn shutdown_host_mux() {
     Mux::shutdown();
 }
 
-pub(crate) fn activate_host_runtime_entry(
-    window_id: u64,
-    render_scope_id: u64,
-) -> anyhow::Result<()> {
-    let window_id = EngineWindowId::try_from(window_id)
-        .map_err(|_| anyhow!("invalid window id {window_id}"))?;
+pub(crate) fn activate_host_runtime_entry(render_scope_id: u64) -> anyhow::Result<()> {
     let render_scope_id = usize::try_from(render_scope_id)
         .map_err(|_| anyhow!("invalid runtime entry id {render_scope_id}"))?;
     let mux = Mux::get();
-    let mut window = mux
-        .get_window_mut(window_id)
-        .ok_or_else(|| anyhow!("failed to get host window id {window_id}"))?;
+    let mut window = mux.root_window_mut();
     let tab_idx = window.idx_by_id(render_scope_id).ok_or_else(|| {
-        anyhow!("runtime entry {render_scope_id} not attached to window {window_id}")
+        anyhow!("runtime entry {render_scope_id} not attached to root window")
     })?;
     window.set_active_without_saving(tab_idx);
     Ok(())
-}
-
-pub(crate) fn create_empty_host_window(workspace: Option<String>) -> u64 {
-    let position = None;
-    let builder = Mux::get().new_empty_window(workspace, position);
-    *builder as u64
 }
 
 pub(crate) fn host_has_panes_in_workspace(workspace: Option<&str>) -> bool {
@@ -811,33 +753,17 @@ pub(crate) fn host_has_panes_in_workspace(workspace: Option<&str>) -> bool {
     let Some(workspace) = workspace else {
         return true;
     };
-    for window_id in mux.iter_windows_in_workspace(workspace) {
-        if let Some(window) = mux.get_window(window_id) {
-            for runtime_entry in window.iter() {
-                if runtime_entry
-                    .iter_panes_ignoring_zoom()
-                    .iter()
-                    .next()
-                    .is_some()
-                {
-                    return true;
-                }
-            }
-        }
+    if !host_workspace_has_windows(workspace) {
+        return false;
     }
-    false
-}
-
-pub(crate) async fn move_terminal_handle_to_new_runtime(
-    pane_id: HostTerminalHandle,
-    window_id: Option<u64>,
-) -> anyhow::Result<()> {
-    let window_id = window_id
-        .map(EngineWindowId::try_from)
-        .transpose()
-        .map_err(|_| anyhow!("invalid window id"))?;
-    Mux::get()
-        .move_pane_to_new_tab(pane_id, window_id, None)
-        .await
-        .map(|_| ())
+    with_host_window(|window| {
+        window.iter().any(|runtime_entry| {
+            runtime_entry
+                .iter_panes_ignoring_zoom()
+                .iter()
+                .next()
+                .is_some()
+        })
+    })
+    .unwrap_or(false)
 }

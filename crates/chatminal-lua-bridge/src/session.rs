@@ -37,11 +37,11 @@ impl UserData for SessionRef {
         methods.add_method("window", |_, this, _: ()| {
             let mux = get_mux()?;
             let tab = this.resolve(&mux)?;
-            // resolve_pane_id gives us the window_id without scanning all windows.
+            // resolve_pane_id gives us the active root tab without scanning all sessions.
             Ok(tab
                 .get_active_pane()
                 .and_then(|pane| mux.resolve_pane_id(pane.pane_id()))
-                .map(|(window_id, _tab_id)| WindowRef(window_id)))
+                .map(|_| WindowRef::root()))
         });
         methods.add_method("get_title", |_, this, _: ()| {
             let mux = get_mux()?;
@@ -147,16 +147,13 @@ impl UserData for SessionRef {
                 mlua::Error::external(format!("session '{}' has no active terminal", this.0))
             })?;
 
-            let (window_id, tab_id) =
-                mux.resolve_pane_id(pane.pane_id()).ok_or_else(|| {
+            let tab_id = mux.resolve_pane_id(pane.pane_id()).ok_or_else(|| {
                     mlua::Error::external(format!("active terminal {} not found", pane.pane_id()))
                 })?;
             {
-                let mut window = mux.get_window_mut(window_id).ok_or_else(|| {
-                    mlua::Error::external(format!("window {window_id} not found"))
-                })?;
+                let mut window = mux.root_window_mut();
                 let tab_idx = window.idx_by_id(tab_id).ok_or_else(|| {
-                    mlua::Error::external(format!("session '{}' is not attached to window {window_id}", this.0))
+                    mlua::Error::external(format!("session '{}' is not attached to root window", this.0))
                 })?;
                 window.save_and_then_set_active(tab_idx);
             }

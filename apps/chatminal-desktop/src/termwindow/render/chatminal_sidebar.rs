@@ -188,8 +188,11 @@ impl crate::TermWindow {
             self.append_and_render_overlay(context_menu)?;
         }
         self.render_chatminal_sidebar_scrollbar(&bounds)?;
-        self.append_and_render_overlay(&footer_background)?;
-        self.append_and_render_overlay(&footer_content)
+        if bounds.footer_height > 0.0 {
+            self.append_and_render_overlay(&footer_background)?;
+            self.append_and_render_overlay(&footer_content)?;
+        }
+        Ok(())
     }
 
     fn append_and_render_overlay(
@@ -464,12 +467,7 @@ impl crate::TermWindow {
             let gl_state = self.render_state.as_ref().unwrap();
             let mut glyph_cache = gl_state.glyph_cache.borrow_mut();
             let (rgba, width, height) = crate::lucide_icons::rasterize_icon_mask(icon, size_px)?;
-            glyph_cache.cached_named_sprite(
-                &icon.cache_key(size_px),
-                width,
-                height,
-                &rgba,
-            )?
+            glyph_cache.cached_named_sprite(&icon.cache_key(size_px), width, height, &rgba)?
         };
         let body_font = self.sidebar_text_font()?;
         Ok(Element::new(
@@ -540,19 +538,17 @@ impl crate::TermWindow {
         }
         children.push(actions);
 
-        Ok(
-            Element::new(body_font, ElementContent::Children(children))
-                .display(crate::termwindow::box_model::DisplayType::Block)
-                .padding(BoxDimension {
-                    left: Dimension::Pixels(8.0),
-                    right: Dimension::Pixels(8.0),
-                    top: Dimension::Pixels(8.0),
-                    bottom: Dimension::Pixels(0.0),
-                })
-                .min_width(Some(Dimension::Pixels((body_width - 16.0).max(120.0))))
-                .min_height(Some(Dimension::Pixels(32.0)))
-                .colors(text_colors(text)),
-        )
+        Ok(Element::new(body_font, ElementContent::Children(children))
+            .display(crate::termwindow::box_model::DisplayType::Block)
+            .padding(BoxDimension {
+                left: Dimension::Pixels(8.0),
+                right: Dimension::Pixels(8.0),
+                top: Dimension::Pixels(8.0),
+                bottom: Dimension::Pixels(0.0),
+            })
+            .min_width(Some(Dimension::Pixels((body_width - 16.0).max(120.0))))
+            .min_height(Some(Dimension::Pixels(32.0)))
+            .colors(text_colors(text)))
     }
 
     fn build_chatminal_sidebar_header_tooltip(
@@ -603,10 +599,13 @@ impl crate::TermWindow {
             pixel_max: self.dimensions.pixel_height as f32,
             pixel_cell: self.render_metrics.cell_size.height as f32,
         };
-        let estimated_width = (label.len() as f32 * self.render_metrics.cell_size.width as f32)
-            + 18.0;
+        let estimated_width =
+            (label.len() as f32 * self.render_metrics.cell_size.width as f32) + 18.0;
         let tooltip_x = ((item.x as f32) + (item.width as f32 - estimated_width.max(60.0)) * 0.5)
-            .clamp(4.0, (self.dimensions.pixel_width as f32 - estimated_width - 4.0).max(4.0));
+            .clamp(
+                4.0,
+                (self.dimensions.pixel_width as f32 - estimated_width - 4.0).max(4.0),
+            );
         let tooltip_y = (item.y + item.height) as f32 + SIDEBAR_TOOLTIP_GAP_PX;
 
         Ok(Some(self.compute_element(
@@ -639,8 +638,8 @@ impl crate::TermWindow {
         };
         let selected_session_ids = self.chatminal_sidebar.selected_session_ids();
         let selected_session_count = selected_session_ids.len();
-        let can_join_selected_sessions =
-            selected_session_count >= 2 && selected_sessions_share_profile(&snapshot, &selected_session_ids);
+        let can_join_selected_sessions = selected_session_count >= 2
+            && selected_sessions_share_profile(&snapshot, &selected_session_ids);
         let is_joined = joined_session_markers(self).contains_key(&session.session_id);
 
         let body_font = self.sidebar_text_font()?;
@@ -696,34 +695,29 @@ impl crate::TermWindow {
             .collect();
 
         let root = Element::new(&body_font, ElementContent::Children(children))
-        .display(crate::termwindow::box_model::DisplayType::Block)
-        .item_type(UIItemType::ChatminalSidebarSessionMenu)
-        .padding(BoxDimension::default())
-        .border(BoxDimension::new(Dimension::Pixels(1.0)))
-        .border_corners(Some(rounded_corners(7.0)))
-        .colors(ElementColors {
-            border: BorderColor::new(border),
-            bg: bg.into(),
-            text: text.into(),
-        })
-        .min_width(Some(Dimension::Pixels(SIDEBAR_CONTEXT_MENU_WIDTH_PX)))
-        .max_width(Some(Dimension::Pixels(SIDEBAR_CONTEXT_MENU_WIDTH_PX)));
+            .display(crate::termwindow::box_model::DisplayType::Block)
+            .item_type(UIItemType::ChatminalSidebarSessionMenu)
+            .padding(BoxDimension::default())
+            .border(BoxDimension::new(Dimension::Pixels(1.0)))
+            .border_corners(Some(rounded_corners(7.0)))
+            .colors(ElementColors {
+                border: BorderColor::new(border),
+                bg: bg.into(),
+                text: text.into(),
+            })
+            .min_width(Some(Dimension::Pixels(SIDEBAR_CONTEXT_MENU_WIDTH_PX)))
+            .max_width(Some(Dimension::Pixels(SIDEBAR_CONTEXT_MENU_WIDTH_PX)));
 
         let width = SIDEBAR_CONTEXT_MENU_WIDTH_PX;
         let estimated_height = 8.0 + item_count as f32 * 32.0;
-        let x = menu
-            .anchor_x_px
-            .clamp(
-                4.0,
-                (self.dimensions.pixel_width as f32 - width - 4.0).max(4.0),
-            );
-        let y = menu
-            .anchor_y_px
-            .clamp(
-                sb.sidebar_y + 4.0,
-                (self.dimensions.pixel_height as f32 - estimated_height - 4.0)
-                    .max(sb.sidebar_y + 4.0),
-            );
+        let x = menu.anchor_x_px.clamp(
+            4.0,
+            (self.dimensions.pixel_width as f32 - width - 4.0).max(4.0),
+        );
+        let y = menu.anchor_y_px.clamp(
+            sb.sidebar_y + 4.0,
+            (self.dimensions.pixel_height as f32 - estimated_height - 4.0).max(sb.sidebar_y + 4.0),
+        );
 
         Ok(Some(self.compute_element(
             &crate::termwindow::box_model::LayoutContext {
@@ -920,7 +914,9 @@ impl crate::TermWindow {
         suppress_hover: bool,
     ) -> anyhow::Result<Element> {
         let is_running = session.status == "running";
-        let is_selected = self.chatminal_sidebar.is_session_selected(&session.session_id);
+        let is_selected = self
+            .chatminal_sidebar
+            .is_session_selected(&session.session_id);
         let row_bg = if session.is_active {
             session_active_bg
         } else if is_selected {
@@ -961,8 +957,8 @@ impl crate::TermWindow {
         } else {
             LinearRgba::with_components(0.773, 0.773, 0.773, 0.90)
         };
-        let terminal = self
-            .sidebar_icon_element(LucideIcon::SquareTerminal, self.sidebar_icon_size_px())?;
+        let terminal =
+            self.sidebar_icon_element(LucideIcon::SquareTerminal, self.sidebar_icon_size_px())?;
         let joined_markers = joined_session_markers(self);
         let joined_marker = joined_markers.get(&session.session_id).copied();
         let inline_rename = self.chatminal_sidebar.inline_rename_state();
@@ -975,14 +971,23 @@ impl crate::TermWindow {
             .map(|rename| rename.session_id == session.session_id && rename.select_all)
             .unwrap_or(false);
         let session_label = if is_inline_rename {
-            format!("{}_", inline_rename.as_ref().map(|rename| rename.input.as_str()).unwrap_or(""))
+            format!(
+                "{}_",
+                inline_rename
+                    .as_ref()
+                    .map(|rename| rename.input.as_str())
+                    .unwrap_or("")
+            )
         } else {
             session.name.clone()
         };
         let status_suffix = if is_inline_rename {
             None
         } else {
-            Some(format!(" ({})", if is_running { "Online" } else { "Offline" }))
+            Some(format!(
+                " ({})",
+                if is_running { "Online" } else { "Offline" }
+            ))
         };
         let rename_bg = if is_inline_rename_selected {
             LinearRgba::with_components(0.086, 0.322, 0.620, 1.0)
@@ -1101,34 +1106,34 @@ impl crate::TermWindow {
         }
 
         Ok(Element::new(body_font, ElementContent::Children(children))
-        .display(crate::termwindow::box_model::DisplayType::Block)
-        .item_type(UIItemType::ChatminalSidebarSession(
-            session.session_id.clone(),
-        ))
-        .padding(BoxDimension {
-            left: Dimension::Pixels(6.0),
-            right: Dimension::Pixels(8.0),
-            top: Dimension::Pixels(4.0),
-            bottom: Dimension::Pixels(4.0),
-        })
-        .border(BoxDimension {
-            left: Dimension::Pixels(0.0),
-            right: Dimension::Pixels(0.0),
-            top: Dimension::Pixels(if is_insert_target { 3.0 } else { 0.0 }),
-            bottom: Dimension::Pixels(0.0),
-        })
-        .margin(BoxDimension {
-            left: Dimension::Pixels(22.0),
-            right: Dimension::Pixels(0.0),
-            top: Dimension::Pixels(1.0),
-            bottom: Dimension::Pixels(0.0),
-        })
-        .colors(ElementColors {
-            border: BorderColor::new(indicator_border),
-            bg: row_bg.into(),
-            text: name_color.into(),
-        })
-        .hover_colors((!suppress_hover).then_some(filled_colors(hover_bg, text))))
+            .display(crate::termwindow::box_model::DisplayType::Block)
+            .item_type(UIItemType::ChatminalSidebarSession(
+                session.session_id.clone(),
+            ))
+            .padding(BoxDimension {
+                left: Dimension::Pixels(6.0),
+                right: Dimension::Pixels(8.0),
+                top: Dimension::Pixels(4.0),
+                bottom: Dimension::Pixels(4.0),
+            })
+            .border(BoxDimension {
+                left: Dimension::Pixels(0.0),
+                right: Dimension::Pixels(0.0),
+                top: Dimension::Pixels(if is_insert_target { 3.0 } else { 0.0 }),
+                bottom: Dimension::Pixels(0.0),
+            })
+            .margin(BoxDimension {
+                left: Dimension::Pixels(22.0),
+                right: Dimension::Pixels(0.0),
+                top: Dimension::Pixels(1.0),
+                bottom: Dimension::Pixels(0.0),
+            })
+            .colors(ElementColors {
+                border: BorderColor::new(indicator_border),
+                bg: row_bg.into(),
+                text: name_color.into(),
+            })
+            .hover_colors((!suppress_hover).then_some(filled_colors(hover_bg, text))))
     }
 
     #[allow(dead_code)]
@@ -1477,10 +1482,12 @@ fn joined_session_markers(
             );
         }
         for workspace_id in workspace_ids {
-            let Some(layout) = crate::chatminal_layout::workspace_store::DesktopWorkspaceLayoutStore::new(
-                workspace_id,
-            )
-            .snapshot_or_restore() else {
+            let Some(layout) =
+                crate::chatminal_layout::workspace_store::DesktopWorkspaceLayoutStore::new(
+                    workspace_id,
+                )
+                .snapshot_or_restore()
+            else {
                 continue;
             };
             if layout.views.len() <= 1 {
@@ -1843,11 +1850,7 @@ fn sidebar_header_text_style() -> TextStyle {
 
 fn sidebar_font_stack(weight: FontWeight) -> Vec<FontAttributes> {
     #[cfg(target_os = "macos")]
-    let families = [
-        "Helvetica Neue",
-        "Helvetica",
-        "Arial",
-    ];
+    let families = ["Helvetica Neue", "Helvetica", "Arial"];
 
     #[cfg(target_os = "windows")]
     let families = ["Segoe WPC", "Segoe UI", "Arial"];

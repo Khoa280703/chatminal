@@ -1,8 +1,7 @@
 impl TermWindow {
     fn positioned_panes_for_session(&self, session_id: &str) -> Vec<TerminalPaneLayout> {
         // Phase 03+: 1 session = 1 pane invariant — look up pane directly.
-        let window_id = self.window_id as DesktopWindowId;
-        let Some(session_pane) = crate::chatminal_runtime::desktop_pane_for_session(window_id, session_id) else {
+        let Some(session_pane) = crate::chatminal_runtime::desktop_pane_for_session(session_id) else {
             return vec![];
         };
         let pane_id = session_pane.pane_id_value() as u64;

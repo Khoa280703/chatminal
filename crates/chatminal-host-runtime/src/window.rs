@@ -1,19 +1,14 @@
-//! WezTerm engine window — wraps a `Vec<Tab>`.
-//!
-//! Desktop creates exactly **1 Window with 1 Tab** via `Mux`. Multi-tab and
-//! multi-window methods are retained for runtime/lua-bridge compatibility but
-//! are not exercised by the desktop product layer.
+//! Single root window container for the desktop mux.
 
 use crate::pane::CloseReason;
 use crate::{Mux, MuxNotification, Tab, TabId};
 use config::GuiPosition;
 use std::sync::Arc;
 
-static WIN_ID: ::std::sync::atomic::AtomicUsize = ::std::sync::atomic::AtomicUsize::new(0);
 pub type WindowId = usize;
+pub const ROOT_WINDOW_ID: WindowId = 0;
 
 pub struct Window {
-    id: WindowId,
     tabs: Vec<Arc<Tab>>,
     active: usize,
     last_active: Option<TabId>,
@@ -23,14 +18,13 @@ pub struct Window {
 }
 
 impl Window {
-    pub fn new(workspace: Option<String>, initial_position: Option<GuiPosition>) -> Self {
+    pub fn new(workspace: String, initial_position: Option<GuiPosition>) -> Self {
         Self {
-            id: WIN_ID.fetch_add(1, ::std::sync::atomic::Ordering::Relaxed),
             tabs: vec![],
             active: 0,
             last_active: None,
             title: String::new(),
-            workspace: workspace.unwrap_or_else(|| Mux::get().active_workspace()),
+            workspace,
             initial_position,
         }
     }
@@ -48,7 +42,6 @@ impl Window {
             self.title = title.to_string();
             Mux::try_get().map(|mux| {
                 mux.notify(MuxNotification::WindowTitleChanged {
-                    window_id: self.id,
                     title: title.to_string(),
                 })
             });
@@ -64,11 +57,7 @@ impl Window {
             return;
         }
         self.workspace = workspace.to_string();
-        Mux::get().notify(MuxNotification::WindowWorkspaceChanged(self.id));
-    }
-
-    pub fn window_id(&self) -> WindowId {
-        self.id
+        Mux::get().notify(MuxNotification::WindowWorkspaceChanged);
     }
 
     fn check_that_tab_isnt_already_in_window(&self, tab: &Arc<Tab>) {
@@ -79,7 +68,7 @@ impl Window {
 
     fn invalidate(&self) {
         let mux = Mux::get();
-        mux.notify(MuxNotification::WindowInvalidated(self.id));
+        mux.notify(MuxNotification::WindowInvalidated);
     }
 
     pub fn insert(&mut self, index: usize, tab: &Arc<Tab>) {

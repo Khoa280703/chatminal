@@ -822,14 +822,13 @@ impl AlertHandler for LocalPaneNotifHandler {
             let mux = Mux::get();
             match &alert {
                 Alert::WindowTitleChanged(title) => {
-                    if let Some((window_id, _tab_id)) = mux.resolve_pane_id(pane_id) {
-                        if let Some(mut window) = mux.get_window_mut(window_id) {
-                            window.set_title(title);
-                        }
+                    if mux.resolve_pane_id(pane_id).is_some() {
+                        let mut window = mux.root_window_mut();
+                        window.set_title(title);
                     }
                 }
                 Alert::TabTitleChanged(title) => {
-                    if let Some((_window_id, tab_id)) = mux.resolve_pane_id(pane_id) {
+                    if let Some(tab_id) = mux.resolve_pane_id(pane_id) {
                         if let Some(tab) = mux.get_tab(tab_id) {
                             tab.set_title(title.as_deref().unwrap_or(""));
                         }

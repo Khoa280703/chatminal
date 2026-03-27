@@ -17,7 +17,7 @@ use portable_pty::CommandBuilder;
 use super::session_pane::{pane_id_for_terminal_instance, ChatminalSessionPane};
 use super::{
     host_window_exists, HostMux, HostRenderScope,
-    HostRenderableDimensions as RenderableDimensions, HostTerminal, RuntimeWindowId as EngineWindowId,
+    HostRenderableDimensions as RenderableDimensions, HostTerminal,
 };
 use crate::chatminal_render::{ChatminalRenderPane, ChatminalRenderState};
 use crate::chatminal_runtime::{
@@ -25,24 +25,14 @@ use crate::chatminal_runtime::{
 };
 
 // ---------------------------------------------------------------------------
-// Per-window host registry
+// Singleton host registry
 // ---------------------------------------------------------------------------
 
-static HOST_REGISTRY: OnceLock<Mutex<HashMap<EngineWindowId, Arc<DesktopSessionHost>>>> =
-    OnceLock::new();
+static HOST_REGISTRY: OnceLock<Arc<DesktopSessionHost>> = OnceLock::new();
 
-fn host_registry() -> &'static Mutex<HashMap<EngineWindowId, Arc<DesktopSessionHost>>> {
-    HOST_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-pub(crate) fn get_or_init_session_host(
-    window_id: EngineWindowId,
-    shared: Arc<SessionEngineShared>,
-) -> Arc<DesktopSessionHost> {
-    let mut registry = host_registry().lock().unwrap();
-    registry
-        .entry(window_id)
-        .or_insert_with(|| Arc::new(DesktopSessionHost::new(window_id, shared)))
+pub(crate) fn get_or_init_session_host(shared: Arc<SessionEngineShared>) -> Arc<DesktopSessionHost> {
+    HOST_REGISTRY
+        .get_or_init(|| Arc::new(DesktopSessionHost::new(shared)))
         .clone()
 }
 
@@ -51,7 +41,6 @@ pub(crate) fn get_or_init_session_host(
 // ---------------------------------------------------------------------------
 
 pub(crate) struct DesktopSessionHost {
-    window_id: EngineWindowId,
     shared: Arc<SessionEngineShared>,
     // terminal_instance_id → pane (for output/input routing)
     panes: Mutex<HashMap<TerminalInstanceId, Arc<ChatminalSessionPane>>>,
@@ -68,12 +57,8 @@ pub(crate) struct DesktopSessionHost {
 }
 
 impl DesktopSessionHost {
-    fn new(
-        window_id: EngineWindowId,
-        shared: Arc<SessionEngineShared>,
-    ) -> Self {
+    fn new(shared: Arc<SessionEngineShared>) -> Self {
         Self {
-            window_id,
             shared,
             panes: Mutex::new(HashMap::new()),
             session_pane: Mutex::new(HashMap::new()),
@@ -479,10 +464,9 @@ impl DesktopSessionHost {
     }
 
     fn ensure_mux_tab_shim(&self, session_id: &str, active_pane: &Arc<ChatminalSessionPane>) {
-        if !host_window_exists(self.window_id) {
+        if !host_window_exists() {
             log::debug!(
-                "session host: deferring tab shim attach for session {session_id}; window {} not ready yet",
-                self.window_id
+                "session host: deferring tab shim attach for session {session_id}; root window not ready yet",
             );
             return;
         }
@@ -498,13 +482,9 @@ impl DesktopSessionHost {
             .unwrap()
             .get(session_id)
             .copied();
-        let existing = existing_tab_id
-            .and_then(|tab_id| mux.get_tab(tab_id))
-            .filter(|tab| mux.window_containing_tab(tab.tab_id()) == Some(self.window_id));
+        let existing = existing_tab_id.and_then(|tab_id| mux.get_tab(tab_id));
         let existing = existing.or_else(|| {
-            let tab = mux
-                .get_tab_by_chatminal_session_id(session_id)
-                .filter(|tab| mux.window_containing_tab(tab.tab_id()) == Some(self.window_id))?;
+            let tab = mux.get_tab_by_chatminal_session_id(session_id)?;
             self.session_tab_shim
                 .lock()
                 .unwrap()
@@ -530,10 +510,9 @@ impl DesktopSessionHost {
                         );
                         return;
                     }
-                    if let Err(err) = mux.add_tab_to_window(&replacement, self.window_id) {
+                    if let Err(err) = mux.attach_tab(&replacement) {
                         log::warn!(
-                            "session host: failed to attach replacement tab shim for session {session_id} to window {}: {err}",
-                            self.window_id
+                            "session host: failed to attach replacement tab shim for session {session_id} to root window: {err}"
                         );
                         let _ = mux.remove_tab(replacement.tab_id());
                         return;
@@ -557,10 +536,9 @@ impl DesktopSessionHost {
                     );
                     return;
                 }
-                if let Err(err) = mux.add_tab_to_window(&tab, self.window_id) {
+                if let Err(err) = mux.attach_tab(&tab) {
                     log::warn!(
-                        "session host: failed to attach tab shim for session {session_id} to window {}: {err}",
-                        self.window_id
+                        "session host: failed to attach tab shim for session {session_id} to root window: {err}"
                     );
                     let _ = mux.remove_tab(tab.tab_id());
                     return;
@@ -576,11 +554,9 @@ impl DesktopSessionHost {
 
         tab.set_title(&title);
         {
-            let maybe_window = mux.get_window_mut(self.window_id);
-            if let Some(mut window) = maybe_window {
-                if let Some(idx) = window.idx_by_id(tab.tab_id()) {
-                    window.set_active_without_saving(idx);
-                }
+            let mut window = mux.root_window_mut();
+            if let Some(idx) = window.idx_by_id(tab.tab_id()) {
+                window.set_active_without_saving(idx);
             }
         }
     }

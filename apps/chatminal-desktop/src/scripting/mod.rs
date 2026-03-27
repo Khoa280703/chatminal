@@ -18,17 +18,13 @@ pub fn register(lua: &Lua) -> anyhow::Result<()> {
     let window_mod = get_or_create_sub_module(lua, "gui")?;
 
     window_mod.set(
-        "gui_window_for_window_id",
-        lua.create_async_function(|_, window_id: guiwin::DesktopWindowId| async move {
+        "gui_window",
+        lua.create_async_function(|_, _: ()| async move {
             let fe =
                 try_front_end().ok_or_else(|| mlua::Error::external("not called on gui thread"))?;
             let _ = fe.reconcile_workspace().await;
-            let win = fe.gui_window_for_window_id(window_id).ok_or_else(|| {
-                mlua::Error::external(format!(
-                    "window id {window_id} is not currently associated with a gui window"
-                ))
-            })?;
-            Ok(win)
+            fe.gui_window()
+                .ok_or_else(|| mlua::Error::external("primary gui window is not currently available"))
         })?,
     )?;
 

@@ -9,11 +9,11 @@ use luahelper::*;
 use mlua::{UserData, UserDataMethods};
 use window::{Connection, ConnectionOps, DeadKeyStatus, WindowOps, WindowState};
 
-pub type DesktopWindowId = u64;
+pub type PrimaryGuiWindowId = u64;
 
 #[derive(Clone)]
 pub struct GuiWin {
-    pub window_id: DesktopWindowId,
+    pub primary_window_id: PrimaryGuiWindowId,
     pub active_workspace: String,
     pub window: ::window::Window,
 }
@@ -23,7 +23,7 @@ impl GuiWin {
         let window = term_window.window.clone().unwrap();
         Self {
             window,
-            window_id: term_window.window_id as DesktopWindowId,
+            primary_window_id: term_window.primary_host_window_id as PrimaryGuiWindowId,
             active_workspace: term_window.active_workspace_name(),
         }
     }
@@ -33,13 +33,15 @@ impl UserData for GuiWin {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
         methods.add_meta_method(mlua::MetaMethod::ToString, |_, this, _: ()| {
             Ok(format!(
-                "GuiWin(window_id:{}, pid:{})",
-                this.window_id,
+                "GuiWin(primary_window_id:{}, pid:{})",
+                this.primary_window_id,
                 unsafe { libc::getpid() }
             ))
         });
 
-        methods.add_method("window_id", |_, this, _: ()| Ok(this.window_id));
+        methods.add_method("primary_window_id", |_, this, _: ()| {
+            Ok(this.primary_window_id)
+        });
 
         methods.add_method(
             "set_inner_size",

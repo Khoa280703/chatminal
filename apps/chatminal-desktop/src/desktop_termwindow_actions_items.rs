@@ -85,9 +85,6 @@ impl TermWindow {
             SpawnCommandInNewSession(spawn) => {
                 self.spawn_command(spawn, SpawnWhere::NewSession);
             }
-            SpawnCommandInNewWindow(spawn) => {
-                self.spawn_command(spawn, SpawnWhere::NewWindow);
-            }
             SplitHorizontal(spawn) => {
                 log::trace!("SplitHorizontal {:?}", spawn);
                 self.spawn_command(
@@ -163,15 +160,6 @@ impl TermWindow {
                     self.reset_font_and_window_size(&w)?
                 }
             }
-            ActivateWindow(n) => {
-                self.activate_window(*n)?;
-            }
-            ActivateWindowRelative(n) => {
-                self.activate_window_relative(*n, true)?;
-            }
-            ActivateWindowRelativeNoWrap(n) => {
-                self.activate_window_relative(*n, false)?;
-            }
             SendString(s) => pane.writer().write_all(s.as_bytes())?,
             SendKey(key) => {
                 use keyevent::Key;
@@ -201,6 +189,14 @@ impl TermWindow {
             ScrollToPrompt(n) => self.scroll_to_prompt(*n, pane)?,
             ScrollToTop => self.scroll_to_top(pane),
             ScrollToBottom => self.scroll_to_bottom(pane),
+            ToggleRealtimeFooter => {
+                self.show_terminal_footer = !self.show_terminal_footer;
+                if let Some(window) = self.window.as_ref().cloned() {
+                    let dimensions = self.dimensions;
+                    self.apply_dimensions(&dimensions, None, &window);
+                    window.invalidate();
+                }
+            }
             ShowSessionNavigator => self.show_runtime_entry_navigator(),
             ShowDebugOverlay => self.show_debug_overlay(),
             HideApplication => {
@@ -327,9 +323,7 @@ impl TermWindow {
                 }
             }
             AdjustSplitSize(direction, amount) => {
-                if self
-                    .adjust_active_terminal_size(*direction, *amount)
-                    == false
+                if self.adjust_active_terminal_size(*direction, *amount) == false
                     && self.active_render_scope_id().is_none()
                 {
                     return Ok(PerformAssignmentResult::Handled);
@@ -352,7 +346,8 @@ impl TermWindow {
                 if !self.active_runtime_has_overlay() {
                     let focused_leaf = self.chatminal_sidebar.is_enabled();
                     if !focused_leaf {
-                        let _ = self.activate_terminal_direction_in_active_render_target(*direction);
+                        let _ =
+                            self.activate_terminal_direction_in_active_render_target(*direction);
                     }
                 }
             }
@@ -404,14 +399,12 @@ impl TermWindow {
                     let spawn = spawn.as_ref().map(|s| s.clone()).unwrap_or_default();
                     let size = self.terminal_size;
                     let term_config = Arc::new(TermConfig::with_config(self.config.clone()));
-                    let src_window_id = self.window_id;
 
                     promise::spawn::spawn(async move {
                         if let Err(err) = crate::spawn::spawn_command_internal(
                             spawn,
-                            SpawnWhere::NewWindow,
+                            SpawnWhere::InitialWindow,
                             size,
-                            Some(src_window_id as DesktopWindowId),
                             term_config,
                         )
                         .await
@@ -476,9 +469,9 @@ impl TermWindow {
                 self.set_modal(Rc::new(modal));
             }
             ResetTerminal => {
-                if let Ok(session_pane) = pane
-                    .clone()
-                    .downcast_arc::<crate::desktop_host_runtime::ChatminalSessionPane>()
+                if let Ok(session_pane) =
+                    pane.clone()
+                        .downcast_arc::<crate::desktop_host_runtime::ChatminalSessionPane>()
                 {
                     session_pane.reset_display_state_with_flash();
                 } else {
@@ -499,5 +492,4 @@ impl TermWindow {
         };
         Ok(PerformAssignmentResult::Handled)
     }
-
 }

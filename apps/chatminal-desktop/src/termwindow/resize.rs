@@ -25,6 +25,7 @@ pub(crate) fn shell_window_padding_for_dimensions(
     render_metrics: &RenderMetrics,
     dimensions: &Dimensions,
     sidebar_width: usize,
+    show_terminal_footer: bool,
     terminal_pixel_width: usize,
     terminal_pixel_height: usize,
 ) -> ShellWindowPadding {
@@ -51,6 +52,7 @@ pub(crate) fn shell_window_padding_for_dimensions(
             + super::TermWindow::chatminal_terminal_footer_height_for_dimensions(
                 dimensions.pixel_width,
                 dimensions.dpi,
+                show_terminal_footer,
             ),
     }
 }
@@ -233,6 +235,7 @@ impl super::TermWindow {
                 dimensions,
                 self.chatminal_sidebar
                     .width_pixels_for_window(dimensions.pixel_width, dimensions.dpi),
+                self.show_terminal_footer,
                 size.pixel_width,
                 size.pixel_height,
             );
@@ -277,6 +280,7 @@ impl super::TermWindow {
                 dimensions,
                 self.chatminal_sidebar
                     .width_pixels_for_window(dimensions.pixel_width, dimensions.dpi),
+                self.show_terminal_footer,
                 self.terminal_size.pixel_width,
                 self.terminal_size.pixel_height,
             );
@@ -334,12 +338,9 @@ impl super::TermWindow {
         // Resizing legacy mux tabs here would force compatibility shims back to
         // full-window dimensions and temporarily break split-pane scroll semantics.
         if !self.chatminal_sidebar.is_enabled() {
-            crate::chatminal_runtime::resize_host_window_tabs(self.window_id, size);
+            crate::chatminal_runtime::resize_host_window_tabs(size);
         }
-        let _ = crate::chatminal_runtime::desktop_resize_visible_sessions(
-            self.window_id as crate::scripting::guiwin::DesktopWindowId,
-            size,
-        );
+        let _ = crate::chatminal_runtime::desktop_resize_visible_sessions(size);
         self.resize_overlays();
         self.invalidate_fancy_tab_bar();
         self.update_title();
@@ -547,6 +548,7 @@ impl super::TermWindow {
             &self.dimensions,
             self.chatminal_sidebar
                 .width_pixels_for_window(self.dimensions.pixel_width, self.dimensions.dpi),
+            self.show_terminal_footer,
             terminal_size.pixel_width,
             terminal_size.pixel_height,
         );

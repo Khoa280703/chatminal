@@ -4,7 +4,6 @@
 use crate::localpane::LocalPane;
 use crate::pane::{alloc_pane_id, Pane, PaneId};
 use crate::tab::{SplitRequest, Tab, TabId};
-use crate::window::WindowId;
 use crate::Mux;
 use anyhow::{Context, Error};
 use async_trait::async_trait;
@@ -37,7 +36,6 @@ pub trait SpawnTarget: Downcast + Send + Sync {
         size: TerminalSize,
         command: Option<CommandBuilder>,
         command_dir: Option<String>,
-        window: WindowId,
     ) -> anyhow::Result<Arc<Tab>> {
         let pane = self
             .spawn_pane(size, command, command_dir)
@@ -49,7 +47,7 @@ pub trait SpawnTarget: Downcast + Send + Sync {
 
         let mux = Mux::get();
         mux.add_tab_and_active_pane(&tab)?;
-        mux.add_tab_to_window(&tab, window)?;
+        mux.attach_tab(&tab)?;
 
         Ok(tab)
     }
@@ -92,7 +90,7 @@ pub trait SpawnTarget: Downcast + Send + Sync {
                     .await?
             }
             SplitSource::MovePane(src_pane_id) => {
-                let (_window, src_tab) = mux
+                let src_tab = mux
                     .resolve_pane_id(src_pane_id)
                     .ok_or_else(|| anyhow::anyhow!("pane {} not found", src_pane_id))?;
                 let src_tab = match mux.get_tab(src_tab) {
@@ -132,19 +130,6 @@ pub trait SpawnTarget: Downcast + Send + Sync {
         command: Option<CommandBuilder>,
         command_dir: Option<String>,
     ) -> anyhow::Result<Arc<dyn Pane>>;
-
-    /// The mux will call this method on the spawn target of the pane that
-    /// is being moved to give the target a chance to handle the movement.
-    /// If this method returns Ok(None), then the mux will handle the
-    /// movement itself by mutating its local Tabs and Windows.
-    async fn move_pane_to_new_tab(
-        &self,
-        _pane_id: PaneId,
-        _window_id: Option<WindowId>,
-        _workspace_for_new_window: Option<String>,
-    ) -> anyhow::Result<Option<(Arc<Tab>, WindowId)>> {
-        Ok(None)
-    }
 
     /// Returns the name of the target.
     /// Should be a short identifier.

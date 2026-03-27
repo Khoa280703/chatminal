@@ -507,18 +507,8 @@ impl TermWindow {
         let title = match title {
             Some(title) => title,
             None => {
-                if let (Some(pos), Some(entry)) = (active_terminal_instance, active_entry) {
-                    if num_tabs == 1 {
-                        format!("{}{}", if pos.is_zoomed { "[Z] " } else { "" }, pos.title)
-                    } else {
-                        format!(
-                            "{}[{}/{}] {}",
-                            if pos.is_zoomed { "[Z] " } else { "" },
-                            entry.entry_index + 1,
-                            num_tabs,
-                            pos.title
-                        )
-                    }
+                if let (Some(pos), Some(_entry)) = (active_terminal_instance, active_entry) {
+                    format!("{}{}", if pos.is_zoomed { "[Z] " } else { "" }, pos.title)
                 } else {
                     "".to_string()
                 }
@@ -587,47 +577,6 @@ impl TermWindow {
             );
             win.set_text_cursor_position(r);
         }
-    }
-
-    fn activate_window(&mut self, window_idx: usize) -> anyhow::Result<()> {
-        let windows = front_end().gui_windows();
-        if let Some(win) = windows.get(window_idx) {
-            win.window.focus();
-        }
-        Ok(())
-    }
-
-    fn activate_window_relative(&mut self, delta: isize, wrap: bool) -> anyhow::Result<()> {
-        let windows = front_end().gui_windows();
-        let my_idx = windows
-            .iter()
-            .position(|w| Some(&w.window) == self.window.as_ref())
-            .ok_or_else(|| anyhow!("I'm not in the window list!?"))?;
-
-        let idx = my_idx as isize + delta;
-
-        let idx = if wrap {
-            let idx = if idx < 0 {
-                windows.len() as isize + idx
-            } else {
-                idx
-            };
-            idx as usize % windows.len()
-        } else {
-            if idx < 0 {
-                0
-            } else if idx >= windows.len() as isize {
-                windows.len().saturating_sub(1)
-            } else {
-                idx as usize
-            }
-        };
-
-        if let Some(win) = windows.get(idx) {
-            win.window.focus();
-        }
-
-        Ok(())
     }
 
     fn activate_runtime_entry_index(&mut self, entry_idx: isize) -> anyhow::Result<()> {
@@ -821,7 +770,6 @@ impl TermWindow {
     }
 
     fn show_launcher_impl(&mut self, args: LauncherActionArgs, initial_choice_idx: usize) {
-        let engine_window_id = self.window_id;
         let window = self.window.as_ref().unwrap().clone();
         let render_scope_id = match self.active_render_scope_id() {
             Some(render_scope_id) => render_scope_id,
@@ -851,7 +799,6 @@ impl TermWindow {
             let args = LauncherArgs::new(
                 &title,
                 flags,
-                engine_window_id as DesktopWindowId,
                 pane_id as u64,
                 &help_text,
                 &fuzzy_help_text,
