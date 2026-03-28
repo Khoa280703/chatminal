@@ -47,6 +47,45 @@ pub struct StoredSessionSnapshot {
     pub seq: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StoredScrollbackRecordKind {
+    Line,
+    Fragment,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredScrollbackRecord {
+    pub session_id: String,
+    pub seq: u64,
+    pub ord: u64,
+    pub kind: StoredScrollbackRecordKind,
+    pub text: String,
+    pub ts: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredLegacyScrollbackChunk {
+    pub session_id: String,
+    pub seq: u64,
+    pub chunk_text: String,
+    pub ts: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredTerminalReplayChunk {
+    pub session_id: String,
+    pub seq: u64,
+    pub chunk_text: String,
+    pub ts: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredScrollbackRecordInput {
+    pub ord: u64,
+    pub kind: StoredScrollbackRecordKind,
+    pub text: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct StoredSession {
     pub session_id: String,
@@ -71,6 +110,20 @@ pub struct StoredSessionExplorerState {
 #[derive(Debug, Clone)]
 pub struct Store {
     db_path: PathBuf,
+}
+
+fn scrollback_record_kind_to_db(kind: StoredScrollbackRecordKind) -> &'static str {
+    match kind {
+        StoredScrollbackRecordKind::Line => "line",
+        StoredScrollbackRecordKind::Fragment => "fragment",
+    }
+}
+
+fn scrollback_record_kind_from_db(value: &str) -> StoredScrollbackRecordKind {
+    match value {
+        "fragment" => StoredScrollbackRecordKind::Fragment,
+        _ => StoredScrollbackRecordKind::Line,
+    }
 }
 
 impl Store {
@@ -833,6 +886,216 @@ impl Store {
         Ok(())
     }
 
+    pub fn append_scrollback_records(
+        &self,
+        session_id: &str,
+        seq: u64,
+        records: &[StoredScrollbackRecordInput],
+        ts: u64,
+    ) -> Result<(), String> {
+        let mut conn = self.open_connection()?;
+        let tx = conn
+            .transaction()
+            .map_err(|err| format!("open append scrollback records transaction failed: {err}"))?;
+        tx.execute(
+            "DELETE FROM scrollback_records WHERE session_id = ?1 AND seq = ?2",
+            params![session_id, seq as i64],
+        )
+        .map_err(|err| format!("clear existing scrollback records failed: {err}"))?;
+
+        for record in records {
+            tx.execute(
+                "INSERT INTO scrollback_records (session_id, seq, ord, kind, record_text, ts) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    session_id,
+                    seq as i64,
+                    record.ord as i64,
+                    scrollback_record_kind_to_db(record.kind),
+                    &record.text,
+                    ts as i64,
+                ],
+            )
+            .map_err(|err| format!("append scrollback record failed: {err}"))?;
+        }
+
+        tx.commit()
+            .map_err(|err| format!("commit append scrollback records failed: {err}"))?;
+        Ok(())
+    }
+
+    pub fn append_terminal_replay_chunk(
+        &self,
+        session_id: &str,
+        seq: u64,
+        chunk: &str,
+        ts: u64,
+    ) -> Result<(), String> {
+        let conn = self.open_connection()?;
+        conn.execute(
+            "INSERT OR REPLACE INTO session_terminal_replay_chunks (session_id, seq, chunk_text, ts) VALUES (?1, ?2, ?3, ?4)",
+            params![session_id, seq as i64, chunk, ts as i64],
+        )
+        .map_err(|err| format!("append terminal replay chunk failed: {err}"))?;
+        Ok(())
+    }
+
+    pub fn list_scrollback_records(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<StoredScrollbackRecord>, String> {
+        let conn = self.open_connection()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT seq, ord, kind, record_text, ts FROM scrollback_records WHERE session_id = ?1 ORDER BY seq ASC, ord ASC",
+            )
+            .map_err(|err| format!("prepare scrollback records query failed: {err}"))?;
+        let mut rows = stmt
+            .query(params![session_id])
+            .map_err(|err| format!("query scrollback records failed: {err}"))?;
+
+        let mut records = Vec::new();
+        while let Some(row) = rows
+            .next()
+            .map_err(|err| format!("read scrollback record row failed: {err}"))?
+        {
+            records.push(StoredScrollbackRecord {
+                session_id: session_id.to_string(),
+                seq: row.get::<_, i64>(0).unwrap_or_default().max(0) as u64,
+                ord: row.get::<_, i64>(1).unwrap_or_default().max(0) as u64,
+                kind: scrollback_record_kind_from_db(
+                    row.get::<_, String>(2).unwrap_or_else(|_| "line".to_string()).as_str(),
+                ),
+                text: row.get::<_, String>(3).unwrap_or_default(),
+                ts: row.get::<_, i64>(4).unwrap_or_default().max(0) as u64,
+            });
+        }
+
+        Ok(records)
+    }
+
+    pub fn list_legacy_scrollback_chunks(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<StoredLegacyScrollbackChunk>, String> {
+        let conn = self.open_connection()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT seq, chunk_text, ts FROM scrollback_chunks WHERE session_id = ?1 ORDER BY seq ASC",
+            )
+            .map_err(|err| format!("prepare legacy scrollback query failed: {err}"))?;
+        let mut rows = stmt
+            .query(params![session_id])
+            .map_err(|err| format!("query legacy scrollback failed: {err}"))?;
+
+        let mut chunks = Vec::new();
+        while let Some(row) = rows
+            .next()
+            .map_err(|err| format!("read legacy scrollback row failed: {err}"))?
+        {
+            chunks.push(StoredLegacyScrollbackChunk {
+                session_id: session_id.to_string(),
+                seq: row.get::<_, i64>(0).unwrap_or_default().max(0) as u64,
+                chunk_text: row.get::<_, String>(1).unwrap_or_default(),
+                ts: row.get::<_, i64>(2).unwrap_or_default().max(0) as u64,
+            });
+        }
+
+        Ok(chunks)
+    }
+
+    pub fn list_terminal_replay_chunks(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<StoredTerminalReplayChunk>, String> {
+        let conn = self.open_connection()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT seq, chunk_text, ts FROM session_terminal_replay_chunks WHERE session_id = ?1 ORDER BY seq ASC",
+            )
+            .map_err(|err| format!("prepare terminal replay query failed: {err}"))?;
+        let mut rows = stmt
+            .query(params![session_id])
+            .map_err(|err| format!("query terminal replay failed: {err}"))?;
+
+        let mut chunks = Vec::new();
+        while let Some(row) = rows
+            .next()
+            .map_err(|err| format!("read terminal replay row failed: {err}"))?
+        {
+            chunks.push(StoredTerminalReplayChunk {
+                session_id: session_id.to_string(),
+                seq: row.get::<_, i64>(0).unwrap_or_default().max(0) as u64,
+                chunk_text: row.get::<_, String>(1).unwrap_or_default(),
+                ts: row.get::<_, i64>(2).unwrap_or_default().max(0) as u64,
+            });
+        }
+
+        Ok(chunks)
+    }
+
+    pub fn session_terminal_replay_snapshot(
+        &self,
+        session_id: &str,
+    ) -> Result<StoredSessionSnapshot, String> {
+        let chunks = self.list_terminal_replay_chunks(session_id)?;
+        let Some(max_seq) = chunks.last().map(|chunk| chunk.seq) else {
+            return Ok(StoredSessionSnapshot {
+                content: String::new(),
+                seq: 0,
+            });
+        };
+
+        Ok(StoredSessionSnapshot {
+            content: chunks
+                .into_iter()
+                .map(|chunk| chunk.chunk_text)
+                .collect::<Vec<_>>()
+                .join(""),
+            seq: max_seq,
+        })
+    }
+
+    pub fn enforce_session_scrollback_record_limit(
+        &self,
+        session_id: &str,
+        max_lines: usize,
+    ) -> Result<(), String> {
+        let max_lines = max_lines.max(1);
+        let records = self.list_scrollback_records(session_id)?;
+        if records.is_empty() {
+            return Ok(());
+        }
+
+        let mut retained_lines = 0usize;
+        let mut cutoff: Option<(u64, u64)> = None;
+        for record in records.iter().rev() {
+            if record.kind != StoredScrollbackRecordKind::Line {
+                if cutoff.is_none() {
+                    cutoff = Some((record.seq, record.ord));
+                }
+                continue;
+            }
+
+            if retained_lines >= max_lines {
+                break;
+            }
+            retained_lines += 1;
+            cutoff = Some((record.seq, record.ord));
+        }
+
+        let Some((cutoff_seq, cutoff_ord)) = cutoff else {
+            return Ok(());
+        };
+
+        let conn = self.open_connection()?;
+        conn.execute(
+            "DELETE FROM scrollback_records WHERE session_id = ?1 AND (seq < ?2 OR (seq = ?2 AND ord < ?3))",
+            params![session_id, cutoff_seq as i64, cutoff_ord as i64],
+        )
+        .map_err(|err| format!("apply canonical retention delete failed: {err}"))?;
+        Ok(())
+    }
+
     pub fn enforce_session_scrollback_line_limit(
         &self,
         session_id: &str,
@@ -944,6 +1207,16 @@ impl Store {
         )
         .map_err(|err| format!("clear session history failed: {err}"))?;
         conn.execute(
+            "DELETE FROM scrollback_records WHERE session_id = ?1",
+            params![session_id],
+        )
+        .map_err(|err| format!("clear session canonical history failed: {err}"))?;
+        conn.execute(
+            "DELETE FROM session_terminal_replay_chunks WHERE session_id = ?1",
+            params![session_id],
+        )
+        .map_err(|err| format!("clear session terminal replay failed: {err}"))?;
+        conn.execute(
             "UPDATE sessions SET last_seq = 0, updated_at = ?1 WHERE id = ?2",
             params![now_millis() as i64, session_id],
         )
@@ -955,6 +1228,10 @@ impl Store {
         let conn = self.open_connection()?;
         conn.execute("DELETE FROM scrollback_chunks", [])
             .map_err(|err| format!("clear all history failed: {err}"))?;
+        conn.execute("DELETE FROM scrollback_records", [])
+            .map_err(|err| format!("clear all canonical history failed: {err}"))?;
+        conn.execute("DELETE FROM session_terminal_replay_chunks", [])
+            .map_err(|err| format!("clear all terminal replay failed: {err}"))?;
         conn.execute(
             "UPDATE sessions SET last_seq = 0, updated_at = ?1",
             params![now_millis() as i64],

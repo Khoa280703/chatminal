@@ -810,6 +810,16 @@ mod tests {
             .join("\n")
     }
 
+    fn rendered_lines(pane: &ChatminalSessionPane) -> Vec<String> {
+        let terminal = pane.terminal.lock();
+        terminal
+            .screen()
+            .lines_in_phys_range(0..terminal.screen().scrollback_rows())
+            .iter()
+            .map(|line| line.as_str().to_string())
+            .collect()
+    }
+
     #[test]
     fn decode_input_payload_chunks_keeps_partial_utf8_until_complete() {
         let mut pending = Vec::new();
@@ -911,6 +921,72 @@ mod tests {
         let restored = rendered_text(&pane);
         assert!(restored.contains("restored-line-1"));
         assert!(restored.contains("restored-line-2"));
+
+        shutdown_host_mux();
+    }
+
+    #[test]
+    fn replay_seed_stays_at_top_of_viewport_for_short_history() {
+        build_initial_host_mux(&config::configuration(), None).expect("init host mux");
+        let runtime_id = RuntimeId::new(17);
+        let terminal_instance_id = TerminalInstanceId::new(18);
+        let core_state = Arc::new(Mutex::new(SessionCoreState::default()));
+        core_state.lock().unwrap().sync_runtime_layout(
+            "session-a",
+            runtime_id,
+            &SessionLayoutSnapshot::single_terminal_instance(
+                LayoutNodeId::new(1),
+                terminal_instance_id,
+                None,
+            ),
+        );
+        let shared = Arc::new(SessionEngineShared::new(Arc::clone(&core_state)));
+        let (events_tx, _events_rx) = mpsc::sync_channel(32);
+
+        shared
+            .leaf_runtimes()
+            .spawn_for_runtime(
+                &core_state,
+                "session-a",
+                1,
+                runtime_id,
+                terminal_instance_id,
+                shell_command("sleep 1"),
+                chatminal_terminal_core::TerminalSize {
+                    rows: 12,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                    dpi: 96,
+                },
+                Some("restored-line-1\nrestored-line-2\nprompt % ".to_string()),
+                events_tx,
+            )
+            .expect("spawn runtime");
+
+        let pane = ChatminalSessionPane::new(
+            Arc::clone(&shared),
+            "session-a".to_string(),
+            runtime_id,
+            terminal_instance_id,
+            TerminalSize {
+                rows: 12,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+                dpi: 96,
+            },
+        )
+        .expect("create pane");
+
+        let lines = rendered_lines(&pane);
+        let first_non_empty = lines.iter().position(|line| !line.is_empty());
+        assert_eq!(
+            first_non_empty,
+            Some(0),
+            "replay seed unexpectedly sank in viewport: {:?}",
+            lines
+        );
 
         shutdown_host_mux();
     }

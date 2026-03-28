@@ -22,8 +22,8 @@ use crate::workspace_layout::WorkspaceLayoutRegistry;
 use chatminal_store::StoredSessionStatus;
 
 use super::{
-    RuntimeState, StateInner, normalize_session_snapshot, snapshot_requires_run_boundary,
-    snapshot_trailing_fragment,
+    RuntimeState, StateInner,
+    canonical_scrollback::build_logical_snapshot,
 };
 
 // ─── handle ────────────────────────────────────────────────────────────────
@@ -175,16 +175,22 @@ impl StateInner {
         &mut self,
         session_id: &str,
     ) -> Result<(), String> {
-        let snapshot = normalize_session_snapshot(self.store.session_snapshot(session_id, 1)?);
-        let prepend_run_boundary_on_next_output = snapshot_requires_run_boundary(&snapshot);
-        let restored_trailing_fragment = snapshot_trailing_fragment(&snapshot);
+        let logical_snapshot = build_logical_snapshot(&self.store, session_id)?;
+        let prepend_run_boundary_on_next_output = !logical_snapshot.open_fragment.is_empty();
+        let restored_trailing_fragment = (!logical_snapshot.open_fragment.is_empty())
+            .then(|| logical_snapshot.open_fragment.clone());
         let Some(entry) = self.sessions.get_mut(session_id) else {
             return Err("session not found".to_string());
         };
         if entry.session.status == StoredSessionStatus::Running {
             return Ok(());
         }
+        let canonical_open_fragment = logical_snapshot.open_fragment;
+        let canonical_cursor_col = canonical_open_fragment.chars().count();
         entry.session.status = StoredSessionStatus::Running;
+        entry.canonical_open_fragment = canonical_open_fragment;
+        entry.canonical_cursor_col = canonical_cursor_col;
+        entry.canonical_pending_carriage_return = false;
         entry.prepend_run_boundary_on_next_output = prepend_run_boundary_on_next_output;
         entry.restored_trailing_fragment = restored_trailing_fragment;
         self.store

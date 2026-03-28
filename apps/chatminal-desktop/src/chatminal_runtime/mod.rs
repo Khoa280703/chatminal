@@ -455,6 +455,7 @@ fn desktop_prepare_host_layout(
             terminal_size_for_layout_session(Some(&layout), size, &view.session_id);
         match desktop_runtime_id_for_session(&view.session_id) {
             Some(runtime_id) => {
+                host.remember_runtime_terminal_size(runtime_id, target_size);
                 if desktop_render_state_for_session(&view.session_id).is_none() {
                     let _ = host.hydrate_runtime(runtime_id);
                 }
@@ -473,6 +474,7 @@ fn desktop_prepare_host_layout(
         if let Some(runtime_id) = desktop_runtime_id_for_session(&active_session_id) {
             let target_size =
                 terminal_size_for_layout_session(Some(&layout), size, &active_session_id);
+            host.remember_runtime_terminal_size(runtime_id, target_size);
             let focused = host.focus_runtime(&active_session_id, runtime_id);
             if enforce_layout_sizes {
                 let _ = host.resize_runtime(&active_session_id, runtime_id, target_size)
@@ -798,12 +800,8 @@ pub fn create_runtime_profile(name: Option<String>) -> Result<RuntimeProfile, St
     runtime_client()?.profile_create(name)
 }
 
-#[allow(dead_code)]
-pub fn read_session_snapshot(
-    session_id: &str,
-    preview_lines: Option<usize>,
-) -> Result<RuntimeSessionSnapshot, String> {
-    runtime_client()?.session_snapshot_get(session_id, preview_lines)
+pub fn read_session_restore_snapshot(session_id: &str) -> Result<RuntimeSessionSnapshot, String> {
+    runtime_client()?.session_restore_snapshot_get(session_id)
 }
 
 pub fn runtime_session_attachment(
@@ -889,6 +887,7 @@ pub fn desktop_activate_session(
     let mut result = preferred_runtime_id
         .or_else(|| desktop_runtime_id_for_session(session_id))
         .and_then(|runtime_id| {
+            host.remember_runtime_terminal_size(runtime_id, target_size);
             let focused_state = host.focus_runtime(session_id, runtime_id);
             let resized_state = host.resize_runtime(session_id, runtime_id, target_size);
             let recovered = resized_state.or(focused_state);

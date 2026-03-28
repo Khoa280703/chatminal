@@ -3,9 +3,14 @@ use chatminal_store::StoredSessionSnapshot;
 
 use super::{
     DEFAULT_KEEP_ALIVE_ON_CLOSE, DEFAULT_START_IN_TRAY, KEEP_ALIVE_ON_CLOSE_KEY, START_IN_TRAY_KEY,
-    StateInner, WORKSPACE_LAYOUT_PREFIX, normalize_session_snapshot, now_millis,
-    strip_zsh_prompt_spacer_artifact,
+    StateInner, WORKSPACE_LAYOUT_PREFIX,
+    canonical_scrollback::{
+        build_logical_snapshot, materialize_output_chunk, render_snapshot,
+        render_snapshot_for_terminal,
+    },
+    append_disconnected_restore_cleanup, now_millis, strip_zsh_prompt_spacer_artifact,
 };
+use chatminal_store::StoredSessionStatus;
 use crate::api::{
     RuntimeLifecyclePreferences, RuntimeProfile, RuntimeSessionSnapshot, RuntimeWorkspace,
 };
@@ -113,10 +118,10 @@ impl StateInner {
             return Err("session not found".to_string());
         }
 
-        let from_store = normalize_session_snapshot(self.store.session_snapshot(
-            session_id,
-            preview_lines.unwrap_or(self.config.default_preview_lines),
-        )?);
+        let from_store = render_snapshot(
+            &build_logical_snapshot(&self.store, session_id)?,
+            Some(preview_lines.unwrap_or(self.config.default_preview_lines)),
+        );
         let merged = if let Some(entry) = self.sessions.get(session_id) {
             if entry.live_output.is_empty() || entry.session.persist_history {
                 from_store
@@ -130,6 +135,34 @@ impl StateInner {
             from_store
         };
         Ok(merged.into())
+    }
+
+    pub(super) fn session_restore_snapshot_get(
+        &self,
+        session_id: &str,
+    ) -> Result<RuntimeSessionSnapshot, String> {
+        if !self.sessions.contains_key(session_id) {
+            return Err("session not found".to_string());
+        }
+
+        let snapshot = self.store.session_terminal_replay_snapshot(session_id)?;
+        let snapshot = if snapshot.content.is_empty() {
+            render_snapshot_for_terminal(&build_logical_snapshot(&self.store, session_id)?)
+        } else {
+            let is_disconnected = self
+                .sessions
+                .get(session_id)
+                .is_none_or(|entry| entry.session.status == StoredSessionStatus::Disconnected);
+            if is_disconnected {
+                StoredSessionSnapshot {
+                    content: append_disconnected_restore_cleanup(&snapshot.content),
+                    seq: snapshot.seq,
+                }
+            } else {
+                snapshot
+            }
+        };
+        Ok(snapshot.into())
     }
 
     pub(super) fn session_set_persist(
@@ -154,13 +187,35 @@ impl StateInner {
         if let (Some(seq), Some(chunk)) = (flush_seq, flush_chunk.as_ref()) {
             let ts = now_millis();
             let sanitized_chunk = strip_zsh_prompt_spacer_artifact(chunk);
+            let current_fragment = self
+                .sessions
+                .get(session_id)
+                .map(|entry| {
+                    (
+                        entry.canonical_open_fragment.clone(),
+                        entry.canonical_cursor_col,
+                        entry.canonical_pending_carriage_return,
+                    )
+                })
+                .unwrap_or_default();
+            let materialized = materialize_output_chunk(
+                &current_fragment.0,
+                current_fragment.1,
+                current_fragment.2,
+                &sanitized_chunk,
+            );
             self.store.update_session_seq(session_id, seq)?;
             self.store
-                .append_scrollback_chunk(session_id, seq, &sanitized_chunk, ts)?;
-            self.store.enforce_session_scrollback_line_limit(
+                .append_scrollback_records(session_id, seq, &materialized.records, ts)?;
+            self.store.enforce_session_scrollback_record_limit(
                 session_id,
                 self.config.max_scrollback_lines_per_session,
             )?;
+            if let Some(entry) = self.sessions.get_mut(session_id) {
+                entry.canonical_open_fragment = materialized.open_fragment;
+                entry.canonical_cursor_col = materialized.cursor_col;
+                entry.canonical_pending_carriage_return = materialized.pending_carriage_return;
+            }
         }
         if let Some(entry) = self.sessions.get_mut(session_id) {
             if entry.session.persist_history != persist_history {

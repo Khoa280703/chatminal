@@ -38,6 +38,32 @@ CREATE TABLE IF NOT EXISTS scrollback_chunks (
 
 CREATE INDEX IF NOT EXISTS idx_scrollback_session_seq ON scrollback_chunks(session_id, seq DESC);
 
+CREATE TABLE IF NOT EXISTS scrollback_records (
+    session_id TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    ord INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    record_text TEXT NOT NULL,
+    ts INTEGER NOT NULL,
+    PRIMARY KEY(session_id, seq, ord),
+    FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_scrollback_records_session_seq_ord
+ON scrollback_records(session_id, seq DESC, ord ASC);
+
+CREATE TABLE IF NOT EXISTS session_terminal_replay_chunks (
+    session_id TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    chunk_text TEXT NOT NULL,
+    ts INTEGER NOT NULL,
+    PRIMARY KEY(session_id, seq),
+    FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_terminal_replay_session_seq
+ON session_terminal_replay_chunks(session_id, seq DESC);
+
 CREATE TABLE IF NOT EXISTS session_explorer_state (
     session_id TEXT PRIMARY KEY,
     root_path TEXT NOT NULL,

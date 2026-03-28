@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use chatminal_store::{Store, StoredSessionStatus};
+use chatminal_store::{
+    Store, StoredScrollbackRecordInput, StoredScrollbackRecordKind, StoredSessionStatus,
+};
 use uuid::Uuid;
 
 struct TempDb {
@@ -96,6 +98,110 @@ fn session_history_roundtrip_and_clear() {
 }
 
 #[test]
+fn canonical_scrollback_roundtrip_and_clear() {
+    let temp = TempDb::new();
+    let store = Store::initialize(&temp.path).expect("initialize store");
+    let active_profile_id = store
+        .load_workspace()
+        .expect("load workspace")
+        .active_profile_id;
+
+    let session = store
+        .create_session(
+            &active_profile_id,
+            Some("Canonical".to_string()),
+            "/tmp".to_string(),
+            "/bin/bash".to_string(),
+            true,
+        )
+        .expect("create session");
+
+    store
+        .append_scrollback_records(
+            &session.session_id,
+            1,
+            &[
+                StoredScrollbackRecordInput {
+                    ord: 0,
+                    kind: StoredScrollbackRecordKind::Line,
+                    text: "line-1".to_string(),
+                },
+                StoredScrollbackRecordInput {
+                    ord: 1,
+                    kind: StoredScrollbackRecordKind::Fragment,
+                    text: "prompt % ".to_string(),
+                },
+            ],
+            100,
+        )
+        .expect("append canonical records");
+
+    let records = store
+        .list_scrollback_records(&session.session_id)
+        .expect("list canonical records");
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0].seq, 1);
+    assert_eq!(records[0].ord, 0);
+    assert_eq!(records[0].kind, StoredScrollbackRecordKind::Line);
+    assert_eq!(records[0].text, "line-1");
+    assert_eq!(records[1].kind, StoredScrollbackRecordKind::Fragment);
+    assert_eq!(records[1].text, "prompt % ");
+
+    store
+        .clear_session_history(&session.session_id)
+        .expect("clear history");
+    assert!(
+        store
+            .list_scrollback_records(&session.session_id)
+            .expect("list cleared canonical records")
+            .is_empty()
+    );
+}
+
+#[test]
+fn terminal_replay_roundtrip_and_clear() {
+    let temp = TempDb::new();
+    let store = Store::initialize(&temp.path).expect("initialize store");
+    let active_profile_id = store
+        .load_workspace()
+        .expect("load workspace")
+        .active_profile_id;
+
+    let session = store
+        .create_session(
+            &active_profile_id,
+            Some("Replay".to_string()),
+            "/tmp".to_string(),
+            "/bin/bash".to_string(),
+            true,
+        )
+        .expect("create session");
+
+    store
+        .append_terminal_replay_chunk(&session.session_id, 1, "\u{1b}]2;Claude Code\u{7}", 100)
+        .expect("append replay 1");
+    store
+        .append_terminal_replay_chunk(&session.session_id, 2, "prompt % ", 101)
+        .expect("append replay 2");
+
+    let snapshot = store
+        .session_terminal_replay_snapshot(&session.session_id)
+        .expect("load replay snapshot");
+    assert_eq!(snapshot.seq, 2);
+    assert_eq!(snapshot.content, "\u{1b}]2;Claude Code\u{7}prompt % ");
+
+    store
+        .clear_session_history(&session.session_id)
+        .expect("clear replay history");
+    assert!(
+        store
+            .list_terminal_replay_chunks(&session.session_id)
+            .expect("list cleared terminal replay")
+            .is_empty()
+    );
+}
+
+#[test]
 fn session_history_retention_keeps_newest_chunks_by_line_budget() {
     let temp = TempDb::new();
     let store = Store::initialize(&temp.path).expect("initialize store");
@@ -172,6 +278,143 @@ fn session_history_retention_counts_non_newline_chunks() {
 }
 
 #[test]
+fn canonical_retention_keeps_newest_logical_lines_and_tail_fragment() {
+    let temp = TempDb::new();
+    let store = Store::initialize(&temp.path).expect("initialize store");
+    let active_profile_id = store
+        .load_workspace()
+        .expect("load workspace")
+        .active_profile_id;
+    let session = store
+        .create_session(
+            &active_profile_id,
+            Some("CanonicalRetain".to_string()),
+            "/tmp".to_string(),
+            "/bin/bash".to_string(),
+            true,
+        )
+        .expect("create session");
+
+    for (seq, line, fragment) in [
+        (1, "l1", "p1 % "),
+        (2, "l2", "p2 % "),
+        (3, "l3", "p3 % "),
+    ] {
+        store
+            .append_scrollback_records(
+                &session.session_id,
+                seq,
+                &[
+                    StoredScrollbackRecordInput {
+                        ord: 0,
+                        kind: StoredScrollbackRecordKind::Line,
+                        text: line.to_string(),
+                    },
+                    StoredScrollbackRecordInput {
+                        ord: 1,
+                        kind: StoredScrollbackRecordKind::Fragment,
+                        text: fragment.to_string(),
+                    },
+                ],
+                100 + seq,
+            )
+            .expect("append canonical seq");
+    }
+
+    store
+        .enforce_session_scrollback_record_limit(&session.session_id, 2)
+        .expect("enforce canonical retention");
+    let records = store
+        .list_scrollback_records(&session.session_id)
+        .expect("list retained canonical records");
+
+    let kept = records
+        .iter()
+        .map(|record| (record.seq, record.ord, record.kind, record.text.as_str()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        kept,
+        vec![
+            (2, 0, StoredScrollbackRecordKind::Line, "l2"),
+            (2, 1, StoredScrollbackRecordKind::Fragment, "p2 % "),
+            (3, 0, StoredScrollbackRecordKind::Line, "l3"),
+            (3, 1, StoredScrollbackRecordKind::Fragment, "p3 % "),
+        ]
+    );
+}
+
+#[test]
+fn clear_all_history_removes_canonical_scrollback() {
+    let temp = TempDb::new();
+    let store = Store::initialize(&temp.path).expect("initialize store");
+    let active_profile_id = store
+        .load_workspace()
+        .expect("load workspace")
+        .active_profile_id;
+    let session = store
+        .create_session(
+            &active_profile_id,
+            Some("CanonicalClearAll".to_string()),
+            "/tmp".to_string(),
+            "/bin/bash".to_string(),
+            true,
+        )
+        .expect("create session");
+
+    store
+        .append_scrollback_records(
+            &session.session_id,
+            1,
+            &[StoredScrollbackRecordInput {
+                ord: 0,
+                kind: StoredScrollbackRecordKind::Fragment,
+                text: "prompt % ".to_string(),
+            }],
+            100,
+        )
+        .expect("append canonical");
+
+    store.clear_all_history().expect("clear all history");
+    assert!(
+        store
+            .list_scrollback_records(&session.session_id)
+            .expect("list canonical after clear all")
+            .is_empty()
+    );
+}
+
+#[test]
+fn clear_all_history_removes_terminal_replay() {
+    let temp = TempDb::new();
+    let store = Store::initialize(&temp.path).expect("initialize store");
+    let active_profile_id = store
+        .load_workspace()
+        .expect("load workspace")
+        .active_profile_id;
+    let session = store
+        .create_session(
+            &active_profile_id,
+            Some("ReplayClearAll".to_string()),
+            "/tmp".to_string(),
+            "/bin/bash".to_string(),
+            true,
+        )
+        .expect("create session");
+
+    store
+        .append_terminal_replay_chunk(&session.session_id, 1, "prompt % ", 100)
+        .expect("append replay");
+
+    store.clear_all_history().expect("clear all history");
+    assert!(
+        store
+            .list_terminal_replay_chunks(&session.session_id)
+            .expect("list replay after clear all")
+            .is_empty()
+    );
+}
+
+#[test]
 fn delete_profile_cascades_sessions_and_history() {
     let temp = TempDb::new();
     let store = Store::initialize(&temp.path).expect("initialize store");
@@ -200,6 +443,9 @@ fn delete_profile_cascades_sessions_and_history() {
         .append_scrollback_chunk(&session.session_id, 1, "hello\n", 200)
         .expect("append history");
     store
+        .append_terminal_replay_chunk(&session.session_id, 1, "hello\n", 200)
+        .expect("append terminal replay");
+    store
         .set_active_session(&profile.profile_id, Some(&session.session_id))
         .expect("set active session");
 
@@ -219,6 +465,12 @@ fn delete_profile_cascades_sessions_and_history() {
             .get_session(&session.session_id)
             .expect("get session after profile delete")
             .is_none()
+    );
+    assert!(
+        store
+            .list_terminal_replay_chunks(&session.session_id)
+            .expect("list replay after profile delete")
+            .is_empty()
     );
 
     let err = store

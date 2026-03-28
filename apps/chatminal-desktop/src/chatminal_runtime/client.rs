@@ -93,14 +93,11 @@ impl ChatminalRuntimeClient {
         self.runtime.state.profile_create(name)
     }
 
-    pub(crate) fn session_snapshot_get(
+    pub(crate) fn session_restore_snapshot_get(
         &self,
         session_id: &str,
-        preview_lines: Option<usize>,
     ) -> Result<RuntimeSessionSnapshot, String> {
-        self.runtime
-            .state
-            .session_snapshot_get(session_id, preview_lines)
+        self.runtime.state.session_restore_snapshot_get(session_id)
     }
 
     pub(crate) fn session_launch_spec(

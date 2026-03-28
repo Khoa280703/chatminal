@@ -6,7 +6,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::workspace_ids::{SessionViewId, WorkspaceNodeId};
 use crate::workspace_layout::{WorkspaceLayoutState, WorkspaceSplitAxis};
-use chatminal_store::{Store, StoredSession, StoredSessionSnapshot, StoredSessionStatus};
+use chatminal_store::{Store, StoredSession, StoredSessionStatus};
+#[cfg(test)]
+use chatminal_store::StoredSessionSnapshot;
 
 use crate::api::{
     RuntimeCreatedSession, RuntimeEvent, RuntimeProfile, RuntimeSessionLaunchSpec,
@@ -17,6 +19,7 @@ use crate::metrics::{RuntimeMetrics, RuntimeMetricsSnapshot};
 use crate::session::{SessionEvent, WriteInputError};
 use crate::state::runtime_bridge::{RuntimeExecutionAdapter, RuntimeHandle};
 
+mod canonical_scrollback;
 mod explorer_utils;
 mod native_api;
 pub mod runtime_bridge;
@@ -37,6 +40,9 @@ struct SessionEntry {
     session: StoredSession,
     runtime: Option<RuntimeHandle>,
     live_output: String,
+    canonical_open_fragment: String,
+    canonical_cursor_col: usize,
+    canonical_pending_carriage_return: bool,
     generation: u64,
     prepend_run_boundary_on_next_output: bool,
     restored_trailing_fragment: Option<String>,
@@ -142,6 +148,9 @@ impl RuntimeState {
                         session: stored,
                         runtime: None,
                         live_output: String::new(),
+                        canonical_open_fragment: String::new(),
+                        canonical_cursor_col: 0,
+                        canonical_pending_carriage_return: false,
                         generation: 0,
                         prepend_run_boundary_on_next_output: false,
                         restored_trailing_fragment: None,
@@ -506,6 +515,17 @@ impl RuntimeState {
             .lock()
             .map_err(|_| "state lock poisoned".to_string())?;
         inner.session_snapshot_get(session_id, preview_lines)
+    }
+
+    pub fn session_restore_snapshot_get(
+        &self,
+        session_id: &str,
+    ) -> Result<RuntimeSessionSnapshot, String> {
+        let inner = self
+            .inner
+            .lock()
+            .map_err(|_| "state lock poisoned".to_string())?;
+        inner.session_restore_snapshot_get(session_id)
     }
 
     pub fn session_launch_spec(
@@ -986,12 +1006,14 @@ fn trim_live_output(buffer: &mut String, max_bytes: usize) {
     buffer.drain(..cut.min(buffer.len()));
 }
 
+#[cfg(test)]
 fn snapshot_requires_run_boundary(snapshot: &StoredSessionSnapshot) -> bool {
     !snapshot.content.is_empty()
         && !snapshot.content.ends_with('\n')
         && !snapshot.content.ends_with('\r')
 }
 
+#[cfg(test)]
 fn snapshot_trailing_fragment(snapshot: &StoredSessionSnapshot) -> Option<String> {
     if !snapshot_requires_run_boundary(snapshot) {
         return None;
@@ -1006,6 +1028,7 @@ fn snapshot_trailing_fragment(snapshot: &StoredSessionSnapshot) -> Option<String
     (!fragment.is_empty()).then_some(fragment)
 }
 
+#[cfg(test)]
 fn normalize_session_snapshot(mut snapshot: StoredSessionSnapshot) -> StoredSessionSnapshot {
     snapshot.content = strip_volatile_terminal_control_sequences(&snapshot.content);
     snapshot.content = collapse_trailing_duplicate_prompt_redraws(&snapshot.content);
@@ -1280,6 +1303,7 @@ fn strip_duplicate_restored_prompt_prefix(restored: &str, chunk: &str) -> Option
     Some(chunk[prefix_end..].to_string())
 }
 
+#[cfg(test)]
 fn collapse_trailing_duplicate_prompt_redraws(content: &str) -> String {
     if content.is_empty() {
         return String::new();
@@ -1316,6 +1340,7 @@ fn collapse_trailing_duplicate_prompt_redraws(content: &str) -> String {
     )
 }
 
+#[cfg(test)]
 fn collapse_trailing_prompt_only_lines(content: &str) -> String {
     if content.is_empty() {
         return String::new();
@@ -1364,11 +1389,13 @@ fn collapse_trailing_prompt_only_lines(content: &str) -> String {
     format!("{prefix}{preserved_prompt}")
 }
 
+#[cfg(test)]
 struct SnapshotLine<'a> {
     content: &'a str,
     raw: &'a str,
 }
 
+#[cfg(test)]
 fn split_lines_with_endings(content: &str) -> Vec<SnapshotLine<'_>> {
     let bytes = content.as_bytes();
     let mut out = Vec::new();
@@ -1412,6 +1439,7 @@ fn split_lines_with_endings(content: &str) -> Vec<SnapshotLine<'_>> {
     out
 }
 
+#[cfg(test)]
 fn find_repeated_trailing_prompt_suffix(line: &str) -> Option<(usize, String)> {
     if line.is_empty() {
         return None;
@@ -1439,6 +1467,7 @@ fn find_repeated_trailing_prompt_suffix(line: &str) -> Option<(usize, String)> {
     None
 }
 
+#[cfg(test)]
 fn raw_index_for_visible_offset(raw: &str, target_visible_offset: usize) -> Option<usize> {
     if target_visible_offset == 0 {
         return Some(0);
@@ -1517,6 +1546,22 @@ fn prepend_run_boundary(chunk: &str) -> String {
         return chunk.to_string();
     }
     format!("\r\n{chunk}")
+}
+
+fn logicalize_prepended_run_boundary(chunk: &str) -> String {
+    chunk
+        .strip_prefix("\r\n")
+        .map(|rest| format!("\n{rest}"))
+        .unwrap_or_else(|| chunk.to_string())
+}
+
+fn append_disconnected_restore_cleanup(chunk: &str) -> String {
+    let mut out = String::with_capacity(chunk.len() + 32);
+    out.push_str(chunk);
+    out.push_str("\x1b]1;Chatminal\x07");
+    out.push_str("\x1b]2;Chatminal\x07");
+    out.push_str("\x1b[?25h");
+    out
 }
 
 fn strip_zsh_prompt_spacer_artifact(value: &str) -> String {

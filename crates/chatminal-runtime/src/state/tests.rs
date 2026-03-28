@@ -4,15 +4,22 @@ use std::time::Duration;
 
 use crate::workspace_ids::SessionViewId;
 use crate::workspace_layout::{WorkspaceLayoutState, WorkspaceSplitAxis};
-use chatminal_store::{Store, StoredSessionStatus};
+use chatminal_store::{
+    Store, StoredScrollbackRecordInput, StoredScrollbackRecordKind, StoredSessionStatus,
+};
 
 use crate::api::{RuntimeEvent, RuntimeSessionBridgeAction, RuntimeSessionLookup};
 use crate::config::RuntimeConfig;
 use crate::session::SessionEvent;
+use super::canonical_scrollback::{
+    build_logical_snapshot, materialize_output_chunk, render_snapshot,
+    render_snapshot_for_terminal,
+};
 use super::explorer_utils::{normalize_relative_path, resolve_explorer_target};
 use super::test_bridge::make_test_bridge;
 use super::{
-    RuntimeState, SessionSpawnPlan, collapse_trailing_duplicate_prompt_redraws,
+    RuntimeState, SessionSpawnPlan, append_disconnected_restore_cleanup,
+    collapse_trailing_duplicate_prompt_redraws,
     is_duplicate_restored_prompt_fragment, normalize_session_snapshot,
     normalize_terminal_fragment_for_compare, prepend_run_boundary,
     snapshot_requires_run_boundary, snapshot_trailing_fragment,
@@ -137,6 +144,12 @@ fn create_state_with_two_sessions() -> (RuntimeState, String, String, TempDb) {
     (state, session_a.session_id, session_b.session_id, db)
 }
 
+fn restore_snapshot(state: &RuntimeState, session_id: &str) -> crate::api::RuntimeSessionSnapshot {
+    state
+        .session_restore_snapshot_get(session_id)
+        .expect("load restore snapshot")
+}
+
 #[test]
 fn trim_live_output_keeps_tail_for_ascii() {
     let mut value = "abcdef".to_string();
@@ -191,6 +204,14 @@ fn prepend_run_boundary_only_when_chunk_needs_it() {
     assert_eq!(prepend_run_boundary("\nprompt"), "\nprompt");
     assert_eq!(prepend_run_boundary("\r\nprompt"), "\r\nprompt");
     assert_eq!(prepend_run_boundary("\rprompt"), "\r\n\rprompt");
+}
+
+#[test]
+fn disconnected_restore_cleanup_forces_chatminal_title_and_visible_cursor() {
+    assert_eq!(
+        append_disconnected_restore_cleanup("abc"),
+        "abc\x1b]1;Chatminal\x07\x1b]2;Chatminal\x07\x1b[?25h"
+    );
 }
 
 #[test]
@@ -1235,11 +1256,9 @@ fn session_set_persist_flushes_live_output_into_store_snapshot() {
     assert!(entry.live_output.is_empty());
     assert!(entry.session.persist_history);
     assert_eq!(entry.session.seq, 1);
-    let snapshot = inner
-        .store
-        .session_snapshot(&session_id, 100)
-        .expect("load snapshot");
-    assert_eq!(snapshot.content, "cached-line\n");
+    drop(inner);
+    let snapshot = restore_snapshot(&state, &session_id);
+    assert_eq!(snapshot.content, "cached-line\r\n");
 }
 
 #[test]
@@ -1282,12 +1301,11 @@ fn first_output_after_respawn_is_separated_from_prompt_only_snapshot() {
         ts: 2,
     });
 
-    let inner = state.inner.lock().expect("lock state");
-    let snapshot = inner
-        .store
-        .session_snapshot(&session_id, 100)
-        .expect("load snapshot");
-    assert_eq!(snapshot.content, "khoa2807@host ~ % ");
+    let snapshot = restore_snapshot(&state, &session_id);
+    assert_eq!(
+        snapshot.content,
+        append_disconnected_restore_cleanup("khoa2807@host ~ % ")
+    );
 }
 
 #[test]
@@ -1330,11 +1348,7 @@ fn first_distinct_output_after_respawn_still_starts_on_new_line() {
         ts: 2,
     });
 
-    let inner = state.inner.lock().expect("lock state");
-    let snapshot = inner
-        .store
-        .session_snapshot(&session_id, 100)
-        .expect("load snapshot");
+    let snapshot = restore_snapshot(&state, &session_id);
     assert_eq!(snapshot.content, "khoa2807@host ~ % \r\ncommand output\n");
 }
 
@@ -1378,12 +1392,11 @@ fn ansi_decorated_prompt_redraw_after_respawn_is_not_persisted_twice() {
         ts: 2,
     });
 
-    let inner = state.inner.lock().expect("lock state");
-    let snapshot = inner
-        .store
-        .session_snapshot(&session_id, 100)
-        .expect("load snapshot");
-    assert_eq!(snapshot.content, "khoa2807@host ~ % ");
+    let snapshot = restore_snapshot(&state, &session_id);
+    assert_eq!(
+        snapshot.content,
+        append_disconnected_restore_cleanup("khoa2807@host ~ % ")
+    );
 }
 
 #[test]
@@ -1435,11 +1448,7 @@ fn repeated_prompt_redraws_after_respawn_are_all_ignored_until_real_output() {
         ts: 5,
     });
 
-    let inner = state.inner.lock().expect("lock state");
-    let snapshot = inner
-        .store
-        .session_snapshot(&session_id, 100)
-        .expect("load snapshot");
+    let snapshot = restore_snapshot(&state, &session_id);
     assert_eq!(snapshot.content, "khoa2807@host ~ % \r\necho hi\nhi\n");
 }
 
@@ -1483,11 +1492,7 @@ fn identical_non_prompt_fragment_after_respawn_is_preserved() {
         ts: 2,
     });
 
-    let inner = state.inner.lock().expect("lock state");
-    let snapshot = inner
-        .store
-        .session_snapshot(&session_id, 100)
-        .expect("load snapshot");
+    let snapshot = restore_snapshot(&state, &session_id);
     assert_eq!(snapshot.content, "identical payload\r\nidentical payload");
 }
 
@@ -1531,11 +1536,7 @@ fn prompt_redraw_prefixed_output_after_respawn_persists_only_new_output() {
         ts: 2,
     });
 
-    let inner = state.inner.lock().expect("lock state");
-    let snapshot = inner
-        .store
-        .session_snapshot(&session_id, 100)
-        .expect("load snapshot");
+    let snapshot = restore_snapshot(&state, &session_id);
     assert_eq!(snapshot.content, "khoa2807@host ~ % \r\ncommand output\n");
 }
 
@@ -1572,13 +1573,67 @@ fn persisted_history_applies_line_retention_limit() {
         ts: 3,
     });
 
-    let inner = state.inner.lock().expect("lock state");
-    let snapshot = inner
-        .store
-        .session_snapshot(&session_id, 100)
-        .expect("load session snapshot");
+    let snapshot = restore_snapshot(&state, &session_id);
     assert_eq!(snapshot.seq, 3);
-    assert_eq!(snapshot.content, "l2\nl3\n");
+    assert_eq!(snapshot.content, "l1\nl2\nl3\n");
+}
+
+#[test]
+fn restore_snapshot_prefers_terminal_replay_over_canonical_snapshot() {
+    let (state, session_id, _db) = create_state_with_session();
+    {
+        let mut inner = state.inner.lock().expect("lock state");
+        inner
+            .sessions
+            .get_mut(&session_id)
+            .expect("session entry exists")
+            .session
+            .status = StoredSessionStatus::Running;
+        inner
+            .store
+            .append_scrollback_records(
+                &session_id,
+                1,
+                &[StoredScrollbackRecordInput {
+                    ord: 0,
+                    kind: StoredScrollbackRecordKind::Line,
+                    text: "canonical-only".to_string(),
+                }],
+                1,
+            )
+            .expect("append canonical");
+        inner
+            .store
+            .append_terminal_replay_chunk(
+                &session_id,
+                2,
+                "\u{1b}]2;Claude Code\u{7}prompt % ",
+                2,
+            )
+            .expect("append replay");
+    }
+
+    let snapshot = restore_snapshot(&state, &session_id);
+    assert_eq!(snapshot.seq, 2);
+    assert_eq!(snapshot.content, "\u{1b}]2;Claude Code\u{7}prompt % ");
+}
+
+#[test]
+fn disconnected_restore_snapshot_appends_cleanup_to_terminal_replay() {
+    let (state, session_id, _db) = create_state_with_session();
+    {
+        let inner = state.inner.lock().expect("lock state");
+        inner
+            .store
+            .append_terminal_replay_chunk(&session_id, 1, "\u{1b}]2;Claude Code\u{7}abc", 1)
+            .expect("append replay");
+    }
+
+    let snapshot = restore_snapshot(&state, &session_id);
+    assert_eq!(
+        snapshot.content,
+        "\u{1b}]2;Claude Code\u{7}abc\x1b]1;Chatminal\x07\x1b]2;Chatminal\x07\x1b[?25h"
+    );
 }
 
 #[test]
@@ -1617,6 +1672,427 @@ fn clear_history_generation_gate_ignores_old_output_after_reset() {
         .expect("snapshot after clear");
     assert_eq!(snapshot.seq, 0);
     assert!(snapshot.content.is_empty());
+}
+
+#[test]
+fn canonical_materializer_handles_backspace_carriage_return_and_erase_in_line() {
+    let materialized =
+        materialize_output_chunk("prompt % ", "prompt % ".chars().count(), false, "echo helo\x08l\nnext\x1b[Kdone");
+
+    assert_eq!(
+        materialized.records,
+        vec![
+            StoredScrollbackRecordInput {
+                ord: 0,
+                kind: StoredScrollbackRecordKind::Line,
+                text: "prompt % echo hell".to_string(),
+            },
+            StoredScrollbackRecordInput {
+                ord: 1,
+                kind: StoredScrollbackRecordKind::Fragment,
+                text: "nextdone".to_string(),
+            },
+        ]
+    );
+    assert_eq!(materialized.open_fragment, "nextdone");
+    assert!(!materialized.pending_carriage_return);
+}
+
+#[test]
+fn canonical_materializer_preserves_content_for_crlf_line_breaks() {
+    let materialized = materialize_output_chunk("", 0, false, "line-1\r\nline-2\r\nprompt % ");
+
+    assert_eq!(
+        materialized.records,
+        vec![
+            StoredScrollbackRecordInput {
+                ord: 0,
+                kind: StoredScrollbackRecordKind::Line,
+                text: "line-1".to_string(),
+            },
+            StoredScrollbackRecordInput {
+                ord: 1,
+                kind: StoredScrollbackRecordKind::Line,
+                text: "line-2".to_string(),
+            },
+            StoredScrollbackRecordInput {
+                ord: 2,
+                kind: StoredScrollbackRecordKind::Fragment,
+                text: "prompt % ".to_string(),
+            },
+        ]
+    );
+    assert_eq!(materialized.open_fragment, "prompt % ");
+    assert!(!materialized.pending_carriage_return);
+}
+
+#[test]
+fn canonical_materializer_preserves_fragment_across_split_crlf_boundary() {
+    let first = materialize_output_chunk("", 0, false, "ád\r");
+    assert_eq!(first.records.len(), 1);
+    assert_eq!(first.open_fragment, "ád");
+    assert_eq!(first.cursor_col, 2);
+    assert!(first.pending_carriage_return);
+
+    let second = materialize_output_chunk(
+        &first.open_fragment,
+        first.cursor_col,
+        first.pending_carriage_return,
+        "\nzsh: command not found: ád\r\n",
+    );
+
+    assert_eq!(
+        second.records,
+        vec![
+            StoredScrollbackRecordInput {
+                ord: 0,
+                kind: StoredScrollbackRecordKind::Line,
+                text: "ád".to_string(),
+            },
+            StoredScrollbackRecordInput {
+                ord: 1,
+                kind: StoredScrollbackRecordKind::Line,
+                text: "zsh: command not found: ád".to_string(),
+            },
+            StoredScrollbackRecordInput {
+                ord: 2,
+                kind: StoredScrollbackRecordKind::Fragment,
+                text: "".to_string(),
+            },
+        ]
+    );
+    assert_eq!(second.cursor_col, 0);
+    assert!(!second.pending_carriage_return);
+}
+
+#[test]
+fn canonical_materializer_preserves_prompt_when_shell_redraws_with_cursor_forward() {
+    let prompt = "khoa2807@192 ~ % ";
+    let redraw = format!("\r\x1b[{}Cád", prompt.chars().count());
+    let materialized = materialize_output_chunk(
+        prompt,
+        prompt.chars().count(),
+        false,
+        &redraw,
+    );
+
+    assert_eq!(materialized.records.len(), 1);
+    assert_eq!(materialized.records[0].text, "khoa2807@192 ~ % ád");
+    assert_eq!(materialized.open_fragment, "khoa2807@192 ~ % ád");
+    assert_eq!(materialized.cursor_col, "khoa2807@192 ~ % ád".chars().count());
+    assert!(!materialized.pending_carriage_return);
+}
+
+#[test]
+fn canonical_materializer_preserves_prompt_when_cursor_redraw_split_across_chunks() {
+    let prompt = "khoa2807@192 ~ % ";
+    let cursor_forward = format!("\r\x1b[{}C", prompt.chars().count());
+    let first = materialize_output_chunk(prompt, prompt.chars().count(), false, &cursor_forward);
+    assert_eq!(first.open_fragment, prompt);
+    assert_eq!(first.cursor_col, prompt.chars().count());
+
+    let second = materialize_output_chunk(
+        &first.open_fragment,
+        first.cursor_col,
+        first.pending_carriage_return,
+        "ád\r\n",
+    );
+
+    assert_eq!(
+        second.records,
+        vec![
+            StoredScrollbackRecordInput {
+                ord: 0,
+                kind: StoredScrollbackRecordKind::Line,
+                text: "khoa2807@192 ~ % ád".to_string(),
+            },
+            StoredScrollbackRecordInput {
+                ord: 1,
+                kind: StoredScrollbackRecordKind::Fragment,
+                text: "".to_string(),
+            },
+        ]
+    );
+}
+
+#[test]
+fn canonical_materializer_preserves_prompt_from_real_zsh_trace() {
+    let prompt_chunk = "\x1b[0m\x1b[27m\x1b[24m\x1b[Jkhoa2807@192 chatminal % \x1b[K\x1b[?2004h";
+    let command_chunk =
+        "s\x08sdf\x1b[?2004l\r\r\nzsh: command not found: sdf\r\n\x1b[0m\x1b[27m\x1b[24m\x1b[Jkhoa2807@192 chatminal % \x1b[K\x1b[?2004h";
+
+    let first = materialize_output_chunk("", 0, false, prompt_chunk);
+    assert_eq!(first.open_fragment, "khoa2807@192 chatminal % ");
+
+    let second = materialize_output_chunk(
+        &first.open_fragment,
+        first.cursor_col,
+        first.pending_carriage_return,
+        command_chunk,
+    );
+
+    assert_eq!(
+        second.records,
+        vec![
+            StoredScrollbackRecordInput {
+                ord: 0,
+                kind: StoredScrollbackRecordKind::Line,
+                text: "khoa2807@192 chatminal % sdf".to_string(),
+            },
+            StoredScrollbackRecordInput {
+                ord: 1,
+                kind: StoredScrollbackRecordKind::Line,
+                text: "zsh: command not found: sdf".to_string(),
+            },
+            StoredScrollbackRecordInput {
+                ord: 2,
+                kind: StoredScrollbackRecordKind::Fragment,
+                text: "khoa2807@192 chatminal % ".to_string(),
+            },
+        ]
+    );
+}
+
+#[test]
+fn logical_snapshot_prefers_canonical_seq_and_interleaves_with_legacy_chunks() {
+    let (state, session_id, _db) = create_state_with_session();
+    let store = {
+        let inner = state.inner.lock().expect("lock state");
+        inner.store.clone()
+    };
+
+    store
+        .append_scrollback_chunk(&session_id, 1, "line-1\n", 100)
+        .expect("append legacy seq1");
+    store
+        .append_scrollback_chunk(&session_id, 2, "legacy-2\n", 101)
+        .expect("append legacy seq2");
+    store
+        .append_scrollback_records(
+            &session_id,
+            2,
+            &[
+                StoredScrollbackRecordInput {
+                    ord: 0,
+                    kind: StoredScrollbackRecordKind::Line,
+                    text: "canon-2".to_string(),
+                },
+                StoredScrollbackRecordInput {
+                    ord: 1,
+                    kind: StoredScrollbackRecordKind::Fragment,
+                    text: "prompt % ".to_string(),
+                },
+            ],
+            101,
+        )
+        .expect("append canonical seq2");
+    store
+        .append_scrollback_chunk(&session_id, 3, "cmd\n", 102)
+        .expect("append legacy seq3");
+
+    let snapshot = render_snapshot(
+        &build_logical_snapshot(&store, &session_id).expect("build logical snapshot"),
+        None,
+    );
+    assert_eq!(snapshot.seq, 3);
+    assert_eq!(snapshot.content, "line-1\ncanon-2\nprompt % cmd\n");
+}
+
+#[test]
+fn logical_snapshot_orders_multiple_records_within_same_seq_by_ord() {
+    let (state, session_id, _db) = create_state_with_session();
+    let store = {
+        let inner = state.inner.lock().expect("lock state");
+        inner.store.clone()
+    };
+
+    store
+        .append_scrollback_records(
+            &session_id,
+            7,
+            &[
+                StoredScrollbackRecordInput {
+                    ord: 0,
+                    kind: StoredScrollbackRecordKind::Line,
+                    text: "line-a".to_string(),
+                },
+                StoredScrollbackRecordInput {
+                    ord: 1,
+                    kind: StoredScrollbackRecordKind::Line,
+                    text: "line-b".to_string(),
+                },
+                StoredScrollbackRecordInput {
+                    ord: 2,
+                    kind: StoredScrollbackRecordKind::Fragment,
+                    text: "tail".to_string(),
+                },
+            ],
+            100,
+        )
+        .expect("append canonical seq");
+
+    let snapshot = render_snapshot(
+        &build_logical_snapshot(&store, &session_id).expect("build logical snapshot"),
+        None,
+    );
+    assert_eq!(snapshot.seq, 7);
+    assert_eq!(snapshot.content, "line-a\nline-b\ntail");
+}
+
+#[test]
+fn logical_snapshot_repairs_prompt_only_line_followed_by_command_without_prefix() {
+    let (state, session_id, _db) = create_state_with_session();
+    let store = {
+        let inner = state.inner.lock().expect("lock state");
+        inner.store.clone()
+    };
+
+    store
+        .append_scrollback_records(
+            &session_id,
+            1,
+            &[StoredScrollbackRecordInput {
+                ord: 0,
+                kind: StoredScrollbackRecordKind::Line,
+                text: "khoa2807@192 ~ % ".to_string(),
+            }],
+            100,
+        )
+        .expect("append prompt-only line");
+    store
+        .append_scrollback_records(
+            &session_id,
+            2,
+            &[
+                StoredScrollbackRecordInput {
+                    ord: 0,
+                    kind: StoredScrollbackRecordKind::Fragment,
+                    text: "".to_string(),
+                },
+                StoredScrollbackRecordInput {
+                    ord: 1,
+                    kind: StoredScrollbackRecordKind::Fragment,
+                    text: "ád".to_string(),
+                },
+            ],
+            101,
+        )
+        .expect("append command fragment");
+    store
+        .append_scrollback_records(
+            &session_id,
+            3,
+            &[
+                StoredScrollbackRecordInput {
+                    ord: 0,
+                    kind: StoredScrollbackRecordKind::Line,
+                    text: "ád".to_string(),
+                },
+                StoredScrollbackRecordInput {
+                    ord: 1,
+                    kind: StoredScrollbackRecordKind::Fragment,
+                    text: "".to_string(),
+                },
+            ],
+            102,
+        )
+        .expect("append command line");
+
+    let snapshot = render_snapshot(
+        &build_logical_snapshot(&store, &session_id).expect("build logical snapshot"),
+        None,
+    );
+    assert_eq!(snapshot.content, "khoa2807@192 ~ % ád\n");
+}
+
+#[test]
+fn logical_snapshot_repairs_prompt_only_line_into_open_fragment_when_command_still_typing() {
+    let (state, session_id, _db) = create_state_with_session();
+    let store = {
+        let inner = state.inner.lock().expect("lock state");
+        inner.store.clone()
+    };
+
+    store
+        .append_scrollback_records(
+            &session_id,
+            1,
+            &[StoredScrollbackRecordInput {
+                ord: 0,
+                kind: StoredScrollbackRecordKind::Line,
+                text: "khoa2807@192 ~ % ".to_string(),
+            }],
+            100,
+        )
+        .expect("append prompt-only line");
+    store
+        .append_scrollback_records(
+            &session_id,
+            2,
+            &[StoredScrollbackRecordInput {
+                ord: 0,
+                kind: StoredScrollbackRecordKind::Fragment,
+                text: "fds".to_string(),
+            }],
+            101,
+        )
+        .expect("append typing fragment");
+
+    let snapshot = render_snapshot(
+        &build_logical_snapshot(&store, &session_id).expect("build logical snapshot"),
+        None,
+    );
+    assert_eq!(snapshot.content, "khoa2807@192 ~ % fds");
+}
+
+#[test]
+fn terminal_restore_snapshot_uses_crlf_between_committed_lines() {
+    let snapshot = render_snapshot_for_terminal(&super::canonical_scrollback::LogicalSnapshot {
+        lines: vec!["line-1".to_string(), "line-2".to_string()],
+        open_fragment: "prompt % ".to_string(),
+        seq: 2,
+    });
+
+    assert_eq!(snapshot.content, "line-1\r\nline-2\r\nprompt % ");
+}
+
+#[test]
+fn persisted_output_writes_canonical_records_not_legacy_chunks() {
+    let (state, session_id, _db) = create_state_with_session();
+    {
+        let mut inner = state.inner.lock().expect("lock state");
+        let entry = inner
+            .sessions
+            .get_mut(&session_id)
+            .expect("session entry exists");
+        entry.session.persist_history = true;
+        entry.session.status = StoredSessionStatus::Running;
+    }
+
+    state.apply_session_event(SessionEvent::Output {
+        session_id: session_id.clone(),
+        generation: 0,
+        chunk: "echo hi\nprompt % ".to_string(),
+        ts: 1,
+    });
+
+    let store = {
+        let inner = state.inner.lock().expect("lock state");
+        inner.store.clone()
+    };
+    assert!(
+        store
+            .list_scrollback_records(&session_id)
+            .expect("list canonical records")
+            .len()
+            >= 2
+    );
+    assert!(
+        store
+            .list_legacy_scrollback_chunks(&session_id)
+            .expect("list legacy chunks")
+            .is_empty()
+    );
 }
 
 #[test]

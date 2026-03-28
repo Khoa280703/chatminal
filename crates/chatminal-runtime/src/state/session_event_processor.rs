@@ -1,7 +1,9 @@
 use chatminal_store::StoredSessionStatus;
 
 use super::{
-    RuntimeState, prepend_run_boundary, strip_duplicate_restored_prompt_prefix,
+    RuntimeState, logicalize_prepended_run_boundary, prepend_run_boundary,
+    strip_duplicate_restored_prompt_prefix,
+    canonical_scrollback::materialize_output_chunk,
     strip_volatile_terminal_control_sequences,
     strip_zsh_prompt_spacer_artifact, trim_live_output,
 };
@@ -29,6 +31,8 @@ impl RuntimeState {
                 let mut seq_after = None;
                 let mut persist_history = false;
                 let mut output_chunk = chunk;
+                let mut raw_replay_chunk = String::new();
+                let mut synthetic_run_boundary_prepended = false;
                 if let Some(entry) = inner.sessions.get_mut(&session_id) {
                     if entry.generation != generation {
                         return;
@@ -51,20 +55,28 @@ impl RuntimeState {
                             entry.prepend_run_boundary_on_next_output = false;
                             entry.restored_trailing_fragment = None;
                             output_chunk = prepend_run_boundary(&stripped_chunk);
+                            synthetic_run_boundary_prepended = true;
                         } else {
                             entry.prepend_run_boundary_on_next_output = false;
                             entry.restored_trailing_fragment = None;
                             output_chunk = prepend_run_boundary(&output_chunk);
+                            synthetic_run_boundary_prepended = true;
                         }
                     } else if !output_chunk.is_empty() {
                         entry.restored_trailing_fragment = None;
                     }
+                    raw_replay_chunk = output_chunk.clone();
                     entry.session.seq += 1;
                     entry.session.status = StoredSessionStatus::Running;
                     seq_after = Some(entry.session.seq);
                     persist_history = entry.session.persist_history;
                     if !persist_history {
-                        entry.live_output.push_str(&output_chunk);
+                        let buffered_chunk = if synthetic_run_boundary_prepended {
+                            logicalize_prepended_run_boundary(&output_chunk)
+                        } else {
+                            output_chunk.clone()
+                        };
+                        entry.live_output.push_str(&buffered_chunk);
                         trim_live_output(&mut entry.live_output, 1024 * 1024);
                     }
 
@@ -93,26 +105,67 @@ impl RuntimeState {
                         }));
                     }
                     if persist_history {
+                        if let Err(err) = inner.store.append_terminal_replay_chunk(
+                            &session_id,
+                            seq,
+                            &raw_replay_chunk,
+                            ts,
+                        ) {
+                            inner.broadcast_event(RuntimeEvent::PtyError(RuntimePtyErrorEvent {
+                                session_id: session_id.clone(),
+                                message: format!("persist terminal replay failed: {err}"),
+                            }));
+                        }
+                        let persisted_chunk = if synthetic_run_boundary_prepended {
+                            logicalize_prepended_run_boundary(&output_chunk)
+                        } else {
+                            output_chunk.clone()
+                        };
                         let persisted_chunk = strip_volatile_terminal_control_sequences(
-                            &strip_zsh_prompt_spacer_artifact(&output_chunk),
+                            &strip_zsh_prompt_spacer_artifact(&persisted_chunk),
+                        );
+                        let current_fragment = inner
+                            .sessions
+                            .get(&session_id)
+                            .map(|entry| {
+                                (
+                                    entry.canonical_open_fragment.clone(),
+                                    entry.canonical_cursor_col,
+                                    entry.canonical_pending_carriage_return,
+                                )
+                            })
+                            .unwrap_or_default();
+                        let materialized = materialize_output_chunk(
+                            &current_fragment.0,
+                            current_fragment.1,
+                            current_fragment.2,
+                            &persisted_chunk,
                         );
                         if let Err(err) =
                             inner
                                 .store
-                                .append_scrollback_chunk(&session_id, seq, &persisted_chunk, ts)
+                                .append_scrollback_records(&session_id, seq, &materialized.records, ts)
                         {
                             inner.broadcast_event(RuntimeEvent::PtyError(RuntimePtyErrorEvent {
                                 session_id: session_id.clone(),
                                 message: format!("persist chunk failed: {err}"),
                             }));
-                        } else if let Err(err) = inner.store.enforce_session_scrollback_line_limit(
+                        } else {
+                            if let Some(entry) = inner.sessions.get_mut(&session_id) {
+                                entry.canonical_open_fragment = materialized.open_fragment;
+                                entry.canonical_cursor_col = materialized.cursor_col;
+                                entry.canonical_pending_carriage_return =
+                                    materialized.pending_carriage_return;
+                            }
+                            if let Err(err) = inner.store.enforce_session_scrollback_record_limit(
                             &session_id,
                             inner.config.max_scrollback_lines_per_session,
                         ) {
-                            inner.broadcast_event(RuntimeEvent::PtyError(RuntimePtyErrorEvent {
-                                session_id: session_id.clone(),
-                                message: format!("apply retention failed: {err}"),
-                            }));
+                                inner.broadcast_event(RuntimeEvent::PtyError(RuntimePtyErrorEvent {
+                                    session_id: session_id.clone(),
+                                    message: format!("apply retention failed: {err}"),
+                                }));
+                            }
                         }
                     }
                 }

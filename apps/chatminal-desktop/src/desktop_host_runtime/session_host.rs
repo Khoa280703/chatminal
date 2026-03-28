@@ -111,10 +111,7 @@ impl DesktopSessionHost {
         activate: bool,
     ) -> Option<SessionRuntimeState> {
         let core_size = core_terminal_size(size);
-        let initial_scrollback = crate::chatminal_runtime::read_session_snapshot(
-            session_id,
-            Some(usize::MAX),
-        )
+        let initial_scrollback = crate::chatminal_runtime::read_session_restore_snapshot(session_id)
         .ok()
         .map(|snapshot| snapshot.content)
         .filter(|content| !content.is_empty());
@@ -158,6 +155,13 @@ impl DesktopSessionHost {
         let state = self.engine().snapshot_runtime_from_core(runtime_id)?;
         self.sync_render_state_for_runtime(&state);
         Some(state)
+    }
+
+    pub(crate) fn remember_runtime_terminal_size(&self, runtime_id: RuntimeId, size: TerminalSize) {
+        self.runtime_terminal_size
+            .lock()
+            .unwrap()
+            .insert(runtime_id, size);
     }
 
     /// Focus a specific leaf. Returns the updated runtime snapshot.

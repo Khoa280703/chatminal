@@ -23,7 +23,7 @@ use chatminal_runtime::{
 use chatminal_terminal_core::TerminalSize;
 use portable_pty::CommandBuilder;
 
-use crate::chatminal_runtime::read_session_snapshot;
+use crate::chatminal_runtime::read_session_restore_snapshot;
 
 const EXECUTION_EVENT_POLL_TIMEOUT: Duration = Duration::from_millis(50);
 
@@ -197,7 +197,7 @@ impl RuntimeExecutionAdapter for DesktopRuntimeExecutionBridge {
     ) -> Result<Arc<Mutex<dyn RuntimeSessionHandleTrait>>, String> {
         let mut command = CommandBuilder::new(shell);
         command.cwd(cwd);
-        let initial_scrollback = read_session_snapshot(session_id, Some(usize::MAX))
+        let initial_scrollback = read_session_restore_snapshot(session_id)
             .map(|snapshot| snapshot.content)
             .ok()
             .filter(|content| !content.is_empty());

@@ -3,9 +3,9 @@ use std::sync::mpsc as std_mpsc;
 use chatminal_store::{StoredSession, StoredSessionStatus};
 
 use super::{
-    RuntimeState, SessionEntry, SessionSpawnPlan, StateInner, kill_runtime_handle,
-    normalize_session_snapshot, now_millis, runtime_bridge::RuntimeHandle,
-    snapshot_requires_run_boundary, snapshot_trailing_fragment,
+    RuntimeState, SessionEntry, SessionSpawnPlan, StateInner,
+    canonical_scrollback::build_logical_snapshot, kill_runtime_handle, now_millis,
+    runtime_bridge::RuntimeHandle,
 };
 use crate::api::{
     RuntimeEvent, RuntimeSessionStatus, RuntimeSessionUpdatedEvent, RuntimeWorkspaceUpdatedEvent,
@@ -143,19 +143,19 @@ impl RuntimeState {
                         SpawnCommitOutcome::Stale
                     }
                     Some(_) => {
-                        let snapshot = normalize_session_snapshot(
-                            inner
-                                .store
-                                .session_snapshot(&plan.session_id, 1)
-                                .map_err(|err| err.to_string())?,
-                        );
-                        let prepend_run_boundary_on_next_output =
-                            snapshot_requires_run_boundary(&snapshot);
-                        let restored_trailing_fragment = snapshot_trailing_fragment(&snapshot);
+                        let logical_snapshot = build_logical_snapshot(&inner.store, &plan.session_id)?;
+                        let prepend_run_boundary_on_next_output = !logical_snapshot.open_fragment.is_empty();
+                        let restored_trailing_fragment = (!logical_snapshot.open_fragment.is_empty())
+                            .then(|| logical_snapshot.open_fragment.clone());
+                        let canonical_open_fragment = logical_snapshot.open_fragment;
+                        let canonical_cursor_col = canonical_open_fragment.chars().count();
                         if let Some(entry) = inner.sessions.get_mut(&plan.session_id) {
                             entry.generation = plan.next_generation;
                             entry.runtime = Some(runtime.clone());
                             entry.session.status = StoredSessionStatus::Running;
+                            entry.canonical_open_fragment = canonical_open_fragment;
+                            entry.canonical_cursor_col = canonical_cursor_col;
+                            entry.canonical_pending_carriage_return = false;
                             entry.prepend_run_boundary_on_next_output =
                                 prepend_run_boundary_on_next_output;
                             entry.restored_trailing_fragment = restored_trailing_fragment;
@@ -196,6 +196,9 @@ impl StateInner {
                 session: session.clone(),
                 runtime: Some(runtime),
                 live_output: String::new(),
+                canonical_open_fragment: String::new(),
+                canonical_cursor_col: 0,
+                canonical_pending_carriage_return: false,
                 generation: 0,
                 prepend_run_boundary_on_next_output: false,
                 restored_trailing_fragment: None,
@@ -355,6 +358,9 @@ fn disconnect_session_entry(
     if options.reset_history {
         entry.session.seq = 0;
         entry.live_output.clear();
+        entry.canonical_open_fragment.clear();
+        entry.canonical_cursor_col = 0;
+        entry.canonical_pending_carriage_return = false;
     }
     entry.prepend_run_boundary_on_next_output = false;
     entry.restored_trailing_fragment = None;
