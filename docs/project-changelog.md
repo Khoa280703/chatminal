@@ -1,5 +1,35 @@
 # Project Changelog
 
+## 2026-03-27
+
+### Changed
+- History persistence đã bắt đầu cutover sang canonical scrollback model để sửa root cause reopen/resize sai do text history bị hard-wrap theo width cũ:
+  - thêm table SQLite `scrollback_records(session_id, seq, ord, kind, record_text, ts)`
+  - writer active của `chatminal-runtime` đổi sang canonical records cho cả `SessionEvent::Output` và `session_set_persist()` flush path
+  - reader mới merge dual-source `scrollback_records + scrollback_chunks` theo `seq`; canonical override legacy cùng `seq`
+  - restore path của desktop đổi sang API riêng `session_restore_snapshot_get()` thay vì reuse preview snapshot path
+  - canonical reducer chốt shell semantics tối thiểu: `\r`, `\n`, backspace, `CSI K`
+  - synthetic run-boundary được tách semantics:
+    - terminal live vẫn dùng `\r\n`
+    - canonical persistence dùng logical newline để không làm mất open fragment/prompt tail
+- Cleanup:
+  - bỏ helper/store path dead không còn dùng trong active canonical flow
+  - sync plan `plans/260327-1638-history-reflow-canonical-scrollback/`
+
+### Verification
+- `cargo test --manifest-path crates/chatminal-store/Cargo.toml` pass
+- `cargo test -p chatminal-runtime` pass
+- `cargo check -p chatminal-runtime -p chatminal-desktop` pass
+- `git diff --check` pass
+
+### Notes
+- Rollout hiện là `canonical-write + dual-read`.
+- Legacy `scrollback_chunks` vẫn được giữ cho DB cũ, nhưng không còn active writer path.
+- Non-goal hiện tại:
+  - alt-screen/TUI exact replay
+  - full VT recorder semantics
+  - main-screen multi-line redraw/progress UIs dùng cursor-motion nhiều dòng
+
 ## 2026-03-25
 
 ### Changed

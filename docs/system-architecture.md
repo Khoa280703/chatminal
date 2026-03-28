@@ -1,6 +1,23 @@
 # System Architecture
 
-Last updated: 2026-03-25 (single-flow desktop/spawn-target cleanup complete)
+Last updated: 2026-03-27 (canonical scrollback dual-read/canonical-write)
+
+## Latest changes (canonical scrollback dual-read/canonical-write, 2026-03-27)
+- Persisted history không còn coi `scrollback_chunks.chunk_text` là source of truth duy nhất.
+- `chatminal-runtime` đã chuyển writer active sang canonical model:
+  - `CommittedLine { seq, ord, ts, text }`
+  - `OpenFragment { seq, ord, ts, text }`
+- Store thêm table `scrollback_records(session_id, seq, ord, kind, record_text, ts)` và index `(session_id, seq DESC, ord ASC)`.
+- Active runtime path:
+  - `SessionEvent::Output` persist canonical records
+  - `session_set_persist()` flush live buffer sang canonical records
+  - restore path trong desktop đổi sang `session_restore_snapshot_get()`
+- Reader hiện là dual-read:
+  - canonical-write
+  - canonical-read + legacy-read
+  - nếu canonical đã có records cho `seq = N` thì legacy chunk `seq = N` bị bỏ
+- Reopen/restore không còn replay hard-wrapped text cũ cho dữ liệu mới; terminal engine tự wrap lại theo width hiện tại khi hydrate snapshot.
+- Legacy `scrollback_chunks` vẫn giữ ở chế độ read-only compat cho DB cũ; clear-history / clear-all-history dọn cả legacy lẫn canonical.
 
 ## Latest changes (single-flow desktop/spawn-target cleanup complete, 2026-03-25)
 - Desktop startup path không còn public routing theo cặp startup flags legacy cho attach/spawn selection; `StartCommand` product surface đã cắt hai cờ này.
@@ -41,12 +58,8 @@ chatminal-desktop
 ```text
 chatminal-runtime
   -> chatminal-store (SQLite)
-  -> profiles / sessions / scrollback / workspace layout state
+  -> profiles / sessions / canonical scrollback / legacy compat scrollback / workspace layout state
   -> native_api + runtime_bridge
-
-chatminald / chatminal-app
-  -> compatibility boundary only
-  -> reuse protocol/store/runtime contracts
 ```
 
 ## Architecture rules
@@ -62,6 +75,10 @@ chatminald / chatminal-app
 
 ### 1. Product state
 - `chatminal-runtime` giữ profile/session persistence, workspace snapshot, native API và desktop-facing runtime bridge.
+- `chatminal-runtime::state::canonical_scrollback` là source of truth cho logical scrollback semantics:
+  - reducer shell-level tối thiểu: `\r`, `\n`, backspace, erase-in-line
+  - mixed-source merge theo `(seq, ord)`
+  - restore/preview materialize từ logical snapshot, không từ wrapped text cũ
 - `chatminal-session-runtime` giữ live execution model: session engine, runtime registry, focus manager, workspace layout registry.
 - `workspace_layout` là public execution/layout model cho app layer; không expose host split tree ra desktop product path.
 
@@ -125,4 +142,8 @@ chatminald / chatminal-app
 - Command/config compatibility vẫn giữ upstream `KeyAssignment::*Tab*` translation trong `desktop_commands.rs` để không gãy config cũ.
 - `OverlayRenderScope` dùng cho launcher/confirm/prompt overlays nhưng không còn coupled với render scope; boundary fully isolated.
 - `SessionExecutionStatus` enum thêm vào `chatminal-runtime/state.rs` để track running status.
+- History compatibility hiện còn một vùng intentional:
+  - `scrollback_chunks` chỉ read-only compat cho session DB cũ
+  - active writer path không còn ghi mới vào legacy table
+  - cleanup reader legacy sẽ là phase riêng sau khi đủ confidence rollout
 - Các phần trên là intentional private/compatibility zones, không còn là product-facing architecture.
