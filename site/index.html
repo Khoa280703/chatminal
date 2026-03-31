@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chatminal</title>
+    <meta
+      name="description"
+      content="Chatminal is a desktop terminal workspace with profiles, persistent sessions, split views, and restore-aware history."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=Syne:wght@500;700;800&amp;display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+    <script defer src="./site.js"></script>
+  </head>
+  <body>
+    <div class="page-ambient" aria-hidden="true">
+      <span class="ambient-orb orb-one"></span>
+      <span class="ambient-orb orb-two"></span>
+      <span class="ambient-orb orb-three"></span>
+      <span class="ambient-grid"></span>
+    </div>
+
+    <header class="site-bar">
+      <div class="site-frame site-header">
+        <a class="brand" href="#top">
+          <span class="brand-mark"></span>
+          <span>Chatminal</span>
+        </a>
+
+        <nav class="site-nav" aria-label="Primary">
+          <a href="#product">Product</a>
+          <a href="#showcase">Interface</a>
+          <a href="#features">Why it feels better</a>
+          <a href="#download">Download</a>
+        </nav>
+
+        <a
+          class="nav-download"
+          href="https://github.com/Khoa280703/chatminal/releases"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Get the app
+        </a>
+      </div>
+    </header>
+
+    <main id="top" class="site-shell">
+      <section class="hero">
+        <div class="hero-backdrop" aria-hidden="true">CHATMINAL</div>
+
+        <div class="hero-copy-block" data-reveal>
+          <p class="eyebrow">Desktop terminal workspace</p>
+          <h1>The terminal that finally feels like a real app.</h1>
+          <p class="hero-copy">
+            Chatminal keeps your sessions, layout, profiles, and terminal flow
+            together in one focused desktop experience instead of a pile of
+            throwaway windows.
+          </p>
+
+          <div class="hero-actions">
+            <a
+              class="button button-primary"
+              href="https://github.com/Khoa280703/chatminal/releases"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Download Chatminal
+            </a>
+            <a class="button button-secondary" href="#showcase">See the interface</a>
+          </div>
+
+          <div class="platform-strip" aria-label="Supported platforms">
+            <span>macOS</span>
+            <span>Windows</span>
+            <span>Linux</span>
+          </div>
+
+          <div class="hero-points">
+            <article>
+              <span class="point-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path d="M12 3v18M3 12h18" />
+                </svg>
+              </span>
+              <strong>Persistent sessions</strong>
+              <span>Open the app and keep moving, not rebuilding.</span>
+            </article>
+
+            <article>
+              <span class="point-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <rect x="3" y="4" width="7" height="16" rx="2" />
+                  <rect x="14" y="4" width="7" height="7" rx="2" />
+                  <rect x="14" y="13" width="7" height="7" rx="2" />
+                </svg>
+              </span>
+              <strong>Split workspace</strong>
+              <span>See the shell, logs, and context in one view.</span>
+            </article>
+
+            <article>
+              <span class="point-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path d="M6 19h12" />
+                  <path d="M8 15a4 4 0 1 1 8 0v4H8v-4Z" />
+                  <path d="M12 3v4" />
+                </svg>
+              </span>
+              <strong>Made for daily use</strong>
+              <span>Cleaner than tab chaos, calmer than raw terminals.</span>
+            </article>
+          </div>
+        </div>
+
+        <div class="hero-stage-wrap" data-reveal>
+          <div class="hero-stage">
+            <img
+              class="hero-shot"
+              src="../image.png"
+              alt="Chatminal desktop interface"
+              decoding="async"
+              data-parallax="20"
+            />
+
+            <div class="stage-badge stage-badge-top">
+              <span class="badge-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path d="M4 7h16" />
+                  <path d="M7 4v16" />
+                  <path d="M17 4v16" />
+                </svg>
+              </span>
+              <div>
+                <strong>Profiles + live shell</strong>
+                <span>Everything stays in one desktop flow.</span>
+              </div>
+            </div>
+
+            <div class="stage-badge stage-badge-bottom">
+              <span class="badge-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path d="M12 7v5l3 3" />
+                  <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                </svg>
+              </span>
+              <div>
+                <strong>Ready to resume</strong>
+                <span>Restore the app and keep your context alive.</span>
+              </div>
+            </div>
+
+            <div class="stage-strip">
+              <span>Stateful</span>
+              <span>Local-first</span>
+              <span>Focused</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="ticker" aria-label="Chatminal highlights">
+        <div class="ticker-track">
+          <span>Persistent sessions</span>
+          <span>Split workspace</span>
+          <span>Profiles</span>
+          <span>Restore-aware history</span>
+          <span>Desktop-first flow</span>
+          <span>macOS</span>
+          <span>Windows</span>
+          <span>Linux</span>
+          <span>Persistent sessions</span>
+          <span>Split workspace</span>
+          <span>Profiles</span>
+          <span>Restore-aware history</span>
+          <span>Desktop-first flow</span>
+        </div>
+      </section>
+
+      <section class="section section-intro" id="product">
+        <div class="section-heading" data-reveal>
+          <div>
+            <p class="section-label">Product</p>
+            <h2>Built for people who live in the terminal, not for screenshots of commands.</h2>
+          </div>
+          <p>
+            Chatminal is a desktop app that turns terminal work into a cohesive
+            workspace with visible structure and less repeated setup.
+          </p>
+        </div>
+
+        <div class="signal-grid">
+          <article class="signal-card" data-reveal>
+            <strong>One focused window</strong>
+            <span>Sidebar, shell, and status stay readable together.</span>
+          </article>
+          <article class="signal-card" data-reveal>
+            <strong>Real product feel</strong>
+            <span>Looks like software you install, not a temporary dev panel.</span>
+          </article>
+          <article class="signal-card" data-reveal>
+            <strong>Fast to understand</strong>
+            <span>Users see the interface first, then decide to download.</span>
+          </article>
+        </div>
+      </section>
+
+      <section class="section section-showcase" id="showcase">
+        <div class="section-heading" data-reveal>
+          <div>
+            <p class="section-label">Interface</p>
+            <h2>A visual walkthrough of what makes Chatminal different.</h2>
+          </div>
+          <p>
+            Instead of describing the app in abstract terms, the page now shows
+            the product itself and labels the parts that matter.
+          </p>
+        </div>
+
+        <div class="showcase-layout">
+          <div class="showcase-visual" data-reveal>
+            <img
+              class="showcase-image"
+              src="../image.png"
+              alt="Chatminal application screenshot"
+              loading="lazy"
+              decoding="async"
+            />
+            <div class="showcase-hotspot hotspot-left">Profile rail stays visible</div>
+            <div class="showcase-hotspot hotspot-top">Single desktop surface, less chaos</div>
+            <div class="showcase-hotspot hotspot-bottom">Status bar keeps the app feeling alive</div>
+          </div>
+
+          <div class="showcase-stack">
+            <article class="showcase-note" data-reveal>
+              <span class="feature-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path d="M5 5h14v14H5z" />
+                  <path d="M9 5v14" />
+                </svg>
+              </span>
+              <div>
+                <h3>Structured, not noisy</h3>
+                <p>The shell is the hero, but the surrounding UI keeps it organized.</p>
+              </div>
+            </article>
+
+            <article class="showcase-note" data-reveal>
+              <span class="feature-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path d="M4 12h16" />
+                  <path d="M12 4v16" />
+                </svg>
+              </span>
+              <div>
+                <h3>Space for long-running work</h3>
+                <p>Keep one app open for real sessions instead of stacking random terminals.</p>
+              </div>
+            </article>
+
+            <article class="showcase-note" data-reveal>
+              <span class="feature-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path d="M7 10h10" />
+                  <path d="M7 14h6" />
+                  <rect x="4" y="4" width="16" height="16" rx="3" />
+                </svg>
+              </span>
+              <div>
+                <h3>Clearer to new users</h3>
+                <p>Visual labels explain the app faster than a wall of feature text.</p>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="features">
+        <div class="section-heading" data-reveal>
+          <div>
+            <p class="section-label">Why it feels better</p>
+            <h2>The difference is less setup friction and more continuity.</h2>
+          </div>
+        </div>
+
+        <div class="feature-grid">
+          <article class="feature-card" data-reveal>
+            <span class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="M6 7h12" />
+                <path d="M6 12h12" />
+                <path d="M6 17h7" />
+              </svg>
+            </span>
+            <h3>Profiles that stay clean</h3>
+            <p>Separate contexts without losing the sense of one app.</p>
+          </article>
+
+          <article class="feature-card" data-reveal>
+            <span class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="M4 7h16" />
+                <path d="M9 7v10" />
+                <path d="M15 7v10" />
+                <path d="M4 17h16" />
+              </svg>
+            </span>
+            <h3>Split views that make sense</h3>
+            <p>Keep related terminal work visible together, not hidden in tabs.</p>
+          </article>
+
+          <article class="feature-card feature-card-accent" data-reveal>
+            <span class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="M12 6v6l4 2" />
+                <circle cx="12" cy="12" r="8" />
+              </svg>
+            </span>
+            <h3>Resume instead of restart</h3>
+            <p>Open Chatminal and feel like your workspace was waiting for you.</p>
+          </article>
+
+          <article class="feature-card" data-reveal>
+            <span class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="M5 12h14" />
+                <path d="M12 5l7 7-7 7" />
+              </svg>
+            </span>
+            <h3>Desktop-first experience</h3>
+            <p>Purpose-built for macOS, Windows, and Linux from one clean landing page.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section section-download" id="download">
+        <div class="section-heading" data-reveal>
+          <div>
+            <p class="section-label">Download</p>
+            <h2>Install Chatminal and make the terminal feel modern again.</h2>
+          </div>
+          <a
+            class="button button-primary"
+            href="https://github.com/Khoa280703/chatminal/releases"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Open GitHub Releases
+          </a>
+        </div>
+
+        <div class="download-grid">
+          <a
+            class="download-card"
+            href="https://github.com/Khoa280703/chatminal/releases"
+            target="_blank"
+            rel="noreferrer"
+            data-reveal
+          >
+            <span class="download-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="M7 18c-1.66 0-3-1.57-3-3.5 0-1.74 1.1-3.18 2.54-3.45A4.49 4.49 0 0 1 11 8c1.83 0 3.4 1.1 4.1 2.68.3-.12.63-.18.97-.18 1.62 0 2.93 1.34 2.93 3S17.69 17 16.07 17H14" />
+                <path d="M12 11v9" />
+                <path d="m8.5 16.5 3.5 3.5 3.5-3.5" />
+              </svg>
+            </span>
+            <span class="download-platform">macOS</span>
+            <strong>Download for Mac</strong>
+            <span>Apple Silicon ready desktop build.</span>
+          </a>
+
+          <a
+            class="download-card"
+            href="https://github.com/Khoa280703/chatminal/releases"
+            target="_blank"
+            rel="noreferrer"
+            data-reveal
+          >
+            <span class="download-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="M4 6.5 12 4l8 2.5V12c0 4.42-3.58 8-8 8s-8-3.58-8-8V6.5Z" />
+                <path d="M9 12.5 11 14.5l4-4" />
+              </svg>
+            </span>
+            <span class="download-platform">Windows</span>
+            <strong>Download for Windows</strong>
+            <span>Native desktop feel with one focused workspace.</span>
+          </a>
+
+          <a
+            class="download-card"
+            href="https://github.com/Khoa280703/chatminal/releases"
+            target="_blank"
+            rel="noreferrer"
+            data-reveal
+          >
+            <span class="download-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="M4 12h16" />
+                <path d="M12 4v16" />
+                <circle cx="12" cy="12" r="8" />
+              </svg>
+            </span>
+            <span class="download-platform">Linux</span>
+            <strong>Download for Linux</strong>
+            <span>Local-first terminal workspace for daily Linux use.</span>
+          </a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-bar site-footer-bar">
+      <div class="site-frame site-footer">
+        <span>Chatminal</span>
+        <span>Desktop terminal workspace for macOS, Windows, and Linux.</span>
+        <a
+          href="https://github.com/Khoa280703/chatminal/releases"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Releases
+        </a>
+      </div>
+    </footer>
+  </body>
+</html>
