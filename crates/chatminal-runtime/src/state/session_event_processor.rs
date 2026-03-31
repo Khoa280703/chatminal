@@ -4,6 +4,7 @@ use super::{
     RuntimeState, logicalize_prepended_run_boundary, prepend_run_boundary,
     strip_duplicate_restored_prompt_prefix,
     canonical_scrollback::materialize_output_chunk,
+    persist_worker::PersistJob,
     startup_recipe::append_recent_output_tail,
     strip_volatile_terminal_control_sequences,
     strip_zsh_prompt_spacer_artifact, trim_live_output,
@@ -31,6 +32,7 @@ impl RuntimeState {
                 let mut event = None;
                 let mut seq_after = None;
                 let mut persist_history = false;
+                let mut was_already_running = false;
                 let mut output_chunk = chunk;
                 let mut raw_replay_chunk = String::new();
                 let mut synthetic_run_boundary_prepended = false;
@@ -47,10 +49,6 @@ impl RuntimeState {
                             });
                         if let Some(stripped_chunk) = stripped_duplicate_prompt {
                             if stripped_chunk.is_empty() {
-                                // Keep the restore-dedupe state armed until we see either
-                                // real output or a prompt-prefixed chunk that carries new
-                                // content. Some shells redraw the prompt multiple times
-                                // immediately after startup/restore.
                                 return;
                             }
                             entry.prepend_run_boundary_on_next_output = false;
@@ -68,6 +66,8 @@ impl RuntimeState {
                     }
                     raw_replay_chunk = output_chunk.clone();
                     entry.session.seq += 1;
+                    was_already_running =
+                        entry.session.status == StoredSessionStatus::Running;
                     entry.session.status = StoredSessionStatus::Running;
                     seq_after = Some(entry.session.seq);
                     persist_history = entry.session.persist_history;
@@ -87,7 +87,7 @@ impl RuntimeState {
                             output_chunk.clone()
                         };
                         entry.live_output.push_str(&buffered_chunk);
-                        trim_live_output(&mut entry.live_output, 1024 * 1024);
+                        trim_live_output(&mut entry.live_output, 256 * 1024);
                     }
 
                     event = Some(RuntimeEvent::PtyOutput(RuntimePtyOutputEvent {
@@ -98,34 +98,22 @@ impl RuntimeState {
                     }));
                 }
 
+                // Offload persist work to background thread (no SQLite under lock).
                 if let Some(seq) = seq_after {
-                    if let Err(err) = inner.store.update_session_seq(&session_id, seq) {
-                        inner.broadcast_event(RuntimeEvent::PtyError(RuntimePtyErrorEvent {
+                    let _ = self.persist_tx.try_send(
+                        PersistJob::UpdateSeq {
                             session_id: session_id.to_string(),
-                            message: format!("persist seq failed: {err}"),
-                        }));
-                    }
-                    if let Err(err) = inner
-                        .store
-                        .set_session_status(&session_id, StoredSessionStatus::Running)
-                    {
-                        inner.broadcast_event(RuntimeEvent::PtyError(RuntimePtyErrorEvent {
-                            session_id: session_id.to_string(),
-                            message: format!("persist status failed: {err}"),
-                        }));
+                            seq,
+                        },
+                    );
+                    if !was_already_running {
+                        let _ = self.persist_tx.try_send(
+                            PersistJob::MarkRunning {
+                                session_id: session_id.to_string(),
+                            },
+                        );
                     }
                     if persist_history {
-                        if let Err(err) = inner.store.append_terminal_replay_chunk(
-                            &session_id,
-                            seq,
-                            &raw_replay_chunk,
-                            ts,
-                        ) {
-                            inner.broadcast_event(RuntimeEvent::PtyError(RuntimePtyErrorEvent {
-                                session_id: session_id.to_string(),
-                                message: format!("persist terminal replay failed: {err}"),
-                            }));
-                        }
                         let persisted_chunk = if synthetic_run_boundary_prepended {
                             logicalize_prepended_run_boundary(&output_chunk)
                         } else {
@@ -151,31 +139,33 @@ impl RuntimeState {
                             current_fragment.2,
                             &persisted_chunk,
                         );
-                        if let Err(err) =
-                            inner
-                                .store
-                                .append_scrollback_records(&session_id, seq, &materialized.records, ts)
-                        {
-                            inner.broadcast_event(RuntimeEvent::PtyError(RuntimePtyErrorEvent {
+
+                        // Update in-memory canonical state.
+                        if let Some(entry) = inner.sessions.get_mut(session_id.as_ref()) {
+                            entry.canonical_open_fragment = materialized.open_fragment;
+                            entry.canonical_cursor_col = materialized.cursor_col;
+                            entry.canonical_pending_carriage_return =
+                                materialized.pending_carriage_return;
+                        }
+
+                        let _ = self.persist_tx.try_send(
+                            PersistJob::OutputChunk {
                                 session_id: session_id.to_string(),
-                                message: format!("persist chunk failed: {err}"),
-                            }));
-                        } else {
-                            if let Some(entry) = inner.sessions.get_mut(session_id.as_ref()) {
-                                entry.canonical_open_fragment = materialized.open_fragment;
-                                entry.canonical_cursor_col = materialized.cursor_col;
-                                entry.canonical_pending_carriage_return =
-                                    materialized.pending_carriage_return;
-                            }
-                            if let Err(err) = inner.store.enforce_session_scrollback_record_limit(
-                            &session_id,
-                            inner.config.max_scrollback_lines_per_session,
-                        ) {
-                                inner.broadcast_event(RuntimeEvent::PtyError(RuntimePtyErrorEvent {
+                                seq,
+                                records: materialized.records,
+                                replay_chunk: raw_replay_chunk,
+                                ts,
+                            },
+                        );
+
+                        if seq % 50 == 0 {
+                            let max_lines = inner.config.max_scrollback_lines_per_session;
+                            let _ = self.persist_tx.try_send(
+                                PersistJob::EnforceLimit {
                                     session_id: session_id.to_string(),
-                                    message: format!("apply retention failed: {err}"),
-                                }));
-                            }
+                                    max_lines,
+                                },
+                            );
                         }
                     }
                 }

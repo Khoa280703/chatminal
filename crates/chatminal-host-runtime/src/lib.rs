@@ -112,7 +112,7 @@ pub struct Mux {
     main_thread_id: std::thread::ThreadId,
 }
 
-const BUFSIZE: usize = 1024 * 1024;
+const BUFSIZE: usize = 256 * 1024;
 
 /// This function applies parsed actions to the pane and notifies any
 /// mux subscribers about the output event

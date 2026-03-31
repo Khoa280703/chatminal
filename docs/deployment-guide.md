@@ -1,111 +1,54 @@
 # Deployment Guide
 
-Last updated: 2026-03-05
+Last updated: 2026-03-31 (single-process desktop model)
 
-## Build targets
-- `apps/chatminald`
-- `apps/chatminal-app`
+## Build target
+- `apps/chatminal-desktop` (single-process desktop app)
 
 ## Prerequisites
-- Rust stable
+- Rust stable (recommended >= 1.93)
 - Linux/macOS (validated local)
-- Windows (validated qua CI `windows-latest`)
+- Native deps: xcb-util (Linux), Cocoa (macOS)
 
 ## Build
 ```bash
-cargo build --release --manifest-path apps/chatminald/Cargo.toml
-cargo build --release --manifest-path apps/chatminal-app/Cargo.toml
+cargo build --release -p chatminal-desktop
 ```
 
 ## Run
-Terminal 1:
-```bash
-CHATMINAL_DAEMON_ENDPOINT=/tmp/chatminald.sock cargo run --manifest-path apps/chatminald/Cargo.toml
-```
-
-Terminal 2:
-```bash
-CHATMINAL_DAEMON_ENDPOINT=/tmp/chatminald.sock cargo run --manifest-path apps/chatminal-app/Cargo.toml -- dashboard-tui-wezterm 120 200 120 32 20
-```
-
-## Endpoint Transport (Linux/macOS)
-- Transport hiện tại: Unix socket (local-only), không dùng TCP.
-- Endpoint mặc định local dev: `/tmp/chatminald.sock`.
-- Policy runtime:
-  - Nếu endpoint path là file thường -> daemon từ chối startup.
-  - Nếu endpoint là socket còn active -> daemon từ chối startup.
-  - Nếu endpoint là stale socket (connect trả connection-refused) -> daemon cleanup rồi bind lại.
-  - Socket permission được set `0600` (user-only); nếu set permission thất bại -> daemon fail sớm.
-
-### Vận hành an toàn
-1. Nên dùng endpoint trong thư mục user-owned.
-2. Không dùng endpoint chung giữa nhiều user.
-3. Nếu daemon crash để lại socket:
-```bash
-rm -f /tmp/chatminald.sock
-```
-
-## Endpoint Transport (Windows)
-- Transport production path trên Windows dùng Named Pipe (local-only), không dùng TCP.
-- Default endpoint resolver trên Windows:
-  - `\\.\pipe\chatminald-<user-suffix>`
-  - `<user-suffix>` ưu tiên `USERNAME`; nếu không khả dụng thì hash ổn định từ context user-local path/machine.
-- Runtime policy:
-  - app dùng `WaitNamedPipeW + CreateFileW` để kết nối local daemon.
-  - daemon dùng `CreateNamedPipeW + ConnectNamedPipe` qua transport backend riêng.
-  - không có TCP fallback trong production path.
-
-## Environment
-- `CHATMINAL_DAEMON_ENDPOINT`
-- `CHATMINAL_PREVIEW_LINES`
-- `CHATMINAL_MAX_LINES_PER_SESSION`
-- `CHATMINAL_DEFAULT_SHELL`
-- `CHATMINAL_DEFAULT_COLS`
-- `CHATMINAL_DEFAULT_ROWS`
-- `CHATMINAL_HEALTH_INTERVAL_MS`
-- `CHATMINAL_INPUT_PIPELINE_MODE` (`wezterm` hoặc `legacy`)
-- `CHATMINAL_WINDOW_BACKEND` (`wezterm-gui` hoặc `legacy`)
-- `CHATMINAL_BENCH_SHELL`
-- `CHATMINAL_BENCH_MAX_SECONDS`
-- `CHATMINAL_BENCH_SAMPLE_INTERVAL_SECONDS`
-
-## Input Pipeline Kill-Switch (Phase 06)
-Khi cần rollback nhanh hành vi input (ví dụ regression IME/modifier):
-
-1. Bật mode fallback:
-```bash
-export CHATMINAL_INPUT_PIPELINE_MODE=legacy
-```
-2. Restart `chatminal-app` (daemon không cần thay đổi config).
-3. Xác nhận thao tác cơ bản:
-   - `Ctrl+C` dừng process foreground.
-   - `Ctrl+Z` stop process foreground.
-   - Attach mode không crash.
-   - Có thể chạy nhanh:
-```bash
-make phase06-killswitch-verify
-```
-4. Khi cần quay lại pipeline mới:
-```bash
-export CHATMINAL_INPUT_PIPELINE_MODE=wezterm
-```
-
-## Window Backend Kill-Switch (Phase 08)
-Khi cần rollback nhanh đường chạy window:
-
-1. Bật backend fallback:
-```bash
-export CHATMINAL_WINDOW_BACKEND=legacy
-```
-2. Mở lại window:
 ```bash
 make window
 ```
-3. Verify nhanh rollback contract:
+
+Or directly:
 ```bash
-make phase08-killswitch-verify
+CHATMINAL_DESKTOP_SESSIONS_SIDEBAR=1 \
+cargo run --manifest-path apps/chatminal-desktop/Cargo.toml -- start -- chatminal-runtime proxy-desktop-session
 ```
-4. Khi cần quay lại runtime mặc định:
+
+## Vendor deps (first-time setup)
 ```bash
-export CHATMINAL_WINDOW_BACKEND=wezterm-gui
+make bootstrap-terminal-deps
 ```
+
+## Desktop-embedded runtime
+- No daemon/IPC: runtime fully embedded in desktop process
+- Session lifecycle: create, resume, close all in-process
+- Database: SQLite opened once at startup, shared connection via Arc<Mutex<Connection>>
+- Persist worker: background thread, coalesces database writes, zero lock contention on hot path
+- Scrollback: 3K lines per session (~22MB RAM), output history 512KB per session
+
+## Environment
+- `CHATMINAL_DATA_DIR` — SQLite database location (default: ~/.local/share/chatminal on Linux, ~/Library/Application Support/Chatminal on macOS)
+- `CHATMINAL_DEFAULT_SHELL` — Shell to spawn (default: $SHELL)
+- `CHATMINAL_DEFAULT_COLS` — Default terminal width (default: 120)
+- `CHATMINAL_DEFAULT_ROWS` — Default terminal height (default: 40)
+- `CHATMINAL_HEALTH_INTERVAL_MS` — Health check interval (default: 5000)
+- `CHATMINAL_DESKTOP_SESSIONS_SIDEBAR` — Enable sessions sidebar (default: 1)
+- `CHATMINAL_WINDOW_BACKEND` — Window backend: `wezterm-gui` (default) or `legacy`
+
+## Performance tuning
+- `CHATMINAL_MAX_LINES_PER_SESSION` — Scrollback limit per session (default: 3000, ~22MB per session)
+- `CHATMINAL_ENFORCE_LIMIT_THROTTLE` — Lines between SQLite enforceLimit calls (default: 50)
+- `CHATMINAL_OUTPUT_HISTORY_SIZE` — Max output history per session (default: 512KB)
+- `CHATMINAL_LIVE_OUTPUT_SIZE` — Max live output buffer (default: 256KB)

@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 /// Bounded output history buffer with byte tracking.
 /// Caps total memory at MAX_BYTES by evicting oldest chunks.
-const MAX_BYTES: usize = 2 * 1024 * 1024; // 2 MB
+const MAX_BYTES: usize = 512 * 1024; // 512 KB
 
 pub struct OutputHistory {
     chunks: VecDeque<String>,

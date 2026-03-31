@@ -351,19 +351,6 @@ pub(crate) fn host_active_terminal_in_render_scope(
     .flatten()
 }
 
-pub(crate) fn host_render_scope_contains_terminal(
-    render_scope_id: u64,
-    terminal_handle: u64,
-) -> bool {
-    with_host_render_scope_by_id(render_scope_id, |render_scope| {
-        render_scope
-            .iter_panes()
-            .iter()
-            .any(|positioned| terminal_handle_matches_public_id(&*positioned.pane, terminal_handle))
-    })
-    .unwrap_or(false)
-}
-
 pub(crate) fn host_activate_terminal_index_in_render_scope(
     render_scope_id: u64,
     index: usize,

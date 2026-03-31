@@ -1,9 +1,9 @@
 # Project Overview + PDR
 
-Last updated: 2026-03-04
+Last updated: 2026-03-31 (single-process desktop model)
 
 ## Product goal
-Xây terminal workspace local theo kiến trúc daemon-first, dùng terminal core nội bộ để xử lý terminal state ổn định.
+Xây terminal workspace native desktop single-process, dùng terminal core nội bộ để xử lý terminal state ổn định.
 
 ## Scope (current)
 - Multi-profile

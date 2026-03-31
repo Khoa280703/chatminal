@@ -1,14 +1,15 @@
 # Codebase Summary
 
-Last updated: 2026-03-25 (single-flow desktop/spawn-target cleanup)
+Last updated: 2026-03-31 (performance optimization phases 1-4, startup recipes, Arc<str> migration)
 
 ## Runtime baseline
-Chatminal hiện chia làm ba lớp rõ ràng:
+Chatminal hiện là **single-process desktop** với hai lớp:
 - `apps/chatminal-desktop` — desktop app first-party, render/input shell + desktop facade + private engine adapter.
-- `crates/chatminal-runtime` — app/runtime orchestrator, persistence facade, native API, workspace/session state.
-- `crates/chatminal-session-runtime` — execution subsystem, workspace layout model, session engine, runtime registry.
+- `crates/chatminal-runtime` — embedded orchestrator (không daemon), persistence facade, session state, startup recipes, persist worker.
 
-Desktop product path hiện là `single-flow local-first`:
+Daemon `chatminald` đã hoàn toàn bị xóa; mọi session management hiện nằm trong desktop process.
+
+Desktop product path là `single-flow local-first`:
 - startup không còn public legacy flags cho attach/spawn selection
 - desktop host mux luôn boot theo default local flow
 - active keyassignment/config path không còn các action legacy kiểu spawn/attach/detach theo execution target
@@ -44,25 +45,27 @@ Desktop product path hiện là `single-flow local-first`:
 - **DELETED** `apps/chatminal-desktop/src/desktop_host_runtime/engine_runtime_adapter.rs` — Phase 2 cleanup (was only 250 LOC, subsumed by session_engine)
 - **DELETED** `apps/chatminal-desktop/src/desktop_host_runtime/pane.rs` — Phase 2 cleanup (528 LOC test-only wrapper, tests refactored)
 
-### Runtime and execution core
+### Runtime and execution core (single-process embedded)
 - `crates/chatminal-runtime/src/state/native_api.rs`
   - desktop/native API cho workspace/session lifecycle.
 - `crates/chatminal-runtime/src/state/runtime_bridge.rs`
   - mapping giữa persisted/runtime-facing state.
+- `crates/chatminal-runtime/src/state/persist_worker.rs`
+  - background thread, coalescing persist jobs, zero lock contention.
+- `crates/chatminal-runtime/src/state/session_event_processor.rs`
+  - in-memory event processor, 5 SQLite writes → 0 under lock.
+- `crates/chatminal-runtime/src/state/startup_recipes.rs`
+  - per-session startup command registry (run/type/enter/wait/wait-for).
 - `crates/chatminal-runtime/src/api/mod.rs`
   - app-facing boundary ids/snapshots.
-- `crates/chatminal-session-runtime/src/session_engine.rs`
-  - facade execution engine.
-- `crates/chatminal-session-runtime/src/session_engine_core.rs`
-  - native execution mutations/focus/close/spawn core logic.
-- `crates/chatminal-session-runtime/src/workspace_layout.rs`
-  - public layout model cho session view/group tree.
-- `crates/chatminal-session-runtime/src/workspace_layout_registry.rs`
-  - registry/source of truth cho layout snapshots theo workspace.
-- `crates/chatminal-session-runtime/src/session_runtime_state.rs`
-  - runtime state snapshots và render-target tracking.
-- `crates/chatminal-session-runtime/src/leaf_runtime_registry.rs`
-  - live terminal runtime registry.
+- `apps/chatminal-desktop/src/desktop_host_runtime/session_engine/mod.rs`
+  - session engine facade.
+- `apps/chatminal-desktop/src/desktop_host_runtime/session_engine/leaf_runtime.rs`
+  - PTY instance runtime (CoreTerminal + IoTerminal, 3K scrollback lines).
+- `apps/chatminal-desktop/src/desktop_host_runtime/session_engine/output_history.rs`
+  - output history bounded to 512KB per session.
+- `apps/chatminal-desktop/src/chatminal_runtime/mod.rs`
+  - desktop facade bindings for session/view/render-target/terminal handle/window snapshot.
 
 ### Lower engine/private compatibility
 - `crates/chatminal-host-runtime/*`

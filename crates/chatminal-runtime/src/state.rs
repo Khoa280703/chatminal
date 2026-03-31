@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -24,6 +25,7 @@ mod explorer_utils;
 mod native_api;
 pub mod runtime_bridge;
 mod runtime_lifecycle;
+mod persist_worker;
 mod session_event_processor;
 mod session_explorer;
 mod startup_recipe;
@@ -70,6 +72,7 @@ struct StateInner {
     subscribers: HashMap<u64, std_mpsc::SyncSender<RuntimeEvent>>,
     next_subscriber_id: u64,
     shutdown_requested: bool,
+    persist_thread: Option<thread::JoinHandle<()>>,
 }
 
 #[derive(Clone)]
@@ -80,6 +83,7 @@ pub struct RuntimeState {
     inner: Arc<Mutex<StateInner>>,
     metrics: RuntimeMetrics,
     execution: Arc<dyn RuntimeExecutionAdapter>,
+    persist_tx: std_mpsc::SyncSender<persist_worker::PersistJob>,
 }
 
 pub struct RuntimeSubscription {
@@ -168,6 +172,8 @@ impl RuntimeState {
             let _ = store.set_session_status(session_id, StoredSessionStatus::Disconnected);
         }
 
+        let (persist_tx, persist_thread) = persist_worker::spawn_persist_worker(store.clone());
+
         let state = Self {
             inner: Arc::new(Mutex::new(StateInner {
                 config,
@@ -177,9 +183,11 @@ impl RuntimeState {
                 subscribers: HashMap::new(),
                 next_subscriber_id: 1,
                 shutdown_requested: false,
+                persist_thread: Some(persist_thread),
             })),
             metrics,
             execution,
+            persist_tx,
         };
 
         let cloned = state.clone();
@@ -991,12 +999,23 @@ impl RuntimeState {
     }
 
     pub fn app_shutdown(&self) {
+        // Signal persist worker to flush remaining jobs and stop.
+        let _ = self
+            .persist_tx
+            .send(persist_worker::PersistJob::Shutdown);
+
         let runtimes = {
             let mut inner = match self.inner.lock() {
                 Ok(value) => value,
                 Err(_) => return,
             };
             inner.shutdown_requested = true;
+
+            // Join persist thread for orderly shutdown.
+            if let Some(thread) = inner.persist_thread.take() {
+                let _ = thread.join();
+            }
+
             inner.disconnect_all_sessions_and_publish(runtime_lifecycle::DisconnectOptions {
                 reset_history: false,
                 bump_generation: false,
@@ -1004,6 +1023,14 @@ impl RuntimeState {
         };
 
         kill_runtime_handles(runtimes);
+    }
+
+    /// Wait for all pending persist jobs to flush. Test-only.
+    #[cfg(test)]
+    pub(super) fn flush_persist(&self) {
+        let (ack_tx, ack_rx) = std_mpsc::sync_channel::<()>(1);
+        let _ = self.persist_tx.send(persist_worker::PersistJob::Flush { ack: ack_tx });
+        let _ = ack_rx.recv();
     }
 }
 

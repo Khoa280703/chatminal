@@ -240,18 +240,36 @@ Last updated: 2026-03-13
      - `cargo test --manifest-path apps/chatminal-desktop/Cargo.toml -- --test-threads=1` pass (55/55)
      - 0 references `chatminal-session-runtime` trong .toml + .rs files (ngoài third_party)
 
-## Active
-1. Consolidate session-native execution primitives:
-   - Bây giờ active path là session-native; không còn dependency trên mux Tab host cho spawn/focus/split/move/close
-   - Monitor regression qua desktop smoke test + session runtime tests sau mỗi batch liên quan tới session lifecycle
-   - Tiếp theo: bóc fully `EngineSurfaceAdapter` khỏi active path (Phase 07 target đã đạt nhưng optional cleanup xem xét thêm)
-2. Daemon session/profile/history ownership đã ổn định:
-   - `chatminald` giữ toàn bộ session state management
-   - `chatminal-app` chỉ read snapshot + event stream từ daemon
-3. Nâng mức native window UX parity cho `chatminal-app`:
-   - session switching/creation/management giờ tất cả route qua session-native layer
-   - minimize latency + flicker ở desktop GUI khi thao tác session
-4. Long-term integration:
-   - theo dõi regression CI matrix Linux/macOS/Windows
-   - tăng coverage integration/soak dài hạn (long-run sessions, reconnect churn)
-   - future: evaluate multi-window session management parity
+## Active (2026-03-31)
+1. **Performance optimization phases 1-4 (complete)**:
+   - Phase 1: SQLite connection reuse (Arc<Mutex<Connection>>)
+   - Phase 2: Async persist pipeline, background thread coalescing
+   - Phase 3: SQL-based retention (window function)
+   - Phase 4: Resource caps (scrollback 10K→3K, OutputHistory 512KB, live_output 256KB)
+   - **Result**: RAM per 5 sessions ~385MB→~115MB (70% reduction), zero SQLite writes under lock
+   - **Verify**: cargo test --workspace pass, cargo check --workspace clean
+2. **Startup recipes (complete)**:
+   - Per-session startup commands with multi-step syntax (run/type/enter/wait/wait-for)
+   - Registry in `crates/chatminal-runtime/src/state/startup_recipes.rs`
+   - Persisted in SQLite, available before first prompt
+   - Integrated into session spawn path
+3. **UI Shell work in progress**:
+   - Phase 01: ShellBounds created, wired sidebar/footer/tab-bar; TODO: render_mod padding, pane coord calcs
+   - Phase 02: pixel-scroll + hit-test clipped; TODO: GPU scissor for sidebar tree render
+   - Phase 03: Done
+   - Phase 04: overlays terminal-based; TODO: pass ShellBounds.content bounds into overlay scope_size
+   - Hard boundaries: no-touch terminal-core, runtime, store, protocol, PTY
+4. **Single-process desktop (complete)**:
+   - `chatminald` daemon fully deleted; runtime embedded in desktop process
+   - All session management within desktop process; no IPC
+   - Session lifecycle: create, resume, close all in-process
+   - Persist worker background thread handles async SQLite writes
+5. **Arc<str> migration (complete)**:
+   - session_id in SessionEvent, TerminalInstanceRuntimeEvent, SessionRuntimeEvent
+   - WebGPU bind group caching
+
+## Upcoming work
+1. Continue UI Shell Phase completion (GPU scissor, overlay bounds)
+2. Profile and optimize remaining hot-path allocations
+3. Potential: Unify terminal parser (vt100 vs termwiz duplicate)
+4. Long-term: Prune legacy WezTerm crates, reduce binary/compile time

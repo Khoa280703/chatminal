@@ -1382,6 +1382,7 @@ fn first_output_after_respawn_is_separated_from_prompt_only_snapshot() {
         ts: 2,
     });
 
+    state.flush_persist();
     let snapshot = restore_snapshot(&state, &session_id);
     assert_eq!(
         snapshot.content,
@@ -1429,6 +1430,7 @@ fn first_distinct_output_after_respawn_still_starts_on_new_line() {
         ts: 2,
     });
 
+    state.flush_persist();
     let snapshot = restore_snapshot(&state, &session_id);
     assert_eq!(snapshot.content, "khoa2807@host ~ % \r\ncommand output\n");
 }
@@ -1473,6 +1475,7 @@ fn ansi_decorated_prompt_redraw_after_respawn_is_not_persisted_twice() {
         ts: 2,
     });
 
+    state.flush_persist();
     let snapshot = restore_snapshot(&state, &session_id);
     assert_eq!(
         snapshot.content,
@@ -1529,6 +1532,7 @@ fn repeated_prompt_redraws_after_respawn_are_all_ignored_until_real_output() {
         ts: 5,
     });
 
+    state.flush_persist();
     let snapshot = restore_snapshot(&state, &session_id);
     assert_eq!(snapshot.content, "khoa2807@host ~ % \r\necho hi\nhi\n");
 }
@@ -1573,6 +1577,7 @@ fn identical_non_prompt_fragment_after_respawn_is_preserved() {
         ts: 2,
     });
 
+    state.flush_persist();
     let snapshot = restore_snapshot(&state, &session_id);
     assert_eq!(snapshot.content, "identical payload\r\nidentical payload");
 }
@@ -1617,6 +1622,7 @@ fn prompt_redraw_prefixed_output_after_respawn_persists_only_new_output() {
         ts: 2,
     });
 
+    state.flush_persist();
     let snapshot = restore_snapshot(&state, &session_id);
     assert_eq!(snapshot.content, "khoa2807@host ~ % \r\ncommand output\n");
 }
@@ -1654,6 +1660,7 @@ fn persisted_history_applies_line_retention_limit() {
         ts: 3,
     });
 
+    state.flush_persist();
     let snapshot = restore_snapshot(&state, &session_id);
     assert_eq!(snapshot.seq, 3);
     assert_eq!(snapshot.content, "l1\nl2\nl3\n");
@@ -2157,6 +2164,7 @@ fn persisted_output_writes_canonical_records_not_legacy_chunks() {
         ts: 1,
     });
 
+    state.flush_persist();
     let store = {
         let inner = state.inner.lock().expect("lock state");
         inner.store.clone()

@@ -496,7 +496,7 @@ pub struct Config {
     #[dynamic(default)]
     pub hide_session_bar_if_only_one_session: bool,
 
-    #[dynamic(default)]
+    #[dynamic(default = "default_true")]
     pub enable_scroll_bar: bool,
 
     #[dynamic(try_from = "crate::units::PixelUnit", default = "default_half_cell")]

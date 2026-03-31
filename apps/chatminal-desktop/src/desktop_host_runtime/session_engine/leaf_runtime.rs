@@ -62,7 +62,7 @@ struct LeafTerminalConfig;
 
 impl CoreTerminalConfiguration for LeafTerminalConfig {
     fn scrollback_size(&self) -> usize {
-        10_000
+        3_000
     }
     fn color_palette(&self) -> ColorPalette {
         ColorPalette

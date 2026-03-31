@@ -146,11 +146,30 @@ impl RuntimeState {
     }
 
     pub fn mark_session_running_and_publish(&self, session_id: &str) -> Result<(), String> {
+        // Phase 5: moved build_logical_snapshot OUTSIDE global lock.
+        // Step 1: briefly acquire lock to check status + clone store.
+        let store = {
+            let inner = self
+                .inner
+                .lock()
+                .map_err(|_| "state lock poisoned".to_string())?;
+            let Some(entry) = inner.sessions.get(session_id) else {
+                return Err("session not found".to_string());
+            };
+            if entry.session.status == StoredSessionStatus::Running {
+                return Ok(());
+            }
+            inner.store.clone()
+        };
+        // Lock released — build snapshot without blocking other operations.
+        let logical_snapshot = build_logical_snapshot(&store, session_id)?;
+
+        // Step 2: re-acquire lock to apply state mutations.
         let mut inner = self
             .inner
             .lock()
             .map_err(|_| "state lock poisoned".to_string())?;
-        inner.mark_session_running_and_publish(session_id)
+        inner.apply_logical_snapshot_for_running(session_id, logical_snapshot)
     }
 }
 
@@ -171,11 +190,11 @@ impl StateInner {
         Ok(())
     }
 
-    pub(super) fn mark_session_running_and_publish(
+    pub(super) fn apply_logical_snapshot_for_running(
         &mut self,
         session_id: &str,
+        logical_snapshot: super::canonical_scrollback::LogicalSnapshot,
     ) -> Result<(), String> {
-        let logical_snapshot = build_logical_snapshot(&self.store, session_id)?;
         let prepend_run_boundary_on_next_output = !logical_snapshot.open_fragment.is_empty();
         let restored_trailing_fragment = (!logical_snapshot.open_fragment.is_empty())
             .then(|| logical_snapshot.open_fragment.clone());

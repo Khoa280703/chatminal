@@ -1,3 +1,4 @@
+use crate::color::LinearRgba;
 use crate::termwindow::box_model::*;
 use crate::termwindow::modal::Modal;
 use crate::termwindow::render::corners::{
@@ -71,6 +72,7 @@ impl PaneSelector {
             crate::overlay::quickselect::compute_labels_for_alphabet(alphabet, panes.len());
 
         let mut elements = vec![];
+        let modal_bg = LinearRgba::with_components(0.007, 0.007, 0.007, 1.0);
         for (pane_index, pos) in panes.into_iter().enumerate() {
             let caption = if show_session_ids {
                 format!("{}: {}", labels[pane_index], pos.pane.pane_id())
@@ -79,10 +81,8 @@ impl PaneSelector {
             };
             let element = Element::new(&font, ElementContent::Text(caption))
                 .colors(ElementColors {
-                    border: BorderColor::new(
-                        term_window.config.pane_select_bg_color.to_linear().into(),
-                    ),
-                    bg: term_window.config.pane_select_bg_color.to_linear().into(),
+                    border: BorderColor::new(modal_bg),
+                    bg: modal_bg.into(),
                     text: term_window.config.pane_select_fg_color.to_linear().into(),
                 })
                 .padding(BoxDimension {

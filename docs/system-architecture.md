@@ -1,8 +1,16 @@
 # System Architecture
 
-Last updated: 2026-03-27 (canonical scrollback dual-read/canonical-write)
+Last updated: 2026-03-31 (performance optimization phases 1-4, startup recipes, single-process desktop model)
 
-## Latest changes (canonical scrollback dual-read/canonical-write, 2026-03-27)
+## Latest changes (performance optimization phases 1-4, startup recipes, 2026-03-30/31)
+- **Phase 1**: SQLite connection reuse (`Arc<Mutex<Connection>>`) — eliminated ~40 `open_connection()` syscalls per event cycle
+- **Phase 2**: Async persist pipeline — background thread with coalescing (UpdateSeq burst N→1, MarkRunning dedup); 5 SQLite writes → 0 under global lock; live_output buffer 1MB→256KB
+- **Phase 3**: SQL-based retention — window function `SUM OVER` for memory-bounded eviction; O(N)→O(1) RAM overhead
+- **Phase 4**: Resource caps — scrollback 10K→3K lines (~70% RAM reduction); OutputHistory 2MB→512KB; EnforceLimit throttle mỗi 50 chunks (disk I/O -98%); Arc<str> migration for session_id in SessionEvent + TerminalInstanceRuntimeEvent + SessionRuntimeEvent; WebGPU bind group caching
+- **Result**: RAM per 5 sessions: ~385MB→~115MB (70% reduction); zero SQLite writes under global lock; verified all tests pass
+- **Startup recipes**: Per-session startup commands với multi-step syntax (run/type/enter/wait/wait-for); registry trong `crates/chatminal-runtime/src/state/startup_recipes.rs`
+
+## Canonical scrollback dual-read/canonical-write model (2026-03-27)
 - Persisted history không còn coi `scrollback_chunks.chunk_text` là source of truth duy nhất.
 - `chatminal-runtime` đã chuyển writer active sang canonical model:
   - `CommittedLine { seq, ord, ts, text }`
@@ -38,18 +46,24 @@ Last updated: 2026-03-27 (canonical scrollback dual-read/canonical-write)
 - **Phase 2.4 - Workspace layout persistence**: Already implemented via `set_string_state`/`get_string_state` with key prefix `workspace_layout:`; mutations auto-save to app_state table.
 - **Phase 2.5 - Documentation**: Added doc comment to window.rs explaining single-Window/single-Tab desktop model; this file updated.
 
+## Single-process desktop model (2026-03-31)
+- **No daemon**: `chatminald` fully DELETED; runtime embedded in desktop process
+- **Single event flow**: PTY output → SessionEngine → SessionEventProcessor (in-memory) → broadcast (UI) + async persist job
+- **Persist worker**: Background thread, coalesces database writes, zero operations under global lock
+- **Session lifecycle**: Created, resumed, closed all within desktop process; no IPC
+- **Startup commands**: Per-session recipes available before first prompt; `startup_recipes` registry persisted in SQLite
+
 ## Topology
 
-### Desktop app
+### Desktop app (single-process)
 ```text
 chatminal-desktop
   -> chatminal_runtime facade
-    -> chatminal-runtime
-      -> chatminal-session-runtime
-        -> workspace_layout + session engine + terminal runtime registry
-    -> desktop_host_runtime (private engine adapter only)
-      -> chatminal-host-runtime
-        -> Mux/Tab/Pane private engine primitives
+    -> chatminal-runtime (embedded, single-process)
+      -> session engine + terminal runtime registry
+      -> persist worker (background thread)
+    -> desktop_host_runtime (private engine adapter)
+      -> chatminal-host-runtime (Mux/Tab/Pane private engine primitives)
   -> termwindow render/input shell
   -> chatminal_sidebar + session bar UI
 ```

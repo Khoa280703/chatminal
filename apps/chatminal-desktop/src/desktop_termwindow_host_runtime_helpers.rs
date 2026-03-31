@@ -400,19 +400,6 @@ impl TermWindow {
         crate::desktop_host_runtime::host_active_terminal_in_render_scope(render_scope_id)
     }
 
-    fn active_render_target_contains_terminal(&self, pane_id: TerminalUiKey) -> bool {
-        if self.chatminal_sidebar.is_enabled() {
-            return self
-                .active_terminal_instance_from_active_render_target()
-                .map(|pane| pane.pane_id() as u64 == pane_id)
-                .unwrap_or(false);
-        }
-        let Some(render_scope_id) = self.active_render_scope_id() else {
-            return false;
-        };
-        crate::desktop_host_runtime::host_render_scope_contains_terminal(render_scope_id, pane_id)
-    }
-
     fn activate_terminal_index_in_active_render_target(&self, index: usize) -> bool {
         if self.chatminal_sidebar.is_enabled() {
             return index == 0 && self.active_terminal_instance_from_active_render_target().is_some();

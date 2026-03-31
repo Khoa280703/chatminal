@@ -857,7 +857,7 @@ impl crate::TermWindow {
             ));
         }
         entries.push((
-            "Đổi tên",
+            "Rename",
             UIItemType::ChatminalSidebarSessionMenuRename(session.session_id.clone()),
         ));
         entries.push((
@@ -866,14 +866,14 @@ impl crate::TermWindow {
         ));
         if has_startup_command {
             entries.push((
-                "Chạy startup recipe ngay",
+                "Run startup recipe now",
                 UIItemType::ChatminalSidebarSessionMenuRunStartupCommand(
                     session.session_id.clone(),
                 ),
             ));
         }
         entries.push((
-            "Xoá",
+            "Delete",
             UIItemType::ChatminalSidebarSessionMenuDelete(session.session_id.clone()),
         ));
 

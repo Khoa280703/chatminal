@@ -10,11 +10,14 @@ use crate::utilsprites::RenderMetrics;
 use config::Dimension;
 use engine_term::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use std::cell::{Ref, RefCell};
+use std::time::{Duration, Instant};
 
 const MODAL_MAX_VISIBLE_LINES: usize = 10;
 const MODAL_MIN_INPUT_HEIGHT_PX: f32 = 220.0;
 const MODAL_INPUT_HORIZONTAL_PADDING_PX: f32 = 10.0;
 const MODAL_VISIBLE_COLUMN_GUTTER: usize = 6;
+const MODAL_CURSOR_BLINK_MS: u64 = 530;
+const MODAL_CURSOR_GLYPH: char = '|';
 
 #[derive(Clone, Copy)]
 struct LineSpan {
@@ -25,7 +28,6 @@ struct LineSpan {
 pub struct StartupRecipeModal {
     element: RefCell<Option<Vec<ComputedElement>>>,
     session_id: String,
-    session_name: String,
     value: RefCell<String>,
     cursor: RefCell<usize>,
     select_all: RefCell<bool>,
@@ -35,12 +37,11 @@ pub struct StartupRecipeModal {
 }
 
 impl StartupRecipeModal {
-    pub fn new(session_id: String, session_name: String, value: String) -> Self {
+    pub fn new(session_id: String, value: String) -> Self {
         let cursor = value.len();
         Self {
             element: RefCell::new(None),
             session_id,
-            session_name,
             value: RefCell::new(value),
             cursor: RefCell::new(cursor),
             select_all: RefCell::new(false),
@@ -247,7 +248,7 @@ impl StartupRecipeModal {
         (top, left)
     }
 
-    fn visible_recipe_lines(&self, visible_columns: usize) -> Vec<String> {
+    fn visible_recipe_lines(&self, visible_columns: usize, cursor_visible: bool) -> Vec<String> {
         let value = self.current_value();
         let cursor = self.current_cursor();
         let (cursor_line, cursor_col, spans) = locate_cursor(&value, cursor);
@@ -264,14 +265,18 @@ impl StartupRecipeModal {
                 let visible_start = left.min(total_cols);
                 let visible_end = (visible_start + visible_columns).min(total_cols);
                 let mut rendered = slice_chars(line, visible_start, visible_end);
-                if line_idx == cursor_line {
+                if cursor_visible && line_idx == cursor_line {
                     let cursor_in_view =
                         cursor_col.clamp(visible_start, visible_end) - visible_start;
                     let insert_byte = byte_offset_for_char_pos(&rendered, cursor_in_view);
-                    rendered.insert(insert_byte, '_');
+                    rendered.insert(insert_byte, MODAL_CURSOR_GLYPH);
                 }
                 if rendered.is_empty() && line_idx == cursor_line {
-                    rendered.push('_');
+                    rendered.push(if cursor_visible {
+                        MODAL_CURSOR_GLYPH
+                    } else {
+                        ' '
+                    });
                 }
                 if visible_start > 0 {
                     rendered.insert(0, '…');
@@ -282,6 +287,19 @@ impl StartupRecipeModal {
                 rendered
             })
             .collect()
+    }
+
+    fn cursor_visible(term_window: &TermWindow) -> bool {
+        (term_window.created.elapsed().as_millis() / MODAL_CURSOR_BLINK_MS as u128).is_multiple_of(2)
+    }
+
+    fn schedule_cursor_blink(term_window: &TermWindow) {
+        let next_due = Instant::now() + Duration::from_millis(MODAL_CURSOR_BLINK_MS / 2);
+        let mut slot = term_window.has_animation.borrow_mut();
+        match *slot {
+            Some(existing) if existing <= next_due => {}
+            _ => *slot = Some(next_due),
+        }
     }
 
     fn resolve_modal_hit(term_window: &TermWindow) -> Option<UIItemType> {
@@ -305,35 +323,6 @@ impl StartupRecipeModal {
                 border: BorderColor::default(),
                 bg: LinearRgba::TRANSPARENT.into(),
                 text: color.into(),
-            })
-    }
-
-    fn pill(
-        font: &std::rc::Rc<engine_font::LoadedFont>,
-        content: impl Into<String>,
-        bg: LinearRgba,
-        fg: LinearRgba,
-    ) -> Element {
-        Element::new(font, ElementContent::Text(content.into()))
-            .display(DisplayType::Inline)
-            .padding(BoxDimension {
-                left: Dimension::Pixels(9.0),
-                right: Dimension::Pixels(9.0),
-                top: Dimension::Pixels(4.0),
-                bottom: Dimension::Pixels(4.0),
-            })
-            .margin(BoxDimension {
-                left: Dimension::Pixels(0.0),
-                right: Dimension::Pixels(6.0),
-                top: Dimension::Pixels(0.0),
-                bottom: Dimension::Pixels(0.0),
-            })
-            .border(BoxDimension::new(Dimension::Pixels(1.0)))
-            .border_corners(Some(rounded_corners(7.0)))
-            .colors(ElementColors {
-                border: BorderColor::new(bg),
-                bg: bg.into(),
-                text: fg.into(),
             })
     }
 
@@ -374,43 +363,8 @@ impl StartupRecipeModal {
             }))
     }
 
-    fn section_card(
-        font: &std::rc::Rc<engine_font::LoadedFont>,
-        children: Vec<Element>,
-        bg: LinearRgba,
-        border: LinearRgba,
-        item_type: Option<UIItemType>,
-    ) -> Element {
-        let mut element = Element::new(font, ElementContent::Children(children))
-            .display(DisplayType::Block)
-            .padding(BoxDimension {
-                left: Dimension::Pixels(16.0),
-                right: Dimension::Pixels(16.0),
-                top: Dimension::Pixels(14.0),
-                bottom: Dimension::Pixels(14.0),
-            })
-            .margin(BoxDimension {
-                left: Dimension::Pixels(0.0),
-                right: Dimension::Pixels(0.0),
-                top: Dimension::Pixels(0.0),
-                bottom: Dimension::Pixels(12.0),
-            })
-            .border(BoxDimension::new(Dimension::Pixels(1.0)))
-            .border_corners(Some(rounded_corners(7.0)))
-            .colors(ElementColors {
-                border: BorderColor::new(border),
-                bg: bg.into(),
-                text: LinearRgba::TRANSPARENT.into(),
-            });
-
-        if let Some(item_type) = item_type {
-            element = element.item_type(item_type);
-        }
-
-        element
-    }
-
     fn compute(&self, term_window: &mut TermWindow) -> anyhow::Result<Vec<ComputedElement>> {
+        Self::schedule_cursor_blink(term_window);
         let font = Self::command_font(term_window)?;
         let metrics = RenderMetrics::with_font_metrics(&font.metrics());
         let dimensions = term_window.dimensions;
@@ -440,17 +394,15 @@ impl StartupRecipeModal {
             });
 
         let text = LinearRgba::with_components(0.92, 0.92, 0.92, 1.0);
-        let muted = LinearRgba::with_components(0.62, 0.62, 0.62, 1.0);
         let sub_muted = LinearRgba::with_components(0.52, 0.52, 0.52, 1.0);
-        let panel_bg = LinearRgba::with_components(0.020, 0.020, 0.020, 0.995);
-        let card_bg = LinearRgba::with_components(0.036, 0.036, 0.036, 1.0);
-        let elevated_card_bg = LinearRgba::with_components(0.042, 0.042, 0.042, 1.0);
-        let border = LinearRgba::with_components(0.075, 0.075, 0.075, 1.0);
-        let accent = LinearRgba::with_components(0.19, 0.47, 0.86, 1.0);
+        let panel_bg = LinearRgba::with_components(0.007, 0.007, 0.007, 1.0);
+        let card_bg = panel_bg;
+        let border = LinearRgba::with_components(0.053, 0.053, 0.053, 1.0);
+        let cursor_visible = Self::cursor_visible(term_window);
         let input_bg = if *self.select_all.borrow() {
             LinearRgba::with_components(0.07, 0.16, 0.29, 1.0)
         } else {
-            LinearRgba::with_components(0.028, 0.028, 0.028, 1.0)
+            panel_bg
         };
         let input_border = if *self.select_all.borrow() {
             LinearRgba::with_components(0.18, 0.45, 0.82, 1.0)
@@ -464,65 +416,27 @@ impl StartupRecipeModal {
         let run_bg = LinearRgba::with_components(0.10, 0.31, 0.20, 1.0);
         let run_hover = LinearRgba::with_components(0.14, 0.39, 0.25, 1.0);
 
-        let recipe_lines: Vec<Element> = if self.current_value().is_empty() {
-            vec![
-                Self::text_block(&font, "Type recipe here...", sub_muted).padding(BoxDimension {
-                    left: Dimension::Pixels(0.0),
-                    right: Dimension::Pixels(0.0),
-                    top: Dimension::Pixels(0.0),
-                    bottom: Dimension::Pixels(8.0),
-                }),
-                Self::text_block(&font, "_", text).padding(BoxDimension {
-                    left: Dimension::Pixels(0.0),
-                    right: Dimension::Pixels(0.0),
-                    top: Dimension::Pixels(0.0),
-                    bottom: Dimension::Pixels(0.0),
-                }),
-            ]
-        } else {
-            self.visible_recipe_lines(visible_columns.max(1))
-                .into_iter()
-                .map(|line| Self::text_block(&font, line, text))
-                .collect()
-        };
+        let recipe_lines: Vec<Element> = self
+            .visible_recipe_lines(visible_columns.max(1), cursor_visible)
+            .into_iter()
+            .map(|line| Self::text_block(&font, line, text))
+            .collect();
 
-        let header_card = Self::section_card(
+        let input_card = Element::new(
             &font,
-            vec![
-                Self::pill(
-                    &font,
-                    "Startup recipe",
-                    LinearRgba::with_components(0.07, 0.11, 0.18, 1.0),
-                    LinearRgba::with_components(0.78, 0.86, 0.97, 1.0),
-                )
-                .margin(BoxDimension {
-                    left: Dimension::Pixels(0.0),
-                    right: Dimension::Pixels(0.0),
-                    top: Dimension::Pixels(0.0),
-                    bottom: Dimension::Pixels(10.0),
-                }),
-                Self::text_block(&font, &self.session_name, muted).padding(BoxDimension {
-                    left: Dimension::Pixels(0.0),
-                    right: Dimension::Pixels(0.0),
-                    top: Dimension::Pixels(0.0),
-                    bottom: Dimension::Pixels(10.0),
-                }),
-            ],
-            elevated_card_bg,
-            border,
-            Some(UIItemType::ChatminalStartupRecipeModalPanel),
-        );
-
-        let input_card = Self::section_card(
-            &font,
-            vec![
-                Self::text_block(&font, "Recipe", text).padding(BoxDimension {
+            ElementContent::Children(vec![
+                Self::text_block(&font, "Startup recipe", text).padding(BoxDimension {
                     left: Dimension::Pixels(0.0),
                     right: Dimension::Pixels(0.0),
                     top: Dimension::Pixels(0.0),
                     bottom: Dimension::Pixels(6.0),
                 }),
-                Self::text_block(&font, "One step per line.", sub_muted).padding(BoxDimension {
+                Self::text_block(
+                    &font,
+                    "Click below and type commands. One step per line.",
+                    sub_muted,
+                )
+                .padding(BoxDimension {
                     left: Dimension::Pixels(0.0),
                     right: Dimension::Pixels(0.0),
                     top: Dimension::Pixels(0.0),
@@ -546,11 +460,29 @@ impl StartupRecipeModal {
                         bg: input_bg.into(),
                         text: text.into(),
                     }),
-            ],
-            card_bg,
-            border,
-            Some(UIItemType::ChatminalStartupRecipeModalPanel),
-        );
+            ]),
+        )
+        .item_type(UIItemType::ChatminalStartupRecipeModalPanel)
+        .display(DisplayType::Block)
+        .padding(BoxDimension {
+            left: Dimension::Pixels(16.0),
+            right: Dimension::Pixels(16.0),
+            top: Dimension::Pixels(14.0),
+            bottom: Dimension::Pixels(14.0),
+        })
+        .margin(BoxDimension {
+            left: Dimension::Pixels(0.0),
+            right: Dimension::Pixels(0.0),
+            top: Dimension::Pixels(0.0),
+            bottom: Dimension::Pixels(12.0),
+        })
+        .border(BoxDimension::new(Dimension::Pixels(1.0)))
+        .border_corners(Some(rounded_corners(7.0)))
+        .colors(ElementColors {
+            border: BorderColor::new(border),
+            bg: card_bg.into(),
+            text: text.into(),
+        });
 
         let footer_actions = Element::new(
             &font,
@@ -589,7 +521,6 @@ impl StartupRecipeModal {
         let panel = Element::new(
             &font,
             ElementContent::Children(vec![
-                header_card,
                 input_card,
                 Self::text_block(
                     &font,
@@ -616,7 +547,7 @@ impl StartupRecipeModal {
         .border(BoxDimension::new(Dimension::Pixels(1.0)))
         .border_corners(Some(rounded_corners(7.0)))
         .colors(ElementColors {
-            border: BorderColor::new(accent),
+            border: BorderColor::new(border),
             bg: panel_bg.into(),
             text: text.into(),
         })
@@ -734,9 +665,7 @@ impl Modal for StartupRecipeModal {
         &self,
         term_window: &mut TermWindow,
     ) -> anyhow::Result<Ref<'_, [ComputedElement]>> {
-        if self.element.borrow().is_none() {
-            self.element.borrow_mut().replace(self.compute(term_window)?);
-        }
+        self.element.borrow_mut().replace(self.compute(term_window)?);
         Ok(Ref::map(self.element.borrow(), |value| {
             value.as_ref().unwrap().as_slice()
         }))

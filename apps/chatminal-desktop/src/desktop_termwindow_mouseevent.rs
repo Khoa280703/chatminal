@@ -17,7 +17,6 @@ use config::MouseEventAltScreen;
 use engine_dynamic::ToDynamic;
 use engine_term::input::{MouseButton, MouseEventKind as TMEK};
 use engine_term::{ClickPosition, LastMouseClick, StableRowIndex};
-use std::convert::TryInto;
 use std::ops::Sub;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -140,9 +139,9 @@ impl super::TermWindow {
             | UIItemType::ChatminalStartupRecipeModalCancel
             | UIItemType::ChatminalStartupRecipeModalRun
             | UIItemType::ChatminalStartupRecipeModalSave
-            | UIItemType::AboveScrollThumb
-            | UIItemType::BelowScrollThumb
-            | UIItemType::ScrollThumb
+            | UIItemType::AboveScrollThumb(_)
+            | UIItemType::BelowScrollThumb(_)
+            | UIItemType::ScrollThumb(_)
             | UIItemType::Split(_) => {}
         }
     }
@@ -172,9 +171,9 @@ impl super::TermWindow {
             | UIItemType::ChatminalStartupRecipeModalCancel
             | UIItemType::ChatminalStartupRecipeModalRun
             | UIItemType::ChatminalStartupRecipeModalSave
-            | UIItemType::AboveScrollThumb
-            | UIItemType::BelowScrollThumb
-            | UIItemType::ScrollThumb
+            | UIItemType::AboveScrollThumb(_)
+            | UIItemType::BelowScrollThumb(_)
+            | UIItemType::ScrollThumb(_)
             | UIItemType::Split(_) => {}
         }
     }
@@ -440,26 +439,28 @@ impl super::TermWindow {
     fn drag_scroll_thumb(
         &mut self,
         item: UIItem,
+        pane_id: u64,
         start_event: MouseEvent,
         event: MouseEvent,
         context: &dyn WindowOps,
     ) {
-        let pane = match self.active_terminal_instance_or_overlay() {
-            Some(pane) => pane,
-            None => return,
+        let Some(pane) = self
+            .get_panes_to_render()
+            .into_iter()
+            .find(|pos| pos.pane.pane_id() as u64 == pane_id)
+            .map(|pos| pos.pane)
+        else {
+            return;
         };
 
         let dims = self.renderable_dimensions_for_pane(&pane);
         let current_viewport = self.get_viewport(pane.pane_id() as u64);
 
-        let tab_bar_height = if self.show_session_bar && self.config.session_bar_at_bottom {
-            self.tab_bar_pixel_height().unwrap_or(0.)
-        } else {
-            0.
+        let Some((_, y_offset, _, track_height)) =
+            self.scroll_bar_track_geometry_for_pane(pane_id)
+        else {
+            return;
         };
-
-        let border = self.get_os_border();
-        let y_offset = self.shell_bounds().content_y;
 
         let from_top = start_event.coords.y.saturating_sub(item.y as isize);
         let effective_thumb_top = event
@@ -474,9 +475,7 @@ impl super::TermWindow {
             effective_thumb_top,
             &*pane,
             current_viewport,
-            self.dimensions
-                .pixel_height
-                .saturating_sub(y_offset as usize + border.bottom.get() + tab_bar_height as usize),
+            track_height,
             self.min_scroll_bar_height() as usize,
         );
         self.set_viewport(pane.pane_id() as u64, Some(row), dims);
@@ -519,8 +518,8 @@ impl super::TermWindow {
             UIItemType::Split(split) => {
                 self.drag_split(item, split, start_event, x, y, context);
             }
-            UIItemType::ScrollThumb => {
-                self.drag_scroll_thumb(item, start_event, event, context);
+            UIItemType::ScrollThumb(pane_id) => {
+                self.drag_scroll_thumb(item, pane_id, start_event, event, context);
             }
             UIItemType::ChatminalSidebarResizeHandle => {
                 self.drag_chatminal_sidebar_resize_handle(item, start_event, event, context);
@@ -575,7 +574,7 @@ impl super::TermWindow {
     fn mouse_event_ui_item(
         &mut self,
         item: UIItem,
-        pane: Option<Arc<dyn OverlayPane>>,
+        _pane: Option<Arc<dyn OverlayPane>>,
         _y: i64,
         event: MouseEvent,
         context: &dyn WindowOps,
@@ -585,20 +584,14 @@ impl super::TermWindow {
             UIItemType::SessionBar(item) => {
                 self.mouse_event_session_bar(item, event, context);
             }
-            UIItemType::AboveScrollThumb => {
-                if let Some(pane) = pane {
-                    self.mouse_event_above_scroll_thumb(item, pane, event, context);
-                }
+            UIItemType::AboveScrollThumb(pane_id) => {
+                self.mouse_event_above_scroll_thumb(item, pane_id, event, context);
             }
-            UIItemType::ScrollThumb => {
-                if let Some(pane) = pane {
-                    self.mouse_event_scroll_thumb(item, pane, event, context);
-                }
+            UIItemType::ScrollThumb(pane_id) => {
+                self.mouse_event_scroll_thumb(item, pane_id, event, context);
             }
-            UIItemType::BelowScrollThumb => {
-                if let Some(pane) = pane {
-                    self.mouse_event_below_scroll_thumb(item, pane, event, context);
-                }
+            UIItemType::BelowScrollThumb(pane_id) => {
+                self.mouse_event_below_scroll_thumb(item, pane_id, event, context);
             }
             UIItemType::Split(split) => {
                 self.mouse_event_split(item, split, event, context);
@@ -1284,10 +1277,18 @@ impl super::TermWindow {
     pub fn mouse_event_above_scroll_thumb(
         &mut self,
         _item: UIItem,
-        pane: Arc<dyn OverlayPane>,
+        pane_id: u64,
         event: MouseEvent,
         context: &dyn WindowOps,
     ) {
+        let Some(pane) = self
+            .get_panes_to_render()
+            .into_iter()
+            .find(|pos| pos.pane.pane_id() as u64 == pane_id)
+            .map(|pos| pos.pane)
+        else {
+            return;
+        };
         if let WMEK::Press(MousePress::Left) = event.kind {
             let dims = self.renderable_dimensions_for_pane(&pane);
             let current_viewport = self.get_viewport(pane.pane_id() as u64);
@@ -1297,7 +1298,7 @@ impl super::TermWindow {
                 Some(
                     current_viewport
                         .unwrap_or(dims.physical_top)
-                        .saturating_sub(self.terminal_size.rows.try_into().unwrap()),
+                        .saturating_sub(dims.viewport_rows as StableRowIndex),
                 ),
                 dims,
             );
@@ -1309,10 +1310,18 @@ impl super::TermWindow {
     pub fn mouse_event_below_scroll_thumb(
         &mut self,
         _item: UIItem,
-        pane: Arc<dyn OverlayPane>,
+        pane_id: u64,
         event: MouseEvent,
         context: &dyn WindowOps,
     ) {
+        let Some(pane) = self
+            .get_panes_to_render()
+            .into_iter()
+            .find(|pos| pos.pane.pane_id() as u64 == pane_id)
+            .map(|pos| pos.pane)
+        else {
+            return;
+        };
         if let WMEK::Press(MousePress::Left) = event.kind {
             let dims = self.renderable_dimensions_for_pane(&pane);
             let current_viewport = self.get_viewport(pane.pane_id() as u64);
@@ -1322,7 +1331,7 @@ impl super::TermWindow {
                 Some(
                     current_viewport
                         .unwrap_or(dims.physical_top)
-                        .saturating_add(self.terminal_size.rows.try_into().unwrap()),
+                        .saturating_add(dims.viewport_rows as StableRowIndex),
                 ),
                 dims,
             );
@@ -1334,7 +1343,7 @@ impl super::TermWindow {
     pub fn mouse_event_scroll_thumb(
         &mut self,
         item: UIItem,
-        _pane: Arc<dyn OverlayPane>,
+        _pane_id: u64,
         event: MouseEvent,
         context: &dyn WindowOps,
     ) {

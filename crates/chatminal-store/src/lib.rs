@@ -1,6 +1,7 @@
 mod schema;
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, OptionalExtension, params};
@@ -109,9 +110,18 @@ pub struct StoredSessionExplorerState {
     pub open_file_path: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Store {
     db_path: PathBuf,
+    conn: Arc<Mutex<Connection>>,
+}
+
+impl std::fmt::Debug for Store {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Store")
+            .field("db_path", &self.db_path)
+            .finish()
+    }
 }
 
 fn scrollback_record_kind_to_db(kind: StoredScrollbackRecordKind) -> &'static str {
@@ -138,8 +148,11 @@ impl Store {
     }
 
     pub fn initialize<P: AsRef<Path>>(db_path: P) -> Result<Self, String> {
+        let db_path = db_path.as_ref().to_path_buf();
+        let conn = Self::new_connection(&db_path)?;
         let store = Self {
-            db_path: db_path.as_ref().to_path_buf(),
+            db_path,
+            conn: Arc::new(Mutex::new(conn)),
         };
         store.init_schema()?;
         store.ensure_default_profile()?;
@@ -151,7 +164,7 @@ impl Store {
     }
 
     pub fn load_workspace(&self) -> Result<StoredWorkspace, String> {
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         let profiles = self.list_profiles_with_conn(&conn)?;
         let active_profile_id = self
             .active_profile_id_with_conn(&conn)?
@@ -169,12 +182,12 @@ impl Store {
     }
 
     pub fn list_profiles(&self) -> Result<Vec<StoredProfile>, String> {
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         self.list_profiles_with_conn(&conn)
     }
 
     pub fn create_profile(&self, raw_name: Option<String>) -> Result<StoredProfile, String> {
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         let name = match raw_name {
             Some(value) => {
                 let trimmed = value.trim();
@@ -207,7 +220,7 @@ impl Store {
             return Err("profile name cannot be empty".to_string());
         }
 
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         let affected = conn
             .execute(
                 "UPDATE profiles SET name = ?1, updated_at = ?2 WHERE id = ?3",
@@ -226,7 +239,7 @@ impl Store {
     }
 
     pub fn delete_profile(&self, profile_id: &str) -> Result<(), String> {
-        let mut conn = self.open_connection()?;
+        let mut conn = self.conn()?;
         let tx = conn
             .transaction()
             .map_err(|err| format!("open delete profile transaction failed: {err}"))?;
@@ -291,7 +304,7 @@ impl Store {
     }
 
     pub fn set_active_profile(&self, profile_id: &str) -> Result<(), String> {
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         conn.execute(
             "INSERT INTO app_state (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             params![ACTIVE_PROFILE_KEY, profile_id],
@@ -301,7 +314,7 @@ impl Store {
     }
 
     pub fn get_bool_state(&self, key: &str, default: bool) -> Result<bool, String> {
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         let raw = self.get_string_state_with_conn(&conn, key)?;
 
         let Some(value) = raw else {
@@ -323,12 +336,12 @@ impl Store {
     }
 
     pub fn get_string_state(&self, key: &str) -> Result<Option<String>, String> {
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         self.get_string_state_with_conn(&conn, key)
     }
 
     pub fn set_string_state(&self, key: &str, value: &str) -> Result<(), String> {
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         conn.execute(
             "INSERT INTO app_state (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             params![key, value],
@@ -338,7 +351,7 @@ impl Store {
     }
 
     pub fn clear_state(&self, key: &str) -> Result<(), String> {
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         conn.execute("DELETE FROM app_state WHERE key = ?1", params![key])
             .map_err(|err| format!("clear state failed: {err}"))?;
         Ok(())
@@ -348,7 +361,7 @@ impl Store {
         &self,
         session_id: &str,
     ) -> Result<Option<StoredSessionExplorerState>, String> {
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         conn.query_row(
             r#"
             SELECT session_id, root_path, current_dir, selected_path, open_file_path
@@ -375,7 +388,7 @@ impl Store {
         session_id: &str,
         root_path: &str,
     ) -> Result<StoredSessionExplorerState, String> {
-        let mut conn = self.open_connection()?;
+        let mut conn = self.conn()?;
         let tx = conn
             .transaction()
             .map_err(|err| format!("open session explorer root transaction failed: {err}"))?;
@@ -439,7 +452,7 @@ impl Store {
         selected_path: Option<&str>,
         open_file_path: Option<&str>,
     ) -> Result<StoredSessionExplorerState, String> {
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         let affected = conn
             .execute(
                 r#"
@@ -463,15 +476,33 @@ impl Store {
             return Err("session explorer root is not set".to_string());
         }
 
-        self.get_session_explorer_state(session_id)?
-            .ok_or_else(|| "session explorer state disappeared".to_string())
+        conn.query_row(
+            r#"
+            SELECT session_id, root_path, current_dir, selected_path, open_file_path
+            FROM session_explorer_state
+            WHERE session_id = ?1
+            "#,
+            params![session_id],
+            |row| {
+                Ok(StoredSessionExplorerState {
+                    session_id: row.get::<_, String>(0)?,
+                    root_path: row.get::<_, String>(1)?,
+                    current_dir: row.get::<_, String>(2)?,
+                    selected_path: row.get::<_, Option<String>>(3)?,
+                    open_file_path: row.get::<_, Option<String>>(4)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|err| format!("reload session explorer state failed: {err}"))?
+        .ok_or_else(|| "session explorer state disappeared".to_string())
     }
 
     pub fn list_sessions_by_profile(
         &self,
         profile_id: &str,
     ) -> Result<Vec<StoredSessionSummary>, String> {
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         self.list_sessions_by_profile_with_conn(&conn, profile_id)
     }
 
@@ -483,7 +514,7 @@ impl Store {
         shell: String,
         persist_history: bool,
     ) -> Result<StoredSession, String> {
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         let session_id = Uuid::new_v4().to_string();
         let trimmed_name = name
             .as_deref()
@@ -529,7 +560,7 @@ impl Store {
     }
 
     pub fn get_session(&self, session_id: &str) -> Result<Option<StoredSession>, String> {
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         let row = conn
             .query_row(
                 "SELECT id, profile_id, name, cwd, shell, startup_command, status, persist_history, last_seq FROM sessions WHERE id = ?1",
@@ -554,7 +585,7 @@ impl Store {
     }
 
     pub fn upsert_session(&self, session: &StoredSession) -> Result<(), String> {
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         let now = now_millis() as i64;
         conn.execute(
             r#"INSERT INTO sessions (id, profile_id, name, cwd, shell, startup_command, status, persist_history, last_seq, created_at, updated_at)
@@ -592,7 +623,7 @@ impl Store {
         session_id: &str,
         status: StoredSessionStatus,
     ) -> Result<(), String> {
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         conn.execute(
             "UPDATE sessions SET status = ?1, updated_at = ?2 WHERE id = ?3",
             params![status_to_db(&status), now_millis() as i64, session_id],
@@ -607,7 +638,7 @@ impl Store {
             return Err("session name cannot be empty".to_string());
         }
 
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         let affected = conn
             .execute(
                 "UPDATE sessions SET name = ?1, updated_at = ?2 WHERE id = ?3",
@@ -625,7 +656,7 @@ impl Store {
         session_id: &str,
         persist_history: bool,
     ) -> Result<(), String> {
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         conn.execute(
             "UPDATE sessions SET persist_history = ?1, updated_at = ?2 WHERE id = ?3",
             params![
@@ -643,7 +674,7 @@ impl Store {
         session_id: &str,
         startup_command: Option<&str>,
     ) -> Result<(), String> {
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         let startup_command = startup_command
             .map(str::trim)
             .filter(|value| !value.is_empty())
@@ -660,7 +691,7 @@ impl Store {
     }
 
     pub fn delete_session(&self, session_id: &str) -> Result<(), String> {
-        let mut conn = self.open_connection()?;
+        let mut conn = self.conn()?;
         let tx = conn
             .transaction()
             .map_err(|err| format!("open delete session transaction failed: {err}"))?;
@@ -700,7 +731,7 @@ impl Store {
         target_profile_id: &str,
         target_index: Option<usize>,
     ) -> Result<(), String> {
-        let mut conn = self.open_connection()?;
+        let mut conn = self.conn()?;
         let tx = conn
             .transaction()
             .map_err(|err| format!("open move session transaction failed: {err}"))?;
@@ -777,7 +808,7 @@ impl Store {
             return Ok(());
         }
 
-        let mut conn = self.open_connection()?;
+        let mut conn = self.conn()?;
         let tx = conn
             .transaction()
             .map_err(|err| format!("open move sessions transaction failed: {err}"))?;
@@ -865,7 +896,7 @@ impl Store {
         profile_id: &str,
         session_id: Option<&str>,
     ) -> Result<(), String> {
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         let key = format!("{ACTIVE_SESSION_PREFIX}{profile_id}");
         match session_id {
             Some(value) => {
@@ -884,7 +915,7 @@ impl Store {
     }
 
     pub fn update_session_seq(&self, session_id: &str, seq: u64) -> Result<(), String> {
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         conn.execute(
             "UPDATE sessions SET last_seq = MAX(last_seq, ?1), updated_at = ?2 WHERE id = ?3",
             params![seq as i64, now_millis() as i64, session_id],
@@ -900,7 +931,7 @@ impl Store {
         chunk: &str,
         ts: u64,
     ) -> Result<(), String> {
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         let line_count = if chunk.is_empty() {
             0
         } else {
@@ -921,7 +952,7 @@ impl Store {
         records: &[StoredScrollbackRecordInput],
         ts: u64,
     ) -> Result<(), String> {
-        let mut conn = self.open_connection()?;
+        let mut conn = self.conn()?;
         let tx = conn
             .transaction()
             .map_err(|err| format!("open append scrollback records transaction failed: {err}"))?;
@@ -958,7 +989,7 @@ impl Store {
         chunk: &str,
         ts: u64,
     ) -> Result<(), String> {
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         conn.execute(
             "INSERT OR REPLACE INTO session_terminal_replay_chunks (session_id, seq, chunk_text, ts) VALUES (?1, ?2, ?3, ?4)",
             params![session_id, seq as i64, chunk, ts as i64],
@@ -971,7 +1002,7 @@ impl Store {
         &self,
         session_id: &str,
     ) -> Result<Vec<StoredScrollbackRecord>, String> {
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
                 "SELECT seq, ord, kind, record_text, ts FROM scrollback_records WHERE session_id = ?1 ORDER BY seq ASC, ord ASC",
@@ -1005,7 +1036,7 @@ impl Store {
         &self,
         session_id: &str,
     ) -> Result<Vec<StoredLegacyScrollbackChunk>, String> {
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
                 "SELECT seq, chunk_text, ts FROM scrollback_chunks WHERE session_id = ?1 ORDER BY seq ASC",
@@ -1035,7 +1066,7 @@ impl Store {
         &self,
         session_id: &str,
     ) -> Result<Vec<StoredTerminalReplayChunk>, String> {
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
                 "SELECT seq, chunk_text, ts FROM session_terminal_replay_chunks WHERE session_id = ?1 ORDER BY seq ASC",
@@ -1089,36 +1120,51 @@ impl Store {
         max_lines: usize,
     ) -> Result<(), String> {
         let max_lines = max_lines.max(1);
-        let records = self.list_scrollback_records(session_id)?;
-        if records.is_empty() {
+        let conn = self.conn()?;
+
+        // Count total lines for this session to determine if pruning is needed.
+        let total_lines: i64 = conn
+            .query_row(
+                "SELECT COALESCE(SUM(CASE WHEN kind = 'line' THEN 1 ELSE 0 END), 0) FROM scrollback_records WHERE session_id = ?1",
+                params![session_id],
+                |row| row.get(0),
+            )
+            .map_err(|err| format!("count scrollback lines failed: {err}"))?;
+
+        if total_lines <= max_lines as i64 {
             return Ok(());
         }
 
-        let mut retained_lines = 0usize;
-        let mut cutoff: Option<(u64, u64)> = None;
-        for record in records.iter().rev() {
-            if record.kind != StoredScrollbackRecordKind::Line {
-                if cutoff.is_none() {
-                    cutoff = Some((record.seq, record.ord));
-                }
-                continue;
-            }
-
-            if retained_lines >= max_lines {
-                break;
-            }
-            retained_lines += 1;
-            cutoff = Some((record.seq, record.ord));
-        }
+        // Find the cutoff point: keep the last `max_lines` line-type records.
+        // Walk records from newest to oldest, count lines, find the (seq, ord)
+        // of the last record to keep.
+        let cutoff = conn
+            .query_row(
+                r#"
+                SELECT seq, ord FROM (
+                    SELECT seq, ord, kind,
+                           SUM(CASE WHEN kind = 'line' THEN 1 ELSE 0 END)
+                               OVER (ORDER BY seq DESC, ord DESC) AS cumulative_lines
+                    FROM scrollback_records
+                    WHERE session_id = ?1
+                ) sub
+                WHERE cumulative_lines >= ?2 AND kind = 'line'
+                ORDER BY seq ASC, ord ASC
+                LIMIT 1
+                "#,
+                params![session_id, max_lines as i64],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .optional()
+            .map_err(|err| format!("compute scrollback cutoff failed: {err}"))?;
 
         let Some((cutoff_seq, cutoff_ord)) = cutoff else {
             return Ok(());
         };
 
-        let conn = self.open_connection()?;
         conn.execute(
             "DELETE FROM scrollback_records WHERE session_id = ?1 AND (seq < ?2 OR (seq = ?2 AND ord < ?3))",
-            params![session_id, cutoff_seq as i64, cutoff_ord as i64],
+            params![session_id, cutoff_seq, cutoff_ord],
         )
         .map_err(|err| format!("apply canonical retention delete failed: {err}"))?;
         Ok(())
@@ -1130,7 +1176,7 @@ impl Store {
         max_lines: usize,
     ) -> Result<(), String> {
         let max_lines = max_lines.max(1);
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
                 "SELECT seq, line_count FROM scrollback_chunks WHERE session_id = ?1 ORDER BY seq DESC",
@@ -1178,7 +1224,7 @@ impl Store {
         session_id: &str,
         preview_lines: usize,
     ) -> Result<StoredSessionSnapshot, String> {
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
                 "SELECT seq, chunk_text, line_count FROM scrollback_chunks WHERE session_id = ?1 ORDER BY seq DESC LIMIT 4096",
@@ -1228,7 +1274,7 @@ impl Store {
     }
 
     pub fn clear_session_history(&self, session_id: &str) -> Result<(), String> {
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         conn.execute(
             "DELETE FROM scrollback_chunks WHERE session_id = ?1",
             params![session_id],
@@ -1253,7 +1299,7 @@ impl Store {
     }
 
     pub fn clear_all_history(&self) -> Result<(), String> {
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         conn.execute("DELETE FROM scrollback_chunks", [])
             .map_err(|err| format!("clear all history failed: {err}"))?;
         conn.execute("DELETE FROM scrollback_records", [])
@@ -1269,7 +1315,7 @@ impl Store {
     }
 
     fn init_schema(&self) -> Result<(), String> {
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         conn.execute_batch(schema::INIT_SQL)
             .map_err(|err| format!("initialize schema failed: {err}"))?;
         self.migrate_sort_order_columns(&conn)?;
@@ -1278,7 +1324,7 @@ impl Store {
     }
 
     fn ensure_default_profile(&self) -> Result<(), String> {
-        let conn = self.open_connection()?;
+        let conn = self.conn()?;
         let count: i64 = conn
             .query_row("SELECT COUNT(1) FROM profiles", [], |row| row.get(0))
             .map_err(|err| format!("count profiles failed: {err}"))?;
@@ -1301,9 +1347,15 @@ impl Store {
         Ok(())
     }
 
-    fn open_connection(&self) -> Result<Connection, String> {
-        let conn = Connection::open(&self.db_path)
-            .map_err(|err| format!("open database failed ('{}'): {err}", self.db_path.display()))?;
+    fn conn(&self) -> Result<MutexGuard<'_, Connection>, String> {
+        self.conn
+            .lock()
+            .map_err(|_| "store connection lock poisoned".to_string())
+    }
+
+    fn new_connection(db_path: &Path) -> Result<Connection, String> {
+        let conn = Connection::open(db_path)
+            .map_err(|err| format!("open database failed ('{}'): {err}", db_path.display()))?;
         conn.pragma_update(None, "foreign_keys", "ON")
             .map_err(|err| format!("enable foreign_keys failed: {err}"))?;
         conn.busy_timeout(std::time::Duration::from_secs(2))

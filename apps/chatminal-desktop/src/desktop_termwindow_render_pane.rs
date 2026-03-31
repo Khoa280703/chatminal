@@ -102,6 +102,27 @@ impl crate::TermWindow {
         }
     }
 
+    pub(crate) fn scroll_bar_track_geometry_for_pane(
+        &self,
+        pane_id: u64,
+    ) -> Option<(usize, usize, usize, usize)> {
+        let pos = self
+            .get_panes_to_render()
+            .into_iter()
+            .find(|pos| pos.pane.pane_id() as u64 == pane_id)?;
+        let pane_rects = self.pane_pixel_rects(&pos);
+        let padding = self.effective_right_padding(&self.config);
+        let thumb_x = pane_rects
+            .background_rect
+            .max_x()
+            .round()
+            .max(padding as f32) as usize
+            - padding;
+        let thumb_y = pane_rects.content_rect.min_y().max(pane_rects.content_top) as usize;
+        let track_height = pane_rects.content_rect.height().max(0.0).round() as usize;
+        Some((thumb_x, thumb_y, padding, track_height))
+    }
+
     fn paint_pane_box_model(&mut self, pos: &TerminalPaneLayout) -> anyhow::Result<()> {
         let computed = self.build_pane(pos)?;
         let mut ui_items = computed.ui_items();
@@ -142,14 +163,6 @@ impl crate::TermWindow {
         let palette = pos.pane.palette();
         let pane_rects = self.pane_pixel_rects(pos);
 
-        let bottom_bar_height = if self.show_session_bar && self.config.session_bar_at_bottom {
-            self.tab_bar_pixel_height()
-                .context("tab_bar_pixel_height")?
-        } else {
-            0.
-        };
-
-        let border = self.get_os_border();
         let top_pixel_y =
             pane_rects.grid_origin.y + (pos.top as f32 * self.render_metrics.cell_size.height as f32);
 
@@ -253,72 +266,82 @@ impl crate::TermWindow {
             }
         }
 
-        // TODO: we only have a single scrollbar in a single position.
-        // We only update it for the active pane, but we should probably
-        // do a per-pane scrollbar.  That will require more extensive
-        // changes to ScrollHit, mouse positioning, positioned pane layout
-        // and tab size calculation.
-        if pos.is_active && self.show_scroll_bar {
-            let thumb_y_offset = pane_rects.content_top as usize;
+        if self.show_scroll_bar {
+            let pane_id = pos.pane.pane_id() as u64;
+            let thumb_y_offset = pane_rects.content_rect.min_y().max(pane_rects.content_top) as usize;
+            let track_height = pane_rects.content_rect.height().max(0.0).round() as usize;
+            if track_height > 0 {
+                let min_height = self.min_scroll_bar_height();
 
-            let min_height = self.min_scroll_bar_height();
+                let info = ScrollHit::thumb(
+                    &*pos.pane,
+                    current_viewport,
+                    track_height,
+                    min_height as usize,
+                );
+                let abs_thumb_top = thumb_y_offset + info.top;
+                let thumb_size = info.height;
+                let color = palette.scrollbar_thumb.to_linear();
 
-            let info = ScrollHit::thumb(
-                &*pos.pane,
-                current_viewport,
-                self.dimensions.pixel_height.saturating_sub(
-                    thumb_y_offset + border.bottom.get() + bottom_bar_height as usize,
-                ),
-                min_height as usize,
-            );
-            let abs_thumb_top = thumb_y_offset + info.top;
-            let thumb_size = info.height;
-            let color = palette.scrollbar_thumb.to_linear();
+                let config = &self.config;
+                let padding = self.effective_right_padding(&config) as f32;
+                let track_right = pane_rects.background_rect.max_x().round().max(padding) as usize;
+                let thumb_x = track_right.saturating_sub(padding.round() as usize);
+                let track_bottom = thumb_y_offset + track_height;
+                let below_thumb_y = abs_thumb_top + thumb_size;
+                let (r, g, b, _) = color.tuple();
 
-            // Adjust the scrollbar thumb position
-            let config = &self.config;
-            let padding = self.effective_right_padding(&config) as f32;
+                self.ui_items.push(UIItem {
+                    x: thumb_x,
+                    width: padding as usize,
+                    y: thumb_y_offset,
+                    height: info.top,
+                    item_type: UIItemType::AboveScrollThumb(pane_id),
+                });
+                self.ui_items.push(UIItem {
+                    x: thumb_x,
+                    width: padding as usize,
+                    y: abs_thumb_top,
+                    height: thumb_size,
+                    item_type: UIItemType::ScrollThumb(pane_id),
+                });
+                self.ui_items.push(UIItem {
+                    x: thumb_x,
+                    width: padding as usize,
+                    y: abs_thumb_top + thumb_size,
+                    height: self
+                        .dimensions.pixel_height
+                        .min(track_bottom)
+                        .saturating_sub(below_thumb_y),
+                    item_type: UIItemType::BelowScrollThumb(pane_id),
+                });
 
-            let thumb_x = self.dimensions.pixel_width - padding as usize - border.right.get();
+                self.filled_rectangle(
+                    layers,
+                    1,
+                    euclid::rect(
+                        thumb_x as f32,
+                        thumb_y_offset as f32,
+                        padding,
+                        track_height as f32,
+                    ),
+                    LinearRgba::with_components(r, g, b, 0.16),
+                )
+                .context("filled_rectangle")?;
 
-            // Register the scroll bar location
-            self.ui_items.push(UIItem {
-                x: thumb_x,
-                width: padding as usize,
-                y: thumb_y_offset,
-                height: info.top,
-                item_type: UIItemType::AboveScrollThumb,
-            });
-            self.ui_items.push(UIItem {
-                x: thumb_x,
-                width: padding as usize,
-                y: abs_thumb_top,
-                height: thumb_size,
-                item_type: UIItemType::ScrollThumb,
-            });
-            self.ui_items.push(UIItem {
-                x: thumb_x,
-                width: padding as usize,
-                y: abs_thumb_top + thumb_size,
-                height: self
-                    .dimensions
-                    .pixel_height
-                    .saturating_sub(abs_thumb_top + thumb_size),
-                item_type: UIItemType::BelowScrollThumb,
-            });
-
-            self.filled_rectangle(
-                layers,
-                2,
-                euclid::rect(
-                    thumb_x as f32,
-                    abs_thumb_top as f32,
-                    padding,
-                    thumb_size as f32,
-                ),
-                color,
-            )
-            .context("filled_rectangle")?;
+                self.filled_rectangle(
+                    layers,
+                    2,
+                    euclid::rect(
+                        thumb_x as f32,
+                        abs_thumb_top as f32,
+                        padding,
+                        thumb_size as f32,
+                    ),
+                    color,
+                )
+                .context("filled_rectangle")?;
+            }
         }
 
         let (selrange, rectangular) = {

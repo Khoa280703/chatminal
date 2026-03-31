@@ -184,9 +184,9 @@ pub enum UIItemType {
     SessionBar(SessionBarItem),
     CloseSessionEntry(usize),
     CloseSession(String),
-    AboveScrollThumb,
-    ScrollThumb,
-    BelowScrollThumb,
+    AboveScrollThumb(u64),
+    ScrollThumb(u64),
+    BelowScrollThumb(u64),
     Split(TerminalSplit),
     ChatminalSidebarBackground,
     ChatminalSidebarResizeHandle,
@@ -692,6 +692,8 @@ impl TermWindow {
         self.chatminal_sidebar_seen_version = self.chatminal_sidebar.version();
         self.chatminal_sidebar_poll_started = true;
         self.ensure_chatminal_active_session_runtime();
+        let _ = crate::chatminal_runtime::desktop_prepare_workspace_layout(self.terminal_size);
+        let _ = crate::chatminal_runtime::desktop_resize_visible_sessions(self.terminal_size);
         self.schedule_chatminal_sidebar_tick();
     }
 
@@ -719,6 +721,8 @@ impl TermWindow {
         if version != self.chatminal_sidebar_seen_version {
             self.chatminal_sidebar_seen_version = version;
             self.ensure_chatminal_active_session_runtime();
+            let _ = crate::chatminal_runtime::desktop_prepare_workspace_layout(self.terminal_size);
+            let _ = crate::chatminal_runtime::desktop_resize_visible_sessions(self.terminal_size);
             if let Some(window) = self.window.as_ref() {
                 window.invalidate();
             }
@@ -1434,7 +1438,6 @@ impl TermWindow {
         };
         self.set_modal(Rc::new(StartupRecipeModal::new(
             session.session_id,
-            session.name,
             session.startup_command.unwrap_or_default(),
         )));
     }
@@ -2484,27 +2487,9 @@ impl TermWindow {
     }
 
     fn is_pane_visible(&mut self, pane_id: TerminalUiKey) -> bool {
-        if self.chatminal_sidebar.is_enabled() {
-            if let Some(render_target_overlay) = self.active_render_target_overlay() {
-                return render_target_overlay.pane_id() as u64 == pane_id;
-            }
-            let Some(session_id) = self.active_session_id() else {
-                return false;
-            };
-            return self
-                .positioned_panes_for_session(&session_id)
-                .into_iter()
-                .any(|pos| pos.pane.pane_id() as u64 == pane_id);
-        }
-
-        let Some(render_target_id) = self.active_render_scope_id() else {
-            return false;
-        };
-        if let Some(render_target_overlay) = self.render_target_overlay(render_target_id) {
-            return render_target_overlay.pane_id() as u64 == pane_id;
-        }
-
-        self.active_render_target_contains_terminal(pane_id)
+        self.get_panes_to_render()
+            .into_iter()
+            .any(|pos| pos.pane.pane_id() as u64 == pane_id)
     }
 
     fn handle_pane_output_event(&mut self, pane_id: TerminalUiKey) {
