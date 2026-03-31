@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use chatminal_terminal_core::TerminalSize;
 use portable_pty::CommandBuilder;
 
@@ -43,7 +45,7 @@ impl StatefulSessionEngine {
         }
         self.event_hub()
             .publish(SessionRuntimeEvent::TerminalInstanceFocused {
-                session_id: session_id.to_string(),
+                session_id: Arc::from(session_id),
                 runtime_id,
                 terminal_instance_id,
             });
@@ -59,7 +61,7 @@ impl StatefulSessionEngine {
     ) -> Option<SessionRuntimeState> {
         self.event_hub()
             .publish(SessionRuntimeEvent::RuntimeFocused {
-                session_id: session_id.to_string(),
+                session_id: Arc::from(session_id),
                 runtime_id,
             });
         self.snapshot_runtime_from_core(runtime_id)
@@ -91,7 +93,7 @@ impl StatefulSessionEngine {
         if removed {
             self.event_hub()
                 .publish(SessionRuntimeEvent::RuntimeClosed {
-                    session_id: session_id.to_string(),
+                    session_id: Arc::from(session_id),
                     runtime_id,
                 });
         }
@@ -164,7 +166,7 @@ impl StatefulSessionEngine {
         )?;
         self.event_hub()
             .publish(SessionRuntimeEvent::RuntimeAttached {
-                session_id: session_id.clone(),
+                session_id: Arc::from(session_id.as_str()),
                 runtime_id,
             });
 

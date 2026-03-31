@@ -116,6 +116,7 @@ pub struct LineToEleShapeCacheKey {
 pub struct LineToElementShapeItem {
     pub expires: Option<Instant>,
     pub shaped: Rc<Vec<LineToElementShape>>,
+    pub clusters: Rc<Vec<CellCluster>>,
     // Only set if the line contains any hyperlinks, so
     // that we can invalidate when it changes
     pub current_highlight: Option<Arc<Hyperlink>>,
@@ -130,7 +131,7 @@ pub struct LineToElementShape {
     pub x_pos: f32,
     pub pixel_width: f32,
     pub glyph_info: Rc<Vec<ShapedInfo>>,
-    pub cluster: CellCluster,
+    pub cluster_idx: usize,
 }
 
 pub struct RenderScreenLineResult {
@@ -864,6 +865,9 @@ impl crate::TermWindow {
         self.shape_generation += 1;
         self.shape_cache.borrow_mut().clear();
         self.line_to_ele_shape_cache.borrow_mut().clear();
+        self.sidebar_tree_cache = None;
+        self.sidebar_header_cache = None;
+        self.sidebar_footer_background_cache = None;
         if let Some(render_state) = self.render_state.as_mut() {
             render_state.recreate_texture_atlas(&self.fonts, &self.render_metrics, size)?;
         }

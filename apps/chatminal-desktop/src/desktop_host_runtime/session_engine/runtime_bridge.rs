@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use super::{
     RuntimeId, SessionEventBus, SessionRuntimeEvent, SessionRuntimeLookup, SessionWorkspaceHost,
 };
@@ -43,7 +45,7 @@ impl<'a, H: SessionWorkspaceHost, B: SessionEventBus> SessionRuntimeBridge<'a, H
             self.host.activate_session(session_id)?;
         }
         self.bus.publish(SessionRuntimeEvent::RuntimeFocused {
-            session_id: session_id.to_string(),
+            session_id: Arc::from(session_id),
             runtime_id,
         });
         Ok(())
@@ -56,7 +58,7 @@ impl<'a, H: SessionWorkspaceHost, B: SessionEventBus> SessionRuntimeBridge<'a, H
         lookup_after_close: &SessionRuntimeLookup,
     ) -> Result<(), String> {
         self.bus.publish(SessionRuntimeEvent::RuntimeClosed {
-            session_id: session_id.to_string(),
+            session_id: Arc::from(session_id),
             runtime_id,
         });
 
@@ -73,7 +75,7 @@ impl<'a, H: SessionWorkspaceHost, B: SessionEventBus> SessionRuntimeBridge<'a, H
         if let Some(next_session_id) = lookup_after_close.active_session_id.as_deref() {
             self.host.activate_session(next_session_id)?;
             self.bus.publish(SessionRuntimeEvent::RuntimeFocused {
-                session_id: next_session_id.to_string(),
+                session_id: Arc::from(next_session_id),
                 runtime_id: lookup_after_close
                     .runtime_ids_by_session
                     .get(next_session_id)
@@ -176,7 +178,7 @@ mod tests {
         assert_eq!(
             bus.events.lock().expect("lock bus").as_slice(),
             [SessionRuntimeEvent::RuntimeFocused {
-                session_id: "session-b".to_string(),
+                session_id: "session-b".into(),
                 runtime_id: RuntimeId::new(22),
             }]
         );
@@ -205,11 +207,11 @@ mod tests {
             bus.events.lock().expect("lock bus").as_slice(),
             [
                 SessionRuntimeEvent::RuntimeClosed {
-                    session_id: "session-a".to_string(),
+                    session_id: "session-a".into(),
                     runtime_id: RuntimeId::new(11),
                 },
                 SessionRuntimeEvent::RuntimeFocused {
-                    session_id: "session-b".to_string(),
+                    session_id: "session-b".into(),
                     runtime_id: RuntimeId::new(33),
                 }
             ]
@@ -239,11 +241,11 @@ mod tests {
             bus.events.lock().expect("lock bus").as_slice(),
             [
                 SessionRuntimeEvent::RuntimeClosed {
-                    session_id: "session-a".to_string(),
+                    session_id: "session-a".into(),
                     runtime_id: RuntimeId::new(11),
                 },
                 SessionRuntimeEvent::RuntimeFocused {
-                    session_id: "session-b".to_string(),
+                    session_id: "session-b".into(),
                     runtime_id: RuntimeId::new(44),
                 }
             ]

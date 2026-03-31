@@ -1,5 +1,30 @@
 # Project Changelog
 
+## 2026-03-29
+
+### Changed
+- Thêm `startup_command` theo từng session:
+  - SQLite `sessions` có field `startup_command`
+  - runtime/session snapshot mang theo metadata này để desktop sidebar dùng trực tiếp
+  - khi session spawn runtime mới, `chatminal-runtime` tự gửi startup recipe đúng 1 lần cho shell
+  - desktop sidebar context menu có `Startup recipe...` và `Chạy startup recipe ngay`
+  - editor của session row hỗ trợ 2 mode inline: đổi tên session và sửa startup recipe
+  - desktop startup recipe editor đã đổi từ inline edit trong session tree sang modal riêng để nhập recipe dễ hơn
+  - startup recipe v2 vẫn tương thích giá trị cũ kiểu `claude`, đồng thời hỗ trợ recipe nhiều bước bằng `;` hoặc newline:
+    - `run <command>`
+    - `type <text>`
+    - `enter`
+    - `wait <ms>` / `sleep <ms>`
+    - `wait-for <substring> timeout=<ms>`
+  - runtime giữ `recent_output_tail` ngắn theo session để `wait-for` có thể chờ output thật từ PTY mà không đụng terminal core
+
+### Verification
+- `cargo check -p chatminal-desktop -p chatminal-runtime -p chatminal-store` pass
+- `cargo test -p chatminal-runtime session_activate_runs_startup_command_on_spawn -- --nocapture` pass
+- `cargo test -p chatminal-runtime session_run_startup_command_supports_wait_for_and_sleep_steps -- --nocapture` pass
+- `cargo test -p chatminal-runtime state::startup_recipe::tests -- --nocapture` pass
+- `cargo test --manifest-path crates/chatminal-store/Cargo.toml session_startup_command_roundtrips_and_clears -- --nocapture` pass
+
 ## 2026-03-27
 
 ### Changed

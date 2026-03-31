@@ -104,7 +104,14 @@ impl RuntimeState {
             plan.rows,
         )?;
 
+        let session_id = plan.session_id.clone();
         let outcome = self.finish_spawn_commit(plan, runtime)?;
+        if matches!(outcome, SpawnCommitOutcome::Committed)
+            && let Err(err) = self.spawn_startup_recipe_runner(&session_id)
+            && err != "session has no startup command"
+        {
+            log::warn!("session startup recipe failed for {session_id}: {err}");
+        }
         Ok(outcome)
     }
 
@@ -159,6 +166,7 @@ impl RuntimeState {
                             entry.prepend_run_boundary_on_next_output =
                                 prepend_run_boundary_on_next_output;
                             entry.restored_trailing_fragment = restored_trailing_fragment;
+                            entry.recent_output_tail.clear();
                         }
                         inner
                             .store
@@ -202,6 +210,7 @@ impl StateInner {
                 generation: 0,
                 prepend_run_boundary_on_next_output: false,
                 restored_trailing_fragment: None,
+                recent_output_tail: String::new(),
             },
         );
         self.set_active_session_and_publish(&session.profile_id, &session.session_id)
@@ -364,6 +373,7 @@ fn disconnect_session_entry(
     }
     entry.prepend_run_boundary_on_next_output = false;
     entry.restored_trailing_fragment = None;
+    entry.recent_output_tail.clear();
     entry.session.status = StoredSessionStatus::Disconnected;
     entry.runtime.take()
 }

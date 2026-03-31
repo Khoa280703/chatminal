@@ -268,7 +268,7 @@ fn close_runtime_native_removes_state_and_publishes_closed_event() {
             Some(SessionRuntimeEvent::RuntimeClosed {
                 session_id: ref sid,
                 runtime_id: sid2,
-            }) if sid == "session-a" && sid2 == runtime_id => break,
+            }) if &**sid == "session-a" && sid2 == runtime_id => break,
             Some(_) => continue,
             None => panic!("timed out waiting for RuntimeClosed event"),
         }

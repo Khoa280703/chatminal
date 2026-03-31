@@ -9,38 +9,38 @@ use super::{RuntimeId, TerminalInstanceId};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SessionRuntimeEvent {
     RuntimeAttached {
-        session_id: String,
+        session_id: Arc<str>,
         runtime_id: RuntimeId,
     },
     RuntimeFocused {
-        session_id: String,
+        session_id: Arc<str>,
         runtime_id: RuntimeId,
     },
     TerminalInstanceFocused {
-        session_id: String,
+        session_id: Arc<str>,
         runtime_id: RuntimeId,
         terminal_instance_id: TerminalInstanceId,
     },
     RuntimeClosed {
-        session_id: String,
+        session_id: Arc<str>,
         runtime_id: RuntimeId,
     },
     TerminalInstanceOutput {
-        session_id: String,
+        session_id: Arc<str>,
         generation: u64,
         runtime_id: RuntimeId,
         terminal_instance_id: TerminalInstanceId,
         chunk: String,
     },
     TerminalInstanceExited {
-        session_id: String,
+        session_id: Arc<str>,
         generation: u64,
         runtime_id: RuntimeId,
         terminal_instance_id: TerminalInstanceId,
         exit_code: Option<i32>,
     },
     TerminalInstanceError {
-        session_id: String,
+        session_id: Arc<str>,
         generation: u64,
         runtime_id: RuntimeId,
         terminal_instance_id: TerminalInstanceId,

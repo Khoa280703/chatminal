@@ -3,6 +3,8 @@
 // Used by runtime unit tests that exercise native session execution.
 
 use std::io::{Read, Write};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -80,6 +82,8 @@ impl RuntimeSessionHandleTrait for TestSessionHandle {
 pub struct TestExecutionBridge {
     workspace_layouts: Arc<Mutex<WorkspaceLayoutRegistry>>,
     events_tx: OnceLock<mpsc::SyncSender<SessionEvent>>,
+    attachments: Mutex<HashMap<String, (RuntimeId, TerminalInstanceId)>>,
+    next_runtime_id: AtomicU64,
 }
 
 impl TestExecutionBridge {
@@ -87,6 +91,8 @@ impl TestExecutionBridge {
         Self {
             workspace_layouts: Arc::new(Mutex::new(WorkspaceLayoutRegistry::default())),
             events_tx: OnceLock::new(),
+            attachments: Mutex::new(HashMap::new()),
+            next_runtime_id: AtomicU64::new(1),
         }
     }
 }
@@ -105,6 +111,9 @@ impl RuntimeExecutionAdapter for TestExecutionBridge {
         cols: usize,
         rows: usize,
     ) -> Result<RuntimeHandle, String> {
+        let runtime_id = RuntimeId::new(self.next_runtime_id.fetch_add(1, Ordering::Relaxed));
+        let terminal_instance_id =
+            TerminalInstanceId::new(self.next_runtime_id.fetch_add(1, Ordering::Relaxed));
         let pty_system = NativePtySystem::default();
         let pair = pty_system
             .openpty(PtySize {
@@ -134,7 +143,7 @@ impl RuntimeExecutionAdapter for TestExecutionBridge {
                         Ok(n) => {
                             let chunk = String::from_utf8_lossy(&buf[..n]).into_owned();
                             let _ = tx.send(SessionEvent::Output {
-                                session_id: session_id.clone(),
+                                session_id: Arc::from(session_id.as_str()),
                                 generation,
                                 chunk,
                                 ts: 0,
@@ -143,13 +152,18 @@ impl RuntimeExecutionAdapter for TestExecutionBridge {
                     }
                 }
                 let _ = tx.send(SessionEvent::Exited {
-                    session_id: session_id.clone(),
+                    session_id: Arc::from(session_id.as_str()),
                     generation,
                     exit_code: Some(0),
                     reason: "eof".to_string(),
                 });
             });
         }
+
+        self.attachments
+            .lock()
+            .map_err(|_| "lock test attachments".to_string())?
+            .insert(session_id.to_string(), (runtime_id, terminal_instance_id));
 
         Ok(Arc::new(Mutex::new(TestSessionHandle {
             master: Mutex::new(pair.master),
@@ -162,8 +176,11 @@ impl RuntimeExecutionAdapter for TestExecutionBridge {
         Arc::clone(&self.workspace_layouts)
     }
 
-    fn attachment(&self, _session_id: &str) -> Option<(RuntimeId, TerminalInstanceId)> {
-        None
+    fn attachment(&self, session_id: &str) -> Option<(RuntimeId, TerminalInstanceId)> {
+        self.attachments
+            .lock()
+            .ok()
+            .and_then(|attachments| attachments.get(session_id).copied())
     }
 
     fn reconcile_session_lookup(

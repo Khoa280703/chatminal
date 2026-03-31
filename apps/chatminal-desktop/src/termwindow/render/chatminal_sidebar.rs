@@ -29,6 +29,33 @@ const SIDEBAR_JOIN_CONNECTOR_WIDTH_PX: f32 = 14.0;
 const SIDEBAR_JOIN_CONNECTOR_SLOT_WIDTH_PX: f32 = 18.0;
 const SIDEBAR_JOIN_CONNECTOR_HEIGHT_OVERLAP_PX: f32 = 10.0;
 
+pub(crate) struct SidebarTreeCache {
+    pub version: u64,
+    pub width_bits: u32,
+    pub viewport_bits: u32,
+    pub dpi: u32,
+    pub shape_generation: usize,
+    pub computed: crate::termwindow::box_model::ComputedElement,
+    pub clip_rect: ::window::RectF,
+}
+
+pub(crate) struct SidebarHeaderCache {
+    pub version: u64,
+    pub width_bits: u32,
+    pub dpi: u32,
+    pub shape_generation: usize,
+    pub computed: crate::termwindow::box_model::ComputedElement,
+}
+
+pub(crate) struct SidebarFooterBackgroundCache {
+    pub x_bits: u32,
+    pub y_bits: u32,
+    pub width_bits: u32,
+    pub height_bits: u32,
+    pub dpi: u32,
+    pub computed: crate::termwindow::box_model::ComputedElement,
+}
+
 #[derive(Clone)]
 enum SidebarTreeRow {
     Error(String),
@@ -283,7 +310,7 @@ impl crate::TermWindow {
         let body_font = self.sidebar_text_font()?;
 
         let text = LinearRgba::with_components(0.800, 0.800, 0.800, 1.0);
-        let root = Element::new(&body_font, ElementContent::Children(vec![]))
+        let root = Element::new(&body_font, ElementContent::Children(Vec::new()))
             .display(crate::termwindow::box_model::DisplayType::Block)
             .item_type(UIItemType::ChatminalSidebarBackground)
             .colors(ElementColors {
@@ -326,6 +353,21 @@ impl crate::TermWindow {
         sb: &crate::shell_bounds::ShellBounds,
     ) -> anyhow::Result<crate::termwindow::box_model::ComputedElement> {
         let sidebar_width = sb.sidebar_width;
+        let version = self.chatminal_sidebar.version();
+        let width_bits = sidebar_width.to_bits();
+        let dpi = self.dimensions.dpi as u32;
+        let shape_generation = self.shape_generation;
+
+        if let Some(ref cache) = self.sidebar_header_cache {
+            if cache.version == version
+                && cache.width_bits == width_bits
+                && cache.dpi == dpi
+                && cache.shape_generation == shape_generation
+            {
+                return Ok(cache.computed.clone());
+            }
+        }
+
         let body_font = self.sidebar_text_font()?;
         let title_font = self.sidebar_header_font()?;
         let text = LinearRgba::with_components(0.800, 0.800, 0.800, 1.0);
@@ -340,7 +382,7 @@ impl crate::TermWindow {
             muted,
             hover_bg,
         )?;
-        self.compute_element(
+        let computed = self.compute_element(
             &crate::termwindow::box_model::LayoutContext {
                 width: config::DimensionContext {
                     dpi: self.dimensions.dpi as f32,
@@ -363,7 +405,17 @@ impl crate::TermWindow {
                 zindex: 2,
             },
             &header,
-        )
+        )?;
+
+        self.sidebar_header_cache = Some(SidebarHeaderCache {
+            version,
+            width_bits,
+            dpi,
+            shape_generation,
+            computed: computed.clone(),
+        });
+
+        Ok(computed)
     }
 
     fn build_chatminal_sidebar_tree(
@@ -391,6 +443,34 @@ impl crate::TermWindow {
             return Ok((None, tree_clip_rect));
         }
 
+        let version = snapshot.version;
+        let width_bits = sidebar_width.to_bits();
+        let viewport_bits = tree_viewport_height.to_bits();
+        let dpi = self.dimensions.dpi as u32;
+        let shape_generation = self.shape_generation;
+
+        // Check tree cache — reuse pre-scroll computed element if key matches.
+        if let Some(ref cache) = self.sidebar_tree_cache {
+            if cache.version == version
+                && cache.width_bits == width_bits
+                && cache.viewport_bits == viewport_bits
+                && cache.dpi == dpi
+                && cache.shape_generation == shape_generation
+            {
+                // Still need to update scroll bounds from cached geometry.
+                let line_height = self.render_metrics.cell_size.height as f32;
+                let tree_rows = sidebar_tree_rows(self, &snapshot);
+                let total_tree_height = total_tree_height(&tree_rows, line_height);
+                let max_scroll_offset = (total_tree_height - tree_viewport_height).max(0.0);
+                self.chatminal_sidebar.set_scroll_bounds(max_scroll_offset);
+
+                let mut computed = cache.computed.clone();
+                let scroll_offset_px = self.chatminal_sidebar.scroll_offset_px();
+                computed.translate(euclid::vec2(0.0, -scroll_offset_px));
+                return Ok((Some(computed), cache.clip_rect));
+            }
+        }
+
         let body_font = self.sidebar_text_font()?;
         let status_font = self.sidebar_text_font()?;
         let line_height = self.render_metrics.cell_size.height as f32;
@@ -404,12 +484,14 @@ impl crate::TermWindow {
         let error_fg = LinearRgba::with_components(0.973, 0.502, 0.439, 1.0);
 
         let tree_rows = sidebar_tree_rows(self, &snapshot);
+        let joined_markers = joined_session_markers(&snapshot);
         let total_tree_height = total_tree_height(&tree_rows, line_height);
         let max_scroll_offset = (total_tree_height - tree_viewport_height).max(0.0);
         self.chatminal_sidebar.set_scroll_bounds(max_scroll_offset);
 
         let tree_children = self.build_chatminal_sidebar_tree_row_elements(
             &tree_rows,
+            &joined_markers,
             &body_font,
             &status_font,
             text,
@@ -434,7 +516,7 @@ impl crate::TermWindow {
             .min_height(Some(Dimension::Pixels(
                 total_tree_height.max(tree_viewport_height),
             )));
-        let mut computed = self.compute_element(
+        let computed = self.compute_element(
             &crate::termwindow::box_model::LayoutContext {
                 width: config::DimensionContext {
                     dpi: self.dimensions.dpi as f32,
@@ -458,6 +540,19 @@ impl crate::TermWindow {
             },
             &tree,
         )?;
+
+        // Store pre-scroll computed element in cache.
+        self.sidebar_tree_cache = Some(SidebarTreeCache {
+            version,
+            width_bits,
+            viewport_bits,
+            dpi,
+            shape_generation,
+            computed: computed.clone(),
+            clip_rect: tree_clip_rect,
+        });
+
+        let mut computed = computed;
         let scroll_offset_px = self.chatminal_sidebar.scroll_offset_px();
         computed.translate(euclid::vec2(0.0, -scroll_offset_px));
         Ok((Some(computed), tree_clip_rect))
@@ -580,10 +675,10 @@ impl crate::TermWindow {
         .float(Float::Right)
         .colors(text_colors(muted));
 
-        let mut children = Vec::new();
+        let mut children = Vec::with_capacity(2);
         if body_width >= SIDEBAR_COMPACT_TITLE_HIDE_WIDTH_PX {
             children.push(
-                Element::new(title_font, ElementContent::Text("Profiles".to_string()))
+                Element::new(title_font, ElementContent::Text("Profiles".into()))
                     .display(crate::termwindow::box_model::DisplayType::Inline)
                     .colors(text_colors(text)),
             );
@@ -626,7 +721,7 @@ impl crate::TermWindow {
         let fg = LinearRgba::with_components(0.92, 0.92, 0.92, 1.0);
         let bg = LinearRgba::with_components(0.10, 0.10, 0.10, 0.98);
         let border = LinearRgba::with_components(0.24, 0.24, 0.24, 1.0);
-        let tooltip = Element::new(&body_font, ElementContent::Text(label.to_string()))
+        let tooltip = Element::new(&body_font, ElementContent::Text(label.into()))
             .display(crate::termwindow::box_model::DisplayType::Block)
             .padding(BoxDimension {
                 left: Dimension::Pixels(8.0),
@@ -673,6 +768,23 @@ impl crate::TermWindow {
         )?))
     }
 
+    fn hovered_sidebar_session_menu_item(&self) -> Option<UIItemType> {
+        let item = self.last_ui_item.as_ref()?;
+        let event = self.current_mouse_event.as_ref()?;
+        if !item.hit_test(event.coords.x, event.coords.y) {
+            return None;
+        }
+        match &item.item_type {
+            UIItemType::ChatminalSidebarSessionMenuJoin(_)
+            | UIItemType::ChatminalSidebarSessionMenuUnjoin(_)
+            | UIItemType::ChatminalSidebarSessionMenuRename(_)
+            | UIItemType::ChatminalSidebarSessionMenuStartupCommand(_)
+            | UIItemType::ChatminalSidebarSessionMenuRunStartupCommand(_)
+            | UIItemType::ChatminalSidebarSessionMenuDelete(_) => Some(item.item_type.clone()),
+            _ => None,
+        }
+    }
+
     fn build_chatminal_sidebar_session_context_menu(
         &mut self,
         sb: &crate::shell_bounds::ShellBounds,
@@ -692,15 +804,22 @@ impl crate::TermWindow {
         let selected_session_count = selected_session_ids.len();
         let can_join_selected_sessions = selected_session_count >= 2
             && selected_sessions_share_profile(&snapshot, &selected_session_ids);
-        let is_joined = joined_session_markers(self).contains_key(&session.session_id);
+        let joined_markers = joined_session_markers(&snapshot);
+        let is_joined = joined_markers.contains_key(&session.session_id);
+        let has_startup_command = session
+            .startup_command
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty());
 
         let body_font = self.sidebar_text_font()?;
         let text = LinearRgba::with_components(0.92, 0.92, 0.92, 1.0);
         let hover_bg = LinearRgba::with_components(0.20, 0.24, 0.28, 1.0);
         let bg = LinearRgba::with_components(0.03, 0.03, 0.03, 0.995);
         let border = bg;
+        let hovered_item = self.hovered_sidebar_session_menu_item();
         let menu_item = |label: &str, item_type| {
-            Element::new(&body_font, ElementContent::Text(label.to_string()))
+            let is_hovered = hovered_item.as_ref() == Some(&item_type);
+            Element::new(&body_font, ElementContent::Text(label.into()))
                 .display(crate::termwindow::box_model::DisplayType::Block)
                 .item_type(item_type)
                 .padding(BoxDimension {
@@ -715,10 +834,16 @@ impl crate::TermWindow {
                 .max_width(Some(Dimension::Pixels(
                     SIDEBAR_CONTEXT_MENU_ITEM_CONTENT_WIDTH_PX,
                 )))
-                .colors(filled_colors(LinearRgba::TRANSPARENT, text))
-                .hover_colors(Some(filled_colors(hover_bg, text)))
+                .colors(filled_colors(
+                    if is_hovered {
+                        hover_bg
+                    } else {
+                        LinearRgba::TRANSPARENT
+                    },
+                    text,
+                ))
         };
-        let mut entries: Vec<(&str, UIItemType)> = Vec::new();
+        let mut entries: Vec<(&str, UIItemType)> = Vec::with_capacity(6);
         if can_join_selected_sessions {
             entries.push((
                 "Join session",
@@ -735,6 +860,18 @@ impl crate::TermWindow {
             "Đổi tên",
             UIItemType::ChatminalSidebarSessionMenuRename(session.session_id.clone()),
         ));
+        entries.push((
+            "Startup recipe...",
+            UIItemType::ChatminalSidebarSessionMenuStartupCommand(session.session_id.clone()),
+        ));
+        if has_startup_command {
+            entries.push((
+                "Chạy startup recipe ngay",
+                UIItemType::ChatminalSidebarSessionMenuRunStartupCommand(
+                    session.session_id.clone(),
+                ),
+            ));
+        }
         entries.push((
             "Xoá",
             UIItemType::ChatminalSidebarSessionMenuDelete(session.session_id.clone()),
@@ -796,6 +933,7 @@ impl crate::TermWindow {
     fn build_chatminal_sidebar_tree_row_elements(
         &mut self,
         rows: &[SidebarTreeRow],
+        joined_markers: &std::collections::BTreeMap<String, JoinedSessionMarker>,
         body_font: &std::rc::Rc<engine_font::LoadedFont>,
         status_font: &std::rc::Rc<engine_font::LoadedFont>,
         text: LinearRgba,
@@ -839,6 +977,7 @@ impl crate::TermWindow {
                     body_font,
                     status_font,
                     session,
+                    joined_markers.get(&session.session_id).copied(),
                     text,
                     muted,
                     accent,
@@ -955,6 +1094,7 @@ impl crate::TermWindow {
         body_font: &std::rc::Rc<engine_font::LoadedFont>,
         status_font: &std::rc::Rc<engine_font::LoadedFont>,
         session: &SidebarSession,
+        joined_marker: Option<JoinedSessionMarker>,
         text: LinearRgba,
         _muted: LinearRgba,
         accent: LinearRgba,
@@ -1011,29 +1151,22 @@ impl crate::TermWindow {
         };
         let terminal =
             self.sidebar_icon_element(LucideIcon::SquareTerminal, self.sidebar_icon_size_px())?;
-        let joined_markers = joined_session_markers(self);
-        let joined_marker = joined_markers.get(&session.session_id).copied();
-        let inline_rename = self.chatminal_sidebar.inline_rename_state();
-        let is_inline_rename = inline_rename
+        let inline_edit = self.chatminal_sidebar.inline_session_edit_state();
+        let is_inline_edit = inline_edit
             .as_ref()
-            .map(|rename| rename.session_id == session.session_id)
+            .map(|edit| edit.session_id == session.session_id)
             .unwrap_or(false);
-        let is_inline_rename_selected = inline_rename
+        let is_inline_edit_selected = inline_edit
             .as_ref()
-            .map(|rename| rename.session_id == session.session_id && rename.select_all)
+            .map(|edit| edit.session_id == session.session_id && edit.select_all)
             .unwrap_or(false);
-        let session_label = if is_inline_rename {
-            format!(
-                "{}_",
-                inline_rename
-                    .as_ref()
-                    .map(|rename| rename.input.as_str())
-                    .unwrap_or("")
-            )
+        let session_label = if is_inline_edit {
+            let edit = inline_edit.as_ref().filter(|edit| edit.session_id == session.session_id);
+            format!("{}_", edit.map(|edit| edit.input.as_str()).unwrap_or(""))
         } else {
             session.name.clone()
         };
-        let status_suffix = if is_inline_rename {
+        let status_suffix = if is_inline_edit {
             None
         } else {
             Some(format!(
@@ -1041,17 +1174,17 @@ impl crate::TermWindow {
                 if is_running { "Online" } else { "Offline" }
             ))
         };
-        let rename_bg = if is_inline_rename_selected {
+        let rename_bg = if is_inline_edit_selected {
             LinearRgba::with_components(0.086, 0.322, 0.620, 1.0)
         } else {
             LinearRgba::with_components(0.12, 0.12, 0.12, 1.0)
         };
-        let rename_border = if is_inline_rename_selected {
+        let rename_border = if is_inline_edit_selected {
             LinearRgba::with_components(0.184, 0.510, 0.855, 1.0)
         } else {
             LinearRgba::with_components(0.28, 0.28, 0.28, 1.0)
         };
-        let rename_text = if is_inline_rename_selected {
+        let rename_text = if is_inline_edit_selected {
             LinearRgba::with_components(1.0, 1.0, 1.0, 1.0)
         } else {
             name_color
@@ -1120,10 +1253,10 @@ impl crate::TermWindow {
                     .colors(text_colors(connector_color)),
             },
             inline_icon(terminal.colors(text_colors(terminal_fg)), 7.0),
-            Element::new(body_font, ElementContent::Text(session_label))
+                Element::new(body_font, ElementContent::Text(session_label))
                 .display(crate::termwindow::box_model::DisplayType::Inline)
                 .vertical_align(VerticalAlign::Middle)
-                .padding(if is_inline_rename {
+                .padding(if is_inline_edit {
                     BoxDimension {
                         left: Dimension::Pixels(6.0),
                         right: Dimension::Pixels(6.0),
@@ -1133,12 +1266,12 @@ impl crate::TermWindow {
                 } else {
                     BoxDimension::default()
                 })
-                .border(if is_inline_rename {
+                .border(if is_inline_edit {
                     BoxDimension::new(Dimension::Pixels(1.0))
                 } else {
                     BoxDimension::default()
                 })
-                .colors(if is_inline_rename {
+                .colors(if is_inline_edit {
                     ElementColors {
                         border: BorderColor::new(rename_border),
                         bg: rename_bg.into(),
@@ -1205,7 +1338,7 @@ impl crate::TermWindow {
         let muted = LinearRgba::with_components(0.533, 0.533, 0.533, 1.0);
         let accent = LinearRgba::with_components(0.318, 0.639, 0.318, 1.0);
 
-        let mut tabs = Vec::new();
+        let mut tabs = Vec::with_capacity(3);
         for session in snapshot.sessions.iter().take(2) {
             tabs.push(session_pill(
                 &body_font,
@@ -1220,7 +1353,7 @@ impl crate::TermWindow {
             ));
         }
         tabs.push(
-            Element::new(&body_font, ElementContent::Text("+".to_string()))
+            Element::new(&body_font, ElementContent::Text("+".into()))
                 .display(crate::termwindow::box_model::DisplayType::Inline)
                 .float(Float::Right)
                 .item_type(UIItemType::ChatminalSidebarCreateSession)
@@ -1301,11 +1434,26 @@ impl crate::TermWindow {
         let width = sb.footer_width;
         let height = sb.footer_height;
         let y = sb.footer_y;
+        let x_bits = x.to_bits();
+        let y_bits = y.to_bits();
+        let width_bits = width.to_bits();
+        let height_bits = height.to_bits();
+        let dpi = self.dimensions.dpi as u32;
+        if let Some(ref cache) = self.sidebar_footer_background_cache {
+            if cache.x_bits == x_bits
+                && cache.y_bits == y_bits
+                && cache.width_bits == width_bits
+                && cache.height_bits == height_bits
+                && cache.dpi == dpi
+            {
+                return Ok(cache.computed.clone());
+            }
+        }
         let body_font = self.fonts.title_font()?;
         let bg = LinearRgba::with_components(0.0, 0.0, 0.0, 1.0);
         let divider = LinearRgba::with_components(0.133, 0.133, 0.133, 1.0);
 
-        let root = Element::new(&body_font, ElementContent::Children(vec![]))
+        let root = Element::new(&body_font, ElementContent::Children(Vec::new()))
             .display(crate::termwindow::box_model::DisplayType::Block)
             .padding(BoxDimension {
                 left: Dimension::Pixels(0.0),
@@ -1327,7 +1475,7 @@ impl crate::TermWindow {
             .min_width(Some(Dimension::Pixels(width)))
             .min_height(Some(Dimension::Pixels(height)));
 
-        self.compute_element(
+        let computed = self.compute_element(
             &crate::termwindow::box_model::LayoutContext {
                 width: config::DimensionContext {
                     dpi: self.dimensions.dpi as f32,
@@ -1345,7 +1493,18 @@ impl crate::TermWindow {
                 zindex: 2,
             },
             &root,
-        )
+        )?;
+
+        self.sidebar_footer_background_cache = Some(SidebarFooterBackgroundCache {
+            x_bits,
+            y_bits,
+            width_bits,
+            height_bits,
+            dpi,
+            computed: computed.clone(),
+        });
+
+        Ok(computed)
     }
 
     fn build_chatminal_terminal_footer_content(
@@ -1368,17 +1527,17 @@ impl crate::TermWindow {
             .iter()
             .find(|p| p.is_active)
             .map(|p| p.name.clone())
-            .unwrap_or_else(|| "Profile".to_string());
+            .unwrap_or_else(|| "Profile".into());
         let active_session = snapshot
             .sessions
             .iter()
             .find(|s| s.is_active)
             .map(|s| s.name.clone())
-            .unwrap_or_else(|| "Session".to_string());
+            .unwrap_or_else(|| "Session".into());
 
         let metrics = self.system_metrics.snapshot();
 
-        let items: Vec<(&str, String)> = vec![
+        let items = [
             (
                 "Session: ",
                 format!("{} ({})", active_session, active_profile),
@@ -1387,7 +1546,7 @@ impl crate::TermWindow {
             ("RAM: ", metrics.ram_display()),
             ("Latency: ", metrics.latency_display()),
         ];
-        let mut footer_parts = Vec::new();
+        let mut footer_parts = Vec::with_capacity(items.len() * 3 - 1);
         for (i, (lbl, val)) in items.iter().rev().enumerate() {
             footer_parts.push(
                 Element::new(&body_font, ElementContent::Text(val.clone()))
@@ -1396,14 +1555,14 @@ impl crate::TermWindow {
                     .colors(text_colors(value)),
             );
             footer_parts.push(
-                Element::new(&body_font, ElementContent::Text(lbl.to_string()))
+                Element::new(&body_font, ElementContent::Text((*lbl).into()))
                     .display(crate::termwindow::box_model::DisplayType::Inline)
                     .float(Float::Right)
                     .colors(text_colors(label)),
             );
             if i + 1 < items.len() {
                 footer_parts.push(
-                    Element::new(&body_font, ElementContent::Text("  |  ".to_string()))
+                    Element::new(&body_font, ElementContent::Text("  |  ".into()))
                         .display(crate::termwindow::box_model::DisplayType::Inline)
                         .float(Float::Right)
                         .colors(text_colors(sep)),
@@ -1469,10 +1628,10 @@ fn sidebar_tree_rows(
         return vec![SidebarTreeRow::Error(error.clone())];
     }
     if snapshot.profiles.is_empty() {
-        return vec![SidebarTreeRow::EmptyHint("No profiles yet".to_string())];
+        return vec![SidebarTreeRow::EmptyHint("No profiles yet".into())];
     }
 
-    let mut rows = Vec::new();
+    let mut rows = Vec::with_capacity(snapshot.profiles.len() + snapshot.sessions.len());
     for profile in &snapshot.profiles {
         let is_expanded = term_window
             .chatminal_sidebar
@@ -1490,7 +1649,7 @@ fn sidebar_tree_rows(
                 .collect();
             if profile_sessions.is_empty() {
                 rows.push(SidebarTreeRow::EmptyNestedHint(
-                    "No sessions yet".to_string(),
+                    "No sessions yet".into(),
                 ));
             } else {
                 for session in profile_sessions {
@@ -1503,11 +1662,10 @@ fn sidebar_tree_rows(
 }
 
 fn joined_session_markers(
-    _term_window: &crate::TermWindow,
+    snapshot: &SidebarSnapshot,
 ) -> std::collections::BTreeMap<String, JoinedSessionMarker> {
-    let snapshot = _term_window.chatminal_sidebar.snapshot();
     let active_profile_id = snapshot.active_profile_id.as_deref();
-    let mut groups = Vec::new();
+    let mut groups = Vec::with_capacity(snapshot.profiles.len());
     let mut seen_group_keys = std::collections::BTreeSet::new();
 
     for profile in &snapshot.profiles {
@@ -1814,7 +1972,7 @@ fn empty_hint(
     label: &str,
     muted_fg: LinearRgba,
 ) -> Element {
-    Element::new(body_font, ElementContent::Text(label.to_string()))
+    Element::new(body_font, ElementContent::Text(label.into()))
         .display(crate::termwindow::box_model::DisplayType::Block)
         .margin(block_margin(12.0, 0.0))
         .colors(text_colors(muted_fg))
@@ -1825,7 +1983,7 @@ fn empty_nested_hint(
     label: &str,
     muted_fg: LinearRgba,
 ) -> Element {
-    Element::new(body_font, ElementContent::Text(label.to_string()))
+    Element::new(body_font, ElementContent::Text(label.into()))
         .display(crate::termwindow::box_model::DisplayType::Block)
         .margin(BoxDimension {
             left: Dimension::Pixels(14.0),

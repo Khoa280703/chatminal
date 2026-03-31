@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
@@ -148,6 +149,17 @@ fn restore_snapshot(state: &RuntimeState, session_id: &str) -> crate::api::Runti
     state
         .session_restore_snapshot_get(session_id)
         .expect("load restore snapshot")
+}
+
+fn wait_for_file_len(path: &std::path::Path, expected_len: usize) -> String {
+    for _ in 0..40 {
+        let content = std::fs::read_to_string(path).unwrap_or_default();
+        if content.len() >= expected_len {
+            return content;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    std::fs::read_to_string(path).unwrap_or_default()
 }
 
 #[test]
@@ -363,7 +375,7 @@ fn stale_output_event_is_ignored_by_generation_guard() {
     }
 
     state.apply_session_event(SessionEvent::Output {
-        session_id: session_id.clone(),
+        session_id: Arc::from(session_id.as_str()),
         generation: 2,
         chunk: "ignored-output".to_string(),
         ts: 1,
@@ -393,7 +405,7 @@ fn stale_exit_event_does_not_flip_session_status() {
     }
 
     state.apply_session_event(SessionEvent::Exited {
-        session_id: session_id.clone(),
+        session_id: Arc::from(session_id.as_str()),
         generation: 4,
         exit_code: Some(0),
         reason: "stale".to_string(),
@@ -422,7 +434,7 @@ fn lifecycle_preferences_default_values() {
 fn metrics_snapshot_tracks_session_events() {
     let (state, session_id, _db) = create_state_with_session();
     state.apply_session_event(SessionEvent::Output {
-        session_id,
+        session_id: Arc::from(session_id.as_str()),
         generation: 0,
         chunk: "hello\n".to_string(),
         ts: 1,
@@ -1082,6 +1094,75 @@ fn session_activate_resizes_existing_runtime() {
 }
 
 #[test]
+fn session_activate_runs_startup_command_on_spawn() {
+    let (state, session_id, db) = create_state_with_session();
+    let marker_file = db.path.with_extension("startup-marker");
+    let _ = std::fs::remove_file(&marker_file);
+    let startup_command = format!("printf x >> '{}'", marker_file.display());
+
+    state
+        .session_set_startup_command(&session_id, Some(&startup_command))
+        .expect("set startup command");
+
+    state
+        .session_activate(&session_id, 80, 24)
+        .expect("activate session");
+    let first_content = wait_for_file_len(&marker_file, 1);
+    assert_eq!(first_content, "x");
+
+    state.app_shutdown();
+    let _ = std::fs::remove_file(&marker_file);
+}
+
+#[test]
+fn session_run_startup_command_supports_wait_for_and_sleep_steps() {
+    let (state, session_id, db) = create_state_with_session();
+    let marker_file = db.path.with_extension("startup-recipe-marker");
+    let _ = std::fs::remove_file(&marker_file);
+    let startup_recipe = format!(
+        "wait-for READY timeout=3000; wait 50; run printf y >> '{}'",
+        marker_file.display()
+    );
+
+    state
+        .session_set_startup_command(&session_id, Some(&startup_recipe))
+        .expect("set startup recipe");
+
+    state
+        .session_activate(&session_id, 80, 24)
+        .expect("activate session");
+    let generation = {
+        let inner = state.inner.lock().expect("lock state");
+        inner
+            .sessions
+            .get(&session_id)
+            .expect("session entry exists")
+            .generation
+    };
+
+    let cloned = state.clone();
+    let session_id_for_output = session_id.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(100));
+        cloned.apply_session_event(SessionEvent::Output {
+            session_id: Arc::from(session_id_for_output.as_str()),
+            generation,
+            chunk: "READY\n".to_string(),
+            ts: 0,
+        });
+    });
+
+    state
+        .session_run_startup_command(&session_id)
+        .expect("run startup recipe");
+    let content = wait_for_file_len(&marker_file, 1);
+    assert_eq!(content, "y");
+
+    state.app_shutdown();
+    let _ = std::fs::remove_file(&marker_file);
+}
+
+#[test]
 fn session_focus_updates_active_session_without_resizing_runtime() {
     let (state, session_a, session_b, _db) = create_state_with_two_sessions();
 
@@ -1203,7 +1284,7 @@ fn session_history_clear_disconnects_runtime_and_resets_snapshot() {
         .expect("enable persist history");
 
     state.apply_session_event(SessionEvent::Output {
-        session_id: session_id.clone(),
+        session_id: Arc::from(session_id.as_str()),
         generation: 0,
         chunk: "echo hello\n".to_string(),
         ts: 11,
@@ -1275,7 +1356,7 @@ fn first_output_after_respawn_is_separated_from_prompt_only_snapshot() {
     }
 
     state.apply_session_event(SessionEvent::Output {
-        session_id: session_id.clone(),
+        session_id: Arc::from(session_id.as_str()),
         generation: 0,
         chunk: "khoa2807@host ~ % ".to_string(),
         ts: 1,
@@ -1295,7 +1376,7 @@ fn first_output_after_respawn_is_separated_from_prompt_only_snapshot() {
     }
 
     state.apply_session_event(SessionEvent::Output {
-        session_id: session_id.clone(),
+        session_id: Arc::from(session_id.as_str()),
         generation: 1,
         chunk: "khoa2807@host ~ % ".to_string(),
         ts: 2,
@@ -1322,7 +1403,7 @@ fn first_distinct_output_after_respawn_still_starts_on_new_line() {
     }
 
     state.apply_session_event(SessionEvent::Output {
-        session_id: session_id.clone(),
+        session_id: Arc::from(session_id.as_str()),
         generation: 0,
         chunk: "khoa2807@host ~ % ".to_string(),
         ts: 1,
@@ -1342,7 +1423,7 @@ fn first_distinct_output_after_respawn_still_starts_on_new_line() {
     }
 
     state.apply_session_event(SessionEvent::Output {
-        session_id: session_id.clone(),
+        session_id: Arc::from(session_id.as_str()),
         generation: 1,
         chunk: "command output\n".to_string(),
         ts: 2,
@@ -1366,7 +1447,7 @@ fn ansi_decorated_prompt_redraw_after_respawn_is_not_persisted_twice() {
     }
 
     state.apply_session_event(SessionEvent::Output {
-        session_id: session_id.clone(),
+        session_id: Arc::from(session_id.as_str()),
         generation: 0,
         chunk: "khoa2807@host ~ % ".to_string(),
         ts: 1,
@@ -1386,7 +1467,7 @@ fn ansi_decorated_prompt_redraw_after_respawn_is_not_persisted_twice() {
     }
 
     state.apply_session_event(SessionEvent::Output {
-        session_id: session_id.clone(),
+        session_id: Arc::from(session_id.as_str()),
         generation: 1,
         chunk: "\r\x1b[0m\x1b[27m\x1b[24m\x1b[Jkhoa2807@host ~ % ".to_string(),
         ts: 2,
@@ -1413,7 +1494,7 @@ fn repeated_prompt_redraws_after_respawn_are_all_ignored_until_real_output() {
     }
 
     state.apply_session_event(SessionEvent::Output {
-        session_id: session_id.clone(),
+        session_id: Arc::from(session_id.as_str()),
         generation: 0,
         chunk: "khoa2807@host ~ % ".to_string(),
         ts: 1,
@@ -1434,7 +1515,7 @@ fn repeated_prompt_redraws_after_respawn_are_all_ignored_until_real_output() {
 
     for ts in 2..=4 {
         state.apply_session_event(SessionEvent::Output {
-            session_id: session_id.clone(),
+            session_id: Arc::from(session_id.as_str()),
             generation: 1,
             chunk: "\r\x1b[0m\x1b[27m\x1b[24m\x1b[Jkhoa2807@host ~ % ".to_string(),
             ts,
@@ -1442,7 +1523,7 @@ fn repeated_prompt_redraws_after_respawn_are_all_ignored_until_real_output() {
     }
 
     state.apply_session_event(SessionEvent::Output {
-        session_id: session_id.clone(),
+        session_id: Arc::from(session_id.as_str()),
         generation: 1,
         chunk: "echo hi\nhi\n".to_string(),
         ts: 5,
@@ -1466,7 +1547,7 @@ fn identical_non_prompt_fragment_after_respawn_is_preserved() {
     }
 
     state.apply_session_event(SessionEvent::Output {
-        session_id: session_id.clone(),
+        session_id: Arc::from(session_id.as_str()),
         generation: 0,
         chunk: "identical payload".to_string(),
         ts: 1,
@@ -1486,7 +1567,7 @@ fn identical_non_prompt_fragment_after_respawn_is_preserved() {
     }
 
     state.apply_session_event(SessionEvent::Output {
-        session_id: session_id.clone(),
+        session_id: Arc::from(session_id.as_str()),
         generation: 1,
         chunk: "identical payload".to_string(),
         ts: 2,
@@ -1510,7 +1591,7 @@ fn prompt_redraw_prefixed_output_after_respawn_persists_only_new_output() {
     }
 
     state.apply_session_event(SessionEvent::Output {
-        session_id: session_id.clone(),
+        session_id: Arc::from(session_id.as_str()),
         generation: 0,
         chunk: "khoa2807@host ~ % ".to_string(),
         ts: 1,
@@ -1530,7 +1611,7 @@ fn prompt_redraw_prefixed_output_after_respawn_persists_only_new_output() {
     }
 
     state.apply_session_event(SessionEvent::Output {
-        session_id: session_id.clone(),
+        session_id: Arc::from(session_id.as_str()),
         generation: 1,
         chunk: "\r\x1b[0m\x1b[27m\x1b[24m\x1b[Jkhoa2807@host ~ % command output\n".to_string(),
         ts: 2,
@@ -1555,19 +1636,19 @@ fn persisted_history_applies_line_retention_limit() {
     }
 
     state.apply_session_event(SessionEvent::Output {
-        session_id: session_id.clone(),
+        session_id: Arc::from(session_id.as_str()),
         generation: 0,
         chunk: "l1\n".to_string(),
         ts: 1,
     });
     state.apply_session_event(SessionEvent::Output {
-        session_id: session_id.clone(),
+        session_id: Arc::from(session_id.as_str()),
         generation: 0,
         chunk: "l2\n".to_string(),
         ts: 2,
     });
     state.apply_session_event(SessionEvent::Output {
-        session_id: session_id.clone(),
+        session_id: Arc::from(session_id.as_str()),
         generation: 0,
         chunk: "l3\n".to_string(),
         ts: 3,
@@ -1643,7 +1724,7 @@ fn clear_history_generation_gate_ignores_old_output_after_reset() {
         .session_activate(&session_id, 120, 32)
         .expect("activate session");
     state.apply_session_event(SessionEvent::Output {
-        session_id: session_id.clone(),
+        session_id: Arc::from(session_id.as_str()),
         generation: 1,
         chunk: "before-clear\n".to_string(),
         ts: 1,
@@ -1653,7 +1734,7 @@ fn clear_history_generation_gate_ignores_old_output_after_reset() {
         .expect("clear session history");
 
     state.apply_session_event(SessionEvent::Output {
-        session_id: session_id.clone(),
+        session_id: Arc::from(session_id.as_str()),
         generation: 1,
         chunk: "stale-after-clear\n".to_string(),
         ts: 2,
@@ -2070,7 +2151,7 @@ fn persisted_output_writes_canonical_records_not_legacy_chunks() {
     }
 
     state.apply_session_event(SessionEvent::Output {
-        session_id: session_id.clone(),
+        session_id: Arc::from(session_id.as_str()),
         generation: 0,
         chunk: "echo hi\nprompt % ".to_string(),
         ts: 1,
@@ -2103,7 +2184,7 @@ fn workspace_history_clear_all_resets_all_sessions() {
             .session_activate(session_id, 120, 32)
             .expect("activate session");
         state.apply_session_event(SessionEvent::Output {
-            session_id: session_id.to_string(),
+            session_id: Arc::from(session_id.as_str()),
             generation: 1,
             chunk: format!("output-{session_id}\n"),
             ts: 1,

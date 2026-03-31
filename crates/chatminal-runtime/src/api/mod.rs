@@ -56,6 +56,7 @@ pub struct RuntimeSession {
     pub profile_id: String,
     pub name: String,
     pub cwd: String,
+    pub startup_command: Option<String>,
     pub status: RuntimeSessionStatus,
     pub persist_history: bool,
     pub seq: u64,
@@ -272,6 +273,7 @@ impl From<StoredSessionSummary> for RuntimeSession {
             profile_id: value.profile_id,
             name: value.name,
             cwd: value.cwd,
+            startup_command: value.startup_command,
             status: value.status.into(),
             persist_history: value.persist_history,
             seq: value.seq,
@@ -372,6 +374,7 @@ mod tests {
             profile_id: "profile-a".to_string(),
             name: "Shell".to_string(),
             cwd: "/tmp".to_string(),
+            startup_command: Some("claude".to_string()),
             status: StoredSessionStatus::Running,
             persist_history: true,
             seq: 7,
@@ -380,5 +383,6 @@ mod tests {
         assert_eq!(profile.profile_id, "profile-a");
         assert_eq!(session.status, RuntimeSessionStatus::Running);
         assert!(session.persist_history);
+        assert_eq!(session.startup_command.as_deref(), Some("claude"));
     }
 }

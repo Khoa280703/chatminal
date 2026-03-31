@@ -6,6 +6,7 @@ mod leaf_runtime;
 mod leaf_runtime_command;
 mod leaf_runtime_registry;
 mod leaf_runtime_threads;
+mod output_history;
 mod runtime_bridge;
 mod session_core_ids;
 mod session_core_state;

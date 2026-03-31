@@ -7,7 +7,7 @@ use std::sync::mpsc as std_mpsc;
 #[cfg(test)]
 use std::sync::mpsc::TrySendError;
 #[cfg(test)]
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 #[cfg(test)]
 use std::thread;
 #[cfg(test)]
@@ -52,22 +52,24 @@ impl std::fmt::Display for WriteInputError {
     }
 }
 
+use std::sync::Arc;
+
 #[derive(Debug, Clone)]
 pub enum SessionEvent {
     Output {
-        session_id: String,
+        session_id: Arc<str>,
         generation: u64,
         chunk: String,
         ts: u64,
     },
     Exited {
-        session_id: String,
+        session_id: Arc<str>,
         generation: u64,
         exit_code: Option<i32>,
         reason: String,
     },
     Error {
-        session_id: String,
+        session_id: Arc<str>,
         generation: u64,
         message: String,
     },
@@ -130,7 +132,7 @@ impl SessionRuntime {
 
         let (input_tx, input_rx) = std_mpsc::sync_channel::<Vec<u8>>(INPUT_QUEUE_CAPACITY);
 
-        let reader_session = session_id.clone();
+        let reader_session: Arc<str> = Arc::from(session_id.as_str());
         let reader_events = events.clone();
         let reader_handle = thread::spawn(move || {
             let mut buffer = vec![0u8; 64 * 1024];
@@ -140,7 +142,7 @@ impl SessionRuntime {
                     Ok(read) => {
                         let chunk = String::from_utf8_lossy(&buffer[..read]).to_string();
                         let _ = reader_events.send(SessionEvent::Output {
-                            session_id: reader_session.clone(),
+                            session_id: Arc::clone(&reader_session),
                             generation,
                             chunk,
                             ts: now_millis(),
@@ -148,7 +150,7 @@ impl SessionRuntime {
                     }
                     Err(err) => {
                         let _ = reader_events.send(SessionEvent::Error {
-                            session_id: reader_session.clone(),
+                            session_id: Arc::clone(&reader_session),
                             generation,
                             message: format!("pty read failed: {err}"),
                         });
@@ -158,13 +160,13 @@ impl SessionRuntime {
             }
         });
 
-        let writer_session = session_id.clone();
+        let writer_session: Arc<str> = Arc::from(session_id.as_str());
         let writer_events = events.clone();
         let writer_handle = thread::spawn(move || {
             while let Ok(chunk) = input_rx.recv() {
                 if let Err(err) = writer.write_all(&chunk) {
                     let _ = writer_events.send(SessionEvent::Error {
-                        session_id: writer_session.clone(),
+                        session_id: Arc::clone(&writer_session),
                         generation,
                         message: format!("pty write failed: {err}"),
                     });
@@ -174,7 +176,7 @@ impl SessionRuntime {
             }
         });
 
-        let waiter_session = session_id;
+        let waiter_session: Arc<str> = Arc::from(session_id.as_str());
         let waiter_events = events;
         let waiter_child = child.clone();
         let waiter_handle = thread::spawn(move || {

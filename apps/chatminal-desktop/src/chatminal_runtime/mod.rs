@@ -100,6 +100,7 @@ pub struct DesktopSidebarSession {
     pub profile_id: String,
     pub session_id: String,
     pub name: String,
+    pub startup_command: Option<String>,
     pub status: String,
     pub is_active: bool,
 }
@@ -368,6 +369,7 @@ pub(crate) fn build_desktop_sidebar_sessions(
                 is_active: active_session_id == Some(session.session_id.as_str()),
                 session_id: session.session_id.clone(),
                 name: session.name.clone(),
+                startup_command: session.startup_command.clone(),
                 status: format!("{:?}", session.status).to_lowercase(),
             });
         }
@@ -790,6 +792,17 @@ pub fn move_runtime_sessions_to_profile(
 
 pub fn rename_runtime_session(session_id: &str, name: &str) -> Result<RuntimeWorkspace, String> {
     runtime_client()?.session_rename(session_id, name)
+}
+
+pub fn set_runtime_session_startup_command(
+    session_id: &str,
+    startup_command: Option<&str>,
+) -> Result<RuntimeWorkspace, String> {
+    runtime_client()?.session_set_startup_command(session_id, startup_command)
+}
+
+pub fn run_runtime_session_startup_command(session_id: &str) -> Result<(), String> {
+    runtime_client()?.session_run_startup_command(session_id)
 }
 
 pub fn switch_runtime_profile(profile_id: &str) -> Result<RuntimeWorkspace, String> {

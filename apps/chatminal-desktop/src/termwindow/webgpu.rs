@@ -34,7 +34,14 @@ pub struct WebGpuState {
     pub texture_bind_group_layout: wgpu::BindGroupLayout,
     pub texture_nearest_sampler: wgpu::Sampler,
     pub texture_linear_sampler: wgpu::Sampler,
+    atlas_texture_bind_groups: RefCell<Option<AtlasTextureBindGroups>>,
     pub handle: RawHandlePair,
+}
+
+struct AtlasTextureBindGroups {
+    texture_key: usize,
+    linear: wgpu::BindGroup,
+    nearest: wgpu::BindGroup,
 }
 
 pub struct RawHandlePair {
@@ -506,7 +513,60 @@ impl WebGpuState {
             texture_bind_group_layout,
             texture_nearest_sampler,
             texture_linear_sampler,
+            atlas_texture_bind_groups: RefCell::new(None),
         })
+    }
+
+    pub fn atlas_texture_bind_groups(
+        &self,
+        texture: &WebGpuTexture,
+    ) -> (wgpu::BindGroup, wgpu::BindGroup) {
+        let texture_key = texture as *const WebGpuTexture as usize;
+
+        if let Some(cached) = self.atlas_texture_bind_groups.borrow().as_ref() {
+            if cached.texture_key == texture_key {
+                return (cached.linear.clone(), cached.nearest.clone());
+            }
+        }
+
+        let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let linear = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &self.texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.texture_linear_sampler),
+                },
+            ],
+            label: Some("linear bind group"),
+        });
+        let nearest = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &self.texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.texture_nearest_sampler),
+                },
+            ],
+            label: Some("nearest bind group"),
+        });
+
+        self.atlas_texture_bind_groups
+            .replace(Some(AtlasTextureBindGroups {
+                texture_key,
+                linear: linear.clone(),
+                nearest: nearest.clone(),
+            }));
+
+        (linear, nearest)
     }
 
     pub fn create_uniform(&self, uniform: ShaderUniform) -> wgpu::BindGroup {

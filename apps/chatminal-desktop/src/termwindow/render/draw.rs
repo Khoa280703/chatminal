@@ -20,7 +20,7 @@ impl crate::TermWindow {
     fn call_draw_webgpu(&mut self) -> anyhow::Result<()> {
         use crate::termwindow::webgpu::WebGpuTexture;
 
-        let webgpu = self.webgpu.as_mut().unwrap();
+        let webgpu = self.webgpu.as_ref().unwrap();
         let render_state = self.render_state.as_ref().unwrap();
 
         let output = webgpu.surface.get_current_texture()?;
@@ -34,39 +34,8 @@ impl crate::TermWindow {
             });
         let tex = render_state.glyph_cache.borrow().atlas.texture();
         let tex = tex.downcast_ref::<WebGpuTexture>().unwrap();
-        let texture_view = tex.create_view(&wgpu::TextureViewDescriptor::default());
-
-        let texture_linear_bind_group =
-            webgpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                layout: &webgpu.texture_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&texture_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&webgpu.texture_linear_sampler),
-                    },
-                ],
-                label: Some("linear bind group"),
-            });
-
-        let texture_nearest_bind_group =
-            webgpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                layout: &webgpu.texture_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&texture_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&webgpu.texture_nearest_sampler),
-                    },
-                ],
-                label: Some("nearest bind group"),
-            });
+        let (texture_linear_bind_group, texture_nearest_bind_group) =
+            webgpu.atlas_texture_bind_groups(tex);
 
         let mut cleared = false;
         let foreground_text_hsb = self.config.foreground_text_hsb;
@@ -87,9 +56,11 @@ impl crate::TermWindow {
         )
         .to_arrays_transposed();
 
-        for layer in render_state.layers.borrow().iter() {
+        let layers = render_state.layers.borrow();
+        for layer in layers.iter() {
+            let vbs = layer.vb.borrow();
             for idx in 0..3 {
-                let vb = &layer.vb.borrow()[idx];
+                let vb = &vbs[idx];
                 let (vertex_count, index_count) = vb.vertex_index_count();
                 let vertex_buffer;
                 let uniforms;
@@ -234,9 +205,11 @@ impl crate::TermWindow {
         let blink: ColorEaseUniform = (*self.blink_state.borrow()).into();
         let rapid_blink: ColorEaseUniform = (*self.rapid_blink_state.borrow()).into();
 
-        for layer in gl_state.layers.borrow().iter() {
+        let layers = gl_state.layers.borrow();
+        for layer in layers.iter() {
+            let vbs = layer.vb.borrow();
             for idx in 0..3 {
-                let vb = &layer.vb.borrow()[idx];
+                let vb = &vbs[idx];
                 let (vertex_count, index_count) = vb.vertex_index_count();
                 if vertex_count > 0 {
                     let vertices = vb.current_vb_mut();

@@ -190,7 +190,7 @@ enum OnlyKeyBindings {
 }
 
 impl super::TermWindow {
-    fn process_chatminal_sidebar_inline_rename_window_key(
+    fn process_chatminal_sidebar_inline_session_edit_window_key(
         &mut self,
         window_key: &KeyEvent,
         context: &dyn WindowOps,
@@ -200,14 +200,14 @@ impl super::TermWindow {
         }
 
         let key = self.win_key_code_to_termwiz_key_code(&window_key.key);
-        self.process_chatminal_sidebar_inline_rename_key(
+        self.process_chatminal_sidebar_inline_session_edit_key(
             &key,
             window_key.modifiers.remove_positional_mods(),
             context,
         )
     }
 
-    fn process_chatminal_sidebar_inline_rename_text(
+    fn process_chatminal_sidebar_inline_session_edit_text(
         &mut self,
         text: &str,
         raw_modifiers: Modifiers,
@@ -222,7 +222,7 @@ impl super::TermWindow {
             if c.is_control() {
                 continue;
             }
-            if self.chatminal_sidebar.inline_rename_push(c) {
+            if self.chatminal_sidebar.inline_session_edit_push(c) {
                 changed = true;
             }
         }
@@ -233,52 +233,58 @@ impl super::TermWindow {
         changed
     }
 
-    fn process_chatminal_sidebar_inline_rename_key(
+    fn process_chatminal_sidebar_inline_session_edit_key(
         &mut self,
         key: &Key,
         raw_modifiers: Modifiers,
         context: &dyn WindowOps,
     ) -> bool {
         if !self.chatminal_sidebar.is_enabled()
-            || self.chatminal_sidebar.inline_rename_state().is_none()
+            || self.chatminal_sidebar.inline_session_edit_state().is_none()
         {
             return false;
         }
 
         match key {
             Key::Code(::termwiz::input::KeyCode::Escape) => {
-                if self.chatminal_sidebar.inline_rename_cancel() {
+                if self.chatminal_sidebar.inline_session_edit_cancel() {
                     context.invalidate();
                 }
                 true
             }
             Key::Code(::termwiz::input::KeyCode::Enter) => {
-                if let Some((session_id, input)) = self.chatminal_sidebar.inline_rename_commit() {
+                if let Some((_kind, session_id, input)) =
+                    self.chatminal_sidebar.inline_session_edit_commit()
+                {
                     self.rename_chatminal_session(&session_id, &input);
                 }
                 context.invalidate();
                 true
             }
             Key::Code(::termwiz::input::KeyCode::Backspace) if raw_modifiers == Modifiers::NONE => {
-                if self.chatminal_sidebar.inline_rename_backspace() {
+                if self.chatminal_sidebar.inline_session_edit_backspace() {
                     context.invalidate();
                 }
                 true
             }
             Key::Code(::termwiz::input::KeyCode::Char('u')) if raw_modifiers == Modifiers::CTRL => {
-                if self.chatminal_sidebar.inline_rename_clear() {
+                if self.chatminal_sidebar.inline_session_edit_clear() {
                     context.invalidate();
                 }
                 true
             }
             Key::Code(::termwiz::input::KeyCode::Char(c)) => self
-                .process_chatminal_sidebar_inline_rename_text(
+                .process_chatminal_sidebar_inline_session_edit_text(
                     &c.to_string(),
                     raw_modifiers,
                     context,
                 ),
             Key::Composed(text) => {
-                self.process_chatminal_sidebar_inline_rename_text(text, raw_modifiers, context)
+                self.process_chatminal_sidebar_inline_session_edit_text(
+                    text,
+                    raw_modifiers,
+                    context,
+                )
             }
             _ => false,
         }
@@ -371,7 +377,7 @@ impl super::TermWindow {
         if is_down {
             let termwiz_key = self.win_key_code_to_termwiz_key_code(keycode);
             if only_key_bindings == OnlyKeyBindings::No
-                && self.process_chatminal_sidebar_inline_rename_key(
+                && self.process_chatminal_sidebar_inline_session_edit_key(
                     &termwiz_key,
                     raw_modifiers.remove_positional_mods(),
                     context,
@@ -541,10 +547,10 @@ impl super::TermWindow {
     }
 
     pub fn raw_key_event_impl(&mut self, key: RawKeyEvent, context: &dyn WindowOps) {
-        if self.chatminal_sidebar.inline_rename_state().is_some() {
+        if self.chatminal_sidebar.inline_session_edit_state().is_some() {
             if key.key_is_down {
                 let mapped = self.win_key_code_to_termwiz_key_code(&key.key);
-                if self.process_chatminal_sidebar_inline_rename_key(
+                if self.process_chatminal_sidebar_inline_session_edit_key(
                     &mapped,
                     key.modifiers.remove_positional_mods(),
                     context,
@@ -558,6 +564,29 @@ impl super::TermWindow {
                 return;
             }
         }
+
+        if self.get_modal().is_some() {
+            if key.key_is_down {
+                let modal = self.get_modal().unwrap();
+                let modifiers = key.modifiers.remove_positional_mods();
+                match self.win_key_code_to_termwiz_key_code(&key.key) {
+                    Key::Code(term_key) => {
+                        if let Err(err) = modal.key_down(term_key, modifiers, self) {
+                            log::error!("Error dispatching raw key to modal: {err:#}");
+                        }
+                    }
+                    Key::Composed(text) => {
+                        if let Err(err) = modal.text_input(&text, modifiers, self) {
+                            log::error!("Error dispatching raw text to modal: {err:#}");
+                        }
+                    }
+                    Key::None => {}
+                }
+            }
+            key.set_handled();
+            return;
+        }
+
         // The leader key is a kind of modal modifier key.
         // It is allowed to be active for up to the leader timeout duration,
         // after which it auto-deactivates.
@@ -776,8 +805,8 @@ impl super::TermWindow {
             return;
         }
 
-        if self.chatminal_sidebar.inline_rename_state().is_some() {
-            self.process_chatminal_sidebar_inline_rename_window_key(&window_key, context);
+        if self.chatminal_sidebar.inline_session_edit_state().is_some() {
+            self.process_chatminal_sidebar_inline_session_edit_window_key(&window_key, context);
             if window_key.key_is_down {
                 self.key_table_state.pop_until_unknown();
             }

@@ -29,6 +29,7 @@ impl StateInner {
                 session.persist_history = entry.session.persist_history;
                 session.cwd = entry.session.cwd.clone();
                 session.name = entry.session.name.clone();
+                session.startup_command = entry.session.startup_command.clone();
             }
         }
 
@@ -105,6 +106,24 @@ impl StateInner {
         if let Some(entry) = self.sessions.get_mut(session_id) {
             entry.session.name = name.trim().to_string();
         }
+        self.publish_session_and_workspace_updated(session_id);
+        self.load_workspace_snapshot()
+    }
+
+    pub(super) fn session_set_startup_command(
+        &mut self,
+        session_id: &str,
+        startup_command: Option<&str>,
+    ) -> Result<RuntimeWorkspace, String> {
+        self.store
+            .set_session_startup_command(session_id, startup_command)?;
+        let Some(entry) = self.sessions.get_mut(session_id) else {
+            return Err("session not found".to_string());
+        };
+        entry.session.startup_command = startup_command
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string);
         self.publish_session_and_workspace_updated(session_id);
         self.load_workspace_snapshot()
     }

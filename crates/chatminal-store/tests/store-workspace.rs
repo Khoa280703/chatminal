@@ -908,3 +908,49 @@ fn move_sessions_to_profile_moves_group_transactionally_across_profiles() {
     assert_eq!(workspace.active_profile_id, source_profile_id);
     assert_eq!(workspace.active_session_id.as_deref(), Some(first.session_id.as_str()));
 }
+
+#[test]
+fn session_startup_command_roundtrips_and_clears() {
+    let temp = TempDb::new();
+    let store = Store::initialize(&temp.path).expect("initialize store");
+    let active_profile_id = store
+        .load_workspace()
+        .expect("load workspace")
+        .active_profile_id;
+
+    let session = store
+        .create_session(
+            &active_profile_id,
+            Some("Startup".to_string()),
+            "/tmp".to_string(),
+            "/bin/bash".to_string(),
+            true,
+        )
+        .expect("create session");
+
+    store
+        .set_session_startup_command(&session.session_id, Some("claude"))
+        .expect("set startup command");
+    let loaded = store
+        .get_session(&session.session_id)
+        .expect("get session")
+        .expect("session exists");
+    assert_eq!(loaded.startup_command.as_deref(), Some("claude"));
+
+    let workspace = store.load_workspace().expect("reload workspace");
+    let summary = workspace
+        .sessions
+        .into_iter()
+        .find(|entry| entry.session_id == session.session_id)
+        .expect("workspace session summary exists");
+    assert_eq!(summary.startup_command.as_deref(), Some("claude"));
+
+    store
+        .set_session_startup_command(&session.session_id, Some("   "))
+        .expect("clear startup command");
+    let cleared = store
+        .get_session(&session.session_id)
+        .expect("get cleared session")
+        .expect("cleared session exists");
+    assert!(cleared.startup_command.is_none());
+}

@@ -16,8 +16,9 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty};
 
 use super::leaf_runtime_command::prepare_leaf_command;
 use super::leaf_runtime_threads::{
-    command_label, sanitize_zsh_prompt_spacer, spawn_reader_loop, spawn_waiter_loop, to_pty_size,
+    command_label, sanitize_zsh_prompt_spacer, spawn_reader_waiter_loop, to_pty_size,
 };
+use super::output_history::OutputHistory;
 use super::{RuntimeId, TerminalInstanceId, TerminalInstanceProcessState};
 
 #[derive(Clone, Debug)]
@@ -34,21 +35,21 @@ pub struct TerminalInstanceRuntimeSpawn {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TerminalInstanceRuntimeEvent {
     Output {
-        session_id: String,
+        session_id: Arc<str>,
         generation: u64,
         runtime_id: RuntimeId,
         terminal_instance_id: TerminalInstanceId,
         chunk: String,
     },
     Exited {
-        session_id: String,
+        session_id: Arc<str>,
         generation: u64,
         runtime_id: RuntimeId,
         terminal_instance_id: TerminalInstanceId,
         exit_code: Option<i32>,
     },
     Error {
-        session_id: String,
+        session_id: Arc<str>,
         generation: u64,
         runtime_id: RuntimeId,
         terminal_instance_id: TerminalInstanceId,
@@ -106,7 +107,7 @@ impl Write for SharedPtyWriter {
 pub struct TerminalInstanceRuntime {
     terminal: Arc<Mutex<CoreTerminal>>,
     io_terminal: Arc<Mutex<IoTerminal>>,
-    output_history: Arc<Mutex<Vec<String>>>,
+    output_history: Arc<Mutex<OutputHistory>>,
     master: Mutex<Box<dyn MasterPty + Send>>,
     child: Arc<Mutex<Box<dyn Child + Send + Sync>>>,
     writer: Arc<Mutex<Option<Box<dyn Write + Send>>>>,
@@ -157,7 +158,7 @@ impl TerminalInstanceRuntime {
             config::engine_version(),
             Box::new(SharedPtyWriter::new(Arc::clone(&writer))),
         )));
-        let output_history = Arc::new(Mutex::new(Vec::new()));
+        let output_history = Arc::new(Mutex::new(OutputHistory::new()));
         if let Some(scrollback) = spawn
             .initial_scrollback
             .as_ref()
@@ -174,15 +175,15 @@ impl TerminalInstanceRuntime {
             .master
             .try_clone_reader()
             .map_err(|err| format!("clone reader failed: {err}"))?;
-        spawn_reader_loop(
+        spawn_reader_waiter_loop(
             Arc::clone(&terminal),
             Arc::clone(&io_terminal),
             Arc::clone(&output_history),
             spawn.clone(),
-            events.clone(),
+            events,
             reader,
+            Arc::clone(&child),
         );
-        spawn_waiter_loop(spawn, events, Arc::clone(&child));
         log::debug!(
             "bootstrapped terminal instance runtime pid={:?}",
             process_state.process_id
@@ -213,7 +214,7 @@ impl TerminalInstanceRuntime {
     }
 
     pub fn replay_output(&self) -> String {
-        self.output_history.lock().unwrap().join("")
+        self.output_history.lock().unwrap().replay()
     }
 
     pub fn resize(&self, size: TerminalSize) -> Result<(), String> {

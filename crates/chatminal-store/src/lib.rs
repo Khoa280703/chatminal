@@ -28,6 +28,7 @@ pub struct StoredSessionSummary {
     pub profile_id: String,
     pub name: String,
     pub cwd: String,
+    pub startup_command: Option<String>,
     pub status: StoredSessionStatus,
     pub persist_history: bool,
     pub seq: u64,
@@ -93,6 +94,7 @@ pub struct StoredSession {
     pub name: String,
     pub cwd: String,
     pub shell: String,
+    pub startup_command: Option<String>,
     pub status: StoredSessionStatus,
     pub persist_history: bool,
     pub seq: u64,
@@ -496,6 +498,7 @@ impl Store {
             name: trimmed_name,
             cwd,
             shell,
+            startup_command: None,
             status: StoredSessionStatus::Disconnected,
             persist_history,
             seq: 0,
@@ -504,14 +507,15 @@ impl Store {
         let sort_order = self.next_session_sort_order_with_conn(&conn, profile_id)? as i64;
         let now = now_millis() as i64;
         conn.execute(
-            r#"INSERT INTO sessions (id, profile_id, name, cwd, shell, status, persist_history, last_seq, sort_order, created_at, updated_at)
-               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"#,
+            r#"INSERT INTO sessions (id, profile_id, name, cwd, shell, startup_command, status, persist_history, last_seq, sort_order, created_at, updated_at)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"#,
             params![
                 &stored.session_id,
                 &stored.profile_id,
                 &stored.name,
                 &stored.cwd,
                 &stored.shell,
+                &stored.startup_command,
                 status_to_db(&stored.status),
                 if stored.persist_history { 1 } else { 0 },
                 stored.seq as i64,
@@ -528,7 +532,7 @@ impl Store {
         let conn = self.open_connection()?;
         let row = conn
             .query_row(
-                "SELECT id, profile_id, name, cwd, shell, status, persist_history, last_seq FROM sessions WHERE id = ?1",
+                "SELECT id, profile_id, name, cwd, shell, startup_command, status, persist_history, last_seq FROM sessions WHERE id = ?1",
                 params![session_id],
                 |row| {
                     Ok(StoredSession {
@@ -537,9 +541,10 @@ impl Store {
                         name: row.get(2)?,
                         cwd: row.get(3)?,
                         shell: row.get(4)?,
-                        status: status_from_db(row.get::<_, String>(5)?.as_str()),
-                        persist_history: row.get::<_, i64>(6)? != 0,
-                        seq: row.get::<_, i64>(7)?.max(0) as u64,
+                        startup_command: row.get::<_, Option<String>>(5)?,
+                        status: status_from_db(row.get::<_, String>(6)?.as_str()),
+                        persist_history: row.get::<_, i64>(7)? != 0,
+                        seq: row.get::<_, i64>(8)?.max(0) as u64,
                     })
                 },
             )
@@ -552,13 +557,14 @@ impl Store {
         let conn = self.open_connection()?;
         let now = now_millis() as i64;
         conn.execute(
-            r#"INSERT INTO sessions (id, profile_id, name, cwd, shell, status, persist_history, last_seq, created_at, updated_at)
-               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            r#"INSERT INTO sessions (id, profile_id, name, cwd, shell, startup_command, status, persist_history, last_seq, created_at, updated_at)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
                ON CONFLICT(id) DO UPDATE SET
                    profile_id = excluded.profile_id,
                    name = excluded.name,
                    cwd = excluded.cwd,
                    shell = excluded.shell,
+                   startup_command = excluded.startup_command,
                    status = excluded.status,
                    persist_history = excluded.persist_history,
                    last_seq = excluded.last_seq,
@@ -569,6 +575,7 @@ impl Store {
                 &session.name,
                 &session.cwd,
                 &session.shell,
+                &session.startup_command,
                 status_to_db(&session.status),
                 if session.persist_history { 1 } else { 0 },
                 session.seq as i64,
@@ -628,6 +635,27 @@ impl Store {
             ],
         )
         .map_err(|err| format!("set session persist failed: {err}"))?;
+        Ok(())
+    }
+
+    pub fn set_session_startup_command(
+        &self,
+        session_id: &str,
+        startup_command: Option<&str>,
+    ) -> Result<(), String> {
+        let conn = self.open_connection()?;
+        let startup_command = startup_command
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string);
+        let affected = conn.execute(
+            "UPDATE sessions SET startup_command = ?1, updated_at = ?2 WHERE id = ?3",
+            params![startup_command, now_millis() as i64, session_id],
+        )
+        .map_err(|err| format!("set session startup command failed: {err}"))?;
+        if affected == 0 {
+            return Err("session not found".to_string());
+        }
         Ok(())
     }
 
@@ -1245,6 +1273,7 @@ impl Store {
         conn.execute_batch(schema::INIT_SQL)
             .map_err(|err| format!("initialize schema failed: {err}"))?;
         self.migrate_sort_order_columns(&conn)?;
+        self.migrate_startup_command_column(&conn)?;
         Ok(())
     }
 
@@ -1361,7 +1390,7 @@ impl Store {
     ) -> Result<Vec<StoredSessionSummary>, String> {
         let mut stmt = conn
             .prepare(
-                "SELECT id, profile_id, name, cwd, status, persist_history, last_seq FROM sessions WHERE profile_id = ?1 ORDER BY sort_order ASC, created_at ASC, rowid ASC",
+                "SELECT id, profile_id, name, cwd, startup_command, status, persist_history, last_seq FROM sessions WHERE profile_id = ?1 ORDER BY sort_order ASC, created_at ASC, rowid ASC",
             )
             .map_err(|err| format!("prepare list sessions failed: {err}"))?;
 
@@ -1379,9 +1408,10 @@ impl Store {
                 profile_id: row.get(1).unwrap_or_default(),
                 name: row.get(2).unwrap_or_default(),
                 cwd: row.get(3).unwrap_or_default(),
-                status: status_from_db(row.get::<_, String>(4).unwrap_or_default().as_str()),
-                persist_history: row.get::<_, i64>(5).unwrap_or_default() != 0,
-                seq: row.get::<_, i64>(6).unwrap_or_default().max(0) as u64,
+                startup_command: row.get::<_, Option<String>>(4).unwrap_or_default(),
+                status: status_from_db(row.get::<_, String>(5).unwrap_or_default().as_str()),
+                persist_history: row.get::<_, i64>(6).unwrap_or_default() != 0,
+                seq: row.get::<_, i64>(7).unwrap_or_default().max(0) as u64,
             });
         }
 
@@ -1391,7 +1421,7 @@ impl Store {
     fn list_sessions_with_conn(&self, conn: &Connection) -> Result<Vec<StoredSessionSummary>, String> {
         let mut stmt = conn
             .prepare(
-                "SELECT id, profile_id, name, cwd, status, persist_history, last_seq FROM sessions ORDER BY profile_id ASC, sort_order ASC, created_at ASC, rowid ASC",
+                "SELECT id, profile_id, name, cwd, startup_command, status, persist_history, last_seq FROM sessions ORDER BY profile_id ASC, sort_order ASC, created_at ASC, rowid ASC",
             )
             .map_err(|err| format!("prepare list all sessions failed: {err}"))?;
 
@@ -1409,9 +1439,10 @@ impl Store {
                 profile_id: row.get(1).unwrap_or_default(),
                 name: row.get(2).unwrap_or_default(),
                 cwd: row.get(3).unwrap_or_default(),
-                status: status_from_db(row.get::<_, String>(4).unwrap_or_default().as_str()),
-                persist_history: row.get::<_, i64>(5).unwrap_or_default() != 0,
-                seq: row.get::<_, i64>(6).unwrap_or_default().max(0) as u64,
+                startup_command: row.get::<_, Option<String>>(4).unwrap_or_default(),
+                status: status_from_db(row.get::<_, String>(5).unwrap_or_default().as_str()),
+                persist_history: row.get::<_, i64>(6).unwrap_or_default() != 0,
+                seq: row.get::<_, i64>(7).unwrap_or_default().max(0) as u64,
             });
         }
 
@@ -1447,6 +1478,16 @@ impl Store {
             self.normalize_session_sort_order(conn)?;
         }
 
+        Ok(())
+    }
+
+    fn migrate_startup_command_column(&self, conn: &Connection) -> Result<(), String> {
+        if self.column_exists(conn, "sessions", "startup_command")? {
+            return Ok(());
+        }
+
+        conn.execute("ALTER TABLE sessions ADD COLUMN startup_command TEXT", [])
+            .map_err(|err| format!("add sessions.startup_command failed: {err}"))?;
         Ok(())
     }
 

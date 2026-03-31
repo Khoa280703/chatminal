@@ -10,7 +10,8 @@ use crate::chatminal_runtime::DESKTOP_LAYOUT_WORKSPACE_ID;
 use crate::chatminal_runtime::{
     build_desktop_sidebar_sessions, close_runtime_session, create_runtime_profile,
     create_runtime_session, desktop_workspace_subscribe, move_runtime_session_to_profile,
-    move_runtime_sessions_to_profile, rename_runtime_session, switch_runtime_profile,
+    move_runtime_sessions_to_profile, rename_runtime_session,
+    set_runtime_session_startup_command, switch_runtime_profile,
 };
 pub use crate::chatminal_runtime::{
     DesktopSidebarProfile as SidebarProfile, DesktopSidebarSession as SidebarSession,
@@ -31,9 +32,15 @@ pub struct SidebarSessionContextMenu {
     pub anchor_y_px: f32,
 }
 
-#[derive(Debug)]
-pub struct SidebarInlineRenameState {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SidebarInlineSessionEditKind {
+    Rename,
+}
+
+#[derive(Debug, Clone)]
+pub struct SidebarInlineSessionEditState {
     pub session_id: String,
+    pub kind: SidebarInlineSessionEditKind,
     pub input: String,
     pub select_all: bool,
 }
@@ -61,7 +68,7 @@ struct SharedState {
     max_scroll_offset_px: f32,
     width_override_px: Option<f32>,
     session_context_menu: Option<SidebarSessionContextMenu>,
-    inline_rename: Option<SidebarInlineRenameState>,
+    inline_session_edit: Option<SidebarInlineSessionEditState>,
     session_drag: Option<SidebarSessionDragState>,
 }
 
@@ -76,7 +83,7 @@ impl Default for SharedState {
             max_scroll_offset_px: 0.0,
             width_override_px: None,
             session_context_menu: None,
-            inline_rename: None,
+            inline_session_edit: None,
             session_drag: None,
         }
     }
@@ -146,6 +153,14 @@ impl ChatminalSidebar {
 
     pub fn rename_session(&self, session_id: &str, name: &str) -> Result<RuntimeWorkspace, String> {
         rename_runtime_session(session_id, name)
+    }
+
+    pub fn set_session_startup_command(
+        &self,
+        session_id: &str,
+        startup_command: Option<&str>,
+    ) -> Result<RuntimeWorkspace, String> {
+        set_runtime_session_startup_command(session_id, startup_command)
     }
 
     pub fn open_session_context_menu(
@@ -292,7 +307,12 @@ impl ChatminalSidebar {
             .and_then(|state| state.session_context_menu.as_ref().map(clone_context_menu))
     }
 
-    pub fn start_inline_rename(&self, session_id: &str) -> bool {
+    fn start_inline_session_edit(
+        &self,
+        session_id: &str,
+        kind: SidebarInlineSessionEditKind,
+        input: String,
+    ) -> bool {
         let Ok(mut state) = self.shared.lock() else {
             return false;
         };
@@ -304,106 +324,129 @@ impl ChatminalSidebar {
         else {
             return false;
         };
-        let next = SidebarInlineRenameState {
+        let next = SidebarInlineSessionEditState {
             session_id: session.session_id.clone(),
-            input: session.name.clone(),
+            kind,
+            input,
             select_all: true,
         };
         let changed = state
-            .inline_rename
+            .inline_session_edit
             .as_ref()
-            .map(|rename| rename.session_id != next.session_id || rename.input != next.input)
+            .map(|edit| {
+                edit.session_id != next.session_id
+                    || edit.kind != next.kind
+                    || edit.input != next.input
+            })
             .unwrap_or(true);
         if !changed {
             return false;
         }
         state.session_context_menu = None;
-        state.inline_rename = Some(next);
+        state.inline_session_edit = Some(next);
         state.snapshot.version = state.snapshot.version.saturating_add(1);
         true
     }
 
-    pub fn inline_rename_state(&self) -> Option<SidebarInlineRenameState> {
+    pub fn start_inline_rename(&self, session_id: &str) -> bool {
+        let input = self
+            .snapshot()
+            .sessions
+            .into_iter()
+            .find(|session| session.session_id == session_id)
+            .map(|session| session.name)
+            .unwrap_or_default();
+        self.start_inline_session_edit(session_id, SidebarInlineSessionEditKind::Rename, input)
+    }
+
+    pub fn inline_session_edit_state(&self) -> Option<SidebarInlineSessionEditState> {
         self.shared
             .lock()
             .ok()
-            .and_then(|state| state.inline_rename.as_ref().map(clone_inline_rename))
+            .and_then(|state| {
+                state
+                    .inline_session_edit
+                    .as_ref()
+                    .map(clone_inline_session_edit)
+            })
     }
 
-    pub fn inline_rename_cancel(&self) -> bool {
+    pub fn inline_session_edit_cancel(&self) -> bool {
         let Ok(mut state) = self.shared.lock() else {
             return false;
         };
-        if state.inline_rename.take().is_none() {
+        if state.inline_session_edit.take().is_none() {
             return false;
         }
         state.snapshot.version = state.snapshot.version.saturating_add(1);
         true
     }
 
-    pub fn inline_rename_backspace(&self) -> bool {
+    pub fn inline_session_edit_backspace(&self) -> bool {
         let Ok(mut state) = self.shared.lock() else {
             return false;
         };
-        let Some(rename) = state.inline_rename.as_mut() else {
+        let Some(edit) = state.inline_session_edit.as_mut() else {
             return false;
         };
-        if rename.select_all {
-            if rename.input.is_empty() {
+        if edit.select_all {
+            if edit.input.is_empty() {
                 return false;
             }
-            rename.input.clear();
-            rename.select_all = false;
+            edit.input.clear();
+            edit.select_all = false;
             state.snapshot.version = state.snapshot.version.saturating_add(1);
             return true;
         }
-        if rename.input.is_empty() {
+        if edit.input.is_empty() {
             return false;
         }
-        rename.input.pop();
+        edit.input.pop();
         state.snapshot.version = state.snapshot.version.saturating_add(1);
         true
     }
 
-    pub fn inline_rename_clear(&self) -> bool {
+    pub fn inline_session_edit_clear(&self) -> bool {
         let Ok(mut state) = self.shared.lock() else {
             return false;
         };
-        let Some(rename) = state.inline_rename.as_mut() else {
+        let Some(edit) = state.inline_session_edit.as_mut() else {
             return false;
         };
-        if rename.input.is_empty() {
+        if edit.input.is_empty() {
             return false;
         }
-        rename.input.clear();
-        rename.select_all = false;
+        edit.input.clear();
+        edit.select_all = false;
         state.snapshot.version = state.snapshot.version.saturating_add(1);
         true
     }
 
-    pub fn inline_rename_push(&self, c: char) -> bool {
+    pub fn inline_session_edit_push(&self, c: char) -> bool {
         let Ok(mut state) = self.shared.lock() else {
             return false;
         };
-        let Some(rename) = state.inline_rename.as_mut() else {
+        let Some(edit) = state.inline_session_edit.as_mut() else {
             return false;
         };
-        if rename.select_all {
-            rename.input.clear();
-            rename.select_all = false;
+        if edit.select_all {
+            edit.input.clear();
+            edit.select_all = false;
         }
-        rename.input.push(c);
+        edit.input.push(c);
         state.snapshot.version = state.snapshot.version.saturating_add(1);
         true
     }
 
-    pub fn inline_rename_commit(&self) -> Option<(String, String)> {
+    pub fn inline_session_edit_commit(
+        &self,
+    ) -> Option<(SidebarInlineSessionEditKind, String, String)> {
         let Ok(mut state) = self.shared.lock() else {
             return None;
         };
-        let rename = state.inline_rename.take()?;
+        let edit = state.inline_session_edit.take()?;
         state.snapshot.version = state.snapshot.version.saturating_add(1);
-        Some((rename.session_id, rename.input))
+        Some((edit.kind, edit.session_id, edit.input))
     }
 
     pub fn session_drag_state(&self) -> Option<SidebarSessionDragState> {
@@ -438,7 +481,7 @@ impl ChatminalSidebar {
             return false;
         }
         state.session_context_menu = None;
-        state.inline_rename = None;
+        state.inline_session_edit = None;
         state.session_drag = Some(next);
         state.snapshot.version = state.snapshot.version.saturating_add(1);
         true
@@ -821,11 +864,11 @@ fn replace_snapshot(shared: &Arc<Mutex<SharedState>>, mut next: SidebarSnapshot)
         state.session_context_menu = None;
     }
     if state
-        .inline_rename
+        .inline_session_edit
         .as_ref()
-        .is_some_and(|rename| !valid_session_ids.contains(rename.session_id.as_str()))
+        .is_some_and(|edit| !valid_session_ids.contains(edit.session_id.as_str()))
     {
-        state.inline_rename = None;
+        state.inline_session_edit = None;
     }
     if state
         .session_drag
@@ -858,10 +901,11 @@ fn clone_context_menu(menu: &SidebarSessionContextMenu) -> SidebarSessionContext
     }
 }
 
-fn clone_inline_rename(rename: &SidebarInlineRenameState) -> SidebarInlineRenameState {
-    SidebarInlineRenameState {
-        session_id: rename.session_id.clone(),
-        input: rename.input.clone(),
-        select_all: rename.select_all,
+fn clone_inline_session_edit(edit: &SidebarInlineSessionEditState) -> SidebarInlineSessionEditState {
+    SidebarInlineSessionEditState {
+        session_id: edit.session_id.clone(),
+        kind: edit.kind,
+        input: edit.input.clone(),
+        select_all: edit.select_all,
     }
 }

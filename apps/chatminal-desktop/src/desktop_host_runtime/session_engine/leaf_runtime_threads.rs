@@ -8,16 +8,19 @@ use engine_term::Terminal as IoTerminal;
 use portable_pty::{Child, CommandBuilder, PtySize};
 
 use super::leaf_runtime::{TerminalInstanceRuntimeEvent, TerminalInstanceRuntimeSpawn};
+use super::output_history::OutputHistory;
 
-pub(crate) fn spawn_reader_loop(
+pub(crate) fn spawn_reader_waiter_loop(
     terminal: Arc<Mutex<CoreTerminal>>,
     io_terminal: Arc<Mutex<IoTerminal>>,
-    output_history: Arc<Mutex<Vec<String>>>,
+    output_history: Arc<Mutex<OutputHistory>>,
     spawn: TerminalInstanceRuntimeSpawn,
     events: std_mpsc::SyncSender<TerminalInstanceRuntimeEvent>,
     mut reader: Box<dyn Read + Send>,
+    child: Arc<Mutex<Box<dyn Child + Send + Sync>>>,
 ) {
     thread::spawn(move || {
+        let session_id: Arc<str> = Arc::from(spawn.session_id.as_str());
         let mut buffer = vec![0u8; 64 * 1024];
         let mut restored_prompt_fragment = spawn
             .initial_scrollback
@@ -28,6 +31,8 @@ pub(crate) fn spawn_reader_loop(
             .as_deref()
             .map(visible_terminal_fragment)
             .filter(|visible| !visible.is_empty());
+
+        // Reader loop — blocking read on PTY fd.
         loop {
             match reader.read(&mut buffer) {
                 Ok(0) => break,
@@ -68,7 +73,7 @@ pub(crate) fn spawn_reader_loop(
                     terminal.lock().unwrap().advance_bytes(chunk.as_bytes());
                     output_history.lock().unwrap().push(chunk.clone());
                     let _ = events.send(TerminalInstanceRuntimeEvent::Output {
-                        session_id: spawn.session_id.clone(),
+                        session_id: Arc::clone(&session_id),
                         generation: spawn.generation,
                         runtime_id: spawn.runtime_id,
                         terminal_instance_id: spawn.terminal_instance_id,
@@ -77,7 +82,7 @@ pub(crate) fn spawn_reader_loop(
                 }
                 Err(err) => {
                     let _ = events.send(TerminalInstanceRuntimeEvent::Error {
-                        session_id: spawn.session_id.clone(),
+                        session_id: Arc::clone(&session_id),
                         generation: spawn.generation,
                         runtime_id: spawn.runtime_id,
                         terminal_instance_id: spawn.terminal_instance_id,
@@ -87,31 +92,27 @@ pub(crate) fn spawn_reader_loop(
                 }
             }
         }
-    });
-}
 
-pub(crate) fn spawn_waiter_loop(
-    spawn: TerminalInstanceRuntimeSpawn,
-    events: std_mpsc::SyncSender<TerminalInstanceRuntimeEvent>,
-    child: Arc<Mutex<Box<dyn Child + Send + Sync>>>,
-) {
-    thread::spawn(move || loop {
-        let status = child
-            .lock()
-            .ok()
-            .and_then(|mut guard| guard.try_wait().ok())
-            .flatten();
-        if let Some(status) = status {
-            let _ = events.send(TerminalInstanceRuntimeEvent::Exited {
-                session_id: spawn.session_id,
-                generation: spawn.generation,
-                runtime_id: spawn.runtime_id,
-                terminal_instance_id: spawn.terminal_instance_id,
-                exit_code: Some(status.exit_code() as i32),
-            });
-            break;
+        // Waiter phase — reader EOF/error means child is exiting or exited.
+        // Poll try_wait until the child process fully exits.
+        loop {
+            let status = child
+                .lock()
+                .ok()
+                .and_then(|mut guard| guard.try_wait().ok())
+                .flatten();
+            if let Some(status) = status {
+                let _ = events.send(TerminalInstanceRuntimeEvent::Exited {
+                    session_id,
+                    generation: spawn.generation,
+                    runtime_id: spawn.runtime_id,
+                    terminal_instance_id: spawn.terminal_instance_id,
+                    exit_code: Some(status.exit_code() as i32),
+                });
+                break;
+            }
+            thread::sleep(std::time::Duration::from_millis(50));
         }
-        thread::sleep(std::time::Duration::from_millis(120));
     });
 }
 

@@ -4,6 +4,7 @@ use super::{
     RuntimeState, logicalize_prepended_run_boundary, prepend_run_boundary,
     strip_duplicate_restored_prompt_prefix,
     canonical_scrollback::materialize_output_chunk,
+    startup_recipe::append_recent_output_tail,
     strip_volatile_terminal_control_sequences,
     strip_zsh_prompt_spacer_artifact, trim_live_output,
 };
@@ -33,7 +34,7 @@ impl RuntimeState {
                 let mut output_chunk = chunk;
                 let mut raw_replay_chunk = String::new();
                 let mut synthetic_run_boundary_prepended = false;
-                if let Some(entry) = inner.sessions.get_mut(&session_id) {
+                if let Some(entry) = inner.sessions.get_mut(session_id.as_ref()) {
                     if entry.generation != generation {
                         return;
                     }
@@ -70,6 +71,15 @@ impl RuntimeState {
                     entry.session.status = StoredSessionStatus::Running;
                     seq_after = Some(entry.session.seq);
                     persist_history = entry.session.persist_history;
+                    let tail_chunk = if synthetic_run_boundary_prepended {
+                        logicalize_prepended_run_boundary(&output_chunk)
+                    } else {
+                        output_chunk.clone()
+                    };
+                    let tail_chunk = strip_volatile_terminal_control_sequences(
+                        &strip_zsh_prompt_spacer_artifact(&tail_chunk),
+                    );
+                    append_recent_output_tail(&mut entry.recent_output_tail, &tail_chunk);
                     if !persist_history {
                         let buffered_chunk = if synthetic_run_boundary_prepended {
                             logicalize_prepended_run_boundary(&output_chunk)
@@ -81,7 +91,7 @@ impl RuntimeState {
                     }
 
                     event = Some(RuntimeEvent::PtyOutput(RuntimePtyOutputEvent {
-                        session_id: session_id.clone(),
+                        session_id: session_id.to_string(),
                         chunk: output_chunk.clone(),
                         seq: entry.session.seq,
                         ts,
@@ -91,7 +101,7 @@ impl RuntimeState {
                 if let Some(seq) = seq_after {
                     if let Err(err) = inner.store.update_session_seq(&session_id, seq) {
                         inner.broadcast_event(RuntimeEvent::PtyError(RuntimePtyErrorEvent {
-                            session_id: session_id.clone(),
+                            session_id: session_id.to_string(),
                             message: format!("persist seq failed: {err}"),
                         }));
                     }
@@ -100,7 +110,7 @@ impl RuntimeState {
                         .set_session_status(&session_id, StoredSessionStatus::Running)
                     {
                         inner.broadcast_event(RuntimeEvent::PtyError(RuntimePtyErrorEvent {
-                            session_id: session_id.clone(),
+                            session_id: session_id.to_string(),
                             message: format!("persist status failed: {err}"),
                         }));
                     }
@@ -112,7 +122,7 @@ impl RuntimeState {
                             ts,
                         ) {
                             inner.broadcast_event(RuntimeEvent::PtyError(RuntimePtyErrorEvent {
-                                session_id: session_id.clone(),
+                                session_id: session_id.to_string(),
                                 message: format!("persist terminal replay failed: {err}"),
                             }));
                         }
@@ -126,7 +136,7 @@ impl RuntimeState {
                         );
                         let current_fragment = inner
                             .sessions
-                            .get(&session_id)
+                            .get(session_id.as_ref())
                             .map(|entry| {
                                 (
                                     entry.canonical_open_fragment.clone(),
@@ -147,11 +157,11 @@ impl RuntimeState {
                                 .append_scrollback_records(&session_id, seq, &materialized.records, ts)
                         {
                             inner.broadcast_event(RuntimeEvent::PtyError(RuntimePtyErrorEvent {
-                                session_id: session_id.clone(),
+                                session_id: session_id.to_string(),
                                 message: format!("persist chunk failed: {err}"),
                             }));
                         } else {
-                            if let Some(entry) = inner.sessions.get_mut(&session_id) {
+                            if let Some(entry) = inner.sessions.get_mut(session_id.as_ref()) {
                                 entry.canonical_open_fragment = materialized.open_fragment;
                                 entry.canonical_cursor_col = materialized.cursor_col;
                                 entry.canonical_pending_carriage_return =
@@ -162,7 +172,7 @@ impl RuntimeState {
                             inner.config.max_scrollback_lines_per_session,
                         ) {
                                 inner.broadcast_event(RuntimeEvent::PtyError(RuntimePtyErrorEvent {
-                                    session_id: session_id.clone(),
+                                    session_id: session_id.to_string(),
                                     message: format!("apply retention failed: {err}"),
                                 }));
                             }
@@ -183,7 +193,7 @@ impl RuntimeState {
                 let updated = inner.mark_session_exited(&session_id, generation);
 
                 inner.broadcast_event(RuntimeEvent::PtyExited(RuntimePtyExitedEvent {
-                    session_id: session_id.clone(),
+                    session_id: session_id.to_string(),
                     exit_code,
                     reason,
                 }));
@@ -196,13 +206,13 @@ impl RuntimeState {
                 generation,
                 message,
             } => {
-                if let Some(entry) = inner.sessions.get(&session_id)
+                if let Some(entry) = inner.sessions.get(session_id.as_ref())
                     && entry.generation != generation
                 {
                     return;
                 }
                 inner.broadcast_event(RuntimeEvent::PtyError(RuntimePtyErrorEvent {
-                    session_id,
+                    session_id: session_id.to_string(),
                     message,
                 }));
             }

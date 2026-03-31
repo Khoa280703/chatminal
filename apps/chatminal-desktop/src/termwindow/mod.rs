@@ -35,6 +35,7 @@ use crate::termwindow::background::{
 };
 use crate::termwindow::keyevent::{KeyTableArgs, KeyTableState};
 use crate::termwindow::modal::Modal;
+use crate::termwindow::startup_recipe_modal::StartupRecipeModal;
 use crate::termwindow::render::paint::AllowImage;
 use crate::termwindow::render::{
     CachedLineState, LineQuadCacheKey, LineQuadCacheValue, LineToEleShapeCacheKey,
@@ -88,6 +89,7 @@ mod prevcursor;
 pub mod render;
 pub mod resize;
 mod selection;
+mod startup_recipe_modal;
 pub mod spawn;
 pub mod webgpu;
 use crate::spawn::SpawnWhere;
@@ -197,7 +199,15 @@ pub enum UIItemType {
     ChatminalSidebarSessionMenuJoin(String),
     ChatminalSidebarSessionMenuUnjoin(String),
     ChatminalSidebarSessionMenuRename(String),
+    ChatminalSidebarSessionMenuStartupCommand(String),
+    ChatminalSidebarSessionMenuRunStartupCommand(String),
     ChatminalSidebarSessionMenuDelete(String),
+    ChatminalStartupRecipeModalBackdrop,
+    ChatminalStartupRecipeModalPanel,
+    ChatminalStartupRecipeModalInput,
+    ChatminalStartupRecipeModalCancel,
+    ChatminalStartupRecipeModalRun,
+    ChatminalStartupRecipeModalSave,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -483,6 +493,10 @@ pub struct TermWindow {
     chatminal_sidebar: ChatminalSidebar,
     chatminal_sidebar_seen_version: u64,
     chatminal_sidebar_poll_started: bool,
+    sidebar_tree_cache: Option<render::chatminal_sidebar::SidebarTreeCache>,
+    sidebar_header_cache: Option<render::chatminal_sidebar::SidebarHeaderCache>,
+    sidebar_footer_background_cache:
+        Option<render::chatminal_sidebar::SidebarFooterBackgroundCache>,
     system_metrics: crate::system_metrics::SystemMetricsHandle,
     metrics_tick_started: bool,
 }
@@ -719,8 +733,7 @@ impl TermWindow {
         let Some(session_id) = self.active_session_id() else {
             return;
         };
-        if crate::chatminal_runtime::desktop_render_state_for_session(&session_id).is_some()
-        {
+        if crate::chatminal_runtime::desktop_render_state_for_session(&session_id).is_some() {
             return;
         }
         let _ = self.activate_chatminal_session_target(&session_id, None);
@@ -1407,6 +1420,25 @@ impl TermWindow {
         }
     }
 
+    fn prompt_startup_command_chatminal_session(&mut self, session_id: &str) {
+        if !self.chatminal_sidebar.is_enabled() {
+            return;
+        }
+        let snapshot = self.chatminal_sidebar.snapshot();
+        let Some(session) = snapshot
+            .sessions
+            .into_iter()
+            .find(|session| session.session_id == session_id)
+        else {
+            return;
+        };
+        self.set_modal(Rc::new(StartupRecipeModal::new(
+            session.session_id,
+            session.name,
+            session.startup_command.unwrap_or_default(),
+        )));
+    }
+
     fn rename_chatminal_session(&mut self, session_id: &str, name: &str) {
         if !self.chatminal_sidebar.is_enabled() {
             return;
@@ -1422,6 +1454,37 @@ impl TermWindow {
             Err(err) => {
                 log::error!("failed to rename sidebar session {session_id}: {err}");
             }
+        }
+    }
+
+    fn set_startup_command_chatminal_session(&mut self, session_id: &str, command: &str) {
+        if !self.chatminal_sidebar.is_enabled() {
+            return;
+        }
+        match self
+            .chatminal_sidebar
+            .set_session_startup_command(session_id, Some(command))
+        {
+            Ok(workspace) => {
+                self.chatminal_sidebar.apply_workspace(workspace);
+                self.update_title_post_status();
+                if let Some(window) = self.window.as_ref() {
+                    window.invalidate();
+                }
+            }
+            Err(err) => {
+                log::error!("failed to set startup command for session {session_id}: {err}");
+            }
+        }
+    }
+
+    fn run_startup_command_chatminal_session(&mut self, session_id: &str) {
+        if !self.chatminal_sidebar.is_enabled() {
+            return;
+        }
+        self.switch_chatminal_session_target(session_id, None);
+        if let Err(err) = crate::chatminal_runtime::run_runtime_session_startup_command(session_id) {
+            log::error!("failed to run startup command for session {session_id}: {err}");
         }
     }
 
@@ -1709,6 +1772,9 @@ impl TermWindow {
             window_background,
             chatminal_sidebar_seen_version: chatminal_sidebar.version(),
             chatminal_sidebar_poll_started: false,
+            sidebar_tree_cache: None,
+            sidebar_header_cache: None,
+            sidebar_footer_background_cache: None,
             chatminal_sidebar,
             system_metrics: crate::system_metrics::SystemMetricsHandle::start(),
             metrics_tick_started: false,
@@ -2150,6 +2216,9 @@ impl TermWindow {
             TermWindowNotif::InvalidateShapeCache => {
                 self.shape_generation += 1;
                 self.shape_cache.borrow_mut().clear();
+                self.sidebar_tree_cache = None;
+                self.sidebar_header_cache = None;
+                self.sidebar_footer_background_cache = None;
                 self.invalidate_modal();
                 window.invalidate();
             }

@@ -94,8 +94,8 @@ impl super::TermWindow {
         }
     }
 
-    fn cancel_chatminal_sidebar_inline_rename(&mut self, context: &dyn WindowOps) {
-        if self.chatminal_sidebar.inline_rename_cancel() {
+    fn cancel_chatminal_sidebar_inline_session_edit(&mut self, context: &dyn WindowOps) {
+        if self.chatminal_sidebar.inline_session_edit_cancel() {
             context.invalidate();
         }
     }
@@ -131,7 +131,15 @@ impl super::TermWindow {
             | UIItemType::ChatminalSidebarSessionMenuJoin(_)
             | UIItemType::ChatminalSidebarSessionMenuUnjoin(_)
             | UIItemType::ChatminalSidebarSessionMenuRename(_)
+            | UIItemType::ChatminalSidebarSessionMenuStartupCommand(_)
+            | UIItemType::ChatminalSidebarSessionMenuRunStartupCommand(_)
             | UIItemType::ChatminalSidebarSessionMenuDelete(_)
+            | UIItemType::ChatminalStartupRecipeModalBackdrop
+            | UIItemType::ChatminalStartupRecipeModalPanel
+            | UIItemType::ChatminalStartupRecipeModalInput
+            | UIItemType::ChatminalStartupRecipeModalCancel
+            | UIItemType::ChatminalStartupRecipeModalRun
+            | UIItemType::ChatminalStartupRecipeModalSave
             | UIItemType::AboveScrollThumb
             | UIItemType::BelowScrollThumb
             | UIItemType::ScrollThumb
@@ -155,7 +163,15 @@ impl super::TermWindow {
             | UIItemType::ChatminalSidebarSessionMenuJoin(_)
             | UIItemType::ChatminalSidebarSessionMenuUnjoin(_)
             | UIItemType::ChatminalSidebarSessionMenuRename(_)
+            | UIItemType::ChatminalSidebarSessionMenuStartupCommand(_)
+            | UIItemType::ChatminalSidebarSessionMenuRunStartupCommand(_)
             | UIItemType::ChatminalSidebarSessionMenuDelete(_)
+            | UIItemType::ChatminalStartupRecipeModalBackdrop
+            | UIItemType::ChatminalStartupRecipeModalPanel
+            | UIItemType::ChatminalStartupRecipeModalInput
+            | UIItemType::ChatminalStartupRecipeModalCancel
+            | UIItemType::ChatminalStartupRecipeModalRun
+            | UIItemType::ChatminalStartupRecipeModalSave
             | UIItemType::AboveScrollThumb
             | UIItemType::BelowScrollThumb
             | UIItemType::ScrollThumb
@@ -631,9 +647,29 @@ impl super::TermWindow {
             UIItemType::ChatminalSidebarSessionMenuRename(session_id) => {
                 self.mouse_event_chatminal_sidebar_session_menu_rename(&session_id, event, context);
             }
+            UIItemType::ChatminalSidebarSessionMenuStartupCommand(session_id) => {
+                self.mouse_event_chatminal_sidebar_session_menu_startup_command(
+                    &session_id,
+                    event,
+                    context,
+                );
+            }
+            UIItemType::ChatminalSidebarSessionMenuRunStartupCommand(session_id) => {
+                self.mouse_event_chatminal_sidebar_session_menu_run_startup_command(
+                    &session_id,
+                    event,
+                    context,
+                );
+            }
             UIItemType::ChatminalSidebarSessionMenuDelete(session_id) => {
                 self.mouse_event_chatminal_sidebar_session_menu_delete(&session_id, event, context);
             }
+            UIItemType::ChatminalStartupRecipeModalBackdrop
+            | UIItemType::ChatminalStartupRecipeModalPanel
+            | UIItemType::ChatminalStartupRecipeModalInput
+            | UIItemType::ChatminalStartupRecipeModalCancel
+            | UIItemType::ChatminalStartupRecipeModalRun
+            | UIItemType::ChatminalStartupRecipeModalSave => {}
         }
     }
 
@@ -644,7 +680,7 @@ impl super::TermWindow {
     ) {
         if matches!(event.kind, WMEK::Press(_) | WMEK::Release(_)) {
             self.dismiss_chatminal_sidebar_context_menu(context);
-            self.cancel_chatminal_sidebar_inline_rename(context);
+            self.cancel_chatminal_sidebar_inline_session_edit(context);
         }
         context.set_cursor(Some(MouseCursor::Arrow));
     }
@@ -656,7 +692,7 @@ impl super::TermWindow {
     ) {
         if matches!(event.kind, WMEK::Press(_) | WMEK::Release(_)) {
             self.dismiss_chatminal_sidebar_context_menu(context);
-            self.cancel_chatminal_sidebar_inline_rename(context);
+            self.cancel_chatminal_sidebar_inline_session_edit(context);
         }
         if let WMEK::Press(MousePress::Left) = event.kind {
             self.create_chatminal_profile();
@@ -683,7 +719,7 @@ impl super::TermWindow {
     ) {
         if matches!(event.kind, WMEK::Press(_) | WMEK::Release(_)) {
             self.dismiss_chatminal_sidebar_context_menu(context);
-            self.cancel_chatminal_sidebar_inline_rename(context);
+            self.cancel_chatminal_sidebar_inline_session_edit(context);
         }
         context.set_cursor(Some(MouseCursor::Arrow));
     }
@@ -696,7 +732,7 @@ impl super::TermWindow {
     ) {
         if matches!(event.kind, WMEK::Press(_) | WMEK::Release(_)) {
             self.dismiss_chatminal_sidebar_context_menu(context);
-            self.cancel_chatminal_sidebar_inline_rename(context);
+            self.cancel_chatminal_sidebar_inline_session_edit(context);
         }
         if let WMEK::Press(MousePress::Left) = event.kind {
             self.toggle_chatminal_profile(profile_id);
@@ -711,7 +747,7 @@ impl super::TermWindow {
     ) {
         if matches!(event.kind, WMEK::Press(_) | WMEK::Release(_)) {
             self.dismiss_chatminal_sidebar_context_menu(context);
-            self.cancel_chatminal_sidebar_inline_rename(context);
+            self.cancel_chatminal_sidebar_inline_session_edit(context);
         }
         if let WMEK::Press(MousePress::Left) = event.kind {
             self.create_chatminal_session();
@@ -740,7 +776,7 @@ impl super::TermWindow {
                     event.coords.y as f32,
                 );
                 if selection_changed || menu_changed {
-                    self.chatminal_sidebar.inline_rename_cancel();
+                    self.chatminal_sidebar.inline_session_edit_cancel();
                     context.invalidate();
                 }
             }
@@ -750,7 +786,7 @@ impl super::TermWindow {
 
         if matches!(event.kind, WMEK::Press(_) | WMEK::Release(_)) {
             self.dismiss_chatminal_sidebar_context_menu(context);
-            self.cancel_chatminal_sidebar_inline_rename(context);
+            self.cancel_chatminal_sidebar_inline_session_edit(context);
         }
         match event.kind {
             WMEK::Press(MousePress::Left) => {
@@ -883,7 +919,7 @@ impl super::TermWindow {
     ) {
         if Self::is_secondary_click_event(&event) {
             self.dismiss_chatminal_sidebar_context_menu(context);
-            self.cancel_chatminal_sidebar_inline_rename(context);
+            self.cancel_chatminal_sidebar_inline_session_edit(context);
         }
         context.set_cursor(Some(MouseCursor::Arrow));
     }
@@ -903,6 +939,46 @@ impl super::TermWindow {
             self.dismiss_chatminal_sidebar_context_menu(context);
             window.notify(TermWindowNotif::Apply(Box::new(move |term_window| {
                 term_window.prompt_rename_chatminal_session(&session_id);
+            })));
+        }
+        context.set_cursor(Some(MouseCursor::Arrow));
+    }
+
+    fn mouse_event_chatminal_sidebar_session_menu_startup_command(
+        &mut self,
+        session_id: &str,
+        event: MouseEvent,
+        context: &dyn WindowOps,
+    ) {
+        if let WMEK::Release(MousePress::Left) = event.kind {
+            let Some(window) = self.window.as_ref().cloned() else {
+                context.set_cursor(Some(MouseCursor::Arrow));
+                return;
+            };
+            let session_id = session_id.to_string();
+            self.dismiss_chatminal_sidebar_context_menu(context);
+            window.notify(TermWindowNotif::Apply(Box::new(move |term_window| {
+                term_window.prompt_startup_command_chatminal_session(&session_id);
+            })));
+        }
+        context.set_cursor(Some(MouseCursor::Arrow));
+    }
+
+    fn mouse_event_chatminal_sidebar_session_menu_run_startup_command(
+        &mut self,
+        session_id: &str,
+        event: MouseEvent,
+        context: &dyn WindowOps,
+    ) {
+        if let WMEK::Release(MousePress::Left) = event.kind {
+            let Some(window) = self.window.as_ref().cloned() else {
+                context.set_cursor(Some(MouseCursor::Arrow));
+                return;
+            };
+            let session_id = session_id.to_string();
+            self.dismiss_chatminal_sidebar_context_menu(context);
+            window.notify(TermWindowNotif::Apply(Box::new(move |term_window| {
+                term_window.run_startup_command_chatminal_session(&session_id);
             })));
         }
         context.set_cursor(Some(MouseCursor::Arrow));

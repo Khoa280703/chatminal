@@ -85,6 +85,20 @@ impl ChatminalRuntimeClient {
         self.runtime.state.session_rename(session_id, name)
     }
 
+    pub(crate) fn session_set_startup_command(
+        &self,
+        session_id: &str,
+        startup_command: Option<&str>,
+    ) -> Result<RuntimeWorkspace, String> {
+        self.runtime
+            .state
+            .session_set_startup_command(session_id, startup_command)
+    }
+
+    pub(crate) fn session_run_startup_command(&self, session_id: &str) -> Result<(), String> {
+        self.runtime.state.session_run_startup_command(session_id)
+    }
+
     pub(crate) fn profile_switch(&self, profile_id: &str) -> Result<RuntimeWorkspace, String> {
         self.runtime.state.profile_switch(profile_id)
     }

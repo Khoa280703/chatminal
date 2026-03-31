@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     name TEXT NOT NULL,
     cwd TEXT NOT NULL,
     shell TEXT NOT NULL,
+    startup_command TEXT,
     status TEXT NOT NULL,
     persist_history INTEGER NOT NULL DEFAULT 0,
     last_seq INTEGER NOT NULL DEFAULT 0,

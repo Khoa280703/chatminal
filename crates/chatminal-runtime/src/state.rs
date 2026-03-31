@@ -26,6 +26,7 @@ pub mod runtime_bridge;
 mod runtime_lifecycle;
 mod session_event_processor;
 mod session_explorer;
+mod startup_recipe;
 #[cfg(test)]
 pub mod test_bridge;
 
@@ -46,6 +47,7 @@ struct SessionEntry {
     generation: u64,
     prepend_run_boundary_on_next_output: bool,
     restored_trailing_fragment: Option<String>,
+    recent_output_tail: String,
 }
 
 struct SessionSpawnPlan {
@@ -154,6 +156,7 @@ impl RuntimeState {
                         generation: 0,
                         prepend_run_boundary_on_next_output: false,
                         restored_trailing_fragment: None,
+                        recent_output_tail: String::new(),
                     },
                 );
             }
@@ -252,6 +255,7 @@ impl RuntimeState {
                             entry.session.persist_history,
                             entry.session.cwd.clone(),
                             entry.session.name.clone(),
+                            entry.session.startup_command.clone(),
                         ),
                     )
                 })
@@ -261,7 +265,7 @@ impl RuntimeState {
 
         let mut workspace = store.load_workspace()?;
         for session in &mut workspace.sessions {
-            if let Some((status, seq, persist_history, cwd, name)) =
+            if let Some((status, seq, persist_history, cwd, name, startup_command)) =
                 session_overrides.get(&session.session_id)
             {
                 session.status = status.clone();
@@ -269,6 +273,7 @@ impl RuntimeState {
                 session.persist_history = *persist_history;
                 session.cwd = cwd.clone();
                 session.name = name.clone();
+                session.startup_command = startup_command.clone();
             }
         }
 
@@ -556,6 +561,22 @@ impl RuntimeState {
             .lock()
             .map_err(|_| "state lock poisoned".to_string())?;
         inner.session_set_persist(session_id, persist_history)
+    }
+
+    pub fn session_set_startup_command(
+        &self,
+        session_id: &str,
+        startup_command: Option<&str>,
+    ) -> Result<RuntimeWorkspace, String> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|_| "state lock poisoned".to_string())?;
+        inner.session_set_startup_command(session_id, startup_command)
+    }
+
+    pub fn session_run_startup_command(&self, session_id: &str) -> Result<(), String> {
+        self.spawn_startup_recipe_runner(session_id)
     }
 
     pub fn get_lifecycle_preferences(&self) -> Result<crate::api::RuntimeLifecyclePreferences, String> {

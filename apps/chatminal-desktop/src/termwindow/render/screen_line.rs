@@ -15,6 +15,7 @@ use std::ops::Range;
 use std::rc::Rc;
 use std::time::Instant;
 use termwiz::cell::{unicode_column_width, Blink};
+use termwiz::cellcluster::CellCluster;
 use termwiz::color::LinearRgba;
 use termwiz::surface::CursorShape;
 
@@ -114,6 +115,7 @@ impl crate::TermWindow {
             ..params.left_pixel_x + cursor_range.end as f32 * cell_width;
 
         let mut shaped = None;
+        let mut clusters = None;
         let mut invalidate_on_hover_change = false;
 
         if let Some(shape_key) = &params.shape_key {
@@ -132,14 +134,15 @@ impl crate::TermWindow {
                 if !expired && !hover_changed {
                     self.update_next_frame_time(entry.expires);
                     shaped.replace(Rc::clone(&entry.shaped));
+                    clusters.replace(Rc::clone(&entry.clusters));
                 }
 
                 invalidate_on_hover_change = entry.invalidate_on_hover_change;
             }
         }
 
-        let shaped = if let Some(shaped) = shaped {
-            shaped
+        let (shaped, clusters) = if let (Some(shaped), Some(clusters)) = (shaped, clusters) {
+            (shaped, clusters)
         } else {
             let params = LineToElementParams {
                 config: params.config,
@@ -150,9 +153,10 @@ impl crate::TermWindow {
                 shape_key: &params.shape_key,
             };
 
-            let (shaped, invalidate_on_hover) = self.build_line_element_shape(params)?;
+            let (shaped, clusters, invalidate_on_hover) =
+                self.build_line_element_shape(params)?;
             invalidate_on_hover_change = invalidate_on_hover;
-            shaped
+            (shaped, clusters)
         };
 
         let bounding_rect = euclid::rect(
@@ -195,7 +199,7 @@ impl crate::TermWindow {
         // * background when it is not the default color
         // * Reverse video attribute
         for item in shaped.iter() {
-            let cluster = &item.cluster;
+            let cluster = &clusters[item.cluster_idx];
             let attrs = &cluster.attrs;
             let cluster_width = cluster.width;
 
@@ -431,7 +435,7 @@ impl crate::TermWindow {
         };
 
         for item in shaped.iter() {
-            let cluster = &item.cluster;
+            let cluster = &clusters[item.cluster_idx];
             let glyph_info = &item.glyph_info;
             let images = cluster.attrs.images().unwrap_or_else(|| vec![]);
             let valign_adjust = match cluster.attrs.vertical_align() {
@@ -719,7 +723,7 @@ impl crate::TermWindow {
     fn build_line_element_shape(
         &self,
         params: LineToElementParams,
-    ) -> anyhow::Result<(Rc<Vec<LineToElementShape>>, bool)> {
+    ) -> anyhow::Result<(Rc<Vec<LineToElementShape>>, Rc<Vec<CellCluster>>, bool)> {
         let (bidi_enabled, bidi_direction) = params.line.bidi_info();
         let bidi_hint = if bidi_enabled {
             Some(bidi_direction)
@@ -745,7 +749,7 @@ impl crate::TermWindow {
         let mut expires = None;
         let mut invalidate_on_hover_change = false;
 
-        for cluster in &cell_clusters {
+        for (cluster_idx, cluster) in cell_clusters.iter().enumerate() {
             if !matches!(last_style.as_ref(), Some(ClusterStyleCache{attrs,..}) if *attrs == &cluster.attrs)
             {
                 let attrs = &cluster.attrs;
@@ -872,7 +876,7 @@ impl crate::TermWindow {
                 fg_color: style_params.fg_color,
                 underline_color: style_params.underline_color,
                 pixel_width,
-                cluster: cluster.clone(),
+                cluster_idx,
                 glyph_info,
                 x_pos,
             });
@@ -881,6 +885,7 @@ impl crate::TermWindow {
         }
 
         let shaped = Rc::new(shaped);
+        let clusters = Rc::new(cell_clusters);
 
         if let Some(shape_key) = params.shape_key {
             self.line_to_ele_shape_cache.borrow_mut().put(
@@ -888,6 +893,7 @@ impl crate::TermWindow {
                 LineToElementShapeItem {
                     expires,
                     shaped: Rc::clone(&shaped),
+                    clusters: Rc::clone(&clusters),
                     invalidate_on_hover_change,
                     current_highlight: if invalidate_on_hover_change {
                         self.current_highlight.clone()
@@ -898,6 +904,6 @@ impl crate::TermWindow {
             );
         }
 
-        Ok((shaped, invalidate_on_hover_change))
+        Ok((shaped, clusters, invalidate_on_hover_change))
     }
 }
