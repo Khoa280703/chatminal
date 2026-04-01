@@ -52,7 +52,7 @@ impl GuiFrontEnd {
             known_window: RefCell::new(None),
             client_id: client_id.clone(),
             config_subscription: RefCell::new(None),
-            _host_activity_guard: crate::chatminal_sidebar::sidebar_enabled_from_env()
+            _host_activity_guard: crate::chatminal_sidebar::sidebar_enabled()
                 .then(crate::chatminal_runtime::start_host_activity),
         });
 

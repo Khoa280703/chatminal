@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use chatminal_store::StoredSessionStatus;
 
 use super::{
@@ -36,6 +38,7 @@ impl RuntimeState {
                 let mut output_chunk = chunk;
                 let mut raw_replay_chunk = String::new();
                 let mut synthetic_run_boundary_prepended = false;
+                let mut logicalized: Option<String> = None;
                 if let Some(entry) = inner.sessions.get_mut(session_id.as_ref()) {
                     if entry.generation != generation {
                         return;
@@ -71,28 +74,28 @@ impl RuntimeState {
                     entry.session.status = StoredSessionStatus::Running;
                     seq_after = Some(entry.session.seq);
                     persist_history = entry.session.persist_history;
-                    let tail_chunk = if synthetic_run_boundary_prepended {
-                        logicalize_prepended_run_boundary(&output_chunk)
+                    logicalized = if synthetic_run_boundary_prepended {
+                        Some(logicalize_prepended_run_boundary(&output_chunk))
                     } else {
-                        output_chunk.clone()
+                        None
                     };
                     let tail_chunk = strip_volatile_terminal_control_sequences(
-                        &strip_zsh_prompt_spacer_artifact(&tail_chunk),
+                        &strip_zsh_prompt_spacer_artifact(
+                            logicalized.as_deref().unwrap_or(&output_chunk),
+                        ),
                     );
                     append_recent_output_tail(&mut entry.recent_output_tail, &tail_chunk);
                     if !persist_history {
-                        let buffered_chunk = if synthetic_run_boundary_prepended {
-                            logicalize_prepended_run_boundary(&output_chunk)
-                        } else {
-                            output_chunk.clone()
-                        };
-                        entry.live_output.push_str(&buffered_chunk);
+                        let buffered = logicalized
+                            .as_deref()
+                            .unwrap_or(&output_chunk);
+                        entry.live_output.push_str(buffered);
                         trim_live_output(&mut entry.live_output, 256 * 1024);
                     }
 
                     event = Some(RuntimeEvent::PtyOutput(RuntimePtyOutputEvent {
                         session_id: session_id.to_string(),
-                        chunk: output_chunk.clone(),
+                        chunk: output_chunk,
                         seq: entry.session.seq,
                         ts,
                     }));
@@ -102,23 +105,20 @@ impl RuntimeState {
                 if let Some(seq) = seq_after {
                     let _ = self.persist_tx.try_send(
                         PersistJob::UpdateSeq {
-                            session_id: session_id.to_string(),
+                            session_id: Arc::clone(&session_id),
                             seq,
                         },
                     );
                     if !was_already_running {
                         let _ = self.persist_tx.try_send(
                             PersistJob::MarkRunning {
-                                session_id: session_id.to_string(),
+                                session_id: Arc::clone(&session_id),
                             },
                         );
                     }
                     if persist_history {
-                        let persisted_chunk = if synthetic_run_boundary_prepended {
-                            logicalize_prepended_run_boundary(&output_chunk)
-                        } else {
-                            output_chunk.clone()
-                        };
+                        let persisted_chunk = logicalized
+                            .unwrap_or_else(|| raw_replay_chunk.clone());
                         let persisted_chunk = strip_volatile_terminal_control_sequences(
                             &strip_zsh_prompt_spacer_artifact(&persisted_chunk),
                         );
@@ -150,7 +150,7 @@ impl RuntimeState {
 
                         let _ = self.persist_tx.try_send(
                             PersistJob::OutputChunk {
-                                session_id: session_id.to_string(),
+                                session_id: Arc::clone(&session_id),
                                 seq,
                                 records: materialized.records,
                                 replay_chunk: raw_replay_chunk,
@@ -162,7 +162,7 @@ impl RuntimeState {
                             let max_lines = inner.config.max_scrollback_lines_per_session;
                             let _ = self.persist_tx.try_send(
                                 PersistJob::EnforceLimit {
-                                    session_id: session_id.to_string(),
+                                    session_id: Arc::clone(&session_id),
                                     max_lines,
                                 },
                             );

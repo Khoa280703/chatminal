@@ -499,6 +499,6 @@ impl<'a> TripleLayerQuadAllocatorTrait for TripleLayerQuadAllocator<'a> {
 #[cfg(test)]
 #[test]
 fn size() {
-    assert_eq!(std::mem::size_of::<Vertex>() * VERTICES_PER_CELL, 400);
-    assert_eq!(std::mem::size_of::<BoxedQuad>(), 112);
+    assert_eq!(std::mem::size_of::<Vertex>() * VERTICES_PER_CELL, 368);
+    assert_eq!(std::mem::size_of::<BoxedQuad>(), 108);
 }

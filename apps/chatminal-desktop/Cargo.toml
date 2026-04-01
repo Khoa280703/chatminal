@@ -43,7 +43,7 @@ codec = { workspace = true }
 colorgrad = { version = "0.6" }
 config = { workspace = true }
 dhat = { version = "0.3", optional = true }
-dirs-next = { version = "2.0" }
+dirs.workspace = true
 downcast-rs = { version = "1.0" }
 emojis = { version = "0.6" }
 env-bootstrap = { workspace = true }

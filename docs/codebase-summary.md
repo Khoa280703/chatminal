@@ -1,6 +1,6 @@
 # Codebase Summary
 
-Last updated: 2026-03-31 (performance optimization phases 1-4, startup recipes, Arc<str> migration)
+Last updated: 2026-04-01 (architecture unification phase 01, unified desktop shell)
 
 ## Runtime baseline
 Chatminal hiện là **single-process desktop** với hai lớp:
@@ -15,6 +15,17 @@ Desktop product path là `single-flow local-first`:
 - active keyassignment/config path không còn các action legacy kiểu spawn/attach/detach theo execution target
 - host-runtime không còn `SpawnTarget.attach/detach/state` compat flow
 - active host engine đã đổi naming sang `spawn target`; legacy vocabulary cũ không còn nằm trong active product path
+- desktop app entry mặc định luôn boot unified shell path; sidebar không còn gate bởi env runtime flag
+
+## Current cleanup status
+- Architecture unification Phase 01 complete:
+  - deleted dead config surface for SSH/TLS/WSL
+  - deleted auto-update config stubs
+  - removed WSL branch from `crates/chatminal-host-runtime/src/spawn_target.rs`
+  - removed root workspace dependency `libssh-rs`
+- Intentional keep:
+  - `crates/chatminal-config/src/ssh.rs` now only contains minimal active helpers `SshParameters` and `username_from_env()`
+  - `engine-gui-subcommands` and `engine-toast-notification` remain active
 
 ## High-signal modules
 

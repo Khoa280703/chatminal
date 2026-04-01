@@ -86,7 +86,7 @@ fn icon_path() -> Vec<PathBuf> {
         match p.to_str() {
             Some(s) => {
                 if s.starts_with("~/") {
-                    if let Some(home) = dirs_next::home_dir() {
+                    if let Some(home) = dirs::home_dir() {
                         home.join(&s[2..])
                     } else {
                         p.into()

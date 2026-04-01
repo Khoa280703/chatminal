@@ -95,7 +95,7 @@ pub fn fixup_appimage() {
             std::env::remove_var("HOME");
             std::env::set_var(
                 "HOME",
-                dirs_next::home_dir().expect("can't resolve HOME dir"),
+                dirs::home_dir().expect("can't resolve HOME dir"),
             );
             clean_chatminal_config_env();
         }

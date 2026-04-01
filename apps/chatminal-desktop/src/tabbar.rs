@@ -392,7 +392,7 @@ impl SessionBarState {
             .window_decorations
             .contains(window::WindowDecorations::INTEGRATED_BUTTONS);
         let reserve_integrated_title_button_space =
-            use_integrated_title_buttons && !crate::chatminal_sidebar::sidebar_enabled_from_env();
+            use_integrated_title_buttons && !crate::chatminal_sidebar::sidebar_enabled();
 
         // We ultimately want to produce a line looking like this:
         // ` | tab1-title x | tab2-title x |  +      . - X `

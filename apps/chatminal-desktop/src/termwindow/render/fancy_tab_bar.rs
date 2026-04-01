@@ -61,7 +61,7 @@ impl crate::TermWindow {
         let tab_bar_x = sb.session_bar_x;
         let tab_bar_width = sb.session_bar_width;
         let reserve_integrated_title_button_space =
-            !crate::chatminal_sidebar::sidebar_enabled_from_env();
+            !crate::chatminal_sidebar::sidebar_enabled();
         let font = self.fonts.title_font()?;
         let metrics = RenderMetrics::with_font_metrics(&font.metrics());
         let items = self.tab_bar.items();
@@ -328,7 +328,7 @@ impl crate::TermWindow {
             .iter()
             .any(|item| matches!(item.item, SessionBarItem::NewSessionButton));
         let max_tab_width =
-            if crate::chatminal_sidebar::sidebar_enabled_from_env() && session_item_count > 0.0 {
+            if crate::chatminal_sidebar::sidebar_enabled() && session_item_count > 0.0 {
                 let left_padding = 0.5 * metrics.cell_size.width as f32;
                 let new_button_width = if show_new_button {
                     2.5 * metrics.cell_size.width as f32

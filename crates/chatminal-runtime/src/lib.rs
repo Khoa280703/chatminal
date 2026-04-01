@@ -11,6 +11,7 @@ pub mod config;
 pub mod metrics;
 pub mod session;
 pub mod state;
+pub mod terminal_text_utils;
 pub mod workspace_ids;
 pub mod workspace_layout;
 

@@ -1,5 +1,4 @@
 #![allow(non_upper_case_globals)]
-#![allow(dead_code)]
 use engine_input_types::PhysKeyCode;
 use std::collections::HashMap;
 

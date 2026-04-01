@@ -1,6 +1,20 @@
 # System Architecture
 
-Last updated: 2026-03-31 (performance optimization phases 1-4, startup recipes, single-process desktop model)
+Last updated: 2026-04-01 (architecture unification phase 01, unified desktop shell)
+
+## Latest changes (architecture unification phase 01, 2026-04-01)
+- `chatminal-config` không còn giữ dead config surface cho SSH/TLS/WSL:
+  - removed config fields `wsl_targets`, `ssh_targets`, `ssh_backend`, `tls_servers`, `tls_clients`
+  - removed stubs `mux_enable_ssh_agent`, `default_ssh_auth_sock`, `check_for_updates`, `show_update_window`, `check_for_updates_interval_seconds`
+  - removed Lua helper `default_wsl_targets`
+- `chatminal-host-runtime` không còn WSL spawn-target fixup branch trong active build.
+- Root workspace không còn dependency `libssh-rs`.
+- Chỉ giữ lại minimal SSH compile-path utilities trong `chatminal-config`:
+  - `SshParameters`
+  - `username_from_env()`
+- Desktop shell startup đã unify:
+  - sidebar luôn là một phần của desktop app
+  - default startup path của `chatminal-desktop` đi thẳng vào unified desktop shell, không còn terminal-only fallback path ở entry mặc định
 
 ## Latest changes (performance optimization phases 1-4, startup recipes, 2026-03-30/31)
 - **Phase 1**: SQLite connection reuse (`Arc<Mutex<Connection>>`) — eliminated ~40 `open_connection()` syscalls per event cycle

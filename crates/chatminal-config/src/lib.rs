@@ -36,13 +36,11 @@ mod scheme_data;
 mod serial;
 mod ssh;
 mod terminal;
-mod tls;
 mod runtime_options;
 mod units;
 mod unix;
 mod version;
 pub mod window;
-mod wsl;
 
 pub use crate::config::*;
 pub use background::*;
@@ -56,17 +54,15 @@ pub use keys::*;
 pub use serial::*;
 pub use ssh::*;
 pub use terminal::*;
-pub use tls::*;
 pub use runtime_options::*;
 pub use units::*;
 pub use unix::*;
 pub use version::*;
-pub use wsl::*;
 
 type ErrorCallback = fn(&str);
 
 lazy_static! {
-    pub static ref HOME_DIR: PathBuf = dirs_next::home_dir().expect("can't find HOME dir");
+    pub static ref HOME_DIR: PathBuf = dirs::home_dir().expect("can't find HOME dir");
     pub static ref CONFIG_DIRS: Vec<PathBuf> = config_dirs();
     pub static ref RUNTIME_DIR: PathBuf = compute_runtime_dir().unwrap();
     pub static ref DATA_DIR: PathBuf = compute_data_dir().unwrap();

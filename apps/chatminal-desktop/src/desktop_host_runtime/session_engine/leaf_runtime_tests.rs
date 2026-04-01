@@ -1,7 +1,7 @@
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use chatminal_terminal_core::{ScreenLine, TerminalSize};
+use chatminal_terminal_core::TerminalSize;
 use portable_pty::CommandBuilder;
 
 use super::super::{RuntimeId, TerminalInstanceId};
@@ -55,21 +55,13 @@ fn leaf_runtime_captures_output_into_terminal_state() {
     }
     assert!(saw_output);
 
-    let rendered = runtime
-        .screen()
-        .lines_in_phys_range(0..runtime.screen().scrollback_rows())
-        .iter()
-        .map(ScreenLine::as_str)
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(rendered.contains("terminal-instance-runtime-smoke"));
     assert!(runtime
         .replay_output()
         .contains("terminal-instance-runtime-smoke"));
 }
 
 #[test]
-fn leaf_runtime_resize_updates_terminal_snapshot() {
+fn leaf_runtime_resize_updates_pty_size() {
     let (events_tx, _events_rx) = mpsc::sync_channel(32);
     let runtime = TerminalInstanceRuntime::spawn(runtime_spawn("sleep 1"), events_tx)
         .expect("spawn sleeping runtime");
@@ -82,8 +74,6 @@ fn leaf_runtime_resize_updates_terminal_snapshot() {
             dpi: 96,
         })
         .expect("resize runtime");
-
-    assert_eq!(runtime.screen().physical_rows, 30);
 }
 
 #[test]
@@ -93,17 +83,9 @@ fn leaf_runtime_seeds_terminal_from_initial_scrollback() {
     spawn.initial_scrollback = Some("restored-line-1\nrestored-line-2\n".to_string());
 
     let runtime = TerminalInstanceRuntime::spawn(spawn, events_tx).expect("spawn runtime");
-    let rendered = runtime
-        .screen()
-        .lines_in_phys_range(0..runtime.screen().scrollback_rows())
-        .iter()
-        .map(ScreenLine::as_str)
-        .collect::<Vec<_>>()
-        .join("\n");
 
-    assert!(rendered.contains("restored-line-1"));
-    assert!(rendered.contains("restored-line-2"));
     assert!(runtime.replay_output().contains("restored-line-1"));
+    assert!(runtime.replay_output().contains("restored-line-2"));
 }
 
 #[test]

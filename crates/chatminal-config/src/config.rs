@@ -15,11 +15,8 @@ use crate::keyassignment::{
 };
 use crate::keys::{Key, LeaderKey, Mouse};
 use crate::lua::make_lua_context;
-use crate::ssh::{SshBackend, SshTarget};
-use crate::tls::{TlsTargetClient, TlsTargetServer};
 use crate::units::Dimension;
 use crate::unix::UnixTargetConfig;
-use crate::wsl::WslTarget;
 use crate::{
     default_config_with_overrides_applied, default_one_point_oh, default_one_point_oh_f64,
     default_true, default_win32_acrylic_accent_color, CellWidth, GpuInfo,
@@ -340,9 +337,6 @@ pub struct Config {
     pub webgpu_preferred_adapter: Option<GpuInfo>,
 
     #[dynamic(default)]
-    pub wsl_targets: Option<Vec<WslTarget>>,
-
-    #[dynamic(default)]
     pub exec_targets: Vec<ExecTarget>,
 
     #[dynamic(default)]
@@ -351,21 +345,6 @@ pub struct Config {
     /// The set of unix targets
     #[dynamic(default = "UnixTargetConfig::default_unix_targets")]
     pub unix_targets: Vec<UnixTargetConfig>,
-
-    #[dynamic(default)]
-    pub ssh_targets: Option<Vec<SshTarget>>,
-
-    #[dynamic(default)]
-    pub ssh_backend: SshBackend,
-
-    /// When running in server mode, defines configuration for
-    /// each of the endpoints that we'll listen for connections
-    #[dynamic(default)]
-    pub tls_servers: Vec<TlsTargetServer>,
-
-    /// The set of tls targets that we can connect to as a client
-    #[dynamic(default)]
-    pub tls_clients: Vec<TlsTargetClient>,
 
     /// Constrains the rate at which the multiplexer client will
     /// speculatively fetch line data.
@@ -381,12 +360,6 @@ pub struct Config {
     /// high and the user experience will be laggy and less responsive.
     #[dynamic(default = "default_mux_output_parser_buffer_size")]
     pub mux_output_parser_buffer_size: usize,
-
-    #[dynamic(default = "default_true")]
-    pub mux_enable_ssh_agent: bool,
-
-    #[dynamic(default)]
-    pub default_ssh_auth_sock: Option<String>,
 
     /// How many ms to delay after reading a chunk of output
     /// in order to try to coalesce fragmented writes into
@@ -716,17 +689,6 @@ pub struct Config {
     #[dynamic(default = "default_true")]
     pub automatically_reload_config: bool,
 
-    #[dynamic(default = "default_check_for_updates")]
-    pub check_for_updates: bool,
-    #[dynamic(
-        default,
-        deprecated = "this option no longer does anything and will be removed in a future release"
-    )]
-    pub show_update_window: bool,
-
-    #[dynamic(default = "default_update_interval")]
-    pub check_for_updates_interval_seconds: u64,
-
     /// When set to true, use the CSI-U encoding scheme as described
     /// in http://www.leonerd.org.uk/hacks/fixterms/
     /// This is off by default because @wez and @jsgf find the shift-space
@@ -907,25 +869,6 @@ impl Default for Config {
 impl Config {
     pub fn load() -> LoadedConfig {
         Self::load_with_overrides(&engine_dynamic::Value::default())
-    }
-
-    /// It is relatively expensive to parse all the ssh config files,
-    /// so we defer producing the default list until someone explicitly
-    /// asks for it
-    pub fn ssh_targets(&self) -> Vec<SshTarget> {
-        if let Some(targets) = &self.ssh_targets {
-            targets.clone()
-        } else {
-            SshTarget::default_targets()
-        }
-    }
-
-    pub fn wsl_targets(&self) -> Vec<WslTarget> {
-        if let Some(targets) = &self.wsl_targets {
-            targets.clone()
-        } else {
-            WslTarget::default_targets()
-        }
     }
 
     pub fn update_ulimit(&self) -> anyhow::Result<()> {
@@ -1227,21 +1170,8 @@ impl Config {
         for d in &self.unix_targets {
             check_target(&d.name, "unix target")?;
         }
-        if let Some(targets) = &self.ssh_targets {
-            for d in targets {
-                check_target(&d.name, "ssh target")?;
-            }
-        }
         for d in &self.exec_targets {
             check_target(&d.name, "exec target")?;
-        }
-        if let Some(targets) = &self.wsl_targets {
-            for d in targets {
-                check_target(&d.name, "wsl target")?;
-            }
-        }
-        for d in &self.tls_clients {
-            check_target(&d.name, "tls target")?;
         }
         Ok(())
     }
@@ -1594,10 +1524,6 @@ impl Config {
     }
 }
 
-fn default_check_for_updates() -> bool {
-    cfg!(not(feature = "distro-defaults"))
-}
-
 fn default_pane_select_fg_color() -> RgbaColor {
     SrgbaTuple(0.75, 0.75, 0.75, 1.0).into()
 }
@@ -1716,7 +1642,7 @@ fn default_font_size() -> f64 {
 }
 
 pub(crate) fn compute_cache_dir() -> anyhow::Result<PathBuf> {
-    if let Some(runtime) = dirs_next::cache_dir() {
+    if let Some(runtime) = dirs::cache_dir() {
         return Ok(runtime.join("chatminal"));
     }
 
@@ -1724,7 +1650,7 @@ pub(crate) fn compute_cache_dir() -> anyhow::Result<PathBuf> {
 }
 
 pub(crate) fn compute_data_dir() -> anyhow::Result<PathBuf> {
-    if let Some(runtime) = dirs_next::data_dir() {
+    if let Some(runtime) = dirs::data_dir() {
         return Ok(runtime.join("chatminal"));
     }
 
@@ -1732,7 +1658,7 @@ pub(crate) fn compute_data_dir() -> anyhow::Result<PathBuf> {
 }
 
 pub(crate) fn compute_runtime_dir() -> anyhow::Result<PathBuf> {
-    let path = if let Some(runtime) = dirs_next::runtime_dir() {
+    let path = if let Some(runtime) = dirs::runtime_dir() {
         runtime.join("chatminal")
     } else {
         crate::HOME_DIR.join(".local/share/chatminal")
@@ -1778,7 +1704,12 @@ fn default_bypass_mouse_reporting_modifiers() -> Modifiers {
 }
 
 fn default_gui_startup_args() -> Vec<String> {
-    vec!["start".to_string()]
+    vec![
+        "start".to_string(),
+        "--".to_string(),
+        "chatminal-runtime".to_string(),
+        "proxy-desktop-session".to_string(),
+    ]
 }
 
 // Coupled with term/src/config.rs:TerminalConfiguration::unicode_version
@@ -1862,10 +1793,6 @@ fn default_enq_answerback() -> String {
 
 fn default_tab_max_width() -> usize {
     16
-}
-
-fn default_update_interval() -> u64 {
-    86400
 }
 
 fn default_prefer_egl() -> bool {

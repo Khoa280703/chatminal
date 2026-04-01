@@ -352,6 +352,20 @@ fn run_terminal_gui(opts: StartCommand) -> anyhow::Result<()> {
     gui.run_forever()
 }
 
+fn desktop_shell_prog() -> Vec<OsString> {
+    vec![
+        OsString::from(crate::desktop_host_runtime::CHATMINAL_RUNTIME_SPAWN_TARGET_NAME),
+        OsString::from(crate::desktop_host_runtime::DESKTOP_PROXY_COMMAND),
+    ]
+}
+
+fn normalize_desktop_start_command(mut start: StartCommand) -> StartCommand {
+    if start.prog.is_empty() {
+        start.prog = desktop_shell_prog();
+    }
+    start
+}
+
 fn fatal_toast_notification(title: &str, message: &str) {
     persistent_toast_notification(title, message);
     // We need a short delay otherwise the notification
@@ -772,7 +786,7 @@ fn run() -> anyhow::Result<()> {
     let _saver = umask::UmaskSaver::new();
 
     let mut config_overrides = opts.config_override.clone();
-    if crate::chatminal_sidebar::sidebar_enabled_from_env() {
+    if crate::chatminal_sidebar::sidebar_enabled() {
         if !config_overrides
             .iter()
             .any(|(name, _)| name.eq_ignore_ascii_case("show_session_index_in_session_bar"))
@@ -790,9 +804,6 @@ fn run() -> anyhow::Result<()> {
         opts.skip_config,
     )?;
     let config = config::configuration();
-    if let Some(value) = &config.default_ssh_auth_sock {
-        std::env::set_var("SSH_AUTH_SOCK", value);
-    }
 
     let sub = match opts.cmd.as_ref().cloned() {
         Some(SubCommand::BlockingStart(start)) => {
@@ -812,19 +823,23 @@ fn run() -> anyhow::Result<()> {
             for a in &config.default_gui_startup_args {
                 argv.push(a.clone());
             }
-            SubCommand::try_parse_from(&argv).with_context(|| {
+            let parsed = SubCommand::try_parse_from(&argv).with_context(|| {
                 format!(
                     "parsing the default_gui_startup_args config: {:?}",
                     config.default_gui_startup_args
                 )
-            })?
+            })?;
+            match parsed {
+                SubCommand::Start(start) => SubCommand::Start(normalize_desktop_start_command(start)),
+                other => other,
+            }
         }
     };
 
     match sub {
         SubCommand::Start(start) => {
             log::trace!("Using configuration: {:#?}\nopts: {:#?}", config, opts);
-            let res = run_terminal_gui(start);
+            let res = run_terminal_gui(normalize_desktop_start_command(start));
             engine_blob_leases::clear_storage();
             res
         }

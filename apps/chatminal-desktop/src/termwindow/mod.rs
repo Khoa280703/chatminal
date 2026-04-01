@@ -1657,7 +1657,7 @@ impl TermWindow {
         let primary_host_window_id = PrimaryHostWindowId::try_from(primary_window_id)
             .context(format!("invalid primary gui window id {primary_window_id}"))?;
         let config = configuration();
-        let chatminal_sidebar = ChatminalSidebar::from_env();
+        let chatminal_sidebar = ChatminalSidebar::new();
         let dpi = config.dpi.unwrap_or_else(|| ::window::default_dpi()) as usize;
         let fontconfig = Rc::new(FontConfiguration::new(Some(config.clone()), dpi)?);
 

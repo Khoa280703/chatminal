@@ -30,7 +30,7 @@ fn resolve_file_name(name: Option<&str>) -> anyhow::Result<(PathBuf, File)> {
         .and_then(neuter_name)
         .unwrap_or("downloaded-via-chatminal");
 
-    let download_dir = dirs_next::download_dir()
+    let download_dir = dirs::download_dir()
         .ok_or_else(|| anyhow::anyhow!("unable to locate download directory"))?;
 
     for n in 0..20 {

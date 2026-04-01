@@ -29,8 +29,7 @@ make window
 
 Hoặc gọi trực tiếp:
 ```bash
-CHATMINAL_DESKTOP_SESSIONS_SIDEBAR=1 \
-cargo run --manifest-path apps/chatminal-desktop/Cargo.toml -- start -- chatminal-runtime proxy-desktop-session
+cargo run --manifest-path apps/chatminal-desktop/Cargo.toml
 ```
 
 Hydrate vendor deps trước nếu cần:
@@ -49,6 +48,8 @@ make check
 make check-desktop
 make test
 ```
+
+`cargo run --release` ở root workspace cũng đi cùng unified desktop shell path này.
 
 ## Biến môi trường
 - `CHATMINAL_DATA_DIR`

@@ -2,12 +2,7 @@ use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex};
 use std::io::Write;
 
-use chatminal_terminal_core::color::ColorPalette;
-#[cfg(test)]
-use chatminal_terminal_core::ScreenSnapshot;
-use chatminal_terminal_core::{
-    Terminal as CoreTerminal, TerminalConfiguration as CoreTerminalConfiguration, TerminalSize,
-};
+use chatminal_terminal_core::TerminalSize;
 use engine_term::{
     KeyCode as IoKeyCode, KeyModifiers as IoKeyModifiers, MouseEvent as IoMouseEvent,
     Terminal as IoTerminal, TerminalSize as IoTerminalSize,
@@ -57,17 +52,7 @@ pub enum TerminalInstanceRuntimeEvent {
     },
 }
 
-#[derive(Debug)]
-struct LeafTerminalConfig;
 
-impl CoreTerminalConfiguration for LeafTerminalConfig {
-    fn scrollback_size(&self) -> usize {
-        3_000
-    }
-    fn color_palette(&self) -> ColorPalette {
-        ColorPalette
-    }
-}
 
 #[derive(Clone)]
 struct SharedPtyWriter {
@@ -105,7 +90,6 @@ impl Write for SharedPtyWriter {
 }
 
 pub struct TerminalInstanceRuntime {
-    terminal: Arc<Mutex<CoreTerminal>>,
     io_terminal: Arc<Mutex<IoTerminal>>,
     output_history: Arc<Mutex<OutputHistory>>,
     master: Mutex<Box<dyn MasterPty + Send>>,
@@ -138,13 +122,7 @@ impl TerminalInstanceRuntime {
             .take_writer()
             .map_err(|err| format!("take writer failed: {err}"))?;
         let writer = Arc::new(Mutex::new(Some(writer)));
-        let terminal = Arc::new(Mutex::new(CoreTerminal::new(
-            spawn.size,
-            Arc::new(LeafTerminalConfig),
-            "Chatminal",
-            env!("CARGO_PKG_VERSION"),
-            Box::new(std::io::sink()),
-        )));
+
         let io_terminal = Arc::new(Mutex::new(IoTerminal::new(
             IoTerminalSize {
                 rows: spawn.size.rows,
@@ -165,7 +143,6 @@ impl TerminalInstanceRuntime {
             .filter(|value| !value.is_empty())
         {
             let sanitized = sanitize_zsh_prompt_spacer(scrollback.as_bytes());
-            terminal.lock().unwrap().advance_bytes(&sanitized);
             output_history
                 .lock()
                 .unwrap()
@@ -176,7 +153,6 @@ impl TerminalInstanceRuntime {
             .try_clone_reader()
             .map_err(|err| format!("clone reader failed: {err}"))?;
         spawn_reader_waiter_loop(
-            Arc::clone(&terminal),
             Arc::clone(&io_terminal),
             Arc::clone(&output_history),
             spawn.clone(),
@@ -189,7 +165,6 @@ impl TerminalInstanceRuntime {
             process_state.process_id
         );
         Ok(Self {
-            terminal,
             io_terminal,
             output_history,
             master: Mutex::new(pair.master),
@@ -208,10 +183,7 @@ impl TerminalInstanceRuntime {
         }
     }
 
-    #[cfg(test)]
-    pub fn screen(&self) -> ScreenSnapshot {
-        self.terminal.lock().unwrap().screen()
-    }
+
 
     pub fn replay_output(&self) -> String {
         self.output_history.lock().unwrap().replay()
@@ -223,7 +195,6 @@ impl TerminalInstanceRuntime {
             .unwrap()
             .resize(to_pty_size(size))
             .map_err(|err| format!("resize pty failed: {err}"))?;
-        self.terminal.lock().unwrap().resize(size);
         self.io_terminal.lock().unwrap().resize(IoTerminalSize {
             rows: size.rows,
             cols: size.cols,

@@ -335,11 +335,6 @@ end
             lua.create_function(|_, ()| Ok(crate::running_under_wsl()))?,
         )?;
 
-        api_mod.set(
-            "default_wsl_targets",
-            lua.create_function(|_, ()| Ok(crate::WslTarget::default_targets()))?,
-        )?;
-
         api_mod.set("font", lua.create_function(font)?)?;
         api_mod.set(
             "font_with_fallback",

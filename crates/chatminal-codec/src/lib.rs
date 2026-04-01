@@ -8,7 +8,6 @@
 //! client and server instances that are built from different versions
 //! of this code; in this way the client and server can more gracefully
 //! manage unknown enum variants.
-#![allow(dead_code)]
 #![allow(clippy::range_plus_one)]
 
 use anyhow::{bail, Context as _, Error};

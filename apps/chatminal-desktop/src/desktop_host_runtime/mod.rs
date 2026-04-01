@@ -30,7 +30,7 @@ pub(crate) use session_host::{get_or_init_session_host, DesktopSessionHost};
 pub(crate) use session_pane::ChatminalSessionPane;
 
 pub(crate) const CHATMINAL_RUNTIME_SPAWN_TARGET_NAME: &str = "chatminal-runtime";
-const DESKTOP_PROXY_COMMAND: &str = "proxy-desktop-session";
+pub(crate) const DESKTOP_PROXY_COMMAND: &str = "proxy-desktop-session";
 pub(crate) type HostSpawnTargetHandle = Arc<dyn SpawnTarget>;
 
 pub(crate) struct HostActivityGuard(Activity);

@@ -9,6 +9,7 @@
 
 use std::collections::HashMap;
 use std::sync::mpsc as std_mpsc;
+use std::sync::Arc;
 use std::thread;
 
 use chatminal_store::{Store, StoredScrollbackRecordInput, StoredSessionStatus};
@@ -16,21 +17,21 @@ use chatminal_store::{Store, StoredScrollbackRecordInput, StoredSessionStatus};
 #[allow(dead_code)]
 pub(super) enum PersistJob {
     OutputChunk {
-        session_id: String,
+        session_id: Arc<str>,
         seq: u64,
         records: Vec<StoredScrollbackRecordInput>,
         replay_chunk: String,
         ts: u64,
     },
     UpdateSeq {
-        session_id: String,
+        session_id: Arc<str>,
         seq: u64,
     },
     MarkRunning {
-        session_id: String,
+        session_id: Arc<str>,
     },
     EnforceLimit {
-        session_id: String,
+        session_id: Arc<str>,
         max_lines: usize,
     },
     /// Barrier: flushes all pending work, then responds via the ack channel.
@@ -57,8 +58,8 @@ pub(super) fn spawn_persist_worker(
 }
 
 fn run_persist_loop(store: Store, rx: std_mpsc::Receiver<PersistJob>) {
-    let mut pending_seqs: HashMap<String, u64> = HashMap::new();
-    let mut pending_running: HashMap<String, bool> = HashMap::new();
+    let mut pending_seqs: HashMap<Arc<str>, u64> = HashMap::new();
+    let mut pending_running: HashMap<Arc<str>, bool> = HashMap::new();
 
     while let Ok(job) = rx.recv() {
         if process_job(&store, job, &mut pending_seqs, &mut pending_running) {
@@ -81,8 +82,8 @@ fn run_persist_loop(store: Store, rx: std_mpsc::Receiver<PersistJob>) {
 fn process_job(
     store: &Store,
     job: PersistJob,
-    pending_seqs: &mut HashMap<String, u64>,
-    pending_running: &mut HashMap<String, bool>,
+    pending_seqs: &mut HashMap<Arc<str>, u64>,
+    pending_running: &mut HashMap<Arc<str>, bool>,
 ) -> bool {
     match job {
         PersistJob::Shutdown => {
@@ -139,8 +140,8 @@ fn process_job(
 
 fn flush_coalesced(
     store: &Store,
-    pending_seqs: &mut HashMap<String, u64>,
-    pending_running: &mut HashMap<String, bool>,
+    pending_seqs: &mut HashMap<Arc<str>, u64>,
+    pending_running: &mut HashMap<Arc<str>, bool>,
 ) {
     for (session_id, seq) in pending_seqs.drain() {
         if let Err(err) = store.update_session_seq(&session_id, seq) {
@@ -195,7 +196,7 @@ mod tests {
         let (tx, handle) = spawn_persist_worker(store.clone());
         for seq in 1..=10 {
             let _ = tx.send(PersistJob::UpdateSeq {
-                session_id: session.session_id.clone(),
+                session_id: session.session_id.clone().into(),
                 seq,
             });
         }
@@ -229,11 +230,11 @@ mod tests {
 
         let (tx, handle) = spawn_persist_worker(store.clone());
         let _ = tx.send(PersistJob::UpdateSeq {
-            session_id: session.session_id.clone(),
+            session_id: session.session_id.clone().into(),
             seq: 42,
         });
         let _ = tx.send(PersistJob::MarkRunning {
-            session_id: session.session_id.clone(),
+            session_id: session.session_id.clone().into(),
         });
         let _ = tx.send(PersistJob::Shutdown);
         let _ = handle.join();

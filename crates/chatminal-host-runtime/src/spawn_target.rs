@@ -8,13 +8,12 @@ use crate::Mux;
 use anyhow::{Context, Error};
 use async_trait::async_trait;
 use config::keyassignment::SpawnCommand;
-use config::{configuration, ExecTarget, SerialTarget, WslTarget};
+use config::{configuration, ExecTarget, SerialTarget};
 use downcast_rs::{impl_downcast, Downcast};
 use engine_term::TerminalSize;
 use parking_lot::Mutex;
 use portable_pty::{native_pty_system, CommandBuilder, ExitStatus, MasterPty, PtySize, PtySystem};
 use std::collections::HashMap;
-use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -156,23 +155,11 @@ impl LocalSpawnTarget {
             .cloned()
     }
 
-    fn resolve_wsl_target_config(&self) -> Option<WslTarget> {
-        config::configuration()
-            .wsl_targets()
-            .iter()
-            .find(|d| d.name == self.name)
-            .cloned()
-    }
-
     pub fn with_pty_system(name: &str, pty_system: Box<dyn PtySystem + Send>) -> Self {
         Self {
             pty_system: Mutex::new(pty_system),
             name: name.to_string(),
         }
-    }
-
-    pub fn new_wsl_target(wsl: WslTarget) -> Result<Self, Error> {
-        Self::new(&wsl.name)
     }
 
     pub fn new_exec_target(exec_target: ExecTarget) -> anyhow::Result<Self> {
@@ -204,49 +191,7 @@ impl LocalSpawnTarget {
     }
 
     async fn fixup_command(&self, cmd: &mut CommandBuilder) -> anyhow::Result<()> {
-        if let Some(wsl) = self.resolve_wsl_target_config() {
-            let mut args: Vec<OsString> = cmd.get_argv().clone();
-
-            if args.is_empty() {
-                if let Some(def_prog) = &wsl.default_prog {
-                    for arg in def_prog {
-                        args.push(arg.into());
-                    }
-                }
-            }
-
-            let mut argv: Vec<OsString> = vec![
-                "wsl.exe".into(),
-                "--distribution".into(),
-                wsl.distribution
-                    .as_deref()
-                    .unwrap_or(wsl.name.as_str())
-                    .into(),
-            ];
-
-            if let Some(cwd) = cmd.get_cwd() {
-                argv.push("--cd".into());
-                argv.push(cwd.into());
-            }
-
-            if let Some(user) = &wsl.username {
-                argv.push("--user".into());
-                argv.push(user.into());
-            }
-
-            if !args.is_empty() {
-                argv.push("--exec".into());
-                for arg in args {
-                    argv.push(arg);
-                }
-            }
-
-            // TODO: process env list and update WLSENV so that they
-            // get passed through
-
-            cmd.clear_cwd();
-            *cmd.get_argv_mut() = argv;
-        } else if let Some(ed) = self.resolve_exec_target_config() {
+        if let Some(ed) = self.resolve_exec_target_config() {
             let mut args = vec![];
             let mut set_environment_variables = HashMap::new();
             for arg in cmd.get_argv() {
@@ -389,24 +334,12 @@ impl LocalSpawnTarget {
     ) -> anyhow::Result<CommandBuilder> {
         let config = configuration();
 
-        let wsl = self.resolve_wsl_target_config();
-        let default_prog = wsl
-            .as_ref()
-            .map(|wsl| wsl.default_prog.as_ref())
-            .unwrap_or(config.default_prog.as_ref());
-
         let mut cmd = match command {
             Some(mut cmd) => {
-                config.apply_cmd_defaults(&mut cmd, default_prog, config.default_cwd.as_ref());
+                config.apply_cmd_defaults(&mut cmd, config.default_prog.as_ref(), config.default_cwd.as_ref());
                 cmd
             }
-            None => config.build_prog(
-                None,
-                default_prog,
-                wsl.as_ref()
-                    .map(|wsl| wsl.default_cwd.as_ref())
-                    .unwrap_or(config.default_cwd.as_ref()),
-            )?,
+            None => config.build_prog(None, config.default_prog.as_ref(), config.default_cwd.as_ref())?,
         };
         if let Some(dir) = command_dir {
             cmd.cwd(dir);

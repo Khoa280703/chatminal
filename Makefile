@@ -12,7 +12,7 @@ help:
 	@echo "Chatminal desktop shortcuts:"
 	@echo "  make clean-data                             # Kill Chatminal processes and remove local app data/cache/logs"
 	@echo "  make clean                                  # Alias of clean-data"
-	@echo "  make window                                 # Run Chatminal Desktop with session sidebar enabled"
+	@echo "  make window                                 # Run Chatminal Desktop unified shell"
 	@echo "  make bootstrap-terminal-deps                # Hydrate vendored C deps for desktop runtime"
 	@echo "  make verify-third-party-reference-only      # Assert active build/runtime no longer depends on third_party/terminal-engine-reference"
 	@echo "  make check                                  # cargo check --workspace"
@@ -30,7 +30,7 @@ clean-data:
 	-rm -rf "$(DEFAULT_DATA_DIR)" "$(DEFAULT_CACHE_DIR)" "$(DEFAULT_LOG_DIR)" "$(FALLBACK_LOCAL_DATA_DIR)"
 
 window:
-	CHATMINAL_DESKTOP_SESSIONS_SIDEBAR=1 cargo run --manifest-path $(DESKTOP_MANIFEST) -- start -- chatminal-runtime proxy-desktop-session
+	cargo run --manifest-path $(DESKTOP_MANIFEST)
 
 bootstrap-terminal-deps:
 	bash scripts/bootstrap-terminal-vendor-deps.sh

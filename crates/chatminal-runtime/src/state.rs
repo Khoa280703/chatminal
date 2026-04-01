@@ -1164,73 +1164,7 @@ fn strip_volatile_terminal_control_sequences(value: &str) -> String {
 }
 
 fn visible_terminal_fragment(value: &str) -> String {
-    let bytes = value.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-
-    while i < bytes.len() {
-        match bytes[i] {
-            b'\x1b' => {
-                i += 1;
-                match bytes.get(i).copied() {
-                    Some(b'[') => {
-                        i += 1;
-                        while i < bytes.len() {
-                            let byte = bytes[i];
-                            i += 1;
-                            if (0x40..=0x7e).contains(&byte) {
-                                break;
-                            }
-                        }
-                    }
-                    Some(b']') => {
-                        i += 1;
-                        while i < bytes.len() {
-                            match bytes[i] {
-                                0x07 => {
-                                    i += 1;
-                                    break;
-                                }
-                                0x1b if bytes.get(i + 1) == Some(&b'\\') => {
-                                    i += 2;
-                                    break;
-                                }
-                                _ => i += 1,
-                            }
-                        }
-                    }
-                    Some(b'P') | Some(b'^') | Some(b'_') | Some(b'X') => {
-                        i += 1;
-                        while i < bytes.len() {
-                            match bytes[i] {
-                                0x1b if bytes.get(i + 1) == Some(&b'\\') => {
-                                    i += 2;
-                                    break;
-                                }
-                                _ => i += 1,
-                            }
-                        }
-                    }
-                    Some(_) => {
-                        i += 1;
-                    }
-                    None => break,
-                }
-            }
-            b'\r' | b'\n' => {
-                i += 1;
-            }
-            byte if byte.is_ascii_control() => {
-                i += 1;
-            }
-            byte => {
-                out.push(byte);
-                i += 1;
-            }
-        }
-    }
-
-    String::from_utf8_lossy(&out).to_string()
+    crate::terminal_text_utils::visible_terminal_fragment(value)
 }
 
 #[cfg(test)]

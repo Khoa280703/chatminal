@@ -3,7 +3,7 @@ use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use chatminal_terminal_core::{Terminal as CoreTerminal, TerminalSize};
+use chatminal_terminal_core::TerminalSize;
 use engine_term::Terminal as IoTerminal;
 use portable_pty::{Child, CommandBuilder, PtySize};
 
@@ -11,7 +11,6 @@ use super::leaf_runtime::{TerminalInstanceRuntimeEvent, TerminalInstanceRuntimeS
 use super::output_history::OutputHistory;
 
 pub(crate) fn spawn_reader_waiter_loop(
-    terminal: Arc<Mutex<CoreTerminal>>,
     io_terminal: Arc<Mutex<IoTerminal>>,
     output_history: Arc<Mutex<OutputHistory>>,
     spawn: TerminalInstanceRuntimeSpawn,
@@ -39,7 +38,7 @@ pub(crate) fn spawn_reader_waiter_loop(
                 Ok(read) => {
                     let raw_chunk = String::from_utf8_lossy(&buffer[..read]).to_string();
                     io_terminal.lock().unwrap().advance_bytes(raw_chunk.as_bytes());
-                    let mut chunk = raw_chunk.clone();
+                    let mut chunk = raw_chunk;
                     if let Some(restored) = restored_prompt_fragment.as_deref() {
                         if visible_terminal_fragment(&chunk).is_empty() {
                             // Keep prompt-dedupe armed across pure control-sequence chunks.
@@ -70,7 +69,6 @@ pub(crate) fn spawn_reader_waiter_loop(
                         last_visible_prompt = None;
                     }
 
-                    terminal.lock().unwrap().advance_bytes(chunk.as_bytes());
                     output_history.lock().unwrap().push(chunk.clone());
                     let _ = events.send(TerminalInstanceRuntimeEvent::Output {
                         session_id: Arc::clone(&session_id),
@@ -163,86 +161,11 @@ pub(crate) fn sanitize_zsh_prompt_spacer(bytes: &[u8]) -> Vec<u8> {
 }
 
 fn snapshot_trailing_fragment(content: &str) -> Option<String> {
-    if content.is_empty() || content.ends_with('\n') || content.ends_with('\r') {
-        return None;
-    }
-
-    let cut = content
-        .rfind(['\n', '\r'])
-        .map(|index| index.saturating_add(1))
-        .unwrap_or(0);
-    let fragment = content[cut..].to_string();
-    (!fragment.is_empty()).then_some(fragment)
+    chatminal_runtime::terminal_text_utils::snapshot_trailing_fragment(content)
 }
 
 fn visible_terminal_fragment(value: &str) -> String {
-    let bytes = value.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-
-    while i < bytes.len() {
-        match bytes[i] {
-            b'\x1b' => {
-                i += 1;
-                match bytes.get(i).copied() {
-                    Some(b'[') => {
-                        i += 1;
-                        while i < bytes.len() {
-                            let byte = bytes[i];
-                            i += 1;
-                            if (0x40..=0x7e).contains(&byte) {
-                                break;
-                            }
-                        }
-                    }
-                    Some(b']') => {
-                        i += 1;
-                        while i < bytes.len() {
-                            match bytes[i] {
-                                0x07 => {
-                                    i += 1;
-                                    break;
-                                }
-                                0x1b if bytes.get(i + 1) == Some(&b'\\') => {
-                                    i += 2;
-                                    break;
-                                }
-                                _ => i += 1,
-                            }
-                        }
-                    }
-                    Some(b'P') | Some(b'^') | Some(b'_') | Some(b'X') => {
-                        i += 1;
-                        while i < bytes.len() {
-                            match bytes[i] {
-                                0x1b if bytes.get(i + 1) == Some(&b'\\') => {
-                                    i += 2;
-                                    break;
-                                }
-                                _ => i += 1,
-                            }
-                        }
-                    }
-                    Some(_) => {
-                        i += 1;
-                    }
-                    None => break,
-                }
-            }
-            b'\r' | b'\n' => {
-                i += 1;
-            }
-            byte if byte.is_ascii_control() => {
-                i += 1;
-            }
-            byte => {
-                out.push(byte);
-                i += 1;
-            }
-        }
-    }
-
-    String::from_utf8_lossy(&out).to_string()
+    chatminal_runtime::terminal_text_utils::visible_terminal_fragment(value)
 }
 
 fn looks_like_shell_prompt_fragment(value: &str) -> bool {

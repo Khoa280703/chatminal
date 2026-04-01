@@ -18,7 +18,6 @@ pub use crate::chatminal_runtime::{
     DesktopSidebarSnapshot as SidebarSnapshot,
 };
 
-const SIDEBAR_ENABLE_ENV: &str = "CHATMINAL_DESKTOP_SESSIONS_SIDEBAR";
 const SIDEBAR_DEFAULT_WIDTH_PX: f32 = 304.0;
 const SIDEBAR_MIN_WIDTH_PX: f32 = 56.0;
 const SIDEBAR_MAX_WINDOW_RATIO: f32 = 0.58;
@@ -91,22 +90,20 @@ impl Default for SharedState {
 
 #[derive(Debug)]
 pub struct ChatminalSidebar {
-    enabled: bool,
     shared: Arc<Mutex<SharedState>>,
     sync_started: AtomicBool,
 }
 
 impl ChatminalSidebar {
-    pub fn from_env() -> Self {
+    pub fn new() -> Self {
         Self {
-            enabled: sidebar_enabled_from_env(),
             shared: Arc::new(Mutex::new(SharedState::default())),
             sync_started: AtomicBool::new(false),
         }
     }
 
     pub fn is_enabled(&self) -> bool {
-        self.enabled
+        true
     }
 
     pub fn snapshot(&self) -> SidebarSnapshot {
@@ -124,9 +121,6 @@ impl ChatminalSidebar {
     }
 
     pub fn start_background_sync(&self) {
-        if !self.enabled {
-            return;
-        }
         if self
             .sync_started
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
@@ -597,9 +591,6 @@ impl ChatminalSidebar {
     }
 
     pub fn width_pixels_for_window(&self, window_width: usize, dpi: usize) -> usize {
-        if !self.enabled {
-            return 0;
-        }
         let override_px = self
             .shared
             .lock()
@@ -609,9 +600,6 @@ impl ChatminalSidebar {
     }
 
     pub fn set_width_pixels(&self, requested_width_px: f32, window_width: usize, dpi: usize) -> bool {
-        if !self.enabled {
-            return false;
-        }
         let clamped = clamp_sidebar_width_px(requested_width_px, window_width, dpi) as f32;
         let Ok(mut state) = self.shared.lock() else {
             return false;
@@ -724,9 +712,6 @@ impl ChatminalSidebar {
     }
 
     pub fn width_pixels(window_width: usize, dpi: usize) -> usize {
-        if !sidebar_enabled_from_env() {
-            return 0;
-        }
         clamp_sidebar_width_px(default_sidebar_width_px(dpi), window_width, dpi)
     }
 }
@@ -749,11 +734,8 @@ fn clamp_sidebar_width_px(requested_width_px: f32, window_width: usize, dpi: usi
         .round() as usize
 }
 
-pub fn sidebar_enabled_from_env() -> bool {
-    std::env::var(SIDEBAR_ENABLE_ENV)
-        .ok()
-        .map(|value| value.trim() == "1")
-        .unwrap_or(false)
+pub fn sidebar_enabled() -> bool {
+    true
 }
 
 fn run_sync_loop(shared: Arc<Mutex<SharedState>>) {

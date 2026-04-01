@@ -1,5 +1,25 @@
 # Project Changelog
 
+## 2026-04-01
+
+### Changed
+- Architecture unification plan `260401-0949-architecture-unification` đã hoàn thành Phase 01:
+  - xóa dead config surface cho SSH/TLS/WSL
+  - xóa auto-update config stubs không còn implementation
+  - cắt WSL spawn-target fixup path trong `chatminal-host-runtime`
+  - bỏ `libssh-rs` khỏi root workspace dependency
+  - giữ lại đúng 2 SSH utility compile-path còn active:
+    - `SshParameters`
+    - `username_from_env()`
+- Desktop startup path cũng đã được unify:
+  - desktop sidebar không còn gate bởi `CHATMINAL_DESKTOP_SESSIONS_SIDEBAR`
+  - `chatminal-desktop` mặc định boot vào unified desktop shell path thay vì terminal-only fallback
+
+### Verification
+- `cargo check --workspace` pass
+- `cargo test -p chatminal-config --lib` pass
+- `cargo test -p chatminal-host-runtime --lib` pass
+
 ## 2026-03-29
 
 ### Changed

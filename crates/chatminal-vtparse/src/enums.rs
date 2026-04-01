@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 #[repr(u16)]
 pub enum Action {
@@ -50,6 +48,9 @@ pub enum State {
     SosPmString = 13,
     ApcString = 14,
     // Special states, always last (no tables for these)
+    // Anywhere is a pseudo-state used only as a numeric sentinel in the
+    // vtparse transition tables; accessed via State::from_u16 transmute.
+    #[allow(dead_code)]
     Anywhere = 15,
     Utf8Sequence = 16,
 }

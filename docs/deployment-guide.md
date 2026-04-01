@@ -22,8 +22,7 @@ make window
 
 Or directly:
 ```bash
-CHATMINAL_DESKTOP_SESSIONS_SIDEBAR=1 \
-cargo run --manifest-path apps/chatminal-desktop/Cargo.toml -- start -- chatminal-runtime proxy-desktop-session
+cargo run --manifest-path apps/chatminal-desktop/Cargo.toml
 ```
 
 ## Vendor deps (first-time setup)
@@ -44,7 +43,6 @@ make bootstrap-terminal-deps
 - `CHATMINAL_DEFAULT_COLS` — Default terminal width (default: 120)
 - `CHATMINAL_DEFAULT_ROWS` — Default terminal height (default: 40)
 - `CHATMINAL_HEALTH_INTERVAL_MS` — Health check interval (default: 5000)
-- `CHATMINAL_DESKTOP_SESSIONS_SIDEBAR` — Enable sessions sidebar (default: 1)
 - `CHATMINAL_WINDOW_BACKEND` — Window backend: `wezterm-gui` (default) or `legacy`
 
 ## Performance tuning
