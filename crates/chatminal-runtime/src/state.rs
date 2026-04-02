@@ -7,9 +7,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::workspace_ids::{SessionViewId, WorkspaceNodeId};
 use crate::workspace_layout::{WorkspaceLayoutState, WorkspaceSplitAxis};
-use chatminal_store::{Store, StoredSession, StoredSessionStatus};
 #[cfg(test)]
 use chatminal_store::StoredSessionSnapshot;
+use chatminal_store::{Store, StoredSession, StoredSessionStatus};
 
 use crate::api::{
     RuntimeCreatedSession, RuntimeEvent, RuntimeProfile, RuntimeSessionLaunchSpec,
@@ -23,9 +23,9 @@ use crate::state::runtime_bridge::{RuntimeExecutionAdapter, RuntimeHandle};
 mod canonical_scrollback;
 mod explorer_utils;
 mod native_api;
+mod persist_worker;
 pub mod runtime_bridge;
 mod runtime_lifecycle;
-mod persist_worker;
 mod session_event_processor;
 mod session_explorer;
 mod startup_recipe;
@@ -587,7 +587,9 @@ impl RuntimeState {
         self.spawn_startup_recipe_runner(session_id)
     }
 
-    pub fn get_lifecycle_preferences(&self) -> Result<crate::api::RuntimeLifecyclePreferences, String> {
+    pub fn get_lifecycle_preferences(
+        &self,
+    ) -> Result<crate::api::RuntimeLifecyclePreferences, String> {
         let inner = self
             .inner
             .lock()
@@ -1000,9 +1002,7 @@ impl RuntimeState {
 
     pub fn app_shutdown(&self) {
         // Signal persist worker to flush remaining jobs and stop.
-        let _ = self
-            .persist_tx
-            .send(persist_worker::PersistJob::Shutdown);
+        let _ = self.persist_tx.send(persist_worker::PersistJob::Shutdown);
 
         let runtimes = {
             let mut inner = match self.inner.lock() {
@@ -1029,7 +1029,9 @@ impl RuntimeState {
     #[cfg(test)]
     pub(super) fn flush_persist(&self) {
         let (ack_tx, ack_rx) = std_mpsc::sync_channel::<()>(1);
-        let _ = self.persist_tx.send(persist_worker::PersistJob::Flush { ack: ack_tx });
+        let _ = self
+            .persist_tx
+            .send(persist_worker::PersistJob::Flush { ack: ack_tx });
         let _ = ack_rx.recv();
     }
 }
@@ -1427,7 +1429,10 @@ fn find_repeated_trailing_prompt_suffix(line: &str) -> Option<(usize, String)> {
         return None;
     }
 
-    let mut boundaries = line.char_indices().map(|(index, _)| index).collect::<Vec<_>>();
+    let mut boundaries = line
+        .char_indices()
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
     boundaries.push(line.len());
 
     for &start in boundaries.iter().rev().skip(1) {

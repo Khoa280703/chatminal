@@ -5009,6 +5009,14 @@ impl BlockKey {
 }
 
 impl GlyphCache {
+    fn block_poly_aa(&self) -> PolyAA {
+        if self.fonts.config().anti_alias_custom_block_glyphs {
+            PolyAA::AntiAlias
+        } else {
+            PolyAA::MoarPixels
+        }
+    }
+
     fn draw_polys(
         &mut self,
         metrics: &RenderMetrics,
@@ -5168,6 +5176,7 @@ impl GlyphCache {
         let cell_rect = Rect::new(Point::new(0, 0), metrics.cell_size);
 
         buffer.clear_rect(cell_rect, black);
+        let block_poly_aa = self.block_poly_aa();
 
         match key.block {
             BlockKey::Blocks(blocks) => {
@@ -5236,11 +5245,7 @@ impl GlyphCache {
                             style: style,
                         }],
                         &mut buffer,
-                        if config::configuration().anti_alias_custom_block_glyphs {
-                            PolyAA::AntiAlias
-                        } else {
-                            PolyAA::MoarPixels
-                        },
+                        block_poly_aa,
                         BlendMode::default(),
                     );
                 };
@@ -5319,11 +5324,7 @@ impl GlyphCache {
                             style: PolyStyle::Outline,
                         }],
                         &mut buffer,
-                        if config::configuration().anti_alias_custom_block_glyphs {
-                            PolyAA::AntiAlias
-                        } else {
-                            PolyAA::MoarPixels
-                        },
+                        block_poly_aa,
                         BlendMode::default(),
                     );
                 };
@@ -5468,11 +5469,7 @@ impl GlyphCache {
                             style: style,
                         }],
                         &mut buffer,
-                        if config::configuration().anti_alias_custom_block_glyphs {
-                            PolyAA::AntiAlias
-                        } else {
-                            PolyAA::MoarPixels
-                        },
+                        block_poly_aa,
                         BlendMode::default(),
                     );
                 };
@@ -5600,11 +5597,7 @@ impl GlyphCache {
                                 style: style,
                             }],
                             &mut buffer,
-                            if config::configuration().anti_alias_custom_block_glyphs {
-                                PolyAA::AntiAlias
-                            } else {
-                                PolyAA::MoarPixels
-                            },
+                            block_poly_aa,
                             blend_mode,
                         );
                     };
@@ -5769,11 +5762,7 @@ impl GlyphCache {
                                 style: style,
                             }],
                             &mut buffer,
-                            if config::configuration().anti_alias_custom_block_glyphs {
-                                PolyAA::AntiAlias
-                            } else {
-                                PolyAA::MoarPixels
-                            },
+                            block_poly_aa,
                             blend_mode,
                         );
                     };
@@ -5985,11 +5974,7 @@ impl GlyphCache {
                     &metrics,
                     polys,
                     &mut buffer,
-                    if config::configuration().anti_alias_custom_block_glyphs {
-                        PolyAA::AntiAlias
-                    } else {
-                        PolyAA::MoarPixels
-                    },
+                    block_poly_aa,
                     BlendMode::default(),
                 );
             }

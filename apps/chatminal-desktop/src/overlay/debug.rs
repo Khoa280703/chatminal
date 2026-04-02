@@ -240,7 +240,10 @@ pub fn show_debug_overlay(
             if !host.as_ref().unwrap().is_enabled() {
                 term.render(&[Change::Text(format!(
                     "{}\r\n",
-                    host.as_ref().unwrap().disabled_reason().replace('\n', "\r\n")
+                    host.as_ref()
+                        .unwrap()
+                        .disabled_reason()
+                        .replace('\n', "\r\n")
                 ))])?;
                 continue;
             }

@@ -1,7 +1,7 @@
 //! Single root window container for the desktop mux.
 
 use crate::pane::CloseReason;
-use crate::{Mux, MuxNotification, Tab, TabId};
+use crate::{notify_mux, MuxNotification, Tab, TabId};
 use config::GuiPosition;
 use std::sync::Arc;
 
@@ -15,6 +15,7 @@ pub struct Window {
     workspace: String,
     title: String,
     initial_position: Option<GuiPosition>,
+    switch_to_last_active_tab_when_closing_tab: bool,
 }
 
 impl Window {
@@ -26,6 +27,8 @@ impl Window {
             title: String::new(),
             workspace,
             initial_position,
+            switch_to_last_active_tab_when_closing_tab:
+                crate::switch_to_last_active_tab_when_closing_tab(),
         }
     }
 
@@ -40,10 +43,8 @@ impl Window {
     pub fn set_title(&mut self, title: &str) {
         if self.title != title {
             self.title = title.to_string();
-            Mux::try_get().map(|mux| {
-                mux.notify(MuxNotification::WindowTitleChanged {
-                    title: title.to_string(),
-                })
+            notify_mux(MuxNotification::WindowTitleChanged {
+                title: title.to_string(),
             });
         }
     }
@@ -57,7 +58,7 @@ impl Window {
             return;
         }
         self.workspace = workspace.to_string();
-        Mux::get().notify(MuxNotification::WindowWorkspaceChanged);
+        notify_mux(MuxNotification::WindowWorkspaceChanged);
     }
 
     fn check_that_tab_isnt_already_in_window(&self, tab: &Arc<Tab>) {
@@ -67,8 +68,7 @@ impl Window {
     }
 
     fn invalidate(&self) {
-        let mux = Mux::get();
-        mux.notify(MuxNotification::WindowInvalidated);
+        notify_mux(MuxNotification::WindowInvalidated);
     }
 
     pub fn insert(&mut self, index: usize, tab: &Arc<Tab>) {
@@ -104,7 +104,7 @@ impl Window {
         true
     }
 
-    pub fn idx_by_id(&self, id: TabId) -> Option<usize> {
+    pub(crate) fn idx_by_id(&self, id: TabId) -> Option<usize> {
         for (idx, t) in self.tabs.iter().enumerate() {
             if t.tab_id() == id {
                 return Some(idx);
@@ -137,7 +137,7 @@ impl Window {
         self.do_remove_idx(idx, active)
     }
 
-    pub fn remove_by_id(&mut self, id: TabId) {
+    pub(crate) fn remove_by_id(&mut self, id: TabId) {
         let active = self.get_active().map(Arc::clone);
         if let Some(idx) = self.idx_by_id(id) {
             self.do_remove_idx(idx, active);
@@ -147,7 +147,7 @@ impl Window {
     fn do_remove_idx(&mut self, idx: usize, active: Option<Arc<Tab>>) -> Arc<Tab> {
         if let (Some(active), Some(removing)) = (&active, self.tabs.get(idx)) {
             if active.tab_id() == removing.tab_id()
-                && config::configuration().switch_to_last_active_tab_when_closing_tab
+                && self.switch_to_last_active_tab_when_closing_tab
             {
                 // If we are removing the active tab, switch back to
                 // the previously active tab
@@ -213,7 +213,7 @@ impl Window {
         self.tabs.iter()
     }
 
-    pub fn prune_dead_tabs(&mut self, live_tab_ids: &[TabId]) {
+    pub(crate) fn prune_dead_tabs(&mut self, live_tab_ids: &[TabId]) {
         let mut invalidated = false;
         let dead: Vec<TabId> = self
             .tabs

@@ -1,41 +1,12 @@
 use std::collections::HashMap;
 
 use crate::workspace_ids::{RuntimeId, SessionViewId, TerminalInstanceId};
+pub use crate::workspace_ids::{SessionGroupId, SessionRenderTargetId, SessionTerminalHandle};
 use chatminal_store::{
     StoredProfile, StoredSessionExplorerState, StoredSessionSnapshot, StoredSessionStatus,
     StoredSessionSummary,
 };
 use serde::{Deserialize, Serialize};
-
-macro_rules! runtime_boundary_id_type {
-    ($name:ident, $prefix:literal) => {
-        #[derive(
-            Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-        )]
-        #[serde(transparent)]
-        pub struct $name(u64);
-
-        impl $name {
-            pub const fn new(value: u64) -> Self {
-                Self(value)
-            }
-
-            pub const fn as_u64(self) -> u64 {
-                self.0
-            }
-        }
-
-        impl std::fmt::Display for $name {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                write!(f, concat!($prefix, "-{}"), self.0)
-            }
-        }
-    };
-}
-
-runtime_boundary_id_type!(SessionRenderTargetId, "render-target");
-runtime_boundary_id_type!(SessionTerminalHandle, "terminal-handle");
-runtime_boundary_id_type!(SessionGroupId, "group");
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -324,7 +295,10 @@ mod tests {
     #[test]
     fn boundary_ids_use_stable_prefixes() {
         assert_eq!(SessionRenderTargetId::new(7).to_string(), "render-target-7");
-        assert_eq!(SessionTerminalHandle::new(11).to_string(), "terminal-handle-11");
+        assert_eq!(
+            SessionTerminalHandle::new(11).to_string(),
+            "terminal-handle-11"
+        );
         assert_eq!(SessionGroupId::new(13).to_string(), "group-13");
     }
 
@@ -359,7 +333,10 @@ mod tests {
         let capability = SessionEngineCapability::desktop_embedded();
 
         assert_eq!(view_binding.group_id, Some(group.group_id));
-        assert_eq!(window.active_render_target_id, Some(render_target.render_target_id));
+        assert_eq!(
+            window.active_render_target_id,
+            Some(render_target.render_target_id)
+        );
         assert!(capability.supports_session_view_split);
     }
 

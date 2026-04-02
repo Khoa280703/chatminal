@@ -181,9 +181,9 @@ impl DesktopWorkspaceLayoutStore {
                 Some(WorkspaceLayoutState::new_single(session_id.to_string()))
             }
             (Some(layout), _) => Some(layout),
-            (None, Some(session_id)) => Some(WorkspaceLayoutState::new_single(
-                session_id.to_string(),
-            )),
+            (None, Some(session_id)) => {
+                Some(WorkspaceLayoutState::new_single(session_id.to_string()))
+            }
             (None, None) => None,
         };
         match layout {
@@ -205,7 +205,11 @@ impl DesktopWorkspaceLayoutStore {
         }
         let profile_store = self.with_workspace_id(Self::profile_workspace_id(profile_id));
         let layout = profile_store.snapshot_or_restore()?;
-        if !layout.views.iter().any(|view| view.session_id == session_id) {
+        if !layout
+            .views
+            .iter()
+            .any(|view| view.session_id == session_id)
+        {
             return None;
         }
         Some(self.replace_layout(layout))
@@ -231,7 +235,13 @@ impl DesktopWorkspaceLayoutStore {
                         .iter()
                         .any(|view| view.session_id == session_id)
             })
-            .map(|layout| layout.views.into_iter().map(|view| view.session_id).collect())
+            .map(|layout| {
+                layout
+                    .views
+                    .into_iter()
+                    .map(|view| view.session_id)
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -243,7 +253,11 @@ impl DesktopWorkspaceLayoutStore {
         let group_store =
             self.with_workspace_id(Self::profile_group_workspace_id(profile_id, session_id));
         let layout = group_store.snapshot_or_restore()?;
-        if !layout.views.iter().any(|view| view.session_id == session_id) {
+        if !layout
+            .views
+            .iter()
+            .any(|view| view.session_id == session_id)
+        {
             return None;
         }
         Some(self.replace_layout(layout))
@@ -257,9 +271,8 @@ impl DesktopWorkspaceLayoutStore {
     ) -> Option<WorkspaceLayoutState> {
         if previous_profile_id == Some(next_profile_id) {
             return self.snapshot_or_restore().or_else(|| {
-                fallback_session_id.map(|session_id| {
-                    WorkspaceLayoutState::new_single(session_id.to_string())
-                })
+                fallback_session_id
+                    .map(|session_id| WorkspaceLayoutState::new_single(session_id.to_string()))
             });
         }
         if let Some(previous_profile_id) = previous_profile_id {
@@ -463,8 +476,7 @@ mod tests {
 
     use crate::chatminal_runtime::{
         SessionEngineShared, SessionViewId, WorkspaceLayoutNodeKind, WorkspaceLayoutState,
-        WorkspaceNodeId,
-        WorkspaceSplitAxis,
+        WorkspaceNodeId, WorkspaceSplitAxis,
     };
     use crate::desktop_host_runtime::session_engine::SessionCoreState;
 
@@ -519,9 +531,8 @@ mod tests {
         assert_eq!(joined.views.len(), 2);
         let _ = store.save_as_profile_layout("profile-a");
 
-        let work_layout = store.replace_layout(WorkspaceLayoutState::new_single(
-            "session-c".to_string(),
-        ));
+        let work_layout =
+            store.replace_layout(WorkspaceLayoutState::new_single("session-c".to_string()));
         assert_eq!(work_layout.views.len(), 1);
 
         let restored = store
@@ -538,7 +549,9 @@ mod tests {
             .any(|view| view.session_id == "session-b"));
 
         let saved_profile_b = store
-            .with_workspace_id(DesktopWorkspaceLayoutStore::profile_workspace_id("profile-b"))
+            .with_workspace_id(DesktopWorkspaceLayoutStore::profile_workspace_id(
+                "profile-b",
+            ))
             .snapshot()
             .expect("saved profile-b layout");
         assert_eq!(saved_profile_b.views.len(), 1);
@@ -571,7 +584,9 @@ mod tests {
         assert_eq!(saved.views[0].session_id, "session-c");
 
         let profile_layout = store
-            .with_workspace_id(DesktopWorkspaceLayoutStore::profile_workspace_id("profile-a"))
+            .with_workspace_id(DesktopWorkspaceLayoutStore::profile_workspace_id(
+                "profile-a",
+            ))
             .snapshot()
             .expect("profile-a layout");
         assert_eq!(profile_layout.views.len(), 1);
@@ -650,7 +665,9 @@ mod tests {
         assert_eq!(restored.active_view_id, restored.views[0].view_id);
 
         let saved_profile_layout = store
-            .with_workspace_id(DesktopWorkspaceLayoutStore::profile_workspace_id("profile-a"))
+            .with_workspace_id(DesktopWorkspaceLayoutStore::profile_workspace_id(
+                "profile-a",
+            ))
             .snapshot()
             .expect("saved profile-a layout");
         assert_eq!(saved_profile_layout.views.len(), 2);

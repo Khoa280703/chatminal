@@ -1,18 +1,28 @@
-use config::configuration;
 use config::lua::get_or_create_sub_module;
 use config::lua::mlua::Lua;
+use config::{configuration, ConfigSubscription};
 use hdrhistogram::Histogram;
 use metrics::{Counter, Gauge, Key, KeyName, Metadata, Recorder, SharedString, Unit};
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 use tabout::{tabulate_output, Alignment, Column};
 
 static ENABLE_STAT_PRINT: AtomicBool = AtomicBool::new(true);
+static PERIODIC_STAT_LOGGING_SECS: AtomicUsize = AtomicUsize::new(0);
+static CONFIG_SUBSCRIPTION: OnceLock<Mutex<Option<ConfigSubscription>>> = OnceLock::new();
 lazy_static::lazy_static! {
     static ref INNER: Arc<Mutex<Inner>> = make_inner();
+}
+
+fn periodic_stat_logging_secs() -> usize {
+    configuration().periodic_stat_logging as usize
+}
+
+fn refresh_periodic_stat_logging_secs() {
+    PERIODIC_STAT_LOGGING_SECS.store(periodic_stat_logging_secs(), Ordering::Relaxed);
 }
 
 struct ThroughputInner {
@@ -204,7 +214,7 @@ impl Inner {
                 break;
             }
 
-            let seconds = configuration().periodic_stat_logging;
+            let seconds = PERIODIC_STAT_LOGGING_SECS.load(Ordering::Relaxed) as u64;
             if seconds == 0 {
                 continue;
             }
@@ -288,6 +298,16 @@ impl Stats {
     }
 
     pub fn init() -> anyhow::Result<()> {
+        refresh_periodic_stat_logging_secs();
+        let subscription = config::subscribe_to_config_reload(|| {
+            std::thread::spawn(refresh_periodic_stat_logging_secs);
+            true
+        });
+        CONFIG_SUBSCRIPTION
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .replace(subscription);
+
         let stats = Self::new();
         let inner = Arc::clone(&stats.inner);
         std::thread::spawn(move || Inner::run(inner));

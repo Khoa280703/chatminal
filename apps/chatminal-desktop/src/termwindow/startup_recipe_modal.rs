@@ -290,7 +290,8 @@ impl StartupRecipeModal {
     }
 
     fn cursor_visible(term_window: &TermWindow) -> bool {
-        (term_window.created.elapsed().as_millis() / MODAL_CURSOR_BLINK_MS as u128).is_multiple_of(2)
+        (term_window.created.elapsed().as_millis() / MODAL_CURSOR_BLINK_MS as u128)
+            .is_multiple_of(2)
     }
 
     fn schedule_cursor_blink(term_window: &TermWindow) {
@@ -665,7 +666,9 @@ impl Modal for StartupRecipeModal {
         &self,
         term_window: &mut TermWindow,
     ) -> anyhow::Result<Ref<'_, [ComputedElement]>> {
-        self.element.borrow_mut().replace(self.compute(term_window)?);
+        self.element
+            .borrow_mut()
+            .replace(self.compute(term_window)?);
         Ok(Ref::map(self.element.borrow(), |value| {
             value.as_ref().unwrap().as_slice()
         }))

@@ -3,58 +3,696 @@ use crate::pane::{CachePolicy, Pane, PaneId};
 use crate::tab::{SplitRequest, Tab, TabId};
 use crate::window::Window;
 use anyhow::{anyhow, Context, Error};
+use chatminal_runtime::{RuntimeId, SessionTerminalHandle};
 use config::{configuration, ExitBehavior};
-use spawn_target::{SpawnTarget, SplitSource};
 use engine_term::{Clipboard, ClipboardSelection, DownloadHandler, TerminalSize};
-use filedescriptor::{poll, pollfd, socketpair, AsRawSocketDescriptor, FileDescriptor, POLLIN};
-#[cfg(unix)]
-use libc::{c_int, SOL_SOCKET, SO_RCVBUF, SO_SNDBUF};
-use log::error;
-use metrics::histogram;
 use parking_lot::{
     MappedRwLockReadGuard, MappedRwLockWriteGuard, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard,
 };
 use percent_encoding::percent_decode_str;
-use portable_pty::{CommandBuilder, ExitStatus, PtySize};
+use portable_pty::{CommandBuilder, PtySize};
+use spawn_target::{SpawnTarget, SplitSource};
 use std::collections::HashMap;
-use std::convert::TryInto;
-use std::io::{Read, Write};
-#[cfg(windows)]
-use std::os::raw::c_int;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Weak};
-use std::thread;
-use std::time::{Duration, Instant};
-use termwiz::escape::csi::{DecPrivateMode, DecPrivateModeCode, Device, Mode};
-use termwiz::escape::{Action, CSI};
-use thiserror::*;
-#[cfg(windows)]
-use winapi::um::winsock2::{SOL_SOCKET, SO_RCVBUF, SO_SNDBUF};
+use std::convert::{TryFrom, TryInto};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 pub mod activity;
 pub mod client;
-pub mod spawn_target;
 pub mod localpane;
+mod localpane_hooks;
 pub mod pane;
+mod pty_io;
 pub mod renderable;
+pub mod spawn_target;
 pub mod tab;
 pub mod termwiztermtab;
 pub mod window;
+
+use localpane_hooks::LocalPaneHooks;
+pub(crate) use pty_io::{
+    dispatch_default_output_for_terminal_handle, dispatch_inline_output_for_pane,
+    start_pane_pty_reader, PtyIoHooks,
+};
 
 use crate::activity::Activity;
 
 pub const DEFAULT_WORKSPACE: &str = "default";
 
-pub fn terminal_by_id(pane_id: usize) -> Option<Arc<dyn Pane>> {
-    Mux::try_get().and_then(|mux| mux.get_pane(pane_id))
+pub(crate) fn try_global_mux() -> Option<Arc<Mux>> {
+    Mux::try_get()
 }
 
-pub fn runtime_entry_by_id(tab_id: usize) -> Option<Arc<Tab>> {
-    Mux::try_get().and_then(|mux| mux.get_tab(tab_id))
+pub(crate) fn with_mux<R>(func: impl FnOnce(&Mux) -> R) -> Option<R> {
+    let mux = try_global_mux()?;
+    Some(func(&mux))
+}
+
+fn with_control_plane<R>(func: impl FnOnce(&HostRuntimeControlPlane) -> R) -> Option<R> {
+    with_mux(|mux| func(&mux.control))
+}
+
+fn with_mux_and_control_plane<R>(
+    func: impl FnOnce(&Mux, &HostRuntimeControlPlane) -> R,
+) -> Option<R> {
+    with_mux(|mux| func(mux, &mux.control))
+}
+
+pub(crate) fn with_mux_strict<R>(func: impl FnOnce(&Mux) -> R) -> R {
+    func(&Mux::get())
+}
+
+pub(crate) fn notify_mux(notification: MuxNotification) {
+    let _ = with_mux(|mux| mux.notify(notification));
+}
+
+pub(crate) fn notify_mux_any_thread(notification: MuxNotification) {
+    Mux::notify_from_any_thread(notification);
+}
+
+pub(crate) fn prune_dead_windows_on_main_thread() {
+    promise::spawn::spawn_into_main_thread(async move {
+        let _ = with_mux(|mux| mux.prune_dead_windows());
+    })
+    .detach();
+}
+
+pub(crate) fn remove_pane_on_main_thread(pane_id: PaneId) {
+    promise::spawn::spawn_into_main_thread(async move {
+        let _ = with_mux(|mux| mux.remove_pane(pane_id));
+    })
+    .detach();
+}
+
+pub(crate) fn terminal_by_id(pane_id: usize) -> Option<Arc<dyn Pane>> {
+    with_mux(|mux| mux.get_pane(pane_id)).flatten()
+}
+
+pub fn terminal_by_handle(terminal_handle: SessionTerminalHandle) -> Option<Arc<dyn Pane>> {
+    let pane_id = usize::try_from(terminal_handle.as_u64()).ok()?;
+    terminal_by_id(pane_id)
+}
+
+pub fn alloc_terminal_handle_value() -> usize {
+    crate::pane::alloc_pane_id()
+}
+
+/// Initialize the host runtime by creating and installing a global Mux instance.
+pub fn initialize_host_runtime(
+    primary_spawn_target: Option<Arc<dyn SpawnTarget>>,
+) -> anyhow::Result<Arc<MuxHandle>> {
+    if let Some(mux) = try_global_mux() {
+        if let Some(spawn_target) = primary_spawn_target.as_ref() {
+            mux.control.set_primary_spawn_target(spawn_target);
+        }
+        return Ok(Arc::new(MuxHandle(mux)));
+    }
+    let mux = Arc::new(Mux::new(primary_spawn_target));
+    Mux::set_mux(&mux);
+    Ok(Arc::new(MuxHandle(Arc::clone(&mux))))
+}
+
+/// Shut down the host runtime, dropping the global Mux instance.
+pub fn shutdown_host_runtime() {
+    Mux::shutdown();
+}
+
+/// Returns `true` if the host runtime has been initialized.
+pub fn is_host_runtime_available() -> bool {
+    with_control_plane(|_| ()).is_some()
+}
+
+/// Opaque handle to a freshly-initialized Mux. Provides the narrow set of
+/// setup operations (register_client, replace_identity, subscribe) that callers
+/// need right after initialization. The Mux type itself stays `pub(crate)`.
+pub struct MuxHandle(Arc<Mux>);
+
+impl MuxHandle {
+    pub fn register_client(&self, client_id: Arc<ClientId>) {
+        self.0.register_client(client_id);
+    }
+
+    pub fn replace_identity(&self, id: Option<Arc<ClientId>>) -> Option<Arc<ClientId>> {
+        self.0.replace_identity(id)
+    }
+
+    pub fn set_active_workspace(&self, workspace: &str) {
+        self.0.set_active_workspace(workspace);
+    }
+
+    pub fn subscribe<F>(&self, subscriber: F)
+    where
+        F: Fn(HostRuntimeNotification) -> bool + 'static + Send + Sync,
+    {
+        self.0
+            .subscribe(move |notification| subscriber(notification.into()));
+    }
+}
+
+pub fn root_active_runtime_id() -> Option<RuntimeId> {
+    with_mux(|mux| mux.root_active_tab().map(|tab| tab.runtime_id())).flatten()
+}
+
+pub fn remove_terminal_handle(terminal_handle: SessionTerminalHandle) -> bool {
+    let Some(pane_id) = usize::try_from(terminal_handle.as_u64()).ok() else {
+        return false;
+    };
+    if let Some(mux) = try_global_mux() {
+        mux.remove_pane(pane_id);
+    }
+    true
+}
+
+pub fn register_pane(pane: &Arc<dyn Pane>) -> Result<(), Error> {
+    with_mux_strict(|mux| mux.add_pane_without_default_side_effects(pane))
+}
+
+pub(crate) fn register_pane_with_default_side_effects(pane: &Arc<dyn Pane>) -> Result<(), Error> {
+    with_mux_strict(|mux| mux.add_pane(pane))
+}
+
+pub(crate) fn register_pane_with_default_side_effects_and_io_hooks(
+    pane: &Arc<dyn Pane>,
+    hooks: PtyIoHooks,
+) -> Result<(), Error> {
+    with_mux_strict(|mux| mux.add_pane_with_default_side_effects_and_io_hooks(pane, hooks))
+}
+
+/// Register a pane with the global Mux, skipping default side effects, and
+/// optionally providing a callback that replaces `Mux::notify_from_any_thread`
+/// for PTY output notifications on this pane.
+pub fn register_pane_with_output_callback(
+    pane: &Arc<dyn Pane>,
+    on_pane_output: Option<Arc<dyn Fn(SessionTerminalHandle) + Send + Sync>>,
+) -> Result<(), Error> {
+    register_pane_with_io_hooks(pane, PtyIoHooks::with_output(on_pane_output))
+}
+
+pub(crate) fn register_pane_with_io_hooks(
+    pane: &Arc<dyn Pane>,
+    hooks: PtyIoHooks,
+) -> Result<(), Error> {
+    with_mux_strict(|mux| mux.add_pane_with_io_hooks(pane, hooks))
+}
+
+pub(crate) fn tab_by_id(tab_id: TabId) -> Option<Arc<Tab>> {
+    with_mux(|mux| mux.get_tab(tab_id)).flatten()
+}
+
+pub fn runtime_entry_by_runtime_id(runtime_id: RuntimeId) -> Option<Arc<Tab>> {
+    let tab_id = usize::try_from(runtime_id.as_u64()).ok()?;
+    tab_by_id(tab_id)
+}
+
+pub fn runtime_entry_info_by_runtime_id(runtime_id: RuntimeId) -> Option<RuntimeEntryInfo> {
+    runtime_entry_by_runtime_id(runtime_id).map(|tab| runtime_entry_info(&tab))
+}
+
+pub(crate) fn remove_tab_by_id(tab_id: TabId) {
+    if let Some(mux) = try_global_mux() {
+        let _ = mux.remove_tab(tab_id);
+    }
+}
+
+pub fn remove_runtime_entry_by_runtime_id(runtime_id: RuntimeId) -> bool {
+    let Some(tab_id) = usize::try_from(runtime_id.as_u64()).ok() else {
+        return false;
+    };
+    remove_tab_by_id(tab_id);
+    true
+}
+
+pub fn register_tab(tab: &Arc<Tab>) -> Result<(), Error> {
+    with_mux_strict(|mux| mux.add_tab_and_active_pane(tab))
+}
+
+pub fn attach_tab_to_window(tab: &Arc<Tab>) -> anyhow::Result<()> {
+    with_mux_strict(|mux| mux.attach_tab(tab))
+}
+
+pub fn with_root_window<R>(func: impl FnOnce(&Window) -> R) -> Option<R> {
+    let mux = try_global_mux()?;
+    let window = mux.root_window();
+    Some(func(&window))
+}
+
+pub fn with_root_window_mut<R>(func: impl FnOnce(&mut Window) -> R) -> Option<R> {
+    let mux = try_global_mux()?;
+    let mut window = mux.root_window_mut();
+    Some(func(&mut window))
+}
+
+pub fn root_window_workspace_name() -> Option<String> {
+    with_root_window(|window| window.get_workspace().to_string())
+}
+
+pub fn root_window_title() -> Option<String> {
+    with_root_window(|window| window.get_title().to_string())
+}
+
+pub fn set_root_window_workspace_name(workspace: &str) -> bool {
+    let Some(mux) = try_global_mux() else {
+        return false;
+    };
+    mux.window.write().set_workspace(workspace);
+    true
+}
+
+pub fn set_root_window_title(title: &str) -> bool {
+    let Some(mux) = try_global_mux() else {
+        return false;
+    };
+    mux.window.write().set_title(title);
+    true
+}
+
+pub fn focus_root_runtime_entry(runtime_id: RuntimeId) -> bool {
+    let Some(tab_id) = usize::try_from(runtime_id.as_u64()).ok() else {
+        return false;
+    };
+    with_root_window_mut(|window| {
+        let Some(tab_idx) = window.idx_by_id(tab_id) else {
+            return false;
+        };
+        window.save_and_then_set_active(tab_idx);
+        true
+    })
+    .unwrap_or(false)
+}
+
+fn root_runtime_entries() -> Vec<Arc<Tab>> {
+    with_root_window(|window| window.iter().cloned().collect()).unwrap_or_default()
+}
+
+pub fn root_runtime_ids() -> Vec<RuntimeId> {
+    root_runtime_entries()
+        .into_iter()
+        .map(|tab| tab.runtime_id())
+        .collect()
+}
+
+pub fn root_runtime_entry_infos() -> Vec<RuntimeEntryInfo> {
+    root_runtime_entries()
+        .into_iter()
+        .map(|tab| runtime_entry_info(&tab))
+        .collect()
+}
+
+pub fn root_has_runtime_entries_with_panes() -> bool {
+    root_runtime_entries()
+        .iter()
+        .any(|tab| !tab.iter_panes_ignoring_zoom().is_empty())
+}
+
+pub fn resize_all_root_runtime_entries(size: TerminalSize) {
+    for tab in root_runtime_entries() {
+        tab.resize(size);
+    }
+}
+
+pub(crate) fn root_active_runtime_entry() -> Option<Arc<Tab>> {
+    with_root_window(|window| window.get_active().cloned()).flatten()
+}
+
+pub(crate) fn root_first_runtime_entry() -> Option<Arc<Tab>> {
+    with_root_window(|window| window.get_by_idx(0).cloned()).flatten()
+}
+
+pub fn root_window_spawn_context_state() -> (TerminalSize, Option<SessionTerminalHandle>) {
+    let default_size = default_initial_terminal_size();
+    let size = root_first_runtime_entry()
+        .map(|tab| tab.get_size())
+        .unwrap_or(default_size);
+    let pane = root_active_runtime_entry()
+        .and_then(|tab| tab.get_active_pane())
+        .map(|pane| SessionTerminalHandle::new(pane.pane_id() as u64));
+    (size, pane)
+}
+
+pub fn active_workspace_name() -> Option<String> {
+    with_mux_and_control_plane(|mux, control| {
+        control
+            .workspace_for_identity()
+            .unwrap_or_else(|| mux.get_default_workspace())
+    })
+}
+
+pub fn set_active_workspace_name(workspace: &str) -> bool {
+    let Some(mux) = try_global_mux() else {
+        return false;
+    };
+    if let Some(ident) = mux.control.active_identity() {
+        if mux.control.set_workspace_for_client(&ident, workspace) {
+            mux.notify(MuxNotification::ActiveWorkspaceChanged(ident));
+        }
+    }
+    mux.window.write().set_workspace(workspace);
+    true
+}
+
+pub fn rename_workspace(old_workspace: &str, new_workspace: &str) -> bool {
+    let Some(mux) = try_global_mux() else {
+        return false;
+    };
+    if old_workspace == new_workspace {
+        return true;
+    }
+
+    mux.notify(MuxNotification::WorkspaceRenamed {
+        old_workspace: old_workspace.to_string(),
+        new_workspace: new_workspace.to_string(),
+    });
+
+    {
+        let mut window = mux.window.write();
+        if window.get_workspace() == old_workspace {
+            window.set_workspace(new_workspace);
+        }
+    }
+    mux.recompute_pane_count();
+    for client_id in mux.control.rename_workspace(old_workspace, new_workspace) {
+        mux.notify(MuxNotification::ActiveWorkspaceChanged(client_id));
+    }
+    true
+}
+
+pub(crate) fn focus_pane_and_tab(pane_id: PaneId) -> anyhow::Result<()> {
+    with_mux_strict(|mux| mux.focus_pane_and_containing_tab(pane_id))
+}
+
+pub fn focus_terminal_handle(terminal_handle: SessionTerminalHandle) -> anyhow::Result<()> {
+    let pane_id = usize::try_from(terminal_handle.as_u64())
+        .map_err(|_| anyhow!("invalid terminal handle {}", terminal_handle.as_u64()))?;
+    focus_pane_and_tab(pane_id)
+}
+
+pub fn record_focus_for_terminal_handle(terminal_handle: SessionTerminalHandle) -> bool {
+    let Some(pane_id) = usize::try_from(terminal_handle.as_u64()).ok() else {
+        return false;
+    };
+    let Some(mux) = try_global_mux() else {
+        return false;
+    };
+    if let Some(ident) = mux.control.active_identity() {
+        mux.record_focus_for_client(&ident, pane_id);
+    }
+    true
+}
+
+pub fn record_input_for_current_identity() -> bool {
+    let Some(mux) = try_global_mux() else {
+        return false;
+    };
+    if let Some(ident) = mux.control.active_identity() {
+        mux.control.client_had_input(&ident);
+    }
+    true
+}
+
+pub fn active_identity() -> Option<Arc<ClientId>> {
+    with_control_plane(|control| control.active_identity()).flatten()
+}
+
+pub fn active_workspace_for_client(ident: &Arc<ClientId>) -> Option<String> {
+    with_mux_and_control_plane(|mux, control| {
+        control
+            .workspace_for_client(ident)
+            .unwrap_or_else(|| mux.get_default_workspace())
+    })
+}
+
+pub fn set_active_workspace_for_client(ident: &Arc<ClientId>, workspace: &str) -> bool {
+    let Some(mux) = try_global_mux() else {
+        return false;
+    };
+    if mux.control.set_workspace_for_client(ident, workspace) {
+        mux.notify(MuxNotification::ActiveWorkspaceChanged(ident.clone()));
+    }
+    true
+}
+
+pub fn is_workspace_empty(workspace: &str) -> Option<bool> {
+    with_mux(|mux| mux.is_workspace_empty(workspace))
+}
+
+pub fn iter_workspaces() -> Vec<String> {
+    with_mux(|mux| mux.iter_workspaces()).unwrap_or_default()
+}
+
+pub(crate) fn resolve_pane_id(pane_id: PaneId) -> Option<TabId> {
+    with_mux(|mux| mux.resolve_pane_id(pane_id)).flatten()
+}
+
+pub fn resolve_runtime_id_for_terminal_handle(
+    terminal_handle: SessionTerminalHandle,
+) -> Option<RuntimeId> {
+    let pane_id = usize::try_from(terminal_handle.as_u64()).ok()?;
+    resolve_pane_id(pane_id).map(|tab_id| RuntimeId::new(tab_id as u64))
+}
+
+pub fn runtime_entry_by_session_id(session_id: &str) -> Option<Arc<Tab>> {
+    with_mux(|mux| mux.get_tab_by_chatminal_session_id(session_id)).flatten()
+}
+
+pub fn runtime_entry_info_by_session_id(session_id: &str) -> Option<RuntimeEntryInfo> {
+    runtime_entry_by_session_id(session_id).map(|tab| runtime_entry_info(&tab))
+}
+
+pub fn resolve_focused_pane(client_id: &ClientId) -> Option<FocusedPaneBinding> {
+    with_mux_and_control_plane(|mux, control| {
+        let pane_id = control.focused_pane_for_client(client_id)?;
+        let runtime_entry_id = mux.resolve_pane_id(pane_id)?;
+        Some(FocusedPaneBinding::new(runtime_entry_id, pane_id))
+    })
+    .flatten()
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FocusedPaneBinding {
+    runtime_entry_id: TabId,
+    pane_id: PaneId,
+}
+
+impl FocusedPaneBinding {
+    fn new(runtime_entry_id: TabId, pane_id: PaneId) -> Self {
+        Self {
+            runtime_entry_id,
+            pane_id,
+        }
+    }
+
+    pub fn runtime_id(self) -> RuntimeId {
+        RuntimeId::new(self.runtime_entry_id as u64)
+    }
+
+    pub fn terminal_handle(self) -> SessionTerminalHandle {
+        SessionTerminalHandle::new(self.pane_id as u64)
+    }
+}
+
+pub fn iter_panes() -> Vec<Arc<dyn Pane>> {
+    with_mux(|mux| mux.iter_panes()).unwrap_or_default()
+}
+
+pub async fn spawn_tab(
+    command: Option<CommandBuilder>,
+    command_dir: Option<String>,
+    size: TerminalSize,
+    current_terminal_handle: Option<SessionTerminalHandle>,
+) -> anyhow::Result<(Arc<Tab>, Arc<dyn Pane>)> {
+    let mux = Mux::get();
+    let current_pane_id = current_terminal_handle
+        .map(|terminal_handle| usize::try_from(terminal_handle.as_u64()))
+        .transpose()
+        .map_err(|_| anyhow!("invalid terminal handle for spawn_tab"))?;
+    mux.spawn_tab(command, command_dir, size, current_pane_id)
+        .await
+}
+
+pub async fn split_pane(
+    terminal_handle: SessionTerminalHandle,
+    request: SplitRequest,
+    source: SplitSource,
+) -> anyhow::Result<(Arc<dyn Pane>, TerminalSize)> {
+    let mux = Mux::get();
+    let pane_id = usize::try_from(terminal_handle.as_u64())
+        .map_err(|_| anyhow!("invalid terminal handle for split_pane"))?;
+    mux.split_pane(pane_id, request, source).await
+}
+
+pub fn set_primary_spawn_target(spawn_target: &Arc<dyn SpawnTarget>) -> bool {
+    let Some(mux) = try_global_mux() else {
+        return false;
+    };
+    mux.control.set_primary_spawn_target(spawn_target);
+    true
+}
+
+pub fn primary_spawn_target() -> Option<Arc<dyn SpawnTarget>> {
+    with_control_plane(|control| control.primary_spawn_target()).flatten()
+}
+
+fn pane_chatminal_session_id(pane: &dyn Pane) -> Option<String> {
+    use engine_dynamic::Value;
+
+    match pane.get_metadata() {
+        Value::Object(obj) => {
+            let key = Value::String("chatminal_session_id".to_string());
+            match obj.get(&key) {
+                Some(Value::String(session_id)) => Some(session_id.clone()),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn pane_terminal_instance_id(pane: &dyn Pane) -> Option<u64> {
+    use engine_dynamic::Value;
+
+    match pane.get_metadata() {
+        Value::Object(obj) => {
+            let key = Value::String("chatminal_terminal_instance_id".to_string());
+            match obj.get(&key) {
+                Some(Value::U64(terminal_instance_id)) => Some(*terminal_instance_id),
+                Some(Value::I64(terminal_instance_id)) => (*terminal_instance_id).try_into().ok(),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+pub fn terminal_handle_for_pane(pane: &dyn Pane) -> SessionTerminalHandle {
+    SessionTerminalHandle::new(pane.pane_id() as u64)
 }
 
 #[derive(Clone, Debug)]
-pub enum MuxNotification {
+pub struct RuntimeEntryInfo {
+    pub runtime_id: RuntimeId,
+    pub title: String,
+    pub session_id: Option<String>,
+    pub active_terminal_handle: Option<SessionTerminalHandle>,
+    pub active_terminal_instance_id: Option<u64>,
+    pub size: TerminalSize,
+}
+
+fn runtime_entry_info(tab: &Tab) -> RuntimeEntryInfo {
+    let active_pane = tab.get_active_pane();
+    RuntimeEntryInfo {
+        runtime_id: tab.runtime_id(),
+        title: tab.get_title(),
+        session_id: active_pane
+            .as_deref()
+            .and_then(pane_chatminal_session_id)
+            .or_else(|| {
+                tab.iter_panes()
+                    .into_iter()
+                    .find_map(|pos| pane_chatminal_session_id(pos.pane.as_ref()))
+            }),
+        active_terminal_handle: active_pane.as_deref().map(terminal_handle_for_pane),
+        active_terminal_instance_id: active_pane.as_deref().and_then(pane_terminal_instance_id),
+        size: tab.get_size(),
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum HostRuntimeNotification {
+    PaneOutput(SessionTerminalHandle),
+    PaneAdded(SessionTerminalHandle),
+    PaneRemoved(SessionTerminalHandle),
+    WindowInvalidated,
+    WindowWorkspaceChanged,
+    ActiveWorkspaceChanged(Arc<ClientId>),
+    Alert {
+        pane_id: SessionTerminalHandle,
+        alert: engine_term::Alert,
+    },
+    Empty,
+    AssignClipboard {
+        pane_id: SessionTerminalHandle,
+        selection: ClipboardSelection,
+        clipboard: Option<String>,
+    },
+    SaveToDownloads {
+        name: Option<String>,
+        data: Arc<Vec<u8>>,
+    },
+    TabAddedToWindow {
+        runtime_id: RuntimeId,
+    },
+    PaneFocused(SessionTerminalHandle),
+    TabResized(RuntimeId),
+    TabTitleChanged {
+        runtime_id: RuntimeId,
+        title: String,
+    },
+    WindowTitleChanged {
+        title: String,
+    },
+    WorkspaceRenamed {
+        old_workspace: String,
+        new_workspace: String,
+    },
+}
+
+impl From<MuxNotification> for HostRuntimeNotification {
+    fn from(notification: MuxNotification) -> Self {
+        match notification {
+            MuxNotification::PaneOutput(pane_id) => {
+                Self::PaneOutput(SessionTerminalHandle::new(pane_id as u64))
+            }
+            MuxNotification::PaneAdded(pane_id) => {
+                Self::PaneAdded(SessionTerminalHandle::new(pane_id as u64))
+            }
+            MuxNotification::PaneRemoved(pane_id) => {
+                Self::PaneRemoved(SessionTerminalHandle::new(pane_id as u64))
+            }
+            MuxNotification::WindowInvalidated => Self::WindowInvalidated,
+            MuxNotification::WindowWorkspaceChanged => Self::WindowWorkspaceChanged,
+            MuxNotification::ActiveWorkspaceChanged(client_id) => {
+                Self::ActiveWorkspaceChanged(client_id)
+            }
+            MuxNotification::Alert { pane_id, alert } => Self::Alert {
+                pane_id: SessionTerminalHandle::new(pane_id as u64),
+                alert,
+            },
+            MuxNotification::Empty => Self::Empty,
+            MuxNotification::AssignClipboard {
+                pane_id,
+                selection,
+                clipboard,
+            } => Self::AssignClipboard {
+                pane_id: SessionTerminalHandle::new(pane_id as u64),
+                selection,
+                clipboard,
+            },
+            MuxNotification::SaveToDownloads { name, data } => Self::SaveToDownloads { name, data },
+            MuxNotification::TabAddedToWindow { tab_id } => Self::TabAddedToWindow {
+                runtime_id: RuntimeId::new(tab_id as u64),
+            },
+            MuxNotification::PaneFocused(pane_id) => {
+                Self::PaneFocused(SessionTerminalHandle::new(pane_id as u64))
+            }
+            MuxNotification::TabResized(tab_id) => Self::TabResized(RuntimeId::new(tab_id as u64)),
+            MuxNotification::TabTitleChanged { tab_id, title } => Self::TabTitleChanged {
+                runtime_id: RuntimeId::new(tab_id as u64),
+                title,
+            },
+            MuxNotification::WindowTitleChanged { title } => Self::WindowTitleChanged { title },
+            MuxNotification::WorkspaceRenamed {
+                old_workspace,
+                new_workspace,
+            } => Self::WorkspaceRenamed {
+                old_workspace,
+                new_workspace,
+            },
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum MuxNotification {
     PaneOutput(PaneId),
     PaneAdded(PaneId),
     PaneRemoved(PaneId),
@@ -75,14 +713,18 @@ pub enum MuxNotification {
         name: Option<String>,
         data: Arc<Vec<u8>>,
     },
-    TabAddedToWindow { tab_id: TabId },
+    TabAddedToWindow {
+        tab_id: TabId,
+    },
     PaneFocused(PaneId),
     TabResized(TabId),
     TabTitleChanged {
         tab_id: TabId,
         title: String,
     },
-    WindowTitleChanged { title: String },
+    WindowTitleChanged {
+        title: String,
+    },
     WorkspaceRenamed {
         old_workspace: String,
         new_workspace: String,
@@ -91,273 +733,140 @@ pub enum MuxNotification {
 
 static SUB_ID: AtomicUsize = AtomicUsize::new(0);
 
-pub struct Mux {
+type MuxSubscriber = Box<dyn Fn(MuxNotification) -> bool + Send + Sync>;
+
+struct HostRuntimeControlPlane {
+    primary_spawn_target: RwLock<Option<Arc<dyn SpawnTarget>>>,
+    subscribers: RwLock<HashMap<usize, MuxSubscriber>>,
+    clients: RwLock<HashMap<ClientId, ClientInfo>>,
+    identity: RwLock<Option<Arc<ClientId>>>,
+}
+
+impl HostRuntimeControlPlane {
+    fn new(primary_spawn_target: Option<Arc<dyn SpawnTarget>>) -> Self {
+        Self {
+            primary_spawn_target: RwLock::new(primary_spawn_target),
+            subscribers: RwLock::new(HashMap::new()),
+            clients: RwLock::new(HashMap::new()),
+            identity: RwLock::new(None),
+        }
+    }
+
+    fn client_had_input(&self, client_id: &ClientId) {
+        if let Some(info) = self.clients.write().get_mut(client_id) {
+            info.update_last_input();
+        }
+    }
+
+    fn register_client(&self, client_id: Arc<ClientId>) {
+        self.clients
+            .write()
+            .insert((*client_id).clone(), ClientInfo::new(client_id));
+    }
+
+    fn replace_identity(&self, id: Option<Arc<ClientId>>) -> Option<Arc<ClientId>> {
+        std::mem::replace(&mut *self.identity.write(), id)
+    }
+
+    fn active_identity(&self) -> Option<Arc<ClientId>> {
+        self.identity.read().clone()
+    }
+
+    fn focused_pane_for_client(&self, client_id: &ClientId) -> Option<PaneId> {
+        self.clients.read().get(client_id)?.focused_pane_id()
+    }
+
+    fn update_focus_for_client(&self, client_id: &ClientId, pane_id: PaneId) -> Option<PaneId> {
+        let mut clients = self.clients.write();
+        let info = clients.get_mut(client_id)?;
+        let prior = info.focused_pane_id();
+        info.update_focused_pane(pane_id);
+        prior
+    }
+
+    fn workspace_for_identity(&self) -> Option<String> {
+        let ident = self.active_identity()?;
+        self.workspace_for_client(&ident)
+    }
+
+    fn workspace_for_client(&self, ident: &Arc<ClientId>) -> Option<String> {
+        self.clients
+            .read()
+            .get(ident)
+            .and_then(|info| info.active_workspace.clone())
+    }
+
+    fn set_workspace_for_client(&self, ident: &Arc<ClientId>, workspace: &str) -> bool {
+        let mut clients = self.clients.write();
+        let Some(info) = clients.get_mut(ident) else {
+            return false;
+        };
+        info.active_workspace.replace(workspace.to_string());
+        true
+    }
+
+    fn rename_workspace(&self, old_workspace: &str, new_workspace: &str) -> Vec<Arc<ClientId>> {
+        let mut changed_clients = Vec::new();
+        for client in self.clients.write().values_mut() {
+            if client.active_workspace.as_deref() == Some(old_workspace) {
+                client.active_workspace.replace(new_workspace.to_string());
+                changed_clients.push(client.client_id.clone());
+            }
+        }
+        changed_clients
+    }
+
+    fn subscribe<F>(&self, subscriber: F)
+    where
+        F: Fn(MuxNotification) -> bool + 'static + Send + Sync,
+    {
+        let sub_id = SUB_ID.fetch_add(1, Ordering::Relaxed);
+        self.subscribers
+            .write()
+            .insert(sub_id, Box::new(subscriber));
+    }
+
+    fn notify(&self, notification: MuxNotification) {
+        let mut subscribers = self.subscribers.write();
+        subscribers.retain(|_, notify| notify(notification.clone()));
+    }
+
+    fn primary_spawn_target(&self) -> Option<Arc<dyn SpawnTarget>> {
+        self.primary_spawn_target.read().as_ref().map(Arc::clone)
+    }
+
+    fn set_primary_spawn_target(&self, spawn_target: &Arc<dyn SpawnTarget>) {
+        *self.primary_spawn_target.write() = Some(Arc::clone(spawn_target));
+    }
+}
+
+pub(crate) struct Mux {
     tabs: RwLock<HashMap<TabId, Arc<Tab>>>,
     panes: RwLock<HashMap<PaneId, Arc<dyn Pane>>>,
     window: RwLock<Window>,
-    primary_spawn_target: RwLock<Option<Arc<dyn SpawnTarget>>>,
-    subscribers: RwLock<HashMap<usize, Box<dyn Fn(MuxNotification) -> bool + Send + Sync>>>,
-    banner: RwLock<Option<String>>,
-    clients: RwLock<HashMap<ClientId, ClientInfo>>,
-    identity: RwLock<Option<Arc<ClientId>>>,
+    control: HostRuntimeControlPlane,
     num_panes_by_workspace: RwLock<HashMap<String, usize>>,
-    /// O(1) reverse index: chatminal session_id -> PaneId for fast SessionRef.resolve().
-    /// Only populated for panes carrying "chatminal_session_id" metadata.
-    ///
-    /// DEPRECATED: Desktop callers should use `DesktopSessionHost::session_tab_shim` instead.
-    /// This global index is a runtime-host concern only; engine IDs (PaneId, TabId) are
-    /// desktop-only. Kept for Lua bridge compat (`chatminal-lua-bridge/session.rs`).
-    /// Removal tracked in: localize-id-mapping follow-up.
-    chatminal_session_id_index: RwLock<HashMap<String, PaneId>>,
     main_thread_id: std::thread::ThreadId,
 }
 
-const BUFSIZE: usize = 256 * 1024;
-
-/// This function applies parsed actions to the pane and notifies any
-/// mux subscribers about the output event
-fn send_actions_to_mux(pane: &Weak<dyn Pane>, dead: &Arc<AtomicBool>, actions: Vec<Action>) {
-    let start = Instant::now();
-    match pane.upgrade() {
-        Some(pane) => {
-            pane.perform_actions(actions);
-            histogram!("send_actions_to_mux.perform_actions.latency").record(start.elapsed());
-            Mux::notify_from_any_thread(MuxNotification::PaneOutput(pane.pane_id()));
-        }
-        None => {
-            // Something else removed the pane from
-            // the mux, so signal that we should stop
-            // trying to process it in read_from_pane_pty.
-            dead.store(true, Ordering::Relaxed);
-        }
-    }
-    histogram!("send_actions_to_mux.rate").record(1.);
+fn default_workspace_name() -> String {
+    configuration()
+        .default_workspace
+        .as_deref()
+        .unwrap_or(DEFAULT_WORKSPACE)
+        .to_string()
 }
 
-fn parse_buffered_data(pane: Weak<dyn Pane>, dead: &Arc<AtomicBool>, mut rx: FileDescriptor) {
-    let mut buf = vec![0; configuration().mux_output_parser_buffer_size];
-    let mut parser = termwiz::escape::parser::Parser::new();
-    let mut actions = vec![];
-    let mut hold = false;
-    let mut action_size = 0;
-    let mut delay = Duration::from_millis(configuration().mux_output_parser_coalesce_delay_ms);
-    let mut deadline = None;
-
-    loop {
-        match rx.read(&mut buf) {
-            Ok(size) if size == 0 => {
-                dead.store(true, Ordering::Relaxed);
-                break;
-            }
-            Err(_) => {
-                dead.store(true, Ordering::Relaxed);
-                break;
-            }
-            Ok(size) => {
-                parser.parse(&buf[0..size], |action| {
-                    let mut flush = false;
-                    match &action {
-                        Action::CSI(CSI::Mode(Mode::SetDecPrivateMode(DecPrivateMode::Code(
-                            DecPrivateModeCode::SynchronizedOutput,
-                        )))) => {
-                            hold = true;
-
-                            // Flush prior actions
-                            if !actions.is_empty() {
-                                send_actions_to_mux(&pane, &dead, std::mem::take(&mut actions));
-                                action_size = 0;
-                            }
-                        }
-                        Action::CSI(CSI::Mode(Mode::ResetDecPrivateMode(
-                            DecPrivateMode::Code(DecPrivateModeCode::SynchronizedOutput),
-                        ))) => {
-                            hold = false;
-                            flush = true;
-                        }
-                        Action::CSI(CSI::Device(dev)) if matches!(**dev, Device::SoftReset) => {
-                            hold = false;
-                            flush = true;
-                        }
-                        _ => {}
-                    };
-                    action.append_to(&mut actions);
-
-                    if flush && !actions.is_empty() {
-                        send_actions_to_mux(&pane, &dead, std::mem::take(&mut actions));
-                        action_size = 0;
-                    }
-                });
-                action_size += size;
-                if !actions.is_empty() && !hold {
-                    // If we haven't accumulated too much data,
-                    // pause for a short while to increase the chances
-                    // that we coalesce a full "frame" from an unoptimized
-                    // TUI program
-                    if action_size < buf.len() {
-                        let poll_delay = match deadline {
-                            None => {
-                                deadline.replace(Instant::now() + delay);
-                                Some(delay)
-                            }
-                            Some(target) => target.checked_duration_since(Instant::now()),
-                        };
-                        if poll_delay.is_some() {
-                            let mut pfd = [pollfd {
-                                fd: rx.as_socket_descriptor(),
-                                events: POLLIN,
-                                revents: 0,
-                            }];
-                            if let Ok(1) = poll(&mut pfd, poll_delay) {
-                                // We can read now without blocking, so accumulate
-                                // more data into actions
-                                continue;
-                            }
-
-                            // Not readable in time: let the data we have flow into
-                            // the terminal model
-                        }
-                    }
-
-                    send_actions_to_mux(&pane, &dead, std::mem::take(&mut actions));
-                    deadline = None;
-                    action_size = 0;
-                }
-
-                let config = configuration();
-                buf.resize(config.mux_output_parser_buffer_size, 0);
-                delay = Duration::from_millis(config.mux_output_parser_coalesce_delay_ms);
-            }
-        }
-    }
-
-    // Don't forget to send anything that we might have buffered
-    // to be displayed before we return from here; this is important
-    // for very short lived commands so that we don't forget to
-    // display what they displayed.
-    if !actions.is_empty() {
-        send_actions_to_mux(&pane, &dead, std::mem::take(&mut actions));
-    }
+pub(crate) fn switch_to_last_active_tab_when_closing_tab() -> bool {
+    configuration().switch_to_last_active_tab_when_closing_tab
 }
 
-fn set_socket_buffer(fd: &mut FileDescriptor, option: i32, size: usize) -> anyhow::Result<()> {
-    let size = size as c_int;
-    let socklen = std::mem::size_of_val(&size);
-    unsafe {
-        let res = libc::setsockopt(
-            fd.as_socket_descriptor(),
-            SOL_SOCKET,
-            option,
-            &size as *const c_int as *const _,
-            socklen as _,
-        );
-        if res == 0 {
-            Ok(())
-        } else {
-            Err(std::io::Error::last_os_error()).context("setsockopt")
-        }
-    }
+pub(crate) fn unzoom_on_switch_pane() -> bool {
+    configuration().unzoom_on_switch_pane
 }
 
-fn allocate_socketpair() -> anyhow::Result<(FileDescriptor, FileDescriptor)> {
-    let (mut tx, mut rx) = socketpair().context("socketpair")?;
-    set_socket_buffer(&mut tx, SO_SNDBUF, BUFSIZE)
-        .context("SO_SNDBUF")
-        .ok();
-    set_socket_buffer(&mut rx, SO_RCVBUF, BUFSIZE)
-        .context("SO_RCVBUF")
-        .ok();
-    Ok((tx, rx))
-}
-
-/// This function is run in a separate thread; its purpose is to perform
-/// blocking reads from the pty (non-blocking reads are not portable to
-/// all platforms and pty/tty types), parse the escape sequences and
-/// relay the actions to the mux thread to apply them to the pane.
-fn read_from_pane_pty(
-    pane: Weak<dyn Pane>,
-    banner: Option<String>,
-    mut reader: Box<dyn std::io::Read>,
-) {
-    let mut buf = vec![0; BUFSIZE];
-
-    // This is used to signal that an error occurred either in this thread,
-    // or in the main mux thread.  If `true`, this thread will terminate.
-    let dead = Arc::new(AtomicBool::new(false));
-
-    let (pane_id, exit_behavior) = match pane.upgrade() {
-        Some(pane) => (pane.pane_id(), pane.exit_behavior()),
-        None => return,
-    };
-
-    let (mut tx, rx) = match allocate_socketpair() {
-        Ok(pair) => pair,
-        Err(err) => {
-            log::error!("read_from_pane_pty: Unable to allocate a socketpair: {err:#}");
-            localpane::emit_output_for_pane(
-                pane_id,
-                &format!(
-                    "⚠️  Chatminal: read_from_pane_pty: \
-                    Unable to allocate a socketpair: {err:#}"
-                ),
-            );
-            return;
-        }
-    };
-
-    std::thread::spawn({
-        let dead = Arc::clone(&dead);
-        move || parse_buffered_data(pane, &dead, rx)
-    });
-
-    if let Some(banner) = banner {
-        tx.write_all(banner.as_bytes()).ok();
-    }
-
-    while !dead.load(Ordering::Relaxed) {
-        match reader.read(&mut buf) {
-            Ok(size) if size == 0 => {
-                log::trace!("read_pty EOF: pane_id {}", pane_id);
-                break;
-            }
-            Err(err) => {
-                error!("read_pty failed: pane {} {:?}", pane_id, err);
-                break;
-            }
-            Ok(size) => {
-                histogram!("read_from_pane_pty.bytes.rate").record(size as f64);
-                log::trace!("read_pty pane {pane_id} read {size} bytes");
-                if let Err(err) = tx.write_all(&buf[..size]) {
-                    error!(
-                        "read_pty failed to write to parser: pane {} {:?}",
-                        pane_id, err
-                    );
-                    break;
-                }
-            }
-        }
-    }
-
-    match exit_behavior.unwrap_or_else(|| configuration().exit_behavior) {
-        ExitBehavior::Hold | ExitBehavior::CloseOnCleanExit => {
-            // We don't know if we can unilaterally close
-            // this pane right now, so don't!
-            promise::spawn::spawn_into_main_thread(async move {
-                let mux = Mux::get();
-                log::trace!("checking for dead windows after EOF on pane {}", pane_id);
-                mux.prune_dead_windows();
-            })
-            .detach();
-        }
-        ExitBehavior::Close => {
-            promise::spawn::spawn_into_main_thread(async move {
-                let mux = Mux::get();
-                mux.remove_pane(pane_id);
-            })
-            .detach();
-        }
-    }
-
-    dead.store(true, Ordering::Relaxed);
+pub fn default_initial_terminal_size() -> TerminalSize {
+    configuration().initial_size(0, None)
 }
 
 lazy_static::lazy_static! {
@@ -366,34 +875,19 @@ lazy_static::lazy_static! {
 
 impl Mux {
     pub fn new(primary_spawn_target: Option<Arc<dyn SpawnTarget>>) -> Self {
-        let config = configuration();
-        let workspace = config
-            .default_workspace
-            .as_deref()
-            .unwrap_or(DEFAULT_WORKSPACE)
-            .to_string();
+        let workspace = default_workspace_name();
         Self {
             tabs: RwLock::new(HashMap::new()),
             panes: RwLock::new(HashMap::new()),
             window: RwLock::new(Window::new(workspace, None)),
-            primary_spawn_target: RwLock::new(primary_spawn_target),
-            subscribers: RwLock::new(HashMap::new()),
-            banner: RwLock::new(None),
-            clients: RwLock::new(HashMap::new()),
-            identity: RwLock::new(None),
+            control: HostRuntimeControlPlane::new(primary_spawn_target),
             num_panes_by_workspace: RwLock::new(HashMap::new()),
-            chatminal_session_id_index: RwLock::new(HashMap::new()),
             main_thread_id: std::thread::current().id(),
         }
     }
 
     fn get_default_workspace(&self) -> String {
-        let config = configuration();
-        config
-            .default_workspace
-            .as_deref()
-            .unwrap_or(DEFAULT_WORKSPACE)
-            .to_string()
+        default_workspace_name()
     }
 
     pub fn is_main_thread(&self) -> bool {
@@ -416,39 +910,8 @@ impl Mux {
         *self.num_panes_by_workspace.write() = count;
     }
 
-    pub fn client_had_input(&self, client_id: &ClientId) {
-        if let Some(info) = self.clients.write().get_mut(client_id) {
-            info.update_last_input();
-        }
-    }
-
-    pub fn record_input_for_current_identity(&self) {
-        if let Some(ident) = self.identity.read().as_ref() {
-            self.client_had_input(ident);
-        }
-    }
-
-    pub fn record_focus_for_current_identity(&self, pane_id: PaneId) {
-        if let Some(ident) = self.identity.read().as_ref() {
-            self.record_focus_for_client(ident, pane_id);
-        }
-    }
-
-    pub fn resolve_focused_pane(
-        &self,
-        client_id: &ClientId,
-    ) -> Option<(TabId, PaneId)> {
-        let pane_id = self.clients.read().get(client_id)?.focused_pane_id?;
-        let tab = self.resolve_pane_id(pane_id)?;
-        Some((tab, pane_id))
-    }
-
-    pub fn record_focus_for_client(&self, client_id: &ClientId, pane_id: PaneId) {
-        let mut prior = None;
-        if let Some(info) = self.clients.write().get_mut(client_id) {
-            prior = info.focused_pane_id;
-            info.update_focused_pane(pane_id);
-        }
+    pub(crate) fn record_focus_for_client(&self, client_id: &ClientId, pane_id: PaneId) {
+        let prior = self.control.update_focus_for_client(client_id, pane_id);
 
         if prior == Some(pane_id) {
             return;
@@ -466,7 +929,7 @@ impl Mux {
 
     /// Called by PaneFocused event handlers to reconcile a remote
     /// pane focus event and apply its effects locally
-    pub fn focus_pane_and_containing_tab(&self, pane_id: PaneId) -> anyhow::Result<()> {
+    pub(crate) fn focus_pane_and_containing_tab(&self, pane_id: PaneId) -> anyhow::Result<()> {
         let pane = self
             .get_pane(pane_id)
             .ok_or_else(|| anyhow::anyhow!("pane {pane_id} not found"))?;
@@ -495,17 +958,7 @@ impl Mux {
     }
 
     pub fn register_client(&self, client_id: Arc<ClientId>) {
-        self.clients
-            .write()
-            .insert((*client_id).clone(), ClientInfo::new(client_id));
-    }
-
-    pub fn iter_clients(&self) -> Vec<ClientInfo> {
-        self.clients
-            .read()
-            .values()
-            .map(|info| info.clone())
-            .collect()
+        self.control.register_client(client_id);
     }
 
     /// Returns a list of the unique workspace names known to the mux.
@@ -514,116 +967,34 @@ impl Mux {
         vec![self.window.read().get_workspace().to_string()]
     }
 
-    /// Generate a new unique workspace name
-    pub fn generate_workspace_name(&self) -> String {
-        let used = self.iter_workspaces();
-        for candidate in names::Generator::default() {
-            if !used.contains(&candidate) {
-                return candidate;
-            }
-        }
-        unreachable!();
-    }
-
-    /// Returns the effective active workspace name
-    pub fn active_workspace(&self) -> String {
-        self.identity
-            .read()
-            .as_ref()
-            .and_then(|ident| {
-                self.clients
-                    .read()
-                    .get(&ident)
-                    .and_then(|info| info.active_workspace.clone())
-            })
-            .unwrap_or_else(|| self.get_default_workspace())
-    }
-
-    /// Returns the effective active workspace name for a given client
-    pub fn active_workspace_for_client(&self, ident: &Arc<ClientId>) -> String {
-        self.clients
-            .read()
-            .get(&ident)
-            .and_then(|info| info.active_workspace.clone())
-            .unwrap_or_else(|| self.get_default_workspace())
-    }
-
     pub fn set_active_workspace_for_client(&self, ident: &Arc<ClientId>, workspace: &str) {
-        let mut clients = self.clients.write();
-        if let Some(info) = clients.get_mut(&ident) {
-            info.active_workspace.replace(workspace.to_string());
+        if self.control.set_workspace_for_client(ident, workspace) {
             self.notify(MuxNotification::ActiveWorkspaceChanged(ident.clone()));
         }
     }
 
     /// Assigns the active workspace name for the current identity
     pub fn set_active_workspace(&self, workspace: &str) {
-        if let Some(ident) = self.identity.read().clone() {
+        if let Some(ident) = self.control.active_identity() {
             self.set_active_workspace_for_client(&ident, workspace);
         }
         self.window.write().set_workspace(workspace);
     }
 
-    pub fn rename_workspace(&self, old_workspace: &str, new_workspace: &str) {
-        if old_workspace == new_workspace {
-            return;
-        }
-        self.notify(MuxNotification::WorkspaceRenamed {
-            old_workspace: old_workspace.to_string(),
-            new_workspace: new_workspace.to_string(),
-        });
-
-        let mut window = self.window.write();
-        if window.get_workspace() == old_workspace {
-            window.set_workspace(new_workspace);
-        }
-        self.recompute_pane_count();
-        for client in self.clients.write().values_mut() {
-            if client.active_workspace.as_deref() == Some(old_workspace) {
-                client.active_workspace.replace(new_workspace.to_string());
-                self.notify(MuxNotification::ActiveWorkspaceChanged(
-                    client.client_id.clone(),
-                ));
-            }
-        }
-    }
-
-    /// Overrides the current client identity.
-    /// Returns `IdentityHolder` which will restore the prior identity
-    /// when it is dropped.
-    /// This can be used to change the identity for the duration of a block.
-    pub fn with_identity(&self, id: Option<Arc<ClientId>>) -> IdentityHolder {
-        let prior = self.replace_identity(id);
-        IdentityHolder { prior }
-    }
-
-    /// Replace the identity, returning the prior identity
+    /// Replace the active identity, returning the prior one.
     pub fn replace_identity(&self, id: Option<Arc<ClientId>>) -> Option<Arc<ClientId>> {
-        std::mem::replace(&mut *self.identity.write(), id)
-    }
-
-    /// Returns the active identity
-    pub fn active_identity(&self) -> Option<Arc<ClientId>> {
-        self.identity.read().clone()
-    }
-
-    pub fn unregister_client(&self, client_id: &ClientId) {
-        self.clients.write().remove(client_id);
+        self.control.replace_identity(id)
     }
 
     pub fn subscribe<F>(&self, subscriber: F)
     where
         F: Fn(MuxNotification) -> bool + 'static + Send + Sync,
     {
-        let sub_id = SUB_ID.fetch_add(1, Ordering::Relaxed);
-        self.subscribers
-            .write()
-            .insert(sub_id, Box::new(subscriber));
+        self.control.subscribe(subscriber);
     }
 
     pub fn notify(&self, notification: MuxNotification) {
-        let mut subscribers = self.subscribers.write();
-        subscribers.retain(|_, notify| notify(notification.clone()));
+        self.control.notify(notification);
     }
 
     pub fn notify_from_any_thread(notification: MuxNotification) {
@@ -642,15 +1013,7 @@ impl Mux {
     }
 
     pub fn primary_spawn_target(&self) -> Arc<dyn SpawnTarget> {
-        self.primary_spawn_target
-            .read()
-            .as_ref()
-            .map(Arc::clone)
-            .unwrap()
-    }
-
-    pub fn set_primary_spawn_target(&self, spawn_target: &Arc<dyn SpawnTarget>) {
-        *self.primary_spawn_target.write() = Some(Arc::clone(spawn_target));
+        self.control.primary_spawn_target().unwrap()
     }
 
     pub fn set_mux(mux: &Arc<Mux>) {
@@ -669,62 +1032,90 @@ impl Mux {
         MUX.lock().as_ref().map(Arc::clone)
     }
 
-    pub fn get_pane(&self, pane_id: PaneId) -> Option<Arc<dyn Pane>> {
+    pub(crate) fn get_pane(&self, pane_id: PaneId) -> Option<Arc<dyn Pane>> {
         self.panes.read().get(&pane_id).map(Arc::clone)
     }
 
-    pub fn get_tab(&self, tab_id: TabId) -> Option<Arc<Tab>> {
+    pub(crate) fn get_tab(&self, tab_id: TabId) -> Option<Arc<Tab>> {
         self.tabs.read().get(&tab_id).map(Arc::clone)
     }
 
-    /// O(1) lookup: tab containing the pane indexed under the given chatminal session_id.
+    /// Resolve a tab by scanning pane metadata for the given chatminal session_id.
     /// Returns None for SSH/serial/legacy sessions that carry no chatminal session_id.
     pub fn get_tab_by_chatminal_session_id(&self, session_id: &str) -> Option<Arc<Tab>> {
-        let pane_id = *self.chatminal_session_id_index.read().get(session_id)?;
-        let tab_id = self.resolve_pane_id(pane_id)?;
-        self.get_tab(tab_id)
+        self.tabs
+            .read()
+            .values()
+            .find(|tab| {
+                tab.iter_panes_ignoring_zoom().into_iter().any(|info| {
+                    pane_chatminal_session_id(&*info.pane).as_deref() == Some(session_id)
+                })
+            })
+            .map(Arc::clone)
     }
 
-    pub fn add_pane(&self, pane: &Arc<dyn Pane>) -> Result<(), Error> {
+    fn register_pane_internal(
+        &self,
+        pane: &Arc<dyn Pane>,
+        install_default_side_effects: bool,
+    ) -> Result<bool, Error> {
         if self.panes.read().contains_key(&pane.pane_id()) {
+            return Ok(false);
+        }
+
+        if install_default_side_effects {
+            let clipboard: Arc<dyn Clipboard> = Arc::new(MuxClipboard {
+                pane_id: pane.pane_id(),
+            });
+            pane.set_clipboard(&clipboard);
+
+            let downloader: Arc<dyn DownloadHandler> = Arc::new(MuxDownloader {});
+            pane.set_download_handler(&downloader);
+        }
+
+        self.panes.write().insert(pane.pane_id(), Arc::clone(pane));
+        Ok(true)
+    }
+
+    fn add_pane_internal(
+        &self,
+        pane: &Arc<dyn Pane>,
+        install_default_side_effects: bool,
+        hooks: PtyIoHooks,
+    ) -> Result<(), Error> {
+        if !self.register_pane_internal(pane, install_default_side_effects)? {
             return Ok(());
         }
 
-        let clipboard: Arc<dyn Clipboard> = Arc::new(MuxClipboard {
-            pane_id: pane.pane_id(),
-        });
-        pane.set_clipboard(&clipboard);
-
-        let downloader: Arc<dyn DownloadHandler> = Arc::new(MuxDownloader {});
-        pane.set_download_handler(&downloader);
-
-        self.panes.write().insert(pane.pane_id(), Arc::clone(pane));
-        // Index pane by chatminal session_id if present for O(1) SessionRef.resolve().
-        {
-            use engine_dynamic::Value;
-            if let Value::Object(obj) = pane.get_metadata() {
-                let key = Value::String("chatminal_session_id".to_string());
-                if let Some(Value::String(session_id)) = obj.get(&key) {
-                    self.chatminal_session_id_index
-                        .write()
-                        .insert(session_id.clone(), pane.pane_id());
-                }
-            }
-        }
         let pane_id = pane.pane_id();
-        if let Some(reader) = pane.reader()? {
-            let banner = self.banner.read().clone();
-            let pane = Arc::downgrade(pane);
-            thread::spawn(move || read_from_pane_pty(pane, banner, reader));
-        }
+        start_pane_pty_reader(pane, hooks)?;
         self.recompute_pane_count();
         self.notify(MuxNotification::PaneAdded(pane_id));
         Ok(())
     }
 
-    pub fn add_tab_no_panes(&self, tab: &Arc<Tab>) {
-        self.tabs.write().insert(tab.tab_id(), Arc::clone(tab));
-        self.recompute_pane_count();
+    pub fn add_pane(&self, pane: &Arc<dyn Pane>) -> Result<(), Error> {
+        self.add_pane_internal(pane, true, PtyIoHooks::default())
+    }
+
+    pub fn add_pane_without_default_side_effects(&self, pane: &Arc<dyn Pane>) -> Result<(), Error> {
+        self.add_pane_internal(pane, false, PtyIoHooks::default())
+    }
+
+    pub fn add_pane_with_io_hooks(
+        &self,
+        pane: &Arc<dyn Pane>,
+        hooks: PtyIoHooks,
+    ) -> Result<(), Error> {
+        self.add_pane_internal(pane, false, hooks)
+    }
+
+    pub fn add_pane_with_default_side_effects_and_io_hooks(
+        &self,
+        pane: &Arc<dyn Pane>,
+        hooks: PtyIoHooks,
+    ) -> Result<(), Error> {
+        self.add_pane_internal(pane, true, hooks)
     }
 
     pub fn add_tab_and_active_pane(&self, tab: &Arc<Tab>) -> Result<(), Error> {
@@ -740,16 +1131,6 @@ impl Mux {
         let mut changed = false;
         if let Some(pane) = self.panes.write().remove(&pane_id).clone() {
             log::debug!("killing pane {}", pane_id);
-            // Evict from session_id index if this was a chatminal pane.
-            {
-                use engine_dynamic::Value;
-                if let Value::Object(obj) = pane.get_metadata() {
-                    let key = Value::String("chatminal_session_id".to_string());
-                    if let Some(Value::String(session_id)) = obj.get(&key) {
-                        self.chatminal_session_id_index.write().remove(session_id);
-                    }
-                }
-            }
             pane.kill();
             self.notify(MuxNotification::PaneRemoved(pane_id));
             changed = true;
@@ -791,12 +1172,12 @@ impl Mux {
         self.recompute_pane_count();
     }
 
-    pub fn remove_pane(&self, pane_id: PaneId) {
+    pub(crate) fn remove_pane(&self, pane_id: PaneId) {
         self.remove_pane_internal(pane_id);
         self.prune_dead_windows();
     }
 
-    pub fn remove_tab(&self, tab_id: TabId) -> Option<Arc<Tab>> {
+    pub(crate) fn remove_tab(&self, tab_id: TabId) -> Option<Arc<Tab>> {
         let tab = self.remove_tab_internal(tab_id);
         self.prune_dead_windows();
         tab
@@ -888,11 +1269,6 @@ impl Mux {
             == 0
     }
 
-    pub fn is_active_workspace_empty(&self) -> bool {
-        let workspace = self.active_workspace();
-        self.is_workspace_empty(&workspace)
-    }
-
     pub fn iter_panes(&self) -> Vec<Arc<dyn Pane>> {
         self.panes
             .read()
@@ -901,7 +1277,7 @@ impl Mux {
             .collect()
     }
 
-    pub fn resolve_pane_id(&self, pane_id: PaneId) -> Option<TabId> {
+    pub(crate) fn resolve_pane_id(&self, pane_id: PaneId) -> Option<TabId> {
         let mut tab_id = None;
         for tab in self.tabs.read().values() {
             for p in tab.iter_panes_ignoring_zoom() {
@@ -912,10 +1288,6 @@ impl Mux {
             }
         }
         tab_id
-    }
-
-    pub fn set_banner(&self, banner: Option<String>) {
-        *self.banner.write() = banner;
     }
 
     pub fn resolve_spawn_target(
@@ -995,7 +1367,12 @@ impl Mux {
 
         #[allow(deprecated)]
         let pane = spawn_target
-            .split_pane(source, tab_id, pane_id, request)
+            .split_pane(
+                source,
+                RuntimeId::new(tab_id as u64),
+                SessionTerminalHandle::new(pane_id as u64),
+                request,
+            )
             .await?;
         if let Some(config) = term_config {
             pane.set_config(config);
@@ -1076,29 +1453,6 @@ impl Mux {
 }
 
 
-pub struct IdentityHolder {
-    prior: Option<Arc<ClientId>>,
-}
-
-impl Drop for IdentityHolder {
-    fn drop(&mut self) {
-        if let Some(mux) = Mux::try_get() {
-            mux.replace_identity(self.prior.take());
-        }
-    }
-}
-
-#[derive(Debug, Error)]
-#[allow(dead_code)]
-pub enum SessionTerminated {
-    #[error("Process exited: {:?}", status)]
-    ProcessStatus { status: ExitStatus },
-    #[error("Error: {:?}", err)]
-    Error { err: Error },
-    #[error("Window Closed")]
-    WindowClosed,
-}
-
 pub(crate) fn terminal_size_to_pty_size(size: TerminalSize) -> anyhow::Result<PtySize> {
     Ok(PtySize {
         rows: size.rows.try_into()?,
@@ -1118,8 +1472,8 @@ impl Clipboard for MuxClipboard {
         selection: ClipboardSelection,
         clipboard: Option<String>,
     ) -> anyhow::Result<()> {
-        let mux =
-            Mux::try_get().ok_or_else(|| anyhow::anyhow!("MuxClipboard::set_contents: no Mux?"))?;
+        let mux = try_global_mux()
+            .ok_or_else(|| anyhow::anyhow!("MuxClipboard::set_contents: no Mux?"))?;
         mux.notify(MuxNotification::AssignClipboard {
             pane_id: self.pane_id,
             selection,
@@ -1133,7 +1487,7 @@ struct MuxDownloader {}
 
 impl engine_term::DownloadHandler for MuxDownloader {
     fn save_to_downloads(&self, name: Option<String>, data: Vec<u8>) {
-        if let Some(mux) = Mux::try_get() {
+        if let Some(mux) = try_global_mux() {
             mux.notify(MuxNotification::SaveToDownloads {
                 name,
                 data: Arc::new(data),

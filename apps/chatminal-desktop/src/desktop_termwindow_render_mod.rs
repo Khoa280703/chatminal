@@ -258,6 +258,7 @@ impl crate::TermWindow {
                     config.visual_bell.fade_in_function,
                     config.visual_bell.fade_out_duration_ms,
                     config.visual_bell.fade_out_function,
+                    config.animation_fps,
                     Some(ringing),
                 );
 

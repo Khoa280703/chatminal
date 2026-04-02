@@ -1,6 +1,6 @@
+use std::io::Write;
 use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex};
-use std::io::Write;
 
 use chatminal_terminal_core::TerminalSize;
 use engine_term::{
@@ -52,7 +52,33 @@ pub enum TerminalInstanceRuntimeEvent {
     },
 }
 
+#[derive(Clone)]
+pub(crate) struct TerminalInstanceRuntimeHooks {
+    pub(crate) on_output: Arc<dyn Fn(TerminalInstanceRuntimeEvent) + Send + Sync>,
+    pub(crate) on_exit: Arc<dyn Fn(TerminalInstanceRuntimeEvent) + Send + Sync>,
+    pub(crate) on_error: Arc<dyn Fn(TerminalInstanceRuntimeEvent) + Send + Sync>,
+}
 
+impl TerminalInstanceRuntimeHooks {
+    pub(crate) fn from_events_tx(
+        events: std_mpsc::SyncSender<TerminalInstanceRuntimeEvent>,
+    ) -> Self {
+        let output_tx = events.clone();
+        let exit_tx = events.clone();
+        let error_tx = events;
+        Self {
+            on_output: Arc::new(move |event| {
+                let _ = output_tx.send(event);
+            }),
+            on_exit: Arc::new(move |event| {
+                let _ = exit_tx.send(event);
+            }),
+            on_error: Arc::new(move |event| {
+                let _ = error_tx.send(event);
+            }),
+        }
+    }
+}
 
 #[derive(Clone)]
 struct SharedPtyWriter {
@@ -101,6 +127,13 @@ impl TerminalInstanceRuntime {
     pub fn spawn(
         spawn: TerminalInstanceRuntimeSpawn,
         events: std_mpsc::SyncSender<TerminalInstanceRuntimeEvent>,
+    ) -> Result<Self, String> {
+        Self::spawn_with_hooks(spawn, TerminalInstanceRuntimeHooks::from_events_tx(events))
+    }
+
+    pub(crate) fn spawn_with_hooks(
+        spawn: TerminalInstanceRuntimeSpawn,
+        hooks: TerminalInstanceRuntimeHooks,
     ) -> Result<Self, String> {
         let pty = native_pty_system();
         let pair = pty
@@ -156,7 +189,7 @@ impl TerminalInstanceRuntime {
             Arc::clone(&io_terminal),
             Arc::clone(&output_history),
             spawn.clone(),
-            events,
+            hooks,
             reader,
             Arc::clone(&child),
         );
@@ -182,8 +215,6 @@ impl TerminalInstanceRuntime {
             command_label: command_label(&spawn.command),
         }
     }
-
-
 
     pub fn replay_output(&self) -> String {
         self.output_history.lock().unwrap().replay()

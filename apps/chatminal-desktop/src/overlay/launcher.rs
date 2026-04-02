@@ -4,15 +4,17 @@
 //! be rendered as a popup/context menu if the system supports it; at the
 //! time of writing our window layer doesn't provide an API for context
 //! menus.
-use crate::chatminal_runtime::overlay_compat::OverlayTerminal;
-use crate::chatminal_runtime::LauncherSessionEntry;
+use crate::chatminal_runtime::{
+    desktop_current_active_session_id, launcher_sessions, overlay_compat::OverlayTerminal,
+    LauncherSessionEntry,
+};
 use crate::commands::derive_command_from_key_assignment;
 use crate::inputmap::InputMap;
 use crate::overlay::quickselect;
 use crate::overlay::selector::{matcher_pattern, matcher_score};
 use crate::termwindow::TermWindowNotif;
-use config::configuration;
 use config::keyassignment::KeyAssignment;
+use config::ConfigHandle;
 use rayon::prelude::*;
 use std::collections::BTreeMap;
 use termwiz::cell::{AttributeChange, CellAttributes};
@@ -33,6 +35,7 @@ struct Entry {
 
 pub type LauncherTabEntry = LauncherSessionEntry;
 pub struct LauncherArgs {
+    config: ConfigHandle,
     flags: LauncherFlags,
     tabs: Vec<LauncherTabEntry>,
     session_ui_mode: bool,
@@ -46,6 +49,7 @@ pub struct LauncherArgs {
 impl LauncherArgs {
     /// Must be called on the Mux thread!
     pub async fn new(
+        config: ConfigHandle,
         title: &str,
         flags: LauncherFlags,
         pane_id: u64,
@@ -54,13 +58,14 @@ impl LauncherArgs {
         alphabet: &str,
     ) -> Self {
         let tabs = if flags.contains(LauncherFlags::TABS) {
-            crate::chatminal_runtime::launcher_sessions()
+            launcher_sessions()
         } else {
             vec![]
         };
-        let session_ui_mode = crate::chatminal_runtime::desktop_current_active_session_id().is_some();
+        let session_ui_mode = desktop_current_active_session_id().is_some();
 
         Self {
+            config,
             flags,
             tabs,
             session_ui_mode,
@@ -76,6 +81,7 @@ impl LauncherArgs {
 const ROW_OVERHEAD: usize = 3;
 
 struct LauncherState {
+    config: ConfigHandle,
     active_idx: usize,
     max_items: usize,
     top_row: usize,
@@ -131,7 +137,7 @@ impl LauncherState {
     }
 
     fn build_entries(&mut self, args: LauncherArgs) {
-        let config = configuration();
+        let config = args.config.clone();
         // Pull in the user defined entries from the launch_menu
         // section of the configuration.
         if args.flags.contains(LauncherFlags::LAUNCH_MENU_ITEMS) {
@@ -257,8 +263,7 @@ impl LauncherState {
         let max_label_len = labels.iter().map(|s| s.len()).max().unwrap_or(0);
         let mut labels_iter = labels.into_iter();
 
-        let config = configuration();
-        let colors = &config.resolved_palette;
+        let colors = &self.config.resolved_palette;
         let launcher_label_fg = colors.launcher_label_fg;
         let launcher_label_bg = colors.launcher_label_bg;
 
@@ -517,6 +522,7 @@ pub fn launcher(
 ) -> anyhow::Result<()> {
     let filtering = args.flags.contains(LauncherFlags::FUZZY);
     let mut state = LauncherState {
+        config: args.config.clone(),
         active_idx: initial_choice_idx,
         max_items: 0,
         pane_id: args.pane_id,

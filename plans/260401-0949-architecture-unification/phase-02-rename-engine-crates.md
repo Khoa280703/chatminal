@@ -1,6 +1,6 @@
 ---
 phase: 02
-status: pending
+status: deferred
 priority: medium
 effort: medium
 risk: low

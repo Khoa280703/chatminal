@@ -9,24 +9,22 @@ use chatminal_store::{
     Store, StoredScrollbackRecordInput, StoredScrollbackRecordKind, StoredSessionStatus,
 };
 
-use crate::api::{RuntimeEvent, RuntimeSessionBridgeAction, RuntimeSessionLookup};
-use crate::config::RuntimeConfig;
-use crate::session::SessionEvent;
 use super::canonical_scrollback::{
-    build_logical_snapshot, materialize_output_chunk, render_snapshot,
-    render_snapshot_for_terminal,
+    build_logical_snapshot, materialize_output_chunk, render_snapshot, render_snapshot_for_terminal,
 };
 use super::explorer_utils::{normalize_relative_path, resolve_explorer_target};
 use super::test_bridge::make_test_bridge;
 use super::{
     RuntimeState, SessionSpawnPlan, append_disconnected_restore_cleanup,
-    collapse_trailing_duplicate_prompt_redraws,
-    is_duplicate_restored_prompt_fragment, normalize_session_snapshot,
-    normalize_terminal_fragment_for_compare, prepend_run_boundary,
+    collapse_trailing_duplicate_prompt_redraws, is_duplicate_restored_prompt_fragment,
+    normalize_session_snapshot, normalize_terminal_fragment_for_compare, prepend_run_boundary,
     snapshot_requires_run_boundary, snapshot_trailing_fragment,
     strip_duplicate_restored_prompt_prefix, strip_volatile_terminal_control_sequences,
     trim_live_output, visible_terminal_fragment,
 };
+use crate::api::{RuntimeEvent, RuntimeSessionBridgeAction, RuntimeSessionLookup};
+use crate::config::RuntimeConfig;
+use crate::session::SessionEvent;
 
 struct TempDb {
     path: PathBuf,
@@ -563,7 +561,11 @@ fn workspace_layout_facade_mutations_update_runtime_registry() {
 
     let removed = state
         .workspace_layout_remove("desktop-main")
-        .map(|_| state.workspace_layout_snapshot("desktop-main").expect("snapshot"))
+        .map(|_| {
+            state
+                .workspace_layout_snapshot("desktop-main")
+                .expect("snapshot")
+        })
         .expect("remove layout");
     assert_eq!(removed, None);
 }
@@ -596,7 +598,9 @@ fn workspace_layout_load_prunes_sessions_missing_from_profile() {
 #[test]
 fn session_move_to_profile_updates_runtime_state_without_touching_ui_contract() {
     let (state, session_a, _session_b, _db) = create_state_with_two_sessions();
-    let target = state.profile_create(Some("Work".to_string())).expect("create profile");
+    let target = state
+        .profile_create(Some("Work".to_string()))
+        .expect("create profile");
 
     let moved = state
         .session_move_to_profile(&session_a, &target.profile_id, Some(0))
@@ -606,14 +610,19 @@ fn session_move_to_profile_updates_runtime_state_without_touching_ui_contract() 
         .active_profile_id
         .clone()
         .expect("active profile id after move");
-    assert!(moved
-        .sessions
-        .iter()
-        .any(|session| session.profile_id == active_profile_id));
-    assert!(moved
-        .sessions
-        .iter()
-        .any(|session| session.session_id == session_a && session.profile_id == target.profile_id));
+    assert!(
+        moved
+            .sessions
+            .iter()
+            .any(|session| session.profile_id == active_profile_id)
+    );
+    assert!(
+        moved
+            .sessions
+            .iter()
+            .any(|session| session.session_id == session_a
+                && session.profile_id == target.profile_id)
+    );
 
     let launch = state
         .session_launch_spec(&session_a)
@@ -723,31 +732,43 @@ fn workspace_layout_survives_profile_switch_and_restart_with_cross_profile_sessi
         .expect("load layout after switch")
         .expect("layout exists after switch");
     assert_eq!(loaded_after_switch.views.len(), 2);
-    assert!(loaded_after_switch
-        .views
-        .iter()
-        .any(|view| view.session_id == session_a.session_id));
-    assert!(loaded_after_switch
-        .views
-        .iter()
-        .any(|view| view.session_id == session_b.session_id));
+    assert!(
+        loaded_after_switch
+            .views
+            .iter()
+            .any(|view| view.session_id == session_a.session_id)
+    );
+    assert!(
+        loaded_after_switch
+            .views
+            .iter()
+            .any(|view| view.session_id == session_b.session_id)
+    );
 
     drop(state);
 
-    let restored = RuntimeState::new(config, Store::initialize(&db.path).expect("reopen store"), make_test_bridge())
-        .expect("recreate runtime state")
-        .workspace_layout_restore_persisted(workspace_id)
-        .expect("restore persisted layout")
-        .expect("restored layout exists");
+    let restored = RuntimeState::new(
+        config,
+        Store::initialize(&db.path).expect("reopen store"),
+        make_test_bridge(),
+    )
+    .expect("recreate runtime state")
+    .workspace_layout_restore_persisted(workspace_id)
+    .expect("restore persisted layout")
+    .expect("restored layout exists");
     assert_eq!(restored.views.len(), 2);
-    assert!(restored
-        .views
-        .iter()
-        .any(|view| view.session_id == session_a.session_id));
-    assert!(restored
-        .views
-        .iter()
-        .any(|view| view.session_id == session_b.session_id));
+    assert!(
+        restored
+            .views
+            .iter()
+            .any(|view| view.session_id == session_a.session_id)
+    );
+    assert!(
+        restored
+            .views
+            .iter()
+            .any(|view| view.session_id == session_b.session_id)
+    );
 }
 
 #[test]
@@ -830,7 +851,10 @@ fn mark_session_running_and_publish_flips_disconnected_snapshot_to_running() {
         .iter()
         .find(|session| session.session_id == session_id)
         .expect("session before");
-    assert_eq!(before_session.status, crate::api::RuntimeSessionStatus::Disconnected);
+    assert_eq!(
+        before_session.status,
+        crate::api::RuntimeSessionStatus::Disconnected
+    );
 
     state
         .mark_session_running_and_publish(&session_id)
@@ -842,7 +866,10 @@ fn mark_session_running_and_publish_flips_disconnected_snapshot_to_running() {
         .iter()
         .find(|session| session.session_id == session_id)
         .expect("session after");
-    assert_eq!(after_session.status, crate::api::RuntimeSessionStatus::Running);
+    assert_eq!(
+        after_session.status,
+        crate::api::RuntimeSessionStatus::Running
+    );
 }
 
 #[test]
@@ -886,10 +913,12 @@ fn runtime_new_resets_stale_running_sessions_to_disconnected_in_memory() {
         health_interval_ms: 1_000,
     };
 
-    let state = RuntimeState::new(config, store.clone(), make_test_bridge())
-        .expect("create runtime state");
+    let state =
+        RuntimeState::new(config, store.clone(), make_test_bridge()).expect("create runtime state");
 
-    let workspace = state.workspace_load_passive().expect("workspace load passive");
+    let workspace = state
+        .workspace_load_passive()
+        .expect("workspace load passive");
     let session_entry = workspace
         .sessions
         .iter()
@@ -934,7 +963,9 @@ fn workspace_load_auto_connects_active_session_runtime() {
 fn workspace_load_passive_keeps_active_session_disconnected() {
     let (state, session_id, _db) = create_state_with_session();
 
-    let workspace = state.workspace_load_passive().expect("workspace load passive");
+    let workspace = state
+        .workspace_load_passive()
+        .expect("workspace load passive");
     assert_eq!(
         workspace.active_session_id.as_deref(),
         Some(session_id.as_str())
@@ -1172,7 +1203,10 @@ fn session_focus_updates_active_session_without_resizing_runtime() {
 
     let size_before_focus = {
         let inner = state.inner.lock().expect("lock state");
-        let entry = inner.sessions.get(&session_a).expect("session a entry exists");
+        let entry = inner
+            .sessions
+            .get(&session_a)
+            .expect("session a entry exists");
         let runtime = entry.runtime.as_ref().expect("session a runtime exists");
         runtime
             .lock()
@@ -1189,18 +1223,27 @@ fn session_focus_updates_active_session_without_resizing_runtime() {
     let workspace = state
         .workspace_load_passive()
         .expect("workspace should remain readable");
-    assert_eq!(workspace.active_session_id.as_deref(), Some(session_b.as_str()));
+    assert_eq!(
+        workspace.active_session_id.as_deref(),
+        Some(session_b.as_str())
+    );
 
     let (size_after_focus, session_b_has_runtime) = {
         let inner = state.inner.lock().expect("lock state");
-        let entry_a = inner.sessions.get(&session_a).expect("session a entry exists");
+        let entry_a = inner
+            .sessions
+            .get(&session_a)
+            .expect("session a entry exists");
         let runtime_a = entry_a.runtime.as_ref().expect("session a runtime exists");
         let size = runtime_a
             .lock()
             .expect("lock runtime")
             .size()
             .expect("read runtime size after focus");
-        let entry_b = inner.sessions.get(&session_b).expect("session b entry exists");
+        let entry_b = inner
+            .sessions
+            .get(&session_b)
+            .expect("session b entry exists");
         (size, entry_b.runtime.is_some())
     };
     assert_eq!(size_after_focus, (80, 24));
@@ -1692,12 +1735,7 @@ fn restore_snapshot_prefers_terminal_replay_over_canonical_snapshot() {
             .expect("append canonical");
         inner
             .store
-            .append_terminal_replay_chunk(
-                &session_id,
-                2,
-                "\u{1b}]2;Claude Code\u{7}prompt % ",
-                2,
-            )
+            .append_terminal_replay_chunk(&session_id, 2, "\u{1b}]2;Claude Code\u{7}prompt % ", 2)
             .expect("append replay");
     }
 
@@ -1764,8 +1802,12 @@ fn clear_history_generation_gate_ignores_old_output_after_reset() {
 
 #[test]
 fn canonical_materializer_handles_backspace_carriage_return_and_erase_in_line() {
-    let materialized =
-        materialize_output_chunk("prompt % ", "prompt % ".chars().count(), false, "echo helo\x08l\nnext\x1b[Kdone");
+    let materialized = materialize_output_chunk(
+        "prompt % ",
+        "prompt % ".chars().count(),
+        false,
+        "echo helo\x08l\nnext\x1b[Kdone",
+    );
 
     assert_eq!(
         materialized.records,
@@ -1857,17 +1899,15 @@ fn canonical_materializer_preserves_fragment_across_split_crlf_boundary() {
 fn canonical_materializer_preserves_prompt_when_shell_redraws_with_cursor_forward() {
     let prompt = "khoa2807@192 ~ % ";
     let redraw = format!("\r\x1b[{}Cád", prompt.chars().count());
-    let materialized = materialize_output_chunk(
-        prompt,
-        prompt.chars().count(),
-        false,
-        &redraw,
-    );
+    let materialized = materialize_output_chunk(prompt, prompt.chars().count(), false, &redraw);
 
     assert_eq!(materialized.records.len(), 1);
     assert_eq!(materialized.records[0].text, "khoa2807@192 ~ % ád");
     assert_eq!(materialized.open_fragment, "khoa2807@192 ~ % ád");
-    assert_eq!(materialized.cursor_col, "khoa2807@192 ~ % ád".chars().count());
+    assert_eq!(
+        materialized.cursor_col,
+        "khoa2807@192 ~ % ád".chars().count()
+    );
     assert!(!materialized.pending_carriage_return);
 }
 
@@ -1906,8 +1946,7 @@ fn canonical_materializer_preserves_prompt_when_cursor_redraw_split_across_chunk
 #[test]
 fn canonical_materializer_preserves_prompt_from_real_zsh_trace() {
     let prompt_chunk = "\x1b[0m\x1b[27m\x1b[24m\x1b[Jkhoa2807@192 chatminal % \x1b[K\x1b[?2004h";
-    let command_chunk =
-        "s\x08sdf\x1b[?2004l\r\r\nzsh: command not found: sdf\r\n\x1b[0m\x1b[27m\x1b[24m\x1b[Jkhoa2807@192 chatminal % \x1b[K\x1b[?2004h";
+    let command_chunk = "s\x08sdf\x1b[?2004l\r\r\nzsh: command not found: sdf\r\n\x1b[0m\x1b[27m\x1b[24m\x1b[Jkhoa2807@192 chatminal % \x1b[K\x1b[?2004h";
 
     let first = materialize_output_chunk("", 0, false, prompt_chunk);
     assert_eq!(first.open_fragment, "khoa2807@192 chatminal % ");

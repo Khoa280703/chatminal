@@ -10,8 +10,8 @@ use crate::chatminal_runtime::DESKTOP_LAYOUT_WORKSPACE_ID;
 use crate::chatminal_runtime::{
     build_desktop_sidebar_sessions, close_runtime_session, create_runtime_profile,
     create_runtime_session, desktop_workspace_subscribe, move_runtime_session_to_profile,
-    move_runtime_sessions_to_profile, rename_runtime_session,
-    set_runtime_session_startup_command, switch_runtime_profile,
+    move_runtime_sessions_to_profile, rename_runtime_session, set_runtime_session_startup_command,
+    switch_runtime_profile,
 };
 pub use crate::chatminal_runtime::{
     DesktopSidebarProfile as SidebarProfile, DesktopSidebarSession as SidebarSession,
@@ -46,8 +46,13 @@ pub struct SidebarInlineSessionEditState {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SidebarSessionDropTarget {
-    ProfileAppend { profile_id: String },
-    SessionInsertBefore { profile_id: String, session_id: String },
+    ProfileAppend {
+        profile_id: String,
+    },
+    SessionInsertBefore {
+        profile_id: String,
+        session_id: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -354,15 +359,12 @@ impl ChatminalSidebar {
     }
 
     pub fn inline_session_edit_state(&self) -> Option<SidebarInlineSessionEditState> {
-        self.shared
-            .lock()
-            .ok()
-            .and_then(|state| {
-                state
-                    .inline_session_edit
-                    .as_ref()
-                    .map(clone_inline_session_edit)
-            })
+        self.shared.lock().ok().and_then(|state| {
+            state
+                .inline_session_edit
+                .as_ref()
+                .map(clone_inline_session_edit)
+        })
     }
 
     pub fn inline_session_edit_cancel(&self) -> bool {
@@ -596,10 +598,19 @@ impl ChatminalSidebar {
             .lock()
             .ok()
             .and_then(|state| state.width_override_px);
-        clamp_sidebar_width_px(override_px.unwrap_or_else(|| default_sidebar_width_px(dpi)), window_width, dpi)
+        clamp_sidebar_width_px(
+            override_px.unwrap_or_else(|| default_sidebar_width_px(dpi)),
+            window_width,
+            dpi,
+        )
     }
 
-    pub fn set_width_pixels(&self, requested_width_px: f32, window_width: usize, dpi: usize) -> bool {
+    pub fn set_width_pixels(
+        &self,
+        requested_width_px: f32,
+        window_width: usize,
+        dpi: usize,
+    ) -> bool {
         let clamped = clamp_sidebar_width_px(requested_width_px, window_width, dpi) as f32;
         let Ok(mut state) = self.shared.lock() else {
             return false;
@@ -728,10 +739,7 @@ fn clamp_sidebar_width_px(requested_width_px: f32, window_width: usize, dpi: usi
     let max_width_by_ratio = window_width as f32 * SIDEBAR_MAX_WINDOW_RATIO;
     let max_width_by_terminal = (window_width as f32 - min_terminal_width).max(min_width);
     let max_width = max_width_by_ratio.min(max_width_by_terminal).max(min_width);
-    requested_width_px
-        .min(max_width)
-        .max(min_width)
-        .round() as usize
+    requested_width_px.min(max_width).max(min_width).round() as usize
 }
 
 pub fn sidebar_enabled() -> bool {
@@ -852,15 +860,11 @@ fn replace_snapshot(shared: &Arc<Mutex<SharedState>>, mut next: SidebarSnapshot)
     {
         state.inline_session_edit = None;
     }
-    if state
-        .session_drag
-        .as_ref()
-        .is_some_and(|drag| {
-            drag.session_ids
-                .iter()
-                .any(|session_id| !valid_session_ids.contains(session_id.as_str()))
-        })
-    {
+    if state.session_drag.as_ref().is_some_and(|drag| {
+        drag.session_ids
+            .iter()
+            .any(|session_id| !valid_session_ids.contains(session_id.as_str()))
+    }) {
         state.session_drag = None;
     }
     let changed = state.snapshot.active_profile_id != next.active_profile_id
@@ -883,7 +887,9 @@ fn clone_context_menu(menu: &SidebarSessionContextMenu) -> SidebarSessionContext
     }
 }
 
-fn clone_inline_session_edit(edit: &SidebarInlineSessionEditState) -> SidebarInlineSessionEditState {
+fn clone_inline_session_edit(
+    edit: &SidebarInlineSessionEditState,
+) -> SidebarInlineSessionEditState {
     SidebarInlineSessionEditState {
         session_id: edit.session_id.clone(),
         kind: edit.kind,

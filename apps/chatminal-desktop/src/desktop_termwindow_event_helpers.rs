@@ -137,13 +137,14 @@ impl TermWindow {
             // highlighting purpose but also manipulates the selection
             // and we want to allow it to retain the selection it made!
 
-            let clear_selection =
-                if let Some(selection_range) = self.selection(pane.pane_id() as u64).range.as_ref() {
-                    let selection_rows = selection_range.rows();
-                    selection_rows.into_iter().any(|row| dirty.contains(row))
-                } else {
-                    false
-                };
+            let clear_selection = if let Some(selection_range) =
+                self.selection(pane.pane_id() as u64).range.as_ref()
+            {
+                let selection_rows = selection_range.rows();
+                selection_rows.into_iter().any(|row| dirty.contains(row))
+            } else {
+                false
+            };
 
             if clear_selection {
                 self.selection(pane.pane_id() as u64).range.take();
@@ -178,7 +179,7 @@ impl TermWindow {
                     err,
                     self.config_overrides
                 );
-                configuration()
+                self.config.clone()
             }
         };
         self.config = config.clone();
@@ -195,6 +196,7 @@ impl TermWindow {
             config.cursor_blink_ease_in,
             config.cursor_blink_rate,
             config.cursor_blink_ease_out,
+            config.animation_fps,
             None,
         );
         *self.blink_state.borrow_mut() = ColorEase::new(
@@ -202,6 +204,7 @@ impl TermWindow {
             config.text_blink_ease_in,
             config.text_blink_rate,
             config.text_blink_ease_out,
+            config.animation_fps,
             None,
         );
         *self.rapid_blink_state.borrow_mut() = ColorEase::new(
@@ -209,6 +212,7 @@ impl TermWindow {
             config.text_blink_rapid_ease_in,
             config.text_blink_rate_rapid,
             config.text_blink_rapid_ease_out,
+            config.animation_fps,
             None,
         );
 
@@ -357,7 +361,13 @@ impl TermWindow {
             return false;
         };
 
-        self.with_host_window(|window| window.iter().any(|tab| tab.contains_pane(pane_id)))
+        self.with_host_window(|window| {
+            window.iter().any(|tab| {
+                tab.contains_pane(crate::chatminal_runtime::SessionTerminalHandle::new(
+                    pane_id as u64,
+                ))
+            })
+        })
             .unwrap_or(false)
     }
 
@@ -417,7 +427,10 @@ impl TermWindow {
         }
         let terminal_instances = self.get_terminal_instance_information();
         let active_entry = surfaces.iter().find(|entry| entry.is_active).cloned();
-        let active_terminal_instance = terminal_instances.iter().find(|leaf| leaf.is_active).cloned();
+        let active_terminal_instance = terminal_instances
+            .iter()
+            .find(|leaf| leaf.is_active)
+            .cloned();
 
         let border = self.get_os_border();
         let tab_bar_height = self.tab_bar_pixel_height().unwrap_or(0.);
@@ -474,7 +487,8 @@ impl TermWindow {
         let title = match config::run_immediate_with_lua_config(|lua| {
             if let Some(lua) = lua {
                 let surfaces = lua.create_sequence_from(surfaces.clone().into_iter())?;
-                let terminal_instances = lua.create_sequence_from(terminal_instances.clone().into_iter())?;
+                let terminal_instances =
+                    lua.create_sequence_from(terminal_instances.clone().into_iter())?;
 
                 let v = config::lua::emit_sync_callback(
                     &*lua,
@@ -693,12 +707,13 @@ impl TermWindow {
         };
 
         let args = args.clone();
+        let overlay_config = self.config.clone();
 
         let gui_win = GuiWin::new(self);
         let pane_id = pane.pane_id() as u64;
 
         self.spawn_overlay_on_active_render_scope(move |_tab_id, term| {
-            crate::overlay::selector::selector(term, args, gui_win, pane_id)
+            crate::overlay::selector::selector(term, overlay_config, args, gui_win, pane_id)
         });
     }
 
@@ -794,9 +809,11 @@ impl TermWindow {
 
         let config = &self.config;
         let alphabet = args.alphabet.unwrap_or(config.launcher_alphabet.clone());
+        let overlay_config = config.clone();
 
         promise::spawn::spawn(async move {
             let args = LauncherArgs::new(
+                overlay_config,
                 &title,
                 flags,
                 pane_id as u64,
@@ -809,10 +826,10 @@ impl TermWindow {
             let win = window.clone();
             win.notify(TermWindowNotif::Apply(Box::new(move |term_window| {
                 let window = window.clone();
-                let _ = term_window.spawn_overlay_for_render_scope(
-                    render_scope_id,
-                    move |_tab_id, term| launcher(args, term, window, initial_choice_idx),
-                );
+                let _ = term_window
+                    .spawn_overlay_for_render_scope(render_scope_id, move |_tab_id, term| {
+                        launcher(args, term, window, initial_choice_idx)
+                    });
             })));
         })
         .detach();
@@ -903,11 +920,7 @@ impl TermWindow {
         Ok(())
     }
 
-    fn scroll_by_line(
-        &mut self,
-        amount: isize,
-        pane: &Arc<dyn OverlayPane>,
-    ) -> anyhow::Result<()> {
+    fn scroll_by_line(&mut self, amount: isize, pane: &Arc<dyn OverlayPane>) -> anyhow::Result<()> {
         let dims = self.renderable_dimensions_for_pane(pane);
         let position = self
             .get_viewport(pane.pane_id() as u64)
@@ -942,5 +955,4 @@ impl TermWindow {
             })?;
         self.move_runtime_entry(entry_idx)
     }
-
 }

@@ -1,18 +1,19 @@
 use crate::chatminal_runtime::{
     active_frontend_client, active_workspace_for_client, focus_terminal_handle_by_id,
-    frontend_resolve_focused_pane, frontend_resolve_pane, set_active_workspace_for_client,
-    subscribe_frontend_notifications, workspace_is_empty, workspace_names,
-    FrontendClientHandle, RuntimeNotification, host_workspace_has_windows,
-    primary_host_window_exists, primary_host_window_id,
+    frontend_resolve_focused_pane, frontend_resolve_pane, host_activity_count, host_window_exists,
+    host_workspace_has_windows, host_workspace_name, primary_host_window_exists,
+    primary_host_window_id, set_active_workspace_for_client, spawn_local_shell_runner,
+    start_host_activity, subscribe_frontend_notifications, workspace_is_empty, workspace_names,
+    FrontendClientHandle, HostActivityGuard, RuntimeNotification,
 };
-use crate::scripting::guiwin::PrimaryGuiWindowId;
 use crate::scripting::guiwin::GuiWin;
+use crate::scripting::guiwin::PrimaryGuiWindowId;
 use crate::spawn::SpawnWhere;
 use crate::TermWindow;
 use ::window::*;
 use anyhow::{Context, Error};
 use config::keyassignment::{KeyAssignment, SpawnCommand};
-use config::{ConfigSubscription, NotificationHandling};
+use config::{ConfigHandle, ConfigSubscription, NotificationHandling};
 use engine_term::{Alert, ClipboardSelection};
 use engine_toast_notification::*;
 use promise::{Future, Promise};
@@ -27,8 +28,9 @@ pub struct GuiFrontEnd {
     spawning_primary_window: RefCell<bool>,
     known_window: RefCell<Option<Window>>,
     client_id: FrontendClientHandle,
+    config: RefCell<ConfigHandle>,
     config_subscription: RefCell<Option<ConfigSubscription>>,
-    _host_activity_guard: Option<crate::chatminal_runtime::HostActivityGuard>,
+    _host_activity_guard: Option<HostActivityGuard>,
 }
 
 impl Drop for GuiFrontEnd {
@@ -38,7 +40,22 @@ impl Drop for GuiFrontEnd {
 }
 
 impl GuiFrontEnd {
-    pub fn try_new() -> anyhow::Result<Rc<GuiFrontEnd>> {
+    fn effective_config(&self) -> ConfigHandle {
+        self.config.borrow().clone()
+    }
+
+    fn refresh_config_snapshot(&self) -> ConfigHandle {
+        let config = config::configuration();
+        *self.config.borrow_mut() = config.clone();
+        config
+    }
+
+    fn recreate_menubar(&self) {
+        let config = self.effective_config();
+        crate::commands::CommandDef::recreate_menubar(&config);
+    }
+
+    pub fn try_new(initial_config: ConfigHandle) -> anyhow::Result<Rc<GuiFrontEnd>> {
         let connection = Connection::init()?;
         connection.set_event_handler(Self::app_event_handler);
 
@@ -51,9 +68,10 @@ impl GuiFrontEnd {
             spawning_primary_window: RefCell::new(false),
             known_window: RefCell::new(None),
             client_id: client_id.clone(),
+            config: RefCell::new(initial_config),
             config_subscription: RefCell::new(None),
             _host_activity_guard: crate::chatminal_sidebar::sidebar_enabled()
-                .then(crate::chatminal_runtime::start_host_activity),
+                .then(start_host_activity),
         });
 
         subscribe_frontend_notifications(move |n| {
@@ -62,7 +80,7 @@ impl GuiFrontEnd {
                     old_workspace,
                     new_workspace,
                 } => {
-                    let active = crate::chatminal_runtime::host_workspace_name();
+                    let active = host_workspace_name();
                     if active == old_workspace || active == new_workspace {
                         let switcher = WorkspaceSwitcher::new(&new_workspace);
                         promise::spawn::spawn_into_main_thread(async move {
@@ -83,7 +101,7 @@ impl GuiFrontEnd {
                 }
                 RuntimeNotification::PaneFocused(pane_id) => {
                     promise::spawn::spawn_into_main_thread(async move {
-                        if let Err(err) = focus_terminal_handle_by_id(pane_id as u64) {
+                        if let Err(err) = focus_terminal_handle_by_id(pane_id) {
                             log::error!("Error reconciling PaneFocused notification: {err:#}");
                         }
                     })
@@ -106,18 +124,18 @@ impl GuiFrontEnd {
                             focus: _,
                         },
                 } => {
-                    if let Some(resolved) = frontend_resolve_pane(pane_id as u64) {
-                        let config = config::configuration();
+                    if let Some(resolved) = frontend_resolve_pane(pane_id) {
+                        let config = current_frontend_config();
 
                         if let Some(focused) = frontend_resolve_focused_pane(&client_id) {
                             let show = match config.notification_handling {
                                 NotificationHandling::NeverShow => false,
                                 NotificationHandling::AlwaysShow => true,
                                 NotificationHandling::SuppressFromFocusedPane => {
-                                    focused.pane_id != pane_id as u64
+                                    focused.terminal_handle != pane_id
                                 }
                                 NotificationHandling::SuppressFromFocusedTab => {
-                                    focused.runtime_entry_id != resolved.runtime_entry_id
+                                    focused.runtime_id != resolved.runtime_id
                                 }
                                 NotificationHandling::SuppressFromFocusedWindow => false,
                             };
@@ -151,9 +169,9 @@ impl GuiFrontEnd {
                         | Alert::SetUserVar { .. },
                 } => {}
                 RuntimeNotification::Empty => {
-                    if config::configuration().quit_when_all_windows_are_closed {
+                    if current_frontend_config().quit_when_all_windows_are_closed {
                         promise::spawn::spawn_into_main_thread(async move {
-                            let activity_count = crate::chatminal_runtime::host_activity_count();
+                            let activity_count = host_activity_count();
                             let should_terminate = crate::frontend::try_front_end()
                                 .as_ref()
                                 .map(|fe| fe.can_terminate_on_mux_empty())
@@ -171,7 +189,7 @@ impl GuiFrontEnd {
                     }
                 }
                 RuntimeNotification::SaveToDownloads { name, data } => {
-                    if !config::configuration().allow_download_protocols {
+                    if !current_frontend_config().allow_download_protocols {
                         log::error!(
                             "Ignoring download request for {:?}, \
                                  as allow_download_protocols=false",
@@ -190,7 +208,7 @@ impl GuiFrontEnd {
                         let fe = crate::frontend::front_end();
                         log::trace!(
                             "set clipboard in pane {} {:?} {:?}",
-                            pane_id,
+                            pane_id.as_u64(),
                             selection,
                             clipboard
                         );
@@ -217,10 +235,11 @@ impl GuiFrontEnd {
         // `chatminal.gui.get_appearance()` can have that take effect
         // before any windows are created
         config::reload();
+        front_end.refresh_config_snapshot();
 
         // And build the initial menu bar.
         // TODO: arrange for this to happen on config reload.
-        crate::commands::CommandDef::recreate_menubar(&config::configuration());
+        front_end.recreate_menubar();
 
         Ok(front_end)
     }
@@ -246,7 +265,7 @@ impl GuiFrontEnd {
                     // is launched with a default and very anemic path, and that is frustrating for
                     // users.
 
-                    match crate::chatminal_runtime::spawn_local_shell_runner().await {
+                    match spawn_local_shell_runner().await {
                         Ok(pane) => {
                             log::trace!("Spawned {file_name} as pane_id {}", pane.pane_id());
                             let mut writer = pane.writer();
@@ -266,7 +285,7 @@ impl GuiFrontEnd {
                 // future.
 
                 fn spawn_command(spawn: &SpawnCommand, spawn_where: SpawnWhere) {
-                    let config = config::configuration();
+                    let config = current_frontend_config();
                     let dpi = config.dpi.unwrap_or_else(|| ::window::default_dpi());
                     let size =
                         config.initial_size(dpi as u32, crate::cell_pixel_dims(&config, dpi).ok());
@@ -342,8 +361,11 @@ impl GuiFrontEnd {
         log::debug!("workspace is {}, fixup windows", workspace);
 
         self.prune_closing_primary_window();
-        let desired_primary_window_id =
-            host_workspace_has_windows(&workspace).then(primary_host_window_id);
+        let desired_primary_window_id = if primary_host_window_exists() {
+            Some(primary_host_window_id())
+        } else {
+            host_workspace_has_windows(&workspace).then(primary_host_window_id)
+        };
 
         let known_window = self.known_window.borrow_mut().take();
 
@@ -405,6 +427,24 @@ impl GuiFrontEnd {
         self.reconcile_workspace();
     }
 
+    fn bootstrap_primary_window(&self) {
+        if self.known_window.borrow().is_some() || *self.spawning_primary_window.borrow() {
+            return;
+        }
+        if !primary_host_window_exists() {
+            return;
+        }
+        let primary_window_id = primary_host_window_id();
+        *self.spawning_primary_window.borrow_mut() = true;
+        promise::spawn::spawn(async move {
+            if let Err(err) = TermWindow::new_primary_window(primary_window_id).await {
+                log::error!("Failed to bootstrap primary window: {:#}", err);
+                *front_end().spawning_primary_window.borrow_mut() = false;
+            }
+        })
+        .detach();
+    }
+
     pub fn record_primary_window_binding(
         &self,
         window: Window,
@@ -434,7 +474,7 @@ impl GuiFrontEnd {
             }
             *known_window = Some(window);
         }
-        crate::commands::CommandDef::recreate_menubar(&config::configuration());
+        self.recreate_menubar();
         if !self.is_switching_workspace() {
             self.reconcile_workspace();
         }
@@ -451,7 +491,7 @@ impl GuiFrontEnd {
             *self.closing_primary_window.borrow_mut() = true;
             *self.spawning_primary_window.borrow_mut() = false;
         }
-        crate::commands::CommandDef::recreate_menubar(&config::configuration());
+        self.recreate_menubar();
         if !self.is_switching_workspace() {
             self.reconcile_workspace();
         }
@@ -466,7 +506,7 @@ impl GuiFrontEnd {
     }
 
     fn prune_closing_primary_window(&self) {
-        if !crate::chatminal_runtime::host_window_exists() {
+        if !host_window_exists() {
             *self.closing_primary_window.borrow_mut() = false;
         }
     }
@@ -495,6 +535,12 @@ pub fn front_end() -> Rc<GuiFrontEnd> {
         .expect("to be called on gui thread")
 }
 
+pub(crate) fn current_frontend_config() -> ConfigHandle {
+    try_front_end()
+        .map(|front_end| front_end.effective_config())
+        .unwrap_or_else(config::configuration)
+}
+
 pub struct WorkspaceSwitcher {
     new_name: String,
 }
@@ -518,14 +564,16 @@ pub fn shutdown() {
     FRONT_END.with(|f| drop(f.borrow_mut().take()));
 }
 
-pub fn try_new() -> Result<Rc<GuiFrontEnd>, Error> {
-    let front_end = GuiFrontEnd::try_new()?;
+pub fn try_new(initial_config: ConfigHandle) -> Result<Rc<GuiFrontEnd>, Error> {
+    let front_end = GuiFrontEnd::try_new(initial_config)?;
     FRONT_END.with(|f| *f.borrow_mut() = Some(Rc::clone(&front_end)));
 
     let config_subscription = config::subscribe_to_config_reload({
         move || {
             promise::spawn::spawn_into_main_thread(async {
-                crate::commands::CommandDef::recreate_menubar(&config::configuration());
+                let front_end = crate::frontend::front_end();
+                front_end.refresh_config_snapshot();
+                front_end.recreate_menubar();
             })
             .detach();
             true
@@ -535,6 +583,12 @@ pub fn try_new() -> Result<Rc<GuiFrontEnd>, Error> {
         .config_subscription
         .borrow_mut()
         .replace(config_subscription);
+
+    front_end.bootstrap_primary_window();
+    // Bootstrap the first window immediately. Without an initial reconcile,
+    // the desktop process can stay alive with no visible primary window until
+    // some later workspace/runtime notification happens to arrive.
+    front_end.reconcile_workspace();
 
     Ok(front_end)
 }

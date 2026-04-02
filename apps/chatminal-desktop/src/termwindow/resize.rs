@@ -1,3 +1,4 @@
+use crate::chatminal_runtime::{desktop_resize_visible_sessions, resize_host_window_tabs};
 use crate::resize_increment_calculator::ResizeIncrementCalculator;
 use crate::utilsprites::RenderMetrics;
 use ::window::{Dimensions, ResizeIncrement, Window, WindowOps, WindowState};
@@ -338,9 +339,9 @@ impl super::TermWindow {
         // Resizing legacy mux tabs here would force compatibility shims back to
         // full-window dimensions and temporarily break split-pane scroll semantics.
         if !self.chatminal_sidebar.is_enabled() {
-            crate::chatminal_runtime::resize_host_window_tabs(size);
+            resize_host_window_tabs(size);
         }
-        let _ = crate::chatminal_runtime::desktop_resize_visible_sessions(size);
+        let _ = desktop_resize_visible_sessions(size);
         self.resize_overlays();
         self.invalidate_fancy_tab_bar();
         self.update_title();

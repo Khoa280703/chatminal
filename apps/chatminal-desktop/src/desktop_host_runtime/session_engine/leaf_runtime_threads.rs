@@ -1,5 +1,4 @@
 use std::io::Read;
-use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -7,14 +6,16 @@ use chatminal_terminal_core::TerminalSize;
 use engine_term::Terminal as IoTerminal;
 use portable_pty::{Child, CommandBuilder, PtySize};
 
-use super::leaf_runtime::{TerminalInstanceRuntimeEvent, TerminalInstanceRuntimeSpawn};
+use super::leaf_runtime::{
+    TerminalInstanceRuntimeEvent, TerminalInstanceRuntimeHooks, TerminalInstanceRuntimeSpawn,
+};
 use super::output_history::OutputHistory;
 
 pub(crate) fn spawn_reader_waiter_loop(
     io_terminal: Arc<Mutex<IoTerminal>>,
     output_history: Arc<Mutex<OutputHistory>>,
     spawn: TerminalInstanceRuntimeSpawn,
-    events: std_mpsc::SyncSender<TerminalInstanceRuntimeEvent>,
+    hooks: TerminalInstanceRuntimeHooks,
     mut reader: Box<dyn Read + Send>,
     child: Arc<Mutex<Box<dyn Child + Send + Sync>>>,
 ) {
@@ -37,7 +38,10 @@ pub(crate) fn spawn_reader_waiter_loop(
                 Ok(0) => break,
                 Ok(read) => {
                     let raw_chunk = String::from_utf8_lossy(&buffer[..read]).to_string();
-                    io_terminal.lock().unwrap().advance_bytes(raw_chunk.as_bytes());
+                    io_terminal
+                        .lock()
+                        .unwrap()
+                        .advance_bytes(raw_chunk.as_bytes());
                     let mut chunk = raw_chunk;
                     if let Some(restored) = restored_prompt_fragment.as_deref() {
                         if visible_terminal_fragment(&chunk).is_empty() {
@@ -70,7 +74,7 @@ pub(crate) fn spawn_reader_waiter_loop(
                     }
 
                     output_history.lock().unwrap().push(chunk.clone());
-                    let _ = events.send(TerminalInstanceRuntimeEvent::Output {
+                    (hooks.on_output)(TerminalInstanceRuntimeEvent::Output {
                         session_id: Arc::clone(&session_id),
                         generation: spawn.generation,
                         runtime_id: spawn.runtime_id,
@@ -79,7 +83,7 @@ pub(crate) fn spawn_reader_waiter_loop(
                     });
                 }
                 Err(err) => {
-                    let _ = events.send(TerminalInstanceRuntimeEvent::Error {
+                    (hooks.on_error)(TerminalInstanceRuntimeEvent::Error {
                         session_id: Arc::clone(&session_id),
                         generation: spawn.generation,
                         runtime_id: spawn.runtime_id,
@@ -100,7 +104,7 @@ pub(crate) fn spawn_reader_waiter_loop(
                 .and_then(|mut guard| guard.try_wait().ok())
                 .flatten();
             if let Some(status) = status {
-                let _ = events.send(TerminalInstanceRuntimeEvent::Exited {
+                (hooks.on_exit)(TerminalInstanceRuntimeEvent::Exited {
                     session_id,
                     generation: spawn.generation,
                     runtime_id: spawn.runtime_id,

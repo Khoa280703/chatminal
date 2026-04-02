@@ -192,9 +192,11 @@ impl TermWindow {
                     };
             }
             SelectionMode::Word => {
+                let selection_word_boundary = &self.config.selection_word_boundary;
                 let end_word = crate::selection::SelectionRange::word_around(
                     crate::selection::SelectionCoordinate::x_y(x, y),
                     &**pane,
+                    selection_word_boundary,
                 );
 
                 let start_coord = self
@@ -202,7 +204,11 @@ impl TermWindow {
                     .origin
                     .clone()
                     .unwrap_or(end_word.start);
-                let start_word = crate::selection::SelectionRange::word_around(start_coord, &**pane);
+                let start_word = crate::selection::SelectionRange::word_around(
+                    start_coord,
+                    &**pane,
+                    selection_word_boundary,
+                );
 
                 let selection_range = start_word.extend_with(end_word);
                 self.selection(pane.pane_id() as u64).range = Some(selection_range);
@@ -278,11 +284,11 @@ impl TermWindow {
                 self.selection(pane.pane_id() as u64).rectangular = false;
             }
             SelectionMode::Word => {
-                let selection_range =
-                    crate::selection::SelectionRange::word_around(
-                        crate::selection::SelectionCoordinate::x_y(x, y),
-                        &**pane,
-                    );
+                let selection_range = crate::selection::SelectionRange::word_around(
+                    crate::selection::SelectionCoordinate::x_y(x, y),
+                    &**pane,
+                    &self.config.selection_word_boundary,
+                );
 
                 self.selection(pane.pane_id() as u64).origin = Some(selection_range.start);
                 self.selection(pane.pane_id() as u64).range = Some(selection_range);

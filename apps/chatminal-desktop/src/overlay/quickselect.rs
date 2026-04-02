@@ -1,7 +1,7 @@
 use crate::chatminal_runtime::overlay_compat::{
-    OverlayCachePolicy, OverlayForEachLogicalLine, OverlayLogicalLine, OverlayPane, OverlayPaneHandle,
-    OverlayPattern, OverlaySearchResult, OverlayWithPaneLines, RenderableDimensions,
-    StableCursorPosition,
+    OverlayCachePolicy, OverlayForEachLogicalLine, OverlayLogicalLine, OverlayPane,
+    OverlayPaneHandle, OverlayPattern, OverlaySearchResult, OverlayWithPaneLines,
+    RenderableDimensions, StableCursorPosition,
 };
 use crate::selection::{SelectionCoordinate, SelectionRange};
 use crate::termwindow::{TermWindow, TermWindowNotif};

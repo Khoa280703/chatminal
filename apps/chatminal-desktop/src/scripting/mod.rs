@@ -23,8 +23,9 @@ pub fn register(lua: &Lua) -> anyhow::Result<()> {
             let fe =
                 try_front_end().ok_or_else(|| mlua::Error::external("not called on gui thread"))?;
             let _ = fe.reconcile_workspace().await;
-            fe.gui_window()
-                .ok_or_else(|| mlua::Error::external("primary gui window is not currently available"))
+            fe.gui_window().ok_or_else(|| {
+                mlua::Error::external("primary gui window is not currently available")
+            })
         })?,
     )?;
 

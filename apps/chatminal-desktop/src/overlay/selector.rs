@@ -1,8 +1,8 @@
 use crate::chatminal_runtime::overlay_compat::OverlayTerminal;
 use crate::overlay::quickselect;
 use crate::scripting::guiwin::GuiWin;
-use config::configuration;
 use config::keyassignment::{InputSelector, InputSelectorEntry, KeyAssignment};
+use config::ConfigHandle;
 use nucleo_matcher::pattern::Pattern;
 use nucleo_matcher::{Matcher, Utf32Str};
 use rayon::prelude::*;
@@ -37,6 +37,7 @@ pub fn matcher_pattern(s: &str) -> Pattern {
 }
 
 struct SelectorState {
+    config: ConfigHandle,
     active_idx: usize,
     max_items: usize,
     top_row: usize,
@@ -119,8 +120,7 @@ impl SelectorState {
         let max_label_len = labels.iter().map(|s| s.len()).max().unwrap_or(0);
         let mut labels_iter = labels.into_iter();
 
-        let config = configuration();
-        let colors = &config.resolved_palette;
+        let colors = &self.config.resolved_palette;
         let input_selector_label_fg = colors.input_selector_label_fg;
         let input_selector_label_bg = colors.input_selector_label_bg;
 
@@ -414,6 +414,7 @@ async fn do_event(
 
 pub fn selector(
     mut term: OverlayTerminal,
+    config: ConfigHandle,
     args: InputSelector,
     window: GuiWin,
     pane_id: u64,
@@ -427,6 +428,7 @@ pub fn selector(
         }
     };
     let mut state = SelectorState {
+        config,
         active_idx: 0,
         max_items: 0,
         top_row: 0,

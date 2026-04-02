@@ -279,13 +279,11 @@ impl super::TermWindow {
                     raw_modifiers,
                     context,
                 ),
-            Key::Composed(text) => {
-                self.process_chatminal_sidebar_inline_session_edit_text(
-                    text,
-                    raw_modifiers,
-                    context,
-                )
-            }
+            Key::Composed(text) => self.process_chatminal_sidebar_inline_session_edit_text(
+                text,
+                raw_modifiers,
+                context,
+            ),
             _ => false,
         }
     }

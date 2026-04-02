@@ -3,6 +3,7 @@ use crate::chatminal_runtime::overlay_compat::{
     OverlayPane, OverlayPaneHandle, OverlayPattern, OverlayPatternType, OverlayRuntimeEntryHandle,
     OverlaySearchResult, OverlayWithPaneLines, RenderableDimensions, StableCursorPosition,
 };
+use crate::chatminal_runtime::{frontend_resolve_pane, SessionTerminalHandle};
 use crate::selection::{SelectionCoordinate, SelectionRange, SelectionX};
 use crate::termwindow::keyevent::KeyTableArgs;
 use crate::termwindow::{TermWindow, TermWindowNotif};
@@ -10,6 +11,7 @@ use config::keyassignment::{
     ClipboardCopyDestination, CopyModeAssignment, KeyAssignment, KeyTable, KeyTableEntry,
     SelectionMode,
 };
+use config::ConfigHandle;
 use engine_term::color::ColorPalette;
 use engine_term::{
     unicode_column_width, Clipboard, KeyCode, KeyModifiers, Line, MouseEvent, SemanticType,
@@ -57,6 +59,7 @@ struct Jump {
 }
 
 struct CopyRenderable {
+    config: ConfigHandle,
     cursor: StableCursorPosition,
     delegate: Arc<dyn OverlayPane>,
     start: Option<SelectionCoordinate>,
@@ -120,8 +123,8 @@ impl CopyOverlay {
         cursor.shape = termwiz::surface::CursorShape::SteadyBlock;
         cursor.visibility = CursorVisibility::Visible;
 
-        let tab_id = crate::chatminal_runtime::frontend_resolve_pane(pane.pane_id() as u64)
-            .and_then(|pane| OverlayRuntimeEntryHandle::try_from(pane.runtime_entry_id).ok())
+        let tab_id = frontend_resolve_pane(SessionTerminalHandle::new(pane.pane_id() as u64))
+            .and_then(|pane| OverlayRuntimeEntryHandle::try_from(pane.runtime_id.as_u64()).ok())
             .ok_or_else(|| anyhow::anyhow!("no runtime entry contains the current pane"))?;
 
         let window = term_window
@@ -141,6 +144,7 @@ impl CopyOverlay {
         let search_line = LineEditBuffer::new(&pattern, pattern.len());
 
         let mut render = CopyRenderable {
+            config: term_window.config.clone(),
             cursor,
             window,
             delegate: Arc::clone(pane),
@@ -1529,8 +1533,7 @@ impl OverlayPane for CopyOverlay {
         impl<'a> OverlayWithPaneLines for OverlayLines<'a> {
             fn with_lines_mut(&mut self, first_row: StableRowIndex, lines: &mut [&mut Line]) {
                 let mut overlay_lines = vec![];
-                let config = config::configuration();
-                let colors = &config.resolved_palette;
+                let colors = self.renderer.config.resolved_palette.clone();
 
                 for (idx, line) in lines.iter_mut().enumerate() {
                     let mut line: Line = line.clone();
@@ -1631,8 +1634,7 @@ impl OverlayPane for CopyOverlay {
 
         let (top, mut lines) = self.delegate.get_lines(lines);
 
-        let config = config::configuration();
-        let colors = &config.resolved_palette;
+        let colors = renderer.config.resolved_palette.clone();
 
         // Process the lines; for the search row we want to render instead
         // the search UI.

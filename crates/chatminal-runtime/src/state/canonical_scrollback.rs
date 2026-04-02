@@ -234,9 +234,7 @@ pub(super) fn render_snapshot(
     render_snapshot_with_line_ending(snapshot, preview_lines, "\n")
 }
 
-pub(super) fn render_snapshot_for_terminal(
-    snapshot: &LogicalSnapshot,
-) -> StoredSessionSnapshot {
+pub(super) fn render_snapshot_for_terminal(snapshot: &LogicalSnapshot) -> StoredSessionSnapshot {
     render_snapshot_with_line_ending(snapshot, None, "\r\n")
 }
 
@@ -348,8 +346,7 @@ impl LogicalReducer {
 
     fn write_char(&mut self, ch: char) {
         if self.cursor_col > self.current_line.len() {
-            self.current_line
-                .resize(self.cursor_col, ' ');
+            self.current_line.resize(self.cursor_col, ' ');
         }
         if self.cursor_col == self.current_line.len() {
             self.current_line.push(ch);

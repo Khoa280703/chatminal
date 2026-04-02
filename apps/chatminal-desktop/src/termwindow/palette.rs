@@ -10,7 +10,7 @@ use crate::termwindow::{DimensionContext, GuiWin, TermWindow};
 use crate::utilsprites::RenderMetrics;
 use chatminal_lua_bridge::TerminalRef;
 use config::keyassignment::KeyAssignment;
-use config::{Dimension, FontAttributes, FontWeight, TextStyle};
+use config::{ConfigHandle, Dimension, FontAttributes, FontWeight, TextStyle};
 use engine_dynamic::{FromDynamic, ToDynamic};
 use engine_term::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use frecency::Frecency;
@@ -91,15 +91,14 @@ pub struct UserPaletteEntry {
 impl_lua_conversion_dynamic!(UserPaletteEntry);
 
 fn build_commands(
+    config: &ConfigHandle,
     gui_window: GuiWin,
     pane: Option<TerminalRef>,
     session_ui_mode: bool,
     filter_copy_mode: bool,
 ) -> Vec<ExpandedCommand> {
-    let mut commands = CommandDef::actions_for_palette_and_menubar_with_session_ui(
-        &config::configuration(),
-        session_ui_mode,
-    );
+    let mut commands =
+        CommandDef::actions_for_palette_and_menubar_with_session_ui(config, session_ui_mode);
 
     match config::run_immediate_with_lua_config(|lua| {
         let mut entries: Vec<UserPaletteEntry> = vec![];
@@ -355,10 +354,11 @@ impl CommandPalette {
 
         let pane_ref = term_window
             .active_terminal_instance_or_overlay()
-            .map(|pane| TerminalRef(pane.pane_id()));
+            .map(|pane| TerminalRef::from_pane_id(pane.pane_id()));
         let session_ui_mode = term_window.active_session_id().is_some();
 
         let commands = build_commands(
+            &term_window.config,
             GuiWin::new(term_window),
             pane_ref,
             session_ui_mode,

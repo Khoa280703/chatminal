@@ -3,13 +3,10 @@ use std::sync::Arc;
 use chatminal_store::StoredSessionStatus;
 
 use super::{
-    RuntimeState, logicalize_prepended_run_boundary, prepend_run_boundary,
-    strip_duplicate_restored_prompt_prefix,
-    canonical_scrollback::materialize_output_chunk,
-    persist_worker::PersistJob,
-    startup_recipe::append_recent_output_tail,
-    strip_volatile_terminal_control_sequences,
-    strip_zsh_prompt_spacer_artifact, trim_live_output,
+    RuntimeState, canonical_scrollback::materialize_output_chunk,
+    logicalize_prepended_run_boundary, persist_worker::PersistJob, prepend_run_boundary,
+    startup_recipe::append_recent_output_tail, strip_duplicate_restored_prompt_prefix,
+    strip_volatile_terminal_control_sequences, strip_zsh_prompt_spacer_artifact, trim_live_output,
 };
 use crate::api::{
     RuntimeEvent, RuntimePtyErrorEvent, RuntimePtyExitedEvent, RuntimePtyOutputEvent,
@@ -69,8 +66,7 @@ impl RuntimeState {
                     }
                     raw_replay_chunk = output_chunk.clone();
                     entry.session.seq += 1;
-                    was_already_running =
-                        entry.session.status == StoredSessionStatus::Running;
+                    was_already_running = entry.session.status == StoredSessionStatus::Running;
                     entry.session.status = StoredSessionStatus::Running;
                     seq_after = Some(entry.session.seq);
                     persist_history = entry.session.persist_history;
@@ -86,9 +82,7 @@ impl RuntimeState {
                     );
                     append_recent_output_tail(&mut entry.recent_output_tail, &tail_chunk);
                     if !persist_history {
-                        let buffered = logicalized
-                            .as_deref()
-                            .unwrap_or(&output_chunk);
+                        let buffered = logicalized.as_deref().unwrap_or(&output_chunk);
                         entry.live_output.push_str(buffered);
                         trim_live_output(&mut entry.live_output, 256 * 1024);
                     }
@@ -103,22 +97,18 @@ impl RuntimeState {
 
                 // Offload persist work to background thread (no SQLite under lock).
                 if let Some(seq) = seq_after {
-                    let _ = self.persist_tx.try_send(
-                        PersistJob::UpdateSeq {
-                            session_id: Arc::clone(&session_id),
-                            seq,
-                        },
-                    );
+                    let _ = self.persist_tx.try_send(PersistJob::UpdateSeq {
+                        session_id: Arc::clone(&session_id),
+                        seq,
+                    });
                     if !was_already_running {
-                        let _ = self.persist_tx.try_send(
-                            PersistJob::MarkRunning {
-                                session_id: Arc::clone(&session_id),
-                            },
-                        );
+                        let _ = self.persist_tx.try_send(PersistJob::MarkRunning {
+                            session_id: Arc::clone(&session_id),
+                        });
                     }
                     if persist_history {
-                        let persisted_chunk = logicalized
-                            .unwrap_or_else(|| raw_replay_chunk.clone());
+                        let persisted_chunk =
+                            logicalized.unwrap_or_else(|| raw_replay_chunk.clone());
                         let persisted_chunk = strip_volatile_terminal_control_sequences(
                             &strip_zsh_prompt_spacer_artifact(&persisted_chunk),
                         );
@@ -148,24 +138,20 @@ impl RuntimeState {
                                 materialized.pending_carriage_return;
                         }
 
-                        let _ = self.persist_tx.try_send(
-                            PersistJob::OutputChunk {
-                                session_id: Arc::clone(&session_id),
-                                seq,
-                                records: materialized.records,
-                                replay_chunk: raw_replay_chunk,
-                                ts,
-                            },
-                        );
+                        let _ = self.persist_tx.try_send(PersistJob::OutputChunk {
+                            session_id: Arc::clone(&session_id),
+                            seq,
+                            records: materialized.records,
+                            replay_chunk: raw_replay_chunk,
+                            ts,
+                        });
 
                         if seq % 50 == 0 {
                             let max_lines = inner.config.max_scrollback_lines_per_session;
-                            let _ = self.persist_tx.try_send(
-                                PersistJob::EnforceLimit {
-                                    session_id: Arc::clone(&session_id),
-                                    max_lines,
-                                },
-                            );
+                            let _ = self.persist_tx.try_send(PersistJob::EnforceLimit {
+                                session_id: Arc::clone(&session_id),
+                                max_lines,
+                            });
                         }
                     }
                 }

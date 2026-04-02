@@ -1,5 +1,5 @@
 use super::confirm;
-use crate::chatminal_runtime::overlay_compat::OverlayTerminal;
+use crate::chatminal_runtime::{overlay_compat::OverlayTerminal, remove_runtime_entry_scope};
 
 pub fn confirm_close_tab(tab_id: u64, mut term: OverlayTerminal) -> anyhow::Result<()> {
     if confirm::run_confirmation(
@@ -7,7 +7,7 @@ pub fn confirm_close_tab(tab_id: u64, mut term: OverlayTerminal) -> anyhow::Resu
         &mut term,
     )? {
         promise::spawn::spawn_into_main_thread(async move {
-            crate::chatminal_runtime::remove_runtime_entry_scope(tab_id);
+            remove_runtime_entry_scope(tab_id);
         })
         .detach();
     }

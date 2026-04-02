@@ -51,11 +51,11 @@ pub struct ClientInfo {
     #[serde(with = "ts_seconds")]
     pub last_input: DateTime<Utc>,
     /// The currently-focused pane
-    pub focused_pane_id: Option<PaneId>,
+    focused_pane_id: Option<PaneId>,
 }
 
 impl ClientInfo {
-    pub fn new(client_id: Arc<ClientId>) -> Self {
+    pub(crate) fn new(client_id: Arc<ClientId>) -> Self {
         Self {
             client_id,
             connected_at: Utc::now(),
@@ -65,11 +65,15 @@ impl ClientInfo {
         }
     }
 
-    pub fn update_last_input(&mut self) {
+    pub(crate) fn update_last_input(&mut self) {
         self.last_input = Utc::now();
     }
 
-    pub fn update_focused_pane(&mut self, pane_id: PaneId) {
+    pub(crate) fn focused_pane_id(&self) -> Option<PaneId> {
+        self.focused_pane_id
+    }
+
+    pub(crate) fn update_focused_pane(&mut self, pane_id: PaneId) {
         self.focused_pane_id.replace(pane_id);
     }
 }

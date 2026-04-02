@@ -3,17 +3,23 @@
 
 use crate::localpane::LocalPane;
 use crate::pane::{alloc_pane_id, Pane, PaneId};
-use crate::tab::{SplitRequest, Tab, TabId};
-use crate::Mux;
+use crate::tab::{SplitRequest, Tab};
+use crate::{
+    attach_tab_to_window, register_pane_with_default_side_effects_and_io_hooks, register_tab,
+    remove_tab_by_id, resolve_pane_id, tab_by_id, LocalPaneHooks, PtyIoHooks,
+};
 use anyhow::{Context, Error};
 use async_trait::async_trait;
+use chatminal_runtime::{RuntimeId, SessionTerminalHandle};
 use config::keyassignment::SpawnCommand;
-use config::{configuration, ExecTarget, SerialTarget};
+use config::{configuration, ConfigHandle, ExecTarget, ExitBehavior, SerialTarget};
 use downcast_rs::{impl_downcast, Downcast};
+use engine_term::Alert;
 use engine_term::TerminalSize;
 use parking_lot::Mutex;
 use portable_pty::{native_pty_system, CommandBuilder, ExitStatus, MasterPty, PtySize, PtySystem};
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -24,7 +30,7 @@ pub enum SplitSource {
         command: Option<CommandBuilder>,
         command_dir: Option<String>,
     },
-    MovePane(PaneId),
+    MoveTerminal(SessionTerminalHandle),
 }
 
 #[async_trait(?Send)]
@@ -44,24 +50,28 @@ pub trait SpawnTarget: Downcast + Send + Sync {
         let tab = Arc::new(Tab::new(&size));
         tab.assign_pane(&pane);
 
-        let mux = Mux::get();
-        mux.add_tab_and_active_pane(&tab)?;
-        mux.attach_tab(&tab)?;
+        register_tab(&tab)?;
+        attach_tab_to_window(&tab)?;
 
         Ok(tab)
     }
 
-    #[deprecated(note = "Use session-native split; engine split retained for runtime compatibility")]
+    #[deprecated(
+        note = "Use session-native split; engine split retained for runtime compatibility"
+    )]
     #[allow(deprecated)]
     async fn split_pane(
         &self,
         source: SplitSource,
-        tab: TabId,
-        pane_id: PaneId,
+        runtime_id: RuntimeId,
+        terminal_handle: SessionTerminalHandle,
         split_request: SplitRequest,
     ) -> anyhow::Result<Arc<dyn Pane>> {
-        let mux = Mux::get();
-        let tab = match mux.get_tab(tab) {
+        let tab = usize::try_from(runtime_id.as_u64())
+            .map_err(|_| anyhow::anyhow!("Invalid runtime id {}", runtime_id.as_u64()))?;
+        let pane_id = usize::try_from(terminal_handle.as_u64())
+            .map_err(|_| anyhow::anyhow!("invalid terminal handle {}", terminal_handle.as_u64()))?;
+        let tab = match tab_by_id(tab) {
             Some(t) => t,
             None => anyhow::bail!("Invalid tab id {}", tab),
         };
@@ -88,11 +98,13 @@ pub trait SpawnTarget: Downcast + Send + Sync {
                 self.spawn_pane(split_size.second, command, command_dir)
                     .await?
             }
-            SplitSource::MovePane(src_pane_id) => {
-                let src_tab = mux
-                    .resolve_pane_id(src_pane_id)
+            SplitSource::MoveTerminal(src_terminal_handle) => {
+                let src_pane_id = usize::try_from(src_terminal_handle.as_u64()).map_err(|_| {
+                    anyhow::anyhow!("invalid terminal handle {}", src_terminal_handle.as_u64())
+                })?;
+                let src_tab = resolve_pane_id(src_pane_id)
                     .ok_or_else(|| anyhow::anyhow!("pane {} not found", src_pane_id))?;
-                let src_tab = match mux.get_tab(src_tab) {
+                let src_tab = match tab_by_id(src_tab) {
                     Some(t) => t,
                     None => anyhow::bail!("Invalid tab id {}", src_tab),
                 };
@@ -102,7 +114,7 @@ pub trait SpawnTarget: Downcast + Send + Sync {
                 })?;
 
                 if src_tab.is_dead() {
-                    mux.remove_tab(src_tab.tab_id());
+                    remove_tab_by_id(src_tab.tab_id());
                 }
 
                 pane
@@ -133,13 +145,95 @@ pub trait SpawnTarget: Downcast + Send + Sync {
     /// Returns the name of the target.
     /// Should be a short identifier.
     fn spawn_target_name(&self) -> &str;
-
 }
 impl_downcast!(SpawnTarget);
 
 pub struct LocalSpawnTarget {
     pty_system: Mutex<Box<dyn PtySystem + Send>>,
     name: String,
+    hooks: LocalSpawnHooks,
+}
+
+#[derive(Clone, Default)]
+pub struct LocalSpawnHooks {
+    localpane_hooks: LocalPaneHooks,
+    pty_io_hooks: PtyIoHooks,
+}
+
+impl LocalSpawnHooks {
+    pub(crate) fn localpane_hooks(&self) -> LocalPaneHooks {
+        self.localpane_hooks.clone()
+    }
+
+    pub(crate) fn pty_io_hooks(&self) -> PtyIoHooks {
+        self.pty_io_hooks.clone()
+    }
+
+    pub fn with_output_callback(
+        mut self,
+        on_output: Arc<dyn Fn(SessionTerminalHandle) + Send + Sync>,
+    ) -> Self {
+        self.pty_io_hooks.set_output(Some(on_output));
+        self
+    }
+
+    pub fn with_cleanup_callback(
+        mut self,
+        on_cleanup: Arc<dyn Fn(SessionTerminalHandle, Option<ExitBehavior>) + Send + Sync>,
+    ) -> Self {
+        self.pty_io_hooks
+            .set_cleanup(Some(Arc::new(move |pane_id, exit_behavior| {
+                on_cleanup(SessionTerminalHandle::new(pane_id as u64), exit_behavior);
+            })));
+        self
+    }
+
+    pub fn with_inline_error_output_callback(
+        mut self,
+        on_inline_error_output: Arc<dyn Fn(SessionTerminalHandle, String) + Send + Sync>,
+    ) -> Self {
+        self.pty_io_hooks
+            .set_inline_error_output(Some(Arc::new(move |pane_id, message| {
+                on_inline_error_output(SessionTerminalHandle::new(pane_id as u64), message);
+            })));
+        self
+    }
+
+    pub fn with_input_callback(mut self, on_input: Arc<dyn Fn() + Send + Sync>) -> Self {
+        self.localpane_hooks.set_input(on_input);
+        self
+    }
+
+    pub fn with_inline_output_callback(
+        mut self,
+        on_inline_output: Arc<dyn Fn(SessionTerminalHandle, String) + Send + Sync>,
+    ) -> Self {
+        self.localpane_hooks
+            .set_inline_output(Arc::new(move |pane_id, message| {
+                on_inline_output(SessionTerminalHandle::new(pane_id as u64), message);
+            }));
+        self
+    }
+
+    pub fn with_alert_callback(
+        mut self,
+        on_alert: Arc<dyn Fn(SessionTerminalHandle, Alert) + Send + Sync>,
+    ) -> Self {
+        self.localpane_hooks
+            .set_alert(Arc::new(move |pane_id, alert| {
+                on_alert(SessionTerminalHandle::new(pane_id as u64), alert);
+            }));
+        self
+    }
+
+    pub fn with_child_exit_cleanup_callback(
+        mut self,
+        on_child_exit_cleanup: Arc<dyn Fn() + Send + Sync>,
+    ) -> Self {
+        self.localpane_hooks
+            .set_child_exit_cleanup(on_child_exit_cleanup);
+        self
+    }
 }
 
 impl LocalSpawnTarget {
@@ -147,8 +241,16 @@ impl LocalSpawnTarget {
         Ok(Self::with_pty_system(name, native_pty_system()))
     }
 
-    fn resolve_exec_target_config(&self) -> Option<ExecTarget> {
-        config::configuration()
+    pub fn new_with_hooks(name: &str, hooks: LocalSpawnHooks) -> Result<Self, Error> {
+        Ok(Self::with_pty_system_and_hooks(
+            name,
+            native_pty_system(),
+            hooks,
+        ))
+    }
+
+    fn resolve_exec_target_config(&self, config: &ConfigHandle) -> Option<ExecTarget> {
+        config
             .exec_targets
             .iter()
             .find(|ed| ed.name == self.name)
@@ -156,9 +258,18 @@ impl LocalSpawnTarget {
     }
 
     pub fn with_pty_system(name: &str, pty_system: Box<dyn PtySystem + Send>) -> Self {
+        Self::with_pty_system_and_hooks(name, pty_system, LocalSpawnHooks::default())
+    }
+
+    pub fn with_pty_system_and_hooks(
+        name: &str,
+        pty_system: Box<dyn PtySystem + Send>,
+        hooks: LocalSpawnHooks,
+    ) -> Self {
         Self {
             pty_system: Mutex::new(pty_system),
             name: name.to_string(),
+            hooks,
         }
     }
 
@@ -167,13 +278,24 @@ impl LocalSpawnTarget {
     }
 
     pub fn new_serial_target(serial_target: SerialTarget) -> anyhow::Result<Self> {
+        Self::new_serial_target_with_hooks(serial_target, LocalSpawnHooks::default())
+    }
+
+    pub fn new_serial_target_with_hooks(
+        serial_target: SerialTarget,
+        hooks: LocalSpawnHooks,
+    ) -> anyhow::Result<Self> {
         let port = serial_target.port.as_ref().unwrap_or(&serial_target.name);
         let mut serial = portable_pty::serial::SerialTty::new(&port);
         if let Some(baud) = serial_target.baud {
             serial.set_baud_rate(baud as u32);
         }
         let pty_system = Box::new(serial);
-        Ok(Self::with_pty_system(&serial_target.name, pty_system))
+        Ok(Self::with_pty_system_and_hooks(
+            &serial_target.name,
+            pty_system,
+            hooks,
+        ))
     }
 
     #[cfg(unix)]
@@ -190,8 +312,12 @@ impl LocalSpawnTarget {
             .is_some()
     }
 
-    async fn fixup_command(&self, cmd: &mut CommandBuilder) -> anyhow::Result<()> {
-        if let Some(ed) = self.resolve_exec_target_config() {
+    async fn fixup_command(
+        &self,
+        cmd: &mut CommandBuilder,
+        config: &ConfigHandle,
+    ) -> anyhow::Result<()> {
+        if let Some(ed) = self.resolve_exec_target_config(config) {
             let mut args = vec![];
             let mut set_environment_variables = HashMap::new();
             for arg in cmd.get_argv() {
@@ -328,18 +454,25 @@ impl LocalSpawnTarget {
 
     async fn build_command(
         &self,
+        config: &ConfigHandle,
         command: Option<CommandBuilder>,
         command_dir: Option<String>,
         pane_id: PaneId,
     ) -> anyhow::Result<CommandBuilder> {
-        let config = configuration();
-
         let mut cmd = match command {
             Some(mut cmd) => {
-                config.apply_cmd_defaults(&mut cmd, config.default_prog.as_ref(), config.default_cwd.as_ref());
+                config.apply_cmd_defaults(
+                    &mut cmd,
+                    config.default_prog.as_ref(),
+                    config.default_cwd.as_ref(),
+                );
                 cmd
             }
-            None => config.build_prog(None, config.default_prog.as_ref(), config.default_cwd.as_ref())?,
+            None => config.build_prog(
+                None,
+                config.default_prog.as_ref(),
+                config.default_cwd.as_ref(),
+            )?,
         };
         if let Some(dir) = command_dir {
             cmd.cwd(dir);
@@ -348,7 +481,7 @@ impl LocalSpawnTarget {
             cmd.env("CHATMINAL_UNIX_SOCKET", sock);
         }
         cmd.env("CHATMINAL_PANE", pane_id.to_string());
-        self.fixup_command(&mut cmd).await?;
+        self.fixup_command(&mut cmd, &config).await?;
         Ok(cmd)
     }
 }
@@ -459,8 +592,9 @@ impl SpawnTarget for LocalSpawnTarget {
         command_dir: Option<String>,
     ) -> anyhow::Result<Arc<dyn Pane>> {
         let pane_id = alloc_pane_id();
+        let config = configuration();
         let cmd = self
-            .build_command(command, command_dir, pane_id)
+            .build_command(&config, command, command_dir, pane_id)
             .await
             .context("build_command")?;
         let pair = self
@@ -485,7 +619,7 @@ impl SpawnTarget for LocalSpawnTarget {
 
         let mut terminal = engine_term::Terminal::new(
             size,
-            std::sync::Arc::new(config::TermConfig::new()),
+            std::sync::Arc::new(config::TermConfig::with_config(config.clone())),
             "Chatminal",
             config::engine_version(),
             Box::new(writer.clone()),
@@ -495,20 +629,21 @@ impl SpawnTarget for LocalSpawnTarget {
         }
 
         let pane: Arc<dyn Pane> = match child_result {
-            Ok(child) => Arc::new(LocalPane::new(
+            Ok(child) => Arc::new(LocalPane::new_with_hooks(
                 pane_id,
                 terminal,
                 child,
                 pair.master,
                 Box::new(writer),
                 command_description,
+                self.hooks.localpane_hooks(),
             )),
             Err(err) => {
                 // Show the error to the user in the new pane
                 write!(writer, "{err:#}").ok();
 
                 // and return a dummy pane that has exited
-                Arc::new(LocalPane::new(
+                Arc::new(LocalPane::new_with_hooks(
                     pane_id,
                     terminal,
                     Box::new(FailedProcessSpawn {}),
@@ -517,17 +652,16 @@ impl SpawnTarget for LocalSpawnTarget {
                     }),
                     Box::new(writer),
                     command_description,
+                    self.hooks.localpane_hooks(),
                 ))
             }
         };
 
-        let mux = Mux::get();
-        mux.add_pane(&pane)?;
+        register_pane_with_default_side_effects_and_io_hooks(&pane, self.hooks.pty_io_hooks())?;
 
         Ok(pane)
     }
     fn spawn_target_name(&self) -> &str {
         &self.name
     }
-
 }

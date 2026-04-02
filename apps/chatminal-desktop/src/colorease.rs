@@ -8,6 +8,7 @@ pub struct ColorEase {
     in_function: EasingFunction,
     out_duration: f32,
     out_function: EasingFunction,
+    animation_fps: u8,
     start: Option<Instant>,
     last_render: Instant,
 }
@@ -18,6 +19,7 @@ impl ColorEase {
         in_function: EasingFunction,
         out_duration_ms: u64,
         out_function: EasingFunction,
+        animation_fps: u8,
         start: Option<Instant>,
     ) -> Self {
         Self {
@@ -25,6 +27,7 @@ impl ColorEase {
             in_function,
             out_duration: Duration::from_millis(out_duration_ms).as_secs_f32(),
             out_function,
+            animation_fps,
             start,
             last_render: Instant::now(),
         }
@@ -83,7 +86,7 @@ impl ColorEase {
                 {
                     1
                 } else {
-                    config::configuration().animation_fps as u64
+                    self.animation_fps as u64
                 };
                 let next = match fps {
                     1 if elapsed < self.in_duration => {

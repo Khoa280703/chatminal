@@ -1,9 +1,8 @@
 use crate::background::{BackgroundLayer, Gradient};
 use crate::bell::{AudibleBell, EasingFunction, VisualBell};
 use crate::color::{
-    ColorSchemeFile, HsbTransform, Palette, SrgbaTuple, SessionBarStyle, WindowFrameConfig,
+    ColorSchemeFile, HsbTransform, Palette, SessionBarStyle, SrgbaTuple, WindowFrameConfig,
 };
-use crate::runtime_options::RuntimeOptions;
 use crate::exec_target::ExecTarget;
 use crate::font::{
     AllowSquareGlyphOverflow, DisplayPixelGeometry, FontLocatorSelection, FontRasterizerSelection,
@@ -16,13 +15,12 @@ use crate::keyassignment::{
 use crate::keys::{Key, LeaderKey, Mouse};
 use crate::lua::make_lua_context;
 use crate::units::Dimension;
-use crate::unix::UnixTargetConfig;
 use crate::{
     default_config_with_overrides_applied, default_one_point_oh, default_one_point_oh_f64,
     default_true, default_win32_acrylic_accent_color, CellWidth, GpuInfo,
     IntegratedTitleButtonColor, KeyMapPreference, LoadedConfig, MouseEventTriggerMods, RgbaColor,
-    SerialTarget, SystemBackdrop, WebGpuPowerPreference, CONFIG_DIRS, CONFIG_FILE_OVERRIDE,
-    CONFIG_OVERRIDES, CONFIG_SKIP, HOME_DIR,
+    SystemBackdrop, WebGpuPowerPreference, CONFIG_DIRS, CONFIG_FILE_OVERRIDE, CONFIG_OVERRIDES,
+    CONFIG_SKIP, HOME_DIR,
 };
 use anyhow::Context;
 use engine_bidi::ParagraphDirectionHint;
@@ -103,9 +101,6 @@ pub struct Config {
     #[dynamic(default)]
     pub font_dirs: Vec<PathBuf>,
 
-    #[dynamic(default)]
-    pub color_scheme_dirs: Vec<PathBuf>,
-
     /// The DPI to assume
     pub dpi: Option<f64>,
 
@@ -133,12 +128,6 @@ pub struct Config {
     #[dynamic(default)]
     pub switch_to_last_active_tab_when_closing_tab: bool,
 
-    /// When true, launching a new Chatminal instance will prefer
-    /// to spawn a new tab into an existing instance.
-    /// Otherwise, it will spawn a new window.
-    #[dynamic(default)]
-    pub prefer_to_spawn_tabs: bool,
-
     #[dynamic(default)]
     pub window_frame: WindowFrameConfig,
 
@@ -150,12 +139,6 @@ pub struct Config {
     pub command_palette_font_size: f64,
 
     pub command_palette_rows: Option<usize>,
-    #[dynamic(default = "default_command_palette_fg_color")]
-    pub command_palette_fg_color: RgbaColor,
-
-    #[dynamic(default = "default_command_palette_bg_color")]
-    pub command_palette_bg_color: RgbaColor,
-
     /// Font to use for SessionSelect
     #[dynamic(default)]
     pub pane_select_font: Option<TextStyle>,
@@ -165,9 +148,6 @@ pub struct Config {
 
     #[dynamic(default = "default_pane_select_fg_color")]
     pub pane_select_fg_color: RgbaColor,
-
-    #[dynamic(default = "default_pane_select_bg_color")]
-    pub pane_select_bg_color: RgbaColor,
 
     #[dynamic(default)]
     pub session_bar_style: SessionBarStyle,
@@ -339,37 +319,19 @@ pub struct Config {
     #[dynamic(default)]
     pub exec_targets: Vec<ExecTarget>,
 
-    #[dynamic(default)]
-    pub serial_ports: Vec<SerialTarget>,
-
-    /// The set of unix targets
-    #[dynamic(default = "UnixTargetConfig::default_unix_targets")]
-    pub unix_targets: Vec<UnixTargetConfig>,
-
-    /// Constrains the rate at which the multiplexer client will
-    /// speculatively fetch line data.
-    /// This helps to avoid saturating the link between the client
-    /// and server if the server is dumping a large amount of output
-    /// to the client.
-    #[dynamic(default = "default_ratelimit_line_prefetches_per_second")]
-    pub ratelimit_mux_line_prefetches_per_second: u32,
-
-    /// The buffer size used by parse_buffered_data in the mux module.
+    /// The buffer size used by parse_buffered_data in the output parser.
     /// This should not be too large, otherwise the processing cost
     /// of applying a batch of actions to the terminal will be too
     /// high and the user experience will be laggy and less responsive.
-    #[dynamic(default = "default_mux_output_parser_buffer_size")]
-    pub mux_output_parser_buffer_size: usize,
+    #[dynamic(default = "default_output_parser_buffer_size")]
+    pub output_parser_buffer_size: usize,
 
     /// How many ms to delay after reading a chunk of output
     /// in order to try to coalesce fragmented writes into
     /// a single bigger chunk of output and reduce the chances
     /// observing "screen tearing" with un-synchronized output
-    #[dynamic(default = "default_mux_output_parser_coalesce_delay_ms")]
-    pub mux_output_parser_coalesce_delay_ms: u64,
-
-    #[dynamic(default = "default_mux_env_remove")]
-    pub mux_env_remove: Vec<String>,
+    #[dynamic(default = "default_output_parser_coalesce_delay_ms")]
+    pub output_parser_coalesce_delay_ms: u64,
 
     #[dynamic(default)]
     pub keys: Vec<Key>,
@@ -405,9 +367,6 @@ pub struct Config {
     pub mouse_bindings: Vec<Mouse>,
     #[dynamic(default)]
     pub disable_default_mouse_bindings: bool,
-
-    #[dynamic(default)]
-    pub runtime_options: RuntimeOptions,
 
     #[dynamic(default)]
     pub send_composed_key_when_left_alt_is_pressed: bool,
@@ -668,8 +627,6 @@ pub struct Config {
     #[dynamic(default = "default_true")]
     pub use_ime: bool,
     #[dynamic(default)]
-    pub xim_im_name: Option<String>,
-    #[dynamic(default)]
     pub ime_preedit_rendering: ImePreeditRendering,
 
     #[dynamic(default)]
@@ -807,12 +764,6 @@ pub struct Config {
     pub allow_win32_input_mode: bool,
 
     #[dynamic(default)]
-    pub default_target: Option<String>,
-
-    #[dynamic(default)]
-    pub default_mux_server_target: Option<String>,
-
-    #[dynamic(default)]
     pub default_workspace: Option<String>,
 
     #[dynamic(default)]
@@ -832,25 +783,11 @@ pub struct Config {
 
     #[dynamic(default = "default_one")]
     pub palette_max_key_assigments_for_action: usize,
-
-    #[dynamic(default = "default_ulimit_nofile")]
-    pub ulimit_nofile: u64,
-
-    #[dynamic(default = "default_ulimit_nproc")]
-    pub ulimit_nproc: u64,
 }
 impl_lua_conversion_dynamic!(Config);
 
 fn default_one() -> usize {
     1
-}
-
-fn default_ulimit_nofile() -> u64 {
-    2048
-}
-
-fn default_ulimit_nproc() -> u64 {
-    2048
 }
 
 impl Default for Config {
@@ -874,59 +811,31 @@ impl Config {
     pub fn update_ulimit(&self) -> anyhow::Result<()> {
         #[cfg(unix)]
         {
-            use nix::sys::resource::{getrlimit, rlim_t, setrlimit, Resource};
-            use std::convert::TryInto;
+            use nix::sys::resource::{getrlimit, setrlimit, Resource};
 
+            const TARGET_NOFILE: u64 = 2048;
             let (no_file_soft, no_file_hard) = getrlimit(Resource::RLIMIT_NOFILE)?;
-
-            let ulimit_nofile: rlim_t = self.ulimit_nofile.try_into().with_context(|| {
-                format!(
-                    "ulimit_nofile value {} is out of range for this system",
-                    self.ulimit_nofile
-                )
-            })?;
-
-            if no_file_soft < ulimit_nofile {
+            if no_file_soft < TARGET_NOFILE {
                 setrlimit(
                     Resource::RLIMIT_NOFILE,
-                    ulimit_nofile.min(no_file_hard),
+                    TARGET_NOFILE.min(no_file_hard),
                     no_file_hard,
-                )
-                .with_context(|| {
-                    format!(
-                        "raise RLIMIT_NOFILE from {no_file_soft} to ulimit_nofile {}",
-                        ulimit_nofile
-                    )
-                })?;
+                )?;
             }
         }
 
         #[cfg(all(unix, not(target_os = "macos")))]
         {
-            use nix::sys::resource::{getrlimit, rlim_t, setrlimit, Resource};
-            use std::convert::TryInto;
+            use nix::sys::resource::{getrlimit, setrlimit, Resource};
 
+            const TARGET_NPROC: u64 = 2048;
             let (nproc_soft, nproc_hard) = getrlimit(Resource::RLIMIT_NPROC)?;
-
-            let ulimit_nproc: rlim_t = self.ulimit_nproc.try_into().with_context(|| {
-                format!(
-                    "ulimit_nproc value {} is out of range for this system",
-                    self.ulimit_nproc
-                )
-            })?;
-
-            if nproc_soft < ulimit_nproc {
+            if nproc_soft < TARGET_NPROC {
                 setrlimit(
                     Resource::RLIMIT_NPROC,
-                    ulimit_nproc.min(nproc_hard),
+                    TARGET_NPROC.min(nproc_hard),
                     nproc_hard,
-                )
-                .with_context(|| {
-                    format!(
-                        "raise RLIMIT_NPROC from {nproc_soft} to ulimit_nproc {}",
-                        ulimit_nproc
-                    )
-                })?;
+                )?;
             }
         }
 
@@ -1167,9 +1076,6 @@ impl Config {
             Ok(())
         };
 
-        for d in &self.unix_targets {
-            check_target(&d.name, "unix target")?;
-        }
         for d in &self.exec_targets {
             check_target(&d.name, "exec target")?;
         }
@@ -1328,7 +1234,7 @@ impl Config {
     }
 
     fn compute_color_scheme_dirs(&self) -> Vec<PathBuf> {
-        let mut paths = self.color_scheme_dirs.clone();
+        let mut paths = Vec::new();
         for dir in CONFIG_DIRS.iter() {
             paths.push(dir.join("colors"));
         }
@@ -1528,10 +1434,6 @@ fn default_pane_select_fg_color() -> RgbaColor {
     SrgbaTuple(0.75, 0.75, 0.75, 1.0).into()
 }
 
-fn default_pane_select_bg_color() -> RgbaColor {
-    SrgbaTuple(0., 0., 0., 0.5).into()
-}
-
 fn default_pane_select_font_size() -> f64 {
     36.0
 }
@@ -1545,28 +1447,16 @@ fn default_command_palette_font_size() -> f64 {
     14.0
 }
 
-fn default_command_palette_fg_color() -> RgbaColor {
-    SrgbaTuple(0.75, 0.75, 0.75, 1.0).into()
-}
-
-fn default_command_palette_bg_color() -> RgbaColor {
-    (0x33, 0x33, 0x33).into()
-}
-
 fn default_swallow_mouse_click_on_window_focus() -> bool {
     cfg!(target_os = "macos")
 }
 
-fn default_mux_output_parser_coalesce_delay_ms() -> u64 {
+fn default_output_parser_coalesce_delay_ms() -> u64 {
     3
 }
 
-fn default_mux_output_parser_buffer_size() -> usize {
+fn default_output_parser_buffer_size() -> usize {
     128 * 1024
-}
-
-fn default_ratelimit_line_prefetches_per_second() -> u32 {
-    50
 }
 
 fn default_cursor_blink_rate() -> u64 {
@@ -1683,10 +1573,6 @@ fn private_dir_builder() -> DirBuilder {
     builder
 }
 
-pub fn pki_dir() -> anyhow::Result<PathBuf> {
-    compute_runtime_dir().map(|d| d.join("pki"))
-}
-
 pub fn default_read_timeout() -> Duration {
     Duration::from_secs(60)
 }
@@ -1715,14 +1601,6 @@ fn default_gui_startup_args() -> Vec<String> {
 // Coupled with term/src/config.rs:TerminalConfiguration::unicode_version
 fn default_unicode_version() -> u8 {
     9
-}
-
-fn default_mux_env_remove() -> Vec<String> {
-    vec![
-        "SSH_AUTH_SOCK".to_string(),
-        "SSH_CLIENT".to_string(),
-        "SSH_CONNECTION".to_string(),
-    ]
 }
 
 fn default_anim_fps() -> u8 {

@@ -24,12 +24,396 @@ Biến Chatminal từ "WezTerm core bọc Chatminal layers" → unified codebase
 | Last | [02](phase-02-rename-engine-crates.md) | Rename engine-* → chatminal-terminal-* | Medium | Low | Naming unity (cosmetic) |
 
 ## Progress
+- Session 2026-04-02 (batch 2):
+  - chatminal-runtime: removed `SessionExecutionStatus` enum (write-only duplicate state), all write sites, and re-export
+  - chatminal-desktop/chatminal_runtime: removed 3 dead API chain fns (`desktop_remove_session_terminal_instance`, `desktop_close_session_terminal_handle_or_session`, `desktop_hard_close_session`)
+  - chatminal-desktop/desktop_host_runtime: deleted obsolete `pane.rs` (superseded by `session_pane.rs`)
+  - chatminal-host-runtime: removed dead `SessionTerminated` enum + cleaned unused `ExitStatus`/`thiserror` imports
+  - chatminal-host-runtime: removed 2 stale `#[allow(dead_code)]` from `load_workspace_passive()` and `move_runtime_session_to_profile()` (both have live callers)
+  - 03D: added `root_has_runtime_entries_with_panes()` and `resize_all_root_runtime_entries()` host helpers; session_host.rs no longer hydrates `Arc<Tab>` for has-panes check or resize-all
+  - 03D: narrowed `root_runtime_entries()` from `pub fn` to `fn` (all callers internal)
+  - 03F: lua-bridge eliminated 3 `Arc<Tab>` functions (`session_window()`, `spawn_tab()`, `session_id_for_tab()`/`make_session_ref()`); remaining 2 (`tab_by_ref`, `tab_by_session_id`) kept because callers need mutation/tree-traversal
+  - 04: config sweep removed `runtime_options.rs`, `unix.rs`, and dead config fields (-365 LOC)
+  - verify: `cargo check --workspace` 0 errors, `cargo test --workspace --lib --bins --tests` 0 failures, desktop 87/87 pass
+- Status audit on 2026-04-02:
+  - Overall estimate:
+    - full plan: ~`68%`
+    - nếu bỏ Phase 02 rename/cosmetic khỏi mẫu số: ~`73%+`
+  - Why not done yet:
+    - phần dễ đã xong; phần còn lại là coupling sâu giữa `Arc<Tab>` / `PaneId` / `TabId` / `Mux` ownership / PTY lifecycle
+    - các nhát còn lại không còn là helper cleanup rời rạc mà là capability/lifecycle cuts, nên phải verify chặt sau mỗi batch
+  - Phase 01: `done`
+  - Phase 03: `in_progress`
+    - 03A RuntimeHost trait: `done`
+    - 03B desktop cutover off direct mux access: `partial`
+      - done: desktop app hết direct mux getter calls
+      - blocked by: compat wrappers + raw host-id leakage ở UI/public boundary
+    - 03C ownership migration: `partial`
+      - Scope A notification hub + clipboard/download: `done`
+      - Scope B deprecated session reverse index removal: `done`
+      - Scope C pane-registry local-first slice: `done` for scoped slice, `partial` for whole 03C
+    - 03D singleton/control-plane elimination: `partial`
+      - done: desktop direct singleton accessor calls = 0, control-plane extraction started
+      - blocked by: `static MUX` + mux ownership still alive
+    - 03E lua bridge migration: `partial`
+      - scoped done: window/workspace, session/tab, pane metadata, spawn/split cuts
+      - latest progress: first root-window workspace/title reads-writes no longer need direct mutation closures
+      - blocked by: chưa chuyển toàn bridge sang `RuntimeHost` intent cuối
+    - 03F dual-id elimination: `partial`
+      - done: first typed desktop boundary cuts + `FocusedPaneBinding`
+      - latest progress:
+        - PTY output callback path and desktop output notification bridge now stay on `SessionTerminalHandle`
+        - root/runtime read-only boundaries advanced again:
+          - `Tab::runtime_id()`
+          - `root_runtime_ids()`
+          - `RuntimeEntryInfo`
+          - `runtime_entry_info_by_runtime_id(...)`
+          - `root_runtime_entry_infos(...)`
+          - `runtime_entry_info_by_session_id(...)`
+          - `terminal_handle_for_pane(...)`
+        - Lua root-window queries and several session read-only queries no longer need to hydrate `Arc<Tab>` on the slices already migrated
+        - one more desktop fallback read-only path (`host_render_scope_size`) no longer needs concrete `Tab`
+      - blocked by: `PaneId`/`TabId` vẫn còn trong public API
+    - 03G PTY I/O pipeline migration: `partial`
+      - done: first PTY dispatcher contract (`output / cleanup / inline error`) + first ownership split between pane registration and PTY reader startup + parser/read loop extracted out of `lib.rs` into internal `pty_io.rs` + `LocalPane` singleton-backed side effects now flow through a dedicated hook seam + PTY reader startup now accepts a full internal hook contract instead of only `on_output` + session-engine leaf PTY loop now also publishes through an internal hook contract instead of hard-coding event sends in the reader/waiter thread
+      - blocked by: default dispatcher still falls back to Mux-backed cleanup/notification semantics and lifecycle owner still has not moved to `session_engine`
+  - Phase 04: `partial`
+    - Step 1 config usage audit: `done`
+    - Step 2 dead/unused config cleanup: `partial`
+    - Step 3 config restructure into sections: `deferred`
+    - Step 4 singleton replacement: `deferred`
+    - Step 5 Lua config simplification: `partial`
+  - Phase 02: `deferred`
+  - Remaining blockers with highest leverage:
+    - `runtime_entry_by_runtime_id(...)` và `runtime_entry_by_session_id(...)` vẫn expose `Arc<Tab>` cho mutate/capability paths
+    - `Pane` public trait vẫn lộ `pane_id() -> PaneId`
+    - `static MUX` vẫn còn sống; ownership cuối chưa chuyển khỏi mux layer
+    - `03G` vẫn còn default cleanup/notification semantics dựa vào Mux
+    - `configuration()` singleton vẫn còn trong các path sâu nên Phase 04 chưa thể đóng
+  - Review findings not yet addressed:
+    - startup path ở desktop có risk regression với `config.default_ssh_auth_sock`: host client/runtime vẫn snapshot `SSH_AUTH_SOCK` từ env, nhưng startup path hiện không còn bảo đảm export giá trị config đó vào env trước khi spawn
+    - `Lua WindowRef.active_session()` hiện có risk inconsistent contract với `active_session_id()`: path mới có thể throw error ở empty/non-chatminal root window thay vì trả `nil`
+- Current sync on 2026-04-02:
+  - `apps/chatminal-desktop/src/chatminal_runtime/mod.rs` narrowed more of the desktop compat bridge from `pub` to `pub(crate)`, so `SessionEngineShared` and internal runtime-id re-exports are no longer exposed as broadly inside the desktop binary boundary
+  - `FrontendResolvedPane` / `FrontendFocusedPane` now carry `RuntimeId` and `SessionTerminalHandle` instead of raw `u64` ids; `frontend_resolve_pane(...)` and `focus_terminal_handle_by_id(...)` now consume typed handles across the desktop facade
+  - pane-centric `RuntimeNotification` payloads now also carry `SessionTerminalHandle` instead of raw host pane ids at the desktop boundary (`PaneOutput`, `PaneAdded`, `PaneRemoved`, `PaneFocused`, `Alert.pane_id`, `AssignClipboard.pane_id`)
+  - tab/render-scope desktop notification payloads now also carry `RuntimeId` instead of raw tab ids (`TabAddedToWindow`, `TabResized`, `TabTitleChanged`)
+  - `desktop_host_runtime/session_host.rs` now keeps `session_tab_shim` and host-tab helper flow on `RuntimeId`, so shim-tab lookup/remove/focus no longer widens back to raw `usize` across that desktop boundary slice
+  - `chatminal-host-runtime/src/lib.rs` now also exposes typed terminal-handle helpers for pane lookup/remove/focus-record paths (`terminal_by_handle`, `remove_terminal_handle`, `record_focus_for_terminal_handle`), so desktop and Lua bridge no longer need to call those host flows through raw pane-id helpers on this slice
+  - `chatminal-lua-bridge/src/lib.rs` / `leaf.rs` now resolve pane lookup and root-tab lookup through `SessionTerminalHandle`-based helpers, and `TerminalRef` gained a typed `terminal_handle()` accessor for that bridge boundary
+  - after that migration, `chatminal-host-runtime` could safely narrow another raw public helper slice back to crate scope: `terminal_by_id(...)`, `tab_by_id(...)`, `resolve_pane_id(...)`, and `focus_pane_and_tab(...)` are no longer cross-crate boundary APIs on this path
+  - a deeper dead/raw helper slice was then removed or collapsed internally in `chatminal-host-runtime`: `runtime_entry_by_id(...)` and `has_tab(...)` were deleted, while `root_active_runtime_id(...)`, `remove_terminal_handle(...)`, and `record_focus_for_terminal_handle(...)` now inline their old one-hop raw helpers instead of keeping extra internal wrappers alive
+  - one more raw public edge was trimmed after that cleanup:
+    - `remove_tab_by_id(TabId)` is now crate-local only
+    - Lua bridge switched from `tab_by_chatminal_session_id(...)` to `runtime_entry_by_session_id(...)`, so the cross-crate boundary no longer exposes that older `tab_*` helper name on this slice
+  - public execution-path helpers in `chatminal-host-runtime` no longer expose raw pane ids on this slice:
+    - `spawn_tab(...)` now takes `Option<SessionTerminalHandle>` instead of `Option<PaneId>`
+    - `split_pane(...)` now takes `SessionTerminalHandle` instead of `PaneId`
+    - desktop `session_host.rs` and Lua bridge `LuaBridgeHost` were updated accordingly
+  - public notification subscriber boundary was tightened too:
+    - `MuxHandle::subscribe(...)` now emits a typed `HostRuntimeNotification` instead of raw `MuxNotification`
+    - desktop `RuntimeNotification` conversion now consumes that typed host notification directly
+    - `MuxNotification` itself is now internal to `chatminal-host-runtime`, shrinking another public raw-id leak from the desktop boundary
+  - dead desktop compat wrappers that only re-exposed raw host-pane focus on this slice were removed after the typed cut compiled green
+  - `frontend.rs`, `overlay/copy.rs`, and `session_host.rs` were updated to consume those typed boundaries, and the local session-host fallback tests were updated accordingly
+  - `crates/chatminal-host-runtime/src/lib.rs` now funnels the remaining root exit/workspace config reads through `default_exit_behavior()` and `default_workspace_name()` helper boundaries
+  - `crates/chatminal-host-runtime/src/window.rs` and `crates/chatminal-lua-bridge/src/window.rs` landed the latest root-window boundary cleanup cut
+  - `register_pane_with_output_callback(...)` and the downstream PTY output callback path now use `SessionTerminalHandle`, so this slice no longer widens pane output events back to raw `usize` before desktop notification delivery
+  - `chatminal-host-runtime/src/lib.rs` now exposes narrower root-window helpers (`root_window_workspace_name`, `root_window_title`, `set_root_window_workspace_name`, `set_root_window_title`, `focus_root_runtime_entry`)
+  - first desktop/Lua callsites were migrated to those helpers:
+    - `session_host.rs` now focuses root runtime entries through `focus_root_runtime_entry(...)` instead of re-opening mutable root-window tab indexing inline
+    - Lua `WindowRef` workspace/title getters-setters now use explicit helper APIs instead of direct root-window mutation closures
+    - Lua `WindowRef.sessions`, `sessions_with_info`, `active_session*`, `active_terminal`, plus `LuaBridgeHost::root_tabs()` / `root_window_spawn_context()` now route through root-runtime helper paths instead of direct root-window iteration closures on this slice
+  - Lua bridge no longer has active `with_root_window(...)` / `with_root_window_result(...)` callsites in product code on this slice
+  - `03G` moved from `pending` to `partial`:
+    - `chatminal-host-runtime/src/lib.rs` now has an internal `PtyIoDispatcher` contract for PTY pipeline side effects (`on_output`, `on_cleanup`, `on_inline_error_output`)
+    - `send_actions_to_mux(...)`, `parse_buffered_data(...)`, and `read_from_pane_pty(...)` now run through that dispatcher boundary instead of calling every side effect inline
+    - `Mux::add_pane_internal(...)` was split so pane registration and PTY reader startup are separate responsibilities (`register_pane_internal(...)` + `start_pane_pty_reader(...)`)
+    - socketpair inline-error rendering no longer calls `localpane::emit_output_for_pane(...)` directly from `read_from_pane_pty(...)`; default dispatcher now routes through a local inline-output helper, and `localpane::emit_output_for_pane(...)` was collapsed onto that same helper to keep semantics aligned
+    - default output and cleanup fallback semantics are now also helperized (`dispatch_default_output_for_terminal_handle(...)`, `dispatch_default_exit_cleanup_for_pane(...)`), so the PTY dispatcher no longer encodes those branches inline either
+    - the parser/read loop cluster was then extracted from `chatminal-host-runtime/src/lib.rs` into a dedicated internal module `chatminal-host-runtime/src/pty_io.rs`, so `lib.rs` no longer owns the PTY parse/read implementation details directly
+    - `chatminal-host-runtime/src/localpane_hooks.rs` now fronts `LocalPane` side effects (`input`, `inline output`, `alert`, `child-exit cleanup`) behind a default hook layer, so `LocalPane` no longer hard-codes those singleton-backed calls inline
+    - `pty_io.rs` now also exposes an internal `PtyIoHooks` contract, so PTY reader startup can override `output`, `cleanup`, and `inline error` together instead of only replacing `on_output`
+    - `session_engine/leaf_runtime.rs` + `leaf_runtime_threads.rs` now route PTY `output / error / exit` delivery through `TerminalInstanceRuntimeHooks`, so the session-native PTY loop has the same kind of owner seam instead of hard-coding channel sends directly inside the reader/waiter thread
+    - the local fallback spawn path also now has its own hook seam:
+      - `chatminal-host-runtime/src/spawn_target.rs` now defines `LocalSpawnHooks`
+      - `LocalSpawnTarget::{new_with_hooks,new_serial_target_with_hooks}` can inject typed callbacks for local-pane side effects and PTY output/cleanup without widening `PaneId` into the public cross-crate boundary
+      - pane registration on that path now goes through `register_pane_with_default_side_effects_and_io_hooks(...)`, so default clipboard/download install and custom PTY hooks are no longer mutually exclusive
+      - `apps/chatminal-desktop/src/desktop_host_runtime/spawn_target.rs` now constructs the local fallback target through that explicit hook bundle, even though the current behavior still passes the default bundle
+    - behavior is intentionally still Mux-backed by default for non-session/compat paths; lifecycle ownership has only started to separate, not finished
+  - `apps/chatminal-desktop/src/frontend.rs`, `main.rs`, `stats.rs`, and `customglyph.rs` kept moving config reads out of hot paths via snapshots and atomics
+  - `crates/chatminal-lua-bridge/src/lib.rs` now snapshots the fallback root-window size before the closure boundary instead of reading config singleton inside that closure
+  - 03F moved another notch on root-tab/runtime-id boundaries:
+    - `chatminal-host-runtime/src/tab.rs` now exposes `Tab::runtime_id()`, so desktop/Lua consumers can stop widening `tab_id()` to raw `u64` at those edges
+    - `chatminal-host-runtime/src/lib.rs` now exposes `root_runtime_ids()`, giving consumers a typed root-window listing path without first pulling a `Vec<Arc<Tab>>`
+    - `crates/chatminal-lua-bridge/src/lib.rs` changed `RootTabRef` from `usize` to `RuntimeId`, and `WindowRef` root-session queries now stay on `RuntimeId` instead of `usize -> RuntimeId` round-trips
+    - `apps/chatminal-desktop/src/main.rs`, `termwindow/mod.rs`, `desktop_termwindow_close_helpers.rs`, and `desktop_host_runtime/session_host.rs` now consume `tab.runtime_id()` on their read-only boundary slices instead of `tab.tab_id() as u64`
+    - `desktop_host_runtime/session_host.rs` also now resizes/queries root runtime tabs via `root_runtime_ids()` first, so the desktop slice no longer needs the full root-tab vector just to iterate runtime ids
+    - `chatminal-host-runtime/src/lib.rs` now also exposes read-only `RuntimeEntryInfo` plus `runtime_entry_info_by_runtime_id(...)` / `root_runtime_entry_infos(...)`
+    - Lua `WindowRef.sessions`, `sessions_with_info`, `active_session*`, `active_terminal`, plus `session.all_sessions/list_sessions` now use that DTO instead of hydrating `Arc<Tab>` just to read `session_id`, `title`, or active-terminal metadata
+    - host-runtime now also exposes `runtime_entry_info_by_session_id(...)`, and Lua read-only session queries (`session_active_terminal_instance_id`, `session_title`, `active_terminal_for_session`, `session_size`) now use that DTO path too
+    - `apps/chatminal-desktop/src/desktop_host_runtime/mod.rs::host_render_scope_size(...)` now also uses `runtime_entry_info_by_runtime_id(...)` on the legacy host fallback path instead of fetching a concrete tab just to read size
+    - host-runtime now also exposes `terminal_handle_for_pane(&dyn Pane)`, and the first Lua/desktop boundary helpers use it instead of re-wrapping `pane.pane_id()` into `SessionTerminalHandle` inline
+  - 04 gained another low-risk helper cut:
+    - `chatminal-host-runtime/src/lib.rs` now centralizes `switch_to_last_active_tab_when_closing_tab()` and `unzoom_on_switch_pane()` helper reads
+    - `window.rs` and `tab.rs` now consume those helpers instead of reading `configuration()` directly in their constructors
+  - focused-pane host boundary no longer returns raw `(TabId, PaneId)` tuples:
+    - `chatminal-host-runtime` now exposes `FocusedPaneBinding`
+    - `ClientInfo.focused_pane_id` is no longer a public field
+    - desktop `session_host.rs` now consumes the DTO instead of tuple destructuring
+  - public split boundary no longer widens raw tab/pane ids on this slice:
+    - `chatminal-host-runtime::spawn_target::SplitSource::MovePane(PaneId)` is now `MoveTerminal(SessionTerminalHandle)`
+    - `SpawnTarget::split_pane(...)` now takes `RuntimeId + SessionTerminalHandle` instead of `TabId + PaneId`
+    - raw conversion for split flow now stays inside `chatminal-host-runtime` internals
+  - another small public-surface trim landed after that:
+    - `pane::alloc_pane_id()` is no longer public cross-crate; desktop now uses `host_runtime::alloc_terminal_handle_value()` instead of importing the pane module allocator directly
+    - `Window::{idx_by_id, remove_by_id, prune_dead_tabs}` are now crate-local because they had no external callers and only leaked `TabId` through the public `window.rs` surface
+  - another host core slice is now crate-local too:
+    - `Mux::{record_focus_for_client, focus_pane_and_containing_tab, get_pane, get_tab, remove_pane, remove_tab, resolve_pane_id}` are no longer public cross-crate methods
+    - desktop/Lua/runtime callers were already going through narrower free helpers, so this cut only removes raw-id leakage from the `Mux` type surface itself
+  - `tab.rs` also lost one more raw-id parameter on its public surface:
+    - `Tab::contains_pane(...)` now accepts `SessionTerminalHandle` instead of `PaneId`
+    - the only desktop caller was migrated, and raw `PaneId` matching stays internal to `tab.rs`
+  - `chatminal-host-runtime/src/tab.rs` dropped dead `kill_pane` API and narrowed `remove_pane` to crate scope only
+  - `apps/chatminal-desktop/src/desktop_host_runtime/session_pane.rs` no longer rewrites `KeyCode::Backspace` into `Char(...)`; direct terminal input now leaves backspace encoding to the leaf runtime/terminal encoder, which restored the session-pane input tests
+  - `apps/chatminal-desktop/src/main.rs` now routes root config reads through `current_config_handle()` and threads `ConfigHandle` through more startup/bootstrap paths
+  - `apps/chatminal-desktop/src/stats.rs` now funnels `periodic_stat_logging` reads through a local helper and atomic refresh path instead of repeating direct singleton reads
+  - verification remains green: `cargo check -p chatminal-host-runtime`, `cargo check -p chatminal-lua-bridge`, `cargo check -p chatminal-desktop`, `cargo check --workspace`, `cargo test --manifest-path apps/chatminal-desktop/Cargo.toml -- --test-threads=1`
+- Phase 03D control-plane extraction advanced on 2026-04-02:
+  - `chatminal-host-runtime/src/lib.rs` now has a dedicated `HostRuntimeControlPlane`
+  - `primary_spawn_target`, subscribers, client registry, active identity, workspace metadata, and per-client focus metadata are now grouped there instead of being scattered across `Mux`
+  - `Mux` now delegates register/identity/workspace/focus/subscriber/spawn-target control-plane behavior through that sub-structure
+- Phase 03 tightened again on 2026-04-02:
+  - queued host-runtime cleanup is now best-effort after singleton shutdown instead of strict `Mux::get()` deref
+  - `initialize_host_runtime()` now reuses an already-installed mux handle instead of split-brain replacing live state
+  - `chatminal-host-runtime/src/lib.rs` now factors `primary_spawn_target`, subscribers, and client/identity/focus metadata into `HostRuntimeControlPlane` instead of keeping that control-plane state scattered across `Mux`
+  - init-time host setup now flows through a narrower `MuxHandle` surface (`register_client`, `replace_identity`, `set_active_workspace`, `subscribe`) instead of exposing the whole mux shape at the entry boundary
+  - `chatminal-host-runtime/src/window.rs` now snapshots `switch_to_last_active_tab_when_closing_tab` at construction time and publishes window notifications through host helper wrappers instead of touching `Mux` inline
+  - `chatminal-lua-bridge/src/lib.rs` now propagates workspace/session lookup failures through `mlua::Result` for the common workspace/session APIs instead of silently falling back to empty/default values
+  - `chatminal-lua-bridge/src/window.rs` no longer resolves the root window through raw mux guards for common workspace/title/session queries; those paths now flow through `LuaBridgeHost` closure helpers
+- Phase 04 desktop config surface was reduced further on 2026-04-02:
+  - `frontend.rs` now holds an initial config snapshot and refreshes it on config reload
+  - `main.rs` passes `ConfigHandle` into frontend bootstrap instead of pulling global config again
+  - `selection.rs` and `overlay/copy.rs` now consume caller-owned config data for word-boundary / palette lookup
+  - `stats.rs` now caches `periodic_stat_logging` in an atomic updated by config reload subscription instead of polling the global singleton inside the print loop
+  - `customglyph.rs` now snapshots block AA policy from the font/config snapshot once per draw path instead of repeating singleton reads across hot glyph rendering branches
 - Phase 01 complete on 2026-04-01:
   - removed dead SSH/TLS/WSL config surface
   - removed auto-update config stubs
   - removed `libssh-rs` workspace dependency
   - kept only minimal SSH CLI helpers (`SshParameters`, `username_from_env`) because they are still active compile-path utilities
-- Next safe execution target: Phase 03A/03B after separate audit of current dirty runtime worktree
+- Phase 03A started on 2026-04-01:
+  - `RuntimeHost` trait now lives in `chatminal-runtime`
+  - `DesktopSessionHost` implements that trait
+  - desktop execution facade has begun routing through `Arc<dyn RuntimeHost>`
+  - session-mode terminal-handle focus/resolve has begun routing through `RuntimeHost`
+  - session-mode render-target close and frontend pane-resolution paths now route through Chatminal runtime/session host before legacy `Mux` fallback
+  - workspace/frontend control-plane wrappers now live behind `DesktopSessionHost` instead of direct `desktop_host_runtime/mod.rs` `Mux::get()` calls
+  - spawn/bootstrap wrapper group now also delegates through `DesktopSessionHost` first:
+    - local shell runner spawn
+    - host runtime entry spawn
+    - primary spawn target get/set
+    - host mux bootstrap/shutdown
+    - serial spawn-target creation
+  - host-window query/activation wrapper group now also delegates through `DesktopSessionHost` first:
+    - root-window render-scope existence fallback
+    - resolved window title
+    - active runtime entry size
+    - launcher session snapshot
+    - root-window runtime-entry activation fallback
+  - pane/focus/frontend fallback wrapper group now also delegates through `DesktopSessionHost` first:
+    - active render-scope fallback lookup
+    - remove pane / remove runtime-entry tab
+    - record focus for current identity
+    - fallback pane focus in host window
+    - fallback public-pane resolution
+    - fallback frontend pane resolution / focused-pane resolution
+    - panes-in-workspace query used by startup/spawn decision
+  - window/workspace wrapper closures now also delegate through `DesktopSessionHost` first:
+    - `with_host_window`
+    - `with_host_window_mut`
+    - host-window existence
+    - workspace-has-window lookup
+    - resize-all-tabs on host window
+  - `desktop_host_runtime/mod.rs` is now free of direct `Mux::get()` / `Mux::try_get()` calls; raw host primitive access was pushed down into `session_host.rs` / `session_pane.rs`
+  - `session_host.rs` control-plane methods were then collapsed into thin wrappers over `legacy_*` helpers so the adapter no longer keeps two copies of the same host logic inline
+  - `session_pane.rs` now centralizes repeated host notifications/input-record hooks behind small local helpers, reducing scatter in the remaining raw host primitive layer
+  - `session_host.rs` runtime/reconcile/resource-cleanup paths now also route through a shared host-helper block, so direct `HostMux::get()`/`try_get()` usage is localized to the top helper layer instead of being scattered through `DesktopSessionHost`
+  - `chatminal_runtime/mod.rs` now exposes explicit desktop-host lifecycle facade APIs for entrypoints (`initialize_desktop_host_runtime`, `shutdown_desktop_host_runtime`, `create_desktop_serial_spawn_target`)
+  - `main.rs` switched to those explicit facade APIs instead of leaning on broad `desktop_host_runtime::*` re-exports for host bootstrap/shutdown/serial target setup
+  - `chatminal_runtime/mod.rs` no longer uses wildcard `desktop_host_runtime::*`; the host bridge surface is now explicit
+  - explicit facade conversion has started family-by-family:
+    - spawn/bootstrap wrappers now live in `chatminal_runtime/mod.rs`
+    - window/shell wrappers now also live in `chatminal_runtime/mod.rs`
+    - pane/render-target compat wrappers now also live in `chatminal_runtime/mod.rs`
+    - frontend/workspace wrappers now also live in `chatminal_runtime/mod.rs`
+  - `frontend.rs` and `desktop_spawn.rs` were migrated to import those explicit facade APIs directly
+  - caller migration now also covers:
+    - `desktop_termwindow_host_runtime_helpers.rs`
+    - `desktop_termwindow_close_helpers.rs`
+    - `desktop_termwindow_positioned_session_helpers.rs`
+    - `overlay/confirm_close_pane.rs`
+    - `overlay/launcher.rs`
+    - `overlay/copy.rs`
+    - `termwindow/resize.rs`
+    - `termwindow/render/paint.rs`
+  - `session_pane.rs` no longer calls `HostMux::get()`; only a tiny best-effort `try_get()` helper remains on that file
+  - desktop app direct mux access is now reduced to the narrow helper layer only:
+    - `desktop_host_runtime/session_host.rs`: `host_mux()` / `try_host_mux()` helper block
+    - `desktop_host_runtime/session_pane.rs`: one tiny `try_get()` helper
+  - residual host bridge explicit re-exports in `chatminal_runtime/mod.rs` are now down to 14 items
+  - render-target/window activation wrappers now prefer session-native render targets before `Mux` fallback
+  - workspace serial test gate and desktop default test gate are green again after fixing canonical retention and host-mux test isolation
+  - `chatminal_runtime/mod.rs` host bridge surface is now narrower again:
+    - broad `desktop_host_runtime::{...}` re-export replaced by curated type aliases + curated `overlay_compat` facade
+    - remaining host trait surface is more explicit at the module boundary
+  - `termwindow/mod.rs` Phase 03B Cut 2A advanced:
+    - repeated session-native layout refresh paths now go through local helper methods instead of repeating raw runtime facade calls inline
+    - render-target/session lookup in close/focus flow now reuses helper-family methods (`session_id_for_render_target`, `session_render_scope_id`, `session_pane_for_render_target`)
+    - active-session reconcile no longer composes `desktop_session_window_snapshot` + `reconcile_runtime_session_lookup` inline inside `termwindow/mod.rs`
+    - direct host fallback in the core closeability path is now hidden behind `desktop_termwindow_host_runtime_helpers.rs`
+  - verification after Cut 2A is green:
+    - `cargo check -p chatminal-desktop` pass
+    - `cargo test --manifest-path apps/chatminal-desktop/Cargo.toml -- --test-threads=1` pass (`83/83`)
+  - Phase 03C Scope A is now complete:
+    - `RuntimeNotification` is desktop-owned instead of aliasing `MuxNotification`
+    - desktop runtime notification hub now fronts both frontend/runtime subscriptions
+    - `MuxNotification -> RuntimeNotification` bridge is attached at mux bootstrap
+    - session-native panes now install clipboard/download handlers from desktop host layer
+    - session-native pane registration now uses `add_pane_without_default_side_effects(...)`
+    - `session_pane.rs` pane-output notifications no longer flow through `HostMux::notify_from_any_thread(...)`
+    - root-window/tab ownership was intentionally left untouched
+  - verification after Phase 03C Scope A:
+    - `cargo check -p chatminal-desktop` pass
+    - `cargo test --manifest-path apps/chatminal-desktop/Cargo.toml -- --test-threads=1` pass (`83/83`)
+  - Phase 03C Scope B is now complete:
+    - removed global `chatminal_session_id_index` from `chatminal-host-runtime::Mux`
+    - `get_tab_by_chatminal_session_id(...)` now resolves by scanning tab/pane metadata instead of global reverse index
+    - desktop host no longer falls back to mux-global session-id lookup when reconciling `session_tab_shim`
+    - Lua `SessionRef` compat remains intact through the same `host-runtime` API surface
+  - verification after Phase 03C Scope B:
+    - `cargo check -p chatminal-desktop` pass
+    - `cargo test --manifest-path apps/chatminal-desktop/Cargo.toml -- --test-threads=1` pass (`83/83`)
+  - Phase 03C Scope C moved one notch deeper at the pane-registry boundary:
+    - `session_pane.rs` no longer retains any direct host-mux helper
+    - `session_host.rs` now exposes desktop-owned pane/binding lookup helpers for terminal handle and public id resolution
+    - `session_host.rs` now resolves session-native public pane ids, frontend pane mapping, and focused-pane rebinding locally before legacy mux fallback
+    - `desktop_host_runtime/mod.rs` no longer manually composes session-terminal binding + pane lookup for these read paths; that local-first policy now lives in `DesktopSessionHost`
+    - `session_host.rs::remove_terminal_handle()` now prunes session-native pane/session/runtime indexes locally before falling back to legacy mux removal for non-session/overlay panes
+    - `host_remove_pane(...)` now uses best-effort `try_host_mux()` so local prune paths do not hard-panic when mux bootstrap is absent
+    - direct regression coverage now exists for:
+      - public-id → terminal binding resolution
+      - frontend pane fallback resolution from the local pane registry
+      - local prune before legacy fallback
+      - stale-session prune in `reconcile_visible_sessions()`
+  - verification after the tightened Phase 03C Scope C slice:
+    - `cargo check --workspace` pass
+    - `cargo test --manifest-path apps/chatminal-desktop/Cargo.toml -- --test-threads=1` pass (`87/87`)
+  - Phase 03D has started with a small accessor cut:
+    - desktop app direct `HostMux::get()` / `HostMux::try_get()` callsites are now `0`
+    - singleton accessor calls were pushed down into `chatminal-host-runtime` free helpers, so `apps/chatminal-desktop` no longer touches the global mux accessor directly
+    - root-window notification/config paths were tightened one notch further:
+      - `window.rs` no longer publishes title/workspace invalidation through inline `Mux` access
+      - the close-active-tab fallback now consumes a constructor snapshot instead of reading config at removal time
+    - control-plane ownership was tightened one notch further:
+      - `HostRuntimeControlPlane` now owns `primary_spawn_target`, subscribers, clients, active identity, workspace metadata, and per-client focus metadata
+      - `Mux` keeps pane/tab/window registry ownership for now, but no longer owns that control-plane logic inline
+  - Phase 03E has started with a narrow host abstraction:
+    - `chatminal-lua-bridge` now routes `SessionRef`, `TerminalRef`, `WindowRef`, workspace helpers, spawn, split, and activation through an internal `LuaBridgeHost` wrapper instead of raw `Arc<Mux>` being threaded through every module
+    - `TerminalRef` now stores `usize` directly instead of exposing `PaneId` in its public shape
+    - workspace/session Lua export helpers now propagate host lookup failures instead of silently returning default-empty values for workspace/session control paths
+    - direct bridge-local mux dependence is now centralized in `LuaBridgeHost` instead of being scattered across `lib.rs`, `session.rs`, `leaf.rs`, and `window.rs`
+    - direct `get_mux()` / `Mux::get()` / `Mux::try_get()` callsites inside `crates/chatminal-lua-bridge/src/*.rs` are now `0`
+    - the first incremental bridge cut is now complete for window/workspace metadata:
+      - `LuaBridgeHost` exposes closure/value-based root-window helpers instead of leaking lock guards
+      - `WindowRef` no longer exposes guard-returning `resolve()` / `resolve_mut()` APIs
+      - `SpawnSession::spawn()` now snapshots root-window size/active pane through the same closure-based bridge
+    - the next incremental bridge cut is now complete for the `SessionRef` surface:
+      - `LuaBridgeHost` now owns stable session/tab lookup helpers on top of one retained `Arc<Mux>` per Lua call
+      - `session.rs` no longer resolves `Tab` directly for common session operations
+      - session title/window/active terminal/terminal listing/direction/zoom/size/activation now dispatch through `LuaBridgeHost`
+    - the next incremental bridge cut is now complete for the `TerminalRef` surface:
+      - `leaf.rs` no longer resolves panes directly from the mux for common terminal operations
+      - pane lookup now flows through `LuaBridgeHost::with_pane(...)` / `with_pane_result(...)`
+      - terminal window/session/title/progress/cwd/metadata/process/cursor/dimensions/user-vars/scrollback/semantic-zone helpers now reuse the same host-owned pane lookup path
+      - terminal activation now routes through `LuaBridgeHost::activate_terminal(...)`
+      - `TerminalRef` construction/access now prefers helper methods (`from_pane_id`, `pane_id`) instead of raw tuple access at the boundary
+      - `TerminalRef` tuple field is now private; desktop-side Lua entrypoints no longer reach into the raw field directly
+      - latent compat bug fixed while centralizing this slice: session `rotate_clockwise()` now calls `Tab::rotate_clockwise()`
+    - the next incremental bridge cut is now complete for spawn/split hardening:
+      - root-window spawn context derivation now lives in `LuaBridgeHost`
+      - `SpawnSession::spawn()` now delegates runtime spawn fully through host-owned helpers
+      - `SplitSession::run()` now delegates runtime split fully through host-owned helpers
+    - the next incremental bridge cut is now complete for the `WindowRef` surface:
+      - common root-window getters/setters/session listing no longer resolve raw mux/root-window guards inline
+      - `active_session_id` now returns owned ids through `SessionRef::to_owned_id()`
+      - `active_terminal` now constructs `TerminalRef` via helper constructors instead of exposing raw tuple-style creation
+  - Phase 03F has started with a minimal boundary-hardening cut:
+    - `TerminalRef` now keeps its numeric pane handle behind helper constructors/accessors instead of a public tuple field
+    - desktop callsites now construct `TerminalRef` via `TerminalRef::from_pane_id(...)`
+    - raw tuple-style `TerminalRef(...)` creation outside `chatminal-lua-bridge` is now `0`
+    - focused-pane resolution now returns `FocusedPaneBinding` instead of raw `(TabId, PaneId)` tuples across the host-runtime boundary
+    - `ClientInfo.focused_pane_id` is now private to `chatminal-host-runtime`
+    - dead `Tab::kill_pane` API was removed and `Tab::remove_pane` was narrowed to `pub(crate)`
+  - Phase 03D control-plane extraction moved one notch deeper again:
+    - `with_control_plane(...)` and `with_mux_and_control_plane(...)` now centralize control-plane access inside `chatminal-host-runtime/src/lib.rs`
+    - several free-function/public boundary helpers (`active_identity`, workspace/focus helpers, spawn-target helpers) now read or mutate `HostRuntimeControlPlane` directly instead of bouncing through broader `Mux` methods
+    - dead wrapper methods on `impl Mux` for those control-plane paths were removed
+  - verification after the desktop accessor cut + lua bridge host cut:
+    - `cargo check -p chatminal-host-runtime` pass
+    - `cargo check -p chatminal-lua-bridge` pass
+    - `cargo check -p chatminal-desktop` pass
+    - `cargo test --manifest-path apps/chatminal-desktop/Cargo.toml -- --test-threads=1` pass (`87/87`)
+    - `cargo check --workspace` pass
+- Phase 03C prep is now concrete:
+  - `DesktopSessionHost` already owns the session-native maps
+  - recommended extraction order for remaining `Mux` ownership:
+    1. notifications + clipboard/download
+    2. deprecated session reverse index
+    3. pane registry
+    4. tab registry + root window
+    5. client/workspace/focus + spawn target
+- Next safe execution target:
+  - keep Phase 03D moving at `tab/root-window/focus` ownership, because desktop app direct singleton accessor calls are already gone
+  - Phase 03E incremental lua-bridge cuts are now complete for the currently scoped clusters
+  - next critical path is back on `03D`: move `tab/root-window/focus` ownership itself further out of mux-backed helper paths
+- Phase 03 progress (in_progress):
+  - DONE: Mux `pub(crate)`, MuxHandle opaque wrapper, unified lifecycle
+  - DONE: Desktop app 0 direct `Mux::get()` calls — all through host-runtime wrappers
+  - DONE: LuaBridgeHost facade wraps `host_runtime::*` free functions (not direct Mux)
+  - DONE: PTY output callback bypasses `Mux::notify_from_any_thread` for session panes
+  - DONE: Desktop notification hub fronts both frontend/runtime subscriptions
+  - DONE: queued cleanup after shutdown now uses best-effort mux access instead of strict singleton deref
+  - DONE: host-runtime init is now idempotent for the current singleton; repeated init reuses the live mux and refreshes spawn target instead of replacing it
+  - DONE: `Mux` control-plane logic for spawn target / subscribers / clients / identity / workspace / focus is now grouped behind `HostRuntimeControlPlane`
+  - DONE: Wrapper functions renamed (removed `_global`/`_global_mux` suffixes)
+  - DONE: `dirs-next` consolidated to `dirs` 6.0
+  - NOT DONE: Mux singleton still exists inside host-runtime (global_mux(), OnceCell)
+  - NOT DONE: PaneId/TabId still in public API (03F)
+  - DONE: `TerminalRef` raw tuple-style creation outside the bridge has been eliminated as the first 03F cut
+  - NOT DONE: RuntimeHost does not own session lifecycle — Mux still owns pane/tab/window registries
+  - NOT DONE: Single ID system not achieved
+  - NOT DONE: Dead code warnings in host-runtime (global_mux, create/install/shutdown_global_mux)
+- Phase 04 progress (partial):
+  - DONE: Removed 8 dead config fields + `runtime_options.rs` module
+  - DONE: `.chatminal.lua` is primary config file, zero `.wezterm` references
+  - DONE: desktop config singleton scatter reduced again:
+    - selection word-boundary now comes from caller-owned `TermWindow.config`
+    - copy overlay render path now uses the `TermWindow` config snapshot
+    - frontend bootstrap now receives initial `ConfigHandle` from `main`
+    - frontend notification/startup paths now reuse `current_frontend_config()` instead of re-reading the singleton at each callsite
+    - stats thread loop now reads `periodic_stat_logging` from an atomic refreshed by config reload subscription
+    - custom block glyph render path now snapshots block anti-alias policy once per draw path
+    - `ColorEase` now receives `animation_fps` from caller-owned config instead of reading the global singleton in the animation path
+  - DONE: host-runtime config singleton scatter reduced again in low-risk flows:
+    - `spawn_target.rs` now snapshots config once per `build_command()` flow
+    - `tab.rs` snapshots `unzoom_on_switch_pane` into `TabInner`
+    - `localpane.rs` reuses local config snapshots for exit/stateful-close checks instead of repeating singleton reads inside those flows
+  - NOT DONE: `configuration()` singleton still exists in host-runtime hot path and a few desktop bootstrap sites
+  - NOT DONE: Config not passed explicitly via `Arc<ChatminalConfig>`
+  - NOT DONE: `chatminal-runtime/config.rs` still exists (kept: independent env-based config)
+  - NOT DONE: Config sub-struct restructure
+- Phase 02 status: deferred (cosmetic crate rename)
 
 ## Dependency Graph
 ```

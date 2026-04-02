@@ -289,7 +289,11 @@ pub(crate) fn clamp_split_ratio(ratio: u16) -> u16 {
 #[derive(Clone)]
 enum RebuiltNode {
     View(SessionViewSnapshot, WorkspaceNodeId),
-    Split(WorkspaceLayoutNodeSnapshot, Box<RebuiltNode>, Box<RebuiltNode>),
+    Split(
+        WorkspaceLayoutNodeSnapshot,
+        Box<RebuiltNode>,
+        Box<RebuiltNode>,
+    ),
 }
 
 impl RebuiltNode {
@@ -344,7 +348,11 @@ fn rebuild_node(
     }
 }
 
-fn collect_rebuilt(rebuilt: &RebuiltNode, nodes: &mut Vec<WorkspaceLayoutNodeSnapshot>, views: &mut Vec<SessionViewSnapshot>) {
+fn collect_rebuilt(
+    rebuilt: &RebuiltNode,
+    nodes: &mut Vec<WorkspaceLayoutNodeSnapshot>,
+    views: &mut Vec<SessionViewSnapshot>,
+) {
     match rebuilt {
         RebuiltNode::View(view, node_id) => {
             nodes.push(WorkspaceLayoutNodeSnapshot {
@@ -587,12 +595,14 @@ mod tests {
 
         assert_eq!(layout.views.len(), 4);
         assert_eq!(
-            layout.view(layout.active_view_id).expect("active view").session_id,
+            layout
+                .view(layout.active_view_id)
+                .expect("active view")
+                .session_id,
             "session-a"
         );
         assert!(layout.view_for_session("session-b").is_some());
         assert!(layout.view_for_session("session-c").is_some());
         assert!(layout.view_for_session("session-d").is_some());
     }
-
 }

@@ -21,10 +21,7 @@ use crate::workspace_ids::{RuntimeId, TerminalInstanceId};
 use crate::workspace_layout::WorkspaceLayoutRegistry;
 use chatminal_store::StoredSessionStatus;
 
-use super::{
-    RuntimeState, StateInner,
-    canonical_scrollback::build_logical_snapshot,
-};
+use super::{RuntimeState, StateInner, canonical_scrollback::build_logical_snapshot};
 
 // ─── handle ────────────────────────────────────────────────────────────────
 

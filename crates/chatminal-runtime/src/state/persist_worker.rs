@@ -8,8 +8,8 @@
 // persist only the highest seq. `MarkRunning` is deduped per-session.
 
 use std::collections::HashMap;
-use std::sync::mpsc as std_mpsc;
 use std::sync::Arc;
+use std::sync::mpsc as std_mpsc;
 use std::thread;
 
 use chatminal_store::{Store, StoredScrollbackRecordInput, StoredSessionStatus};
@@ -123,8 +123,7 @@ fn process_job(
             session_id,
             max_lines,
         } => {
-            if let Err(err) =
-                store.enforce_session_scrollback_record_limit(&session_id, max_lines)
+            if let Err(err) = store.enforce_session_scrollback_record_limit(&session_id, max_lines)
             {
                 log::warn!("enforce scrollback limit failed: {err}");
             }

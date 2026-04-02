@@ -6,8 +6,8 @@ use crate::pane::{
     alloc_pane_id, CachePolicy, CloseReason, ForEachPaneLogicalLine, LogicalLine, Pane, PaneId,
     WithPaneLines,
 };
+use crate::register_pane_with_default_side_effects;
 use crate::renderable::*;
-use crate::Mux;
 use crossbeam::channel::{unbounded as channel, Receiver, Sender};
 use engine_term::color::ColorPalette;
 use engine_term::{
@@ -228,7 +228,6 @@ impl Pane for TermWizTerminalPane {
     fn get_current_working_dir(&self, _policy: CachePolicy) -> Option<Url> {
         self.terminal.lock().get_current_dir().cloned()
     }
-
 }
 
 pub struct TermWizTerminal {
@@ -399,8 +398,7 @@ pub fn allocate(
     // Add the tab to the mux so that the output is processed
     let pane: Arc<dyn Pane> = Arc::new(pane);
 
-    let mux = Mux::get();
-    mux.add_pane(&pane).expect("to be able to add pane to mux");
+    register_pane_with_default_side_effects(&pane).expect("to be able to add pane to mux");
 
     (tw_term, pane)
 }

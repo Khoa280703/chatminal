@@ -597,9 +597,9 @@ fn english_ordinal(n: isize) -> String {
 fn spawn_command_from_action(action: &KeyAssignment) -> Option<&SpawnCommand> {
     match action {
         SplitSession(config::keyassignment::SplitSession { command, .. }) => Some(command),
-        SplitHorizontal(command)
-        | SplitVertical(command)
-        | SpawnCommandInNewSession(command) => Some(command),
+        SplitHorizontal(command) | SplitVertical(command) | SpawnCommandInNewSession(command) => {
+            Some(command)
+        }
         _ => None,
     }
 }

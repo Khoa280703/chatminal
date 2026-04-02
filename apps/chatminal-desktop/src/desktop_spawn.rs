@@ -1,4 +1,6 @@
-use crate::chatminal_runtime::DesktopSplitRequest;
+use crate::chatminal_runtime::{
+    host_workspace_name, spawn_host_runtime_entry, start_host_activity, DesktopSplitRequest,
+};
 use anyhow::{anyhow, Context};
 use config::keyassignment::SpawnCommand;
 use config::TermConfig;
@@ -93,9 +95,9 @@ pub async fn spawn_command_internal(
             anyhow::bail!("engine split fallback reached — session_id is None; this is a bug");
         }
         _ => {
-            let activity = crate::chatminal_runtime::start_host_activity();
-            let workspace = crate::chatminal_runtime::host_workspace_name();
-            let pane = crate::chatminal_runtime::spawn_host_runtime_entry(
+            let activity = start_host_activity();
+            let workspace = host_workspace_name();
+            let pane = spawn_host_runtime_entry(
                 cmd_builder,
                 cwd,
                 size,

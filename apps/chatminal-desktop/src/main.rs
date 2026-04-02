@@ -68,6 +68,10 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 pub use selection::SelectionMode;
 pub use termwindow::{set_window_class, set_window_position, TermWindow, ICON_DATA};
 
+fn current_config_handle() -> ConfigHandle {
+    config::configuration()
+}
+
 #[derive(Debug, Parser)]
 #[command(
     about = "Chatminal Desktop",
@@ -130,7 +134,7 @@ enum SubCommand {
     ShowKeys(ShowKeysCommand),
 }
 
-async fn async_run_serial(opts: SerialCommand) -> anyhow::Result<()> {
+async fn async_run_serial(config: ConfigHandle, opts: SerialCommand) -> anyhow::Result<()> {
     let serial_target = SerialTarget {
         name: format!("Serial Port {}", opts.port),
         port: Some(opts.port.clone()),
@@ -149,11 +153,18 @@ async fn async_run_serial(opts: SerialCommand) -> anyhow::Result<()> {
 
     let cmd = None;
 
-    let spawn_target = chatminal_runtime::create_serial_spawn_target(serial_target)?;
+    let spawn_target = chatminal_runtime::create_desktop_serial_spawn_target(serial_target)?;
     chatminal_runtime::set_host_spawn_target(&spawn_target);
 
     let should_publish = false;
-    async_run_terminal_gui(cmd, start_command, should_publish, Some(spawn_target)).await
+    async_run_terminal_gui(
+        config,
+        cmd,
+        start_command,
+        should_publish,
+        Some(spawn_target),
+    )
+    .await
 }
 
 fn run_serial(config: config::ConfigHandle, opts: SerialCommand) -> anyhow::Result<()> {
@@ -164,12 +175,12 @@ fn run_serial(config: config::ConfigHandle, opts: SerialCommand) -> anyhow::Resu
         set_window_position(pos.clone());
     }
 
-    chatminal_runtime::build_initial_host_mux(&config, None)?;
+    chatminal_runtime::initialize_desktop_host_runtime(&config, None)?;
 
-    let gui = crate::frontend::try_new()?;
+    let gui = crate::frontend::try_new(config.clone())?;
 
-    promise::spawn::spawn(async {
-        if let Err(err) = async_run_serial(opts).await {
+    promise::spawn::spawn(async move {
+        if let Err(err) = async_run_serial(config.clone(), opts).await {
             terminate_with_error(err);
         }
     })
@@ -188,6 +199,7 @@ fn have_panes_in_spawn_target_and_ws(
 }
 
 async fn spawn_tab_in_spawn_target_if_mux_is_empty(
+    config: ConfigHandle,
     cmd: Option<CommandBuilder>,
     spawn_target: Option<chatminal_runtime::HostSpawnTargetHandle>,
     workspace: Option<String>,
@@ -198,7 +210,6 @@ async fn spawn_tab_in_spawn_target_if_mux_is_empty(
         return Ok(());
     }
 
-    let config = config::configuration();
     config.update_ulimit()?;
 
     if have_panes_in_spawn_target_and_ws(&spawn_target, &workspace) {
@@ -256,6 +267,15 @@ async fn trigger_and_log_gui_attached() {
     }
 }
 
+fn request_frontend_workspace_reconcile() {
+    promise::spawn::spawn_into_main_thread(async move {
+        if let Some(front_end) = crate::frontend::try_front_end() {
+            front_end.reconcile_workspace();
+        }
+    })
+    .detach();
+}
+
 fn cell_pixel_dims(config: &ConfigHandle, dpi: f64) -> anyhow::Result<(usize, usize)> {
     let fontconfig = Rc::new(FontConfiguration::new(Some(config.clone()), dpi as usize)?);
     let render_metrics = RenderMetrics::new(&fontconfig)?;
@@ -266,6 +286,7 @@ fn cell_pixel_dims(config: &ConfigHandle, dpi: f64) -> anyhow::Result<(usize, us
 }
 
 async fn async_run_terminal_gui(
+    config: ConfigHandle,
     cmd: Option<CommandBuilder>,
     opts: StartCommand,
     should_publish: bool,
@@ -284,13 +305,14 @@ async fn async_run_terminal_gui(
         None => None,
     };
 
-    let spawn_target = startup_spawn_target
-        .or_else(|| cmd.as_ref().map(|_| chatminal_runtime::primary_host_spawn_target()));
+    let spawn_target = startup_spawn_target.or_else(|| {
+        cmd.as_ref()
+            .map(|_| chatminal_runtime::primary_host_spawn_target())
+    });
 
     trigger_and_log_gui_startup(spawn_command).await;
 
     if let Some(spawn_target) = &spawn_target {
-        let config = config::configuration();
         let dpi = config.dpi.unwrap_or_else(|| ::window::default_dpi());
         let tab = spawn_target
             .spawn(
@@ -299,10 +321,14 @@ async fn async_run_terminal_gui(
                 None,
             )
             .await?;
-        chatminal_runtime::activate_host_runtime_entry(tab.tab_id() as u64)?;
+        chatminal_runtime::activate_host_runtime_entry(tab.runtime_id().as_u64())?;
+        request_frontend_workspace_reconcile();
         trigger_and_log_gui_attached().await;
     }
-    spawn_tab_in_spawn_target_if_mux_is_empty(cmd, spawn_target, opts.workspace).await
+    let result =
+        spawn_tab_in_spawn_target_if_mux_is_empty(config, cmd, spawn_target, opts.workspace).await;
+    request_frontend_workspace_reconcile();
+    result
 }
 
 fn run_terminal_gui(opts: StartCommand) -> anyhow::Result<()> {
@@ -313,7 +339,7 @@ fn run_terminal_gui(opts: StartCommand) -> anyhow::Result<()> {
         set_window_position(pos.clone());
     }
 
-    let config = config::configuration();
+    let config = current_config_handle();
     let need_builder = !opts.prog.is_empty() || opts.cwd.is_some();
 
     let cmd = if need_builder {
@@ -335,13 +361,13 @@ fn run_terminal_gui(opts: StartCommand) -> anyhow::Result<()> {
         None
     };
 
-    chatminal_runtime::build_initial_host_mux(&config, opts.workspace.as_deref())?;
+    chatminal_runtime::initialize_desktop_host_runtime(&config, opts.workspace.as_deref())?;
 
-    let gui = crate::frontend::try_new()?;
+    let gui = crate::frontend::try_new(config.clone())?;
     let activity = chatminal_runtime::start_host_activity();
 
     promise::spawn::spawn(async move {
-        if let Err(err) = async_run_terminal_gui(cmd, opts, false, None).await {
+        if let Err(err) = async_run_terminal_gui(config.clone(), cmd, opts, false, None).await {
             terminate_with_error(err);
         }
         drop(activity);
@@ -412,7 +438,7 @@ fn main() {
     if let Err(e) = run() {
         terminate_with_error(e);
     }
-    chatminal_runtime::shutdown_host_mux();
+    chatminal_runtime::shutdown_desktop_host_runtime();
     frontend::shutdown();
 }
 
@@ -803,7 +829,7 @@ fn run() -> anyhow::Result<()> {
         &config_overrides,
         opts.skip_config,
     )?;
-    let config = config::configuration();
+    let config = current_config_handle();
 
     let sub = match opts.cmd.as_ref().cloned() {
         Some(SubCommand::BlockingStart(start)) => {
@@ -830,7 +856,9 @@ fn run() -> anyhow::Result<()> {
                 )
             })?;
             match parsed {
-                SubCommand::Start(start) => SubCommand::Start(normalize_desktop_start_command(start)),
+                SubCommand::Start(start) => {
+                    SubCommand::Start(normalize_desktop_start_command(start))
+                }
                 other => other,
             }
         }

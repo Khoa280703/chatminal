@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use config::SerialTarget;
 use engine_term::TerminalSize;
-use host_runtime::spawn_target::LocalSpawnTarget;
+use host_runtime::spawn_target::{LocalSpawnHooks, LocalSpawnTarget};
 use portable_pty::CommandBuilder;
 
 use super::session_pane::ChatminalSessionPane;
@@ -23,24 +23,31 @@ pub(crate) struct DesktopSpawnTarget {
 impl DesktopSpawnTarget {
     pub(crate) fn new_local() -> anyhow::Result<Self> {
         Ok(Self {
-            local: LocalSpawnTarget::new("local")?,
+            local: LocalSpawnTarget::new_with_hooks("local", LocalSpawnHooks::default())?,
         })
     }
 
     pub(crate) fn new_serial(serial_target: SerialTarget) -> anyhow::Result<Self> {
         Ok(Self {
-            local: LocalSpawnTarget::new_serial_target(serial_target)?,
+            local: LocalSpawnTarget::new_serial_target_with_hooks(
+                serial_target,
+                LocalSpawnHooks::default(),
+            )?,
         })
     }
 
-    fn runtime_session_id(&self, command: Option<CommandBuilder>) -> anyhow::Result<Option<String>> {
+    fn runtime_session_id(
+        &self,
+        command: Option<CommandBuilder>,
+    ) -> anyhow::Result<Option<String>> {
         let Some(explicit) = command.as_ref().and_then(parse_proxy_session_id) else {
             return Ok(None);
         };
         let runtime = EmbeddedRuntime::global().map_err(anyhow::Error::msg)?;
-        let client = ChatminalRuntimeClient::new(Arc::clone(runtime)).map_err(anyhow::Error::msg)?;
-        let session_id =
-            resolve_target_session_id(&client, Some(explicit.as_str())).map_err(anyhow::Error::msg)?;
+        let client =
+            ChatminalRuntimeClient::new(Arc::clone(runtime)).map_err(anyhow::Error::msg)?;
+        let session_id = resolve_target_session_id(&client, Some(explicit.as_str()))
+            .map_err(anyhow::Error::msg)?;
         Ok(Some(session_id))
     }
 }

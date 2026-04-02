@@ -1,15 +1,15 @@
 use crate::pane::*;
 use crate::renderable::StableCursorPosition;
-use crate::{Mux, MuxNotification};
+use crate::{notify_mux, remove_pane_on_main_thread, try_global_mux, MuxNotification};
 use bintree::PathBranch;
-use config::configuration;
+use chatminal_runtime::{RuntimeId, SessionTerminalHandle};
 use config::keyassignment::SessionDirection;
 use engine_term::{StableRowIndex, TerminalSize};
 use parking_lot::Mutex;
 use rangeset::intersects_range;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
 use url::Url;
 
@@ -43,6 +43,7 @@ struct TabInner {
     size_before_zoom: TerminalSize,
     active: usize,
     zoomed: Option<Arc<dyn Pane>>,
+    unzoom_on_switch_pane: bool,
     title: String,
     recency: Recency,
 }
@@ -209,104 +210,6 @@ fn is_pane(pane: &Arc<dyn Pane>, other: &Option<&Arc<dyn Pane>>) -> bool {
         other.pane_id() == pane.pane_id()
     } else {
         false
-    }
-}
-
-fn pane_tree(
-    tree: &Tree,
-    tab_id: TabId,
-    active: Option<&Arc<dyn Pane>>,
-    zoomed: Option<&Arc<dyn Pane>>,
-    workspace: &str,
-    left_col: usize,
-    top_row: usize,
-) -> PaneNode {
-    match tree {
-        Tree::Empty => PaneNode::Empty,
-        Tree::Node { left, right, data } => {
-            let data = data.unwrap();
-            PaneNode::Split {
-                left: Box::new(pane_tree(
-                    &*left, tab_id, active, zoomed, workspace, left_col, top_row,
-                )),
-                right: Box::new(pane_tree(
-                    &*right,
-                    tab_id,
-                    active,
-                    zoomed,
-                    workspace,
-                    if data.direction == SplitDirection::Vertical {
-                        left_col
-                    } else {
-                        left_col + data.left_of_second()
-                    },
-                    if data.direction == SplitDirection::Horizontal {
-                        top_row
-                    } else {
-                        top_row + data.top_of_second()
-                    },
-                )),
-                node: data,
-            }
-        }
-        Tree::Leaf(pane) => {
-            let dims = pane.get_dimensions();
-            let working_dir = pane.get_current_working_dir(CachePolicy::AllowStale);
-            let cursor_pos = pane.get_cursor_position();
-
-            PaneNode::Leaf(PaneEntry {
-                tab_id,
-                pane_id: pane.pane_id(),
-                title: pane.get_title(),
-                is_active_pane: is_pane(pane, &active),
-                is_zoomed_pane: is_pane(pane, &zoomed),
-                size: TerminalSize {
-                    cols: dims.cols,
-                    rows: dims.viewport_rows,
-                    pixel_height: dims.pixel_height,
-                    pixel_width: dims.pixel_width,
-                    dpi: dims.dpi,
-                },
-                working_dir: working_dir.map(Into::into),
-                workspace: workspace.to_string(),
-                cursor_pos,
-                physical_top: dims.physical_top,
-                left_col,
-                top_row,
-                tty_name: pane.tty_name(),
-            })
-        }
-    }
-}
-
-fn build_from_pane_tree<F>(
-    tree: bintree::Tree<PaneEntry, SplitDirectionAndSize>,
-    active: &mut Option<Arc<dyn Pane>>,
-    zoomed: &mut Option<Arc<dyn Pane>>,
-    make_pane: &mut F,
-) -> Tree
-where
-    F: FnMut(PaneEntry) -> Arc<dyn Pane>,
-{
-    match tree {
-        bintree::Tree::Empty => Tree::Empty,
-        bintree::Tree::Node { left, right, data } => Tree::Node {
-            left: Box::new(build_from_pane_tree(*left, active, zoomed, make_pane)),
-            right: Box::new(build_from_pane_tree(*right, active, zoomed, make_pane)),
-            data,
-        },
-        bintree::Tree::Leaf(entry) => {
-            let is_zoomed_pane = entry.is_zoomed_pane;
-            let is_active_pane = entry.is_active_pane;
-            let pane = make_pane(entry);
-            if is_zoomed_pane {
-                zoomed.replace(Arc::clone(&pane));
-            }
-            if is_active_pane {
-                active.replace(Arc::clone(&pane));
-            }
-            Tree::Leaf(pane)
-        }
     }
 }
 
@@ -520,35 +423,11 @@ impl Tab {
         let mut inner = self.inner.lock();
         if inner.title != title {
             inner.title = title.to_string();
-            Mux::try_get().map(|mux| {
-                mux.notify(MuxNotification::TabTitleChanged {
-                    tab_id: inner.id,
-                    title: title.to_string(),
-                })
+            notify_mux(MuxNotification::TabTitleChanged {
+                tab_id: inner.id,
+                title: title.to_string(),
             });
         }
-    }
-
-    /// Called by the multiplexer client when building a local tab to
-    /// mirror a remote tab.  The supplied `root` is the information
-    /// about our counterpart in the the remote server.
-    /// This method builds a local tree based on the remote tree which
-    /// then replaces the local tree structure.
-    ///
-    /// The `make_pane` function is provided by the caller, and its purpose
-    /// is to lookup an existing Pane that corresponds to the provided
-    /// PaneEntry, or to create a new Pane from that entry.
-    /// make_pane is expected to add the pane to the mux if it creates
-    /// a new pane, otherwise the pane won't poll/update in the GUI.
-    pub fn sync_with_pane_tree<F>(&self, size: TerminalSize, root: PaneNode, make_pane: F)
-    where
-        F: FnMut(PaneEntry) -> Arc<dyn Pane>,
-    {
-        self.inner.lock().sync_with_pane_tree(size, root, make_pane)
-    }
-
-    pub fn codec_pane_tree(&self) -> PaneNode {
-        self.inner.lock().codec_pane_tree()
     }
 
     /// Returns a count of how many panes are in this tab
@@ -565,8 +444,11 @@ impl Tab {
         self.inner.lock().toggle_zoom()
     }
 
-    pub fn contains_pane(&self, pane: PaneId) -> bool {
-        self.inner.lock().contains_pane(pane)
+    pub fn contains_pane(&self, terminal_handle: SessionTerminalHandle) -> bool {
+        let Ok(pane_id) = usize::try_from(terminal_handle.as_u64()) else {
+            return false;
+        };
+        self.inner.lock().contains_pane(pane_id)
     }
 
     pub fn iter_panes(&self) -> Vec<PositionedPane> {
@@ -591,6 +473,10 @@ impl Tab {
 
     pub fn tab_id(&self) -> TabId {
         self.tab_id
+    }
+
+    pub fn runtime_id(&self) -> RuntimeId {
+        RuntimeId::new(self.tab_id as u64)
     }
 
     pub fn get_size(&self) -> TerminalSize {
@@ -654,7 +540,11 @@ impl Tab {
     /// In cases where there are multiple adjacent panes in the
     /// intended direction, we take the pane that has the largest
     /// edge intersection.
-    pub fn get_pane_direction(&self, direction: SessionDirection, ignore_zoom: bool) -> Option<usize> {
+    pub fn get_pane_direction(
+        &self,
+        direction: SessionDirection,
+        ignore_zoom: bool,
+    ) -> Option<usize> {
         self.inner.lock().get_pane_direction(direction, ignore_zoom)
     }
 
@@ -662,14 +552,10 @@ impl Tab {
         self.inner.lock().prune_dead_panes()
     }
 
-    pub fn kill_pane(&self, pane_id: PaneId) -> bool {
-        self.inner.lock().kill_pane(pane_id)
-    }
-
     /// Remove pane from tab.
     /// The pane is still live in the mux; the intent is for the pane to
     /// be added to a different tab.
-    pub fn remove_pane(&self, pane_id: PaneId) -> Option<Arc<dyn Pane>> {
+    pub(crate) fn remove_pane(&self, pane_id: PaneId) -> Option<Arc<dyn Pane>> {
         self.inner.lock().remove_pane(pane_id)
     }
 
@@ -754,77 +640,9 @@ impl TabInner {
             size_before_zoom: *size,
             active: 0,
             zoomed: None,
+            unzoom_on_switch_pane: crate::unzoom_on_switch_pane(),
             title: String::new(),
             recency: Recency::default(),
-        }
-    }
-
-    fn sync_with_pane_tree<F>(&mut self, size: TerminalSize, root: PaneNode, mut make_pane: F)
-    where
-        F: FnMut(PaneEntry) -> Arc<dyn Pane>,
-    {
-        let mut active = None;
-        let mut zoomed = None;
-
-        log::debug!("sync_with_pane_tree with size {:?}", size);
-
-        let t = build_from_pane_tree(root.into_tree(), &mut active, &mut zoomed, &mut make_pane);
-        let mut cursor = t.cursor();
-
-        self.active = 0;
-        if let Some(active) = active {
-            // Resolve the active pane to its index
-            let mut index = 0;
-            loop {
-                if let Some(pane) = cursor.leaf_mut() {
-                    if active.pane_id() == pane.pane_id() {
-                        // Found it
-                        self.active = index;
-                        self.recency.tag(index);
-                        break;
-                    }
-                    index += 1;
-                }
-                match cursor.preorder_next() {
-                    Ok(c) => cursor = c,
-                    Err(c) => {
-                        // Didn't find it
-                        cursor = c;
-                        break;
-                    }
-                }
-            }
-        }
-        self.pane.replace(cursor.tree());
-        self.zoomed = zoomed;
-        self.size = size;
-
-        self.resize(size);
-
-        log::debug!(
-            "sync tab: {:#?} zoomed: {} {:#?}",
-            size,
-            self.zoomed.is_some(),
-            self.iter_panes()
-        );
-        assert!(self.pane.is_some());
-    }
-
-    fn codec_pane_tree(&mut self) -> PaneNode {
-        let mux = Mux::get();
-        let tab_id = self.id;
-        if mux.get_tab(tab_id).is_none() {
-            log::error!("no root window contains tab {}", tab_id);
-            return PaneNode::Empty;
-        }
-        let workspace = mux.root_window().get_workspace().to_string();
-
-        let active = self.get_active_pane();
-        let zoomed = self.zoomed.as_ref();
-        if let Some(root) = self.pane.as_ref() {
-            pane_tree(root, tab_id, active.as_ref(), zoomed, &workspace, 0, 0)
-        } else {
-            PaneNode::Empty
         }
     }
 
@@ -878,7 +696,7 @@ impl TabInner {
                 self.zoomed.replace(pane);
             }
         }
-        Mux::try_get().map(|mux| mux.notify(MuxNotification::TabResized(self.id)));
+        notify_mux(MuxNotification::TabResized(self.id));
     }
 
     fn contains_pane(&self, pane: PaneId) -> bool {
@@ -967,7 +785,7 @@ impl TabInner {
                 }
             }
         }
-        Mux::try_get().map(|mux| mux.notify(MuxNotification::TabResized(self.id)));
+        notify_mux(MuxNotification::TabResized(self.id));
     }
 
     fn iter_panes_impl(&mut self, respect_zoom_state: bool) -> Vec<PositionedPane> {
@@ -1149,7 +967,7 @@ impl TabInner {
             apply_sizes_from_splits(self.pane.as_mut().unwrap(), &size);
         }
 
-        Mux::try_get().map(|mux| mux.notify(MuxNotification::TabResized(self.id)));
+        notify_mux(MuxNotification::TabResized(self.id));
     }
 
     fn apply_pane_size(&mut self, pane_size: TerminalSize, cursor: &mut Cursor) {
@@ -1225,7 +1043,7 @@ impl TabInner {
                 self.size = size;
             }
         }
-        Mux::try_get().map(|mux| mux.notify(MuxNotification::TabResized(self.id)));
+        notify_mux(MuxNotification::TabResized(self.id));
     }
 
     fn resize_split_by(&mut self, split_index: usize, delta: isize) {
@@ -1258,7 +1076,7 @@ impl TabInner {
         // Now cursor is looking at the split
         self.adjust_node_at_cursor(&mut cursor, delta);
         self.cascade_size_from_cursor(cursor);
-        Mux::try_get().map(|mux| mux.notify(MuxNotification::TabResized(self.id)));
+        notify_mux(MuxNotification::TabResized(self.id));
     }
 
     fn adjust_node_at_cursor(&mut self, cursor: &mut Cursor, delta: isize) {
@@ -1341,7 +1159,7 @@ impl TabInner {
                 }
             }
         }
-        Mux::try_get().map(|mux| mux.notify(MuxNotification::TabResized(self.id)));
+        notify_mux(MuxNotification::TabResized(self.id));
     }
 
     fn adjust_pane_size(&mut self, direction: SessionDirection, amount: usize) {
@@ -1408,7 +1226,7 @@ impl TabInner {
 
     fn activate_pane_direction(&mut self, direction: SessionDirection) {
         if self.zoomed.is_some() {
-            if !configuration().unzoom_on_switch_pane {
+            if !self.unzoom_on_switch_pane {
                 return;
             }
             self.toggle_zoom();
@@ -1416,10 +1234,14 @@ impl TabInner {
         if let Some(panel_idx) = self.get_pane_direction(direction, false) {
             self.set_active_idx(panel_idx);
         }
-        Mux::get().notify(MuxNotification::WindowInvalidated);
+        notify_mux(MuxNotification::WindowInvalidated);
     }
 
-    fn get_pane_direction(&mut self, direction: SessionDirection, ignore_zoom: bool) -> Option<usize> {
+    fn get_pane_direction(
+        &mut self,
+        direction: SessionDirection,
+        ignore_zoom: bool,
+    ) -> Option<usize> {
         let panes = if ignore_zoom {
             self.iter_panes_ignoring_zoom()
         } else {
@@ -1525,7 +1347,7 @@ impl TabInner {
     }
 
     fn prune_dead_panes(&mut self) -> bool {
-        let mux = Mux::get();
+        let mux = try_global_mux().expect("host mux must exist while pruning dead panes");
         !self
             .remove_pane_if(
                 |_, pane| {
@@ -1545,12 +1367,6 @@ impl TabInner {
                 },
                 true,
             )
-            .is_empty()
-    }
-
-    fn kill_pane(&mut self, pane_id: PaneId) -> bool {
-        !self
-            .remove_pane_if(|_, pane| pane.pane_id() == pane_id, true)
             .is_empty()
     }
 
@@ -1659,13 +1475,9 @@ impl TabInner {
 
         if !dead_panes.is_empty() && kill {
             let to_kill: Vec<_> = dead_panes.iter().map(|p| p.pane_id()).collect();
-            promise::spawn::spawn_into_main_thread(async move {
-                let mux = Mux::get();
-                for pane_id in to_kill.into_iter() {
-                    mux.remove_pane(pane_id);
-                }
-            })
-            .detach();
+            for pane_id in to_kill.into_iter() {
+                remove_pane_on_main_thread(pane_id);
+            }
         }
         dead_panes
     }
@@ -1716,7 +1528,7 @@ impl TabInner {
         }
 
         if self.zoomed.is_some() {
-            if !configuration().unzoom_on_switch_pane {
+            if !self.unzoom_on_switch_pane {
                 return;
             }
             self.toggle_zoom();
@@ -1734,17 +1546,16 @@ impl TabInner {
     }
 
     fn advise_focus_change(&mut self, prior: Option<Arc<dyn Pane>>) {
-        let mux = Mux::get();
         let current = self.get_active_pane();
         match (prior, current) {
             (Some(prior), Some(current)) if prior.pane_id() != current.pane_id() => {
                 prior.focus_changed(false);
                 current.focus_changed(true);
-                mux.notify(MuxNotification::PaneFocused(current.pane_id()));
+                notify_mux(MuxNotification::PaneFocused(current.pane_id()));
             }
             (None, Some(current)) => {
                 current.focus_changed(true);
-                mux.notify(MuxNotification::PaneFocused(current.pane_id()));
+                notify_mux(MuxNotification::PaneFocused(current.pane_id()));
             }
             (Some(prior), None) => {
                 prior.focus_changed(false);
@@ -2071,45 +1882,14 @@ pub enum PaneNode {
     Leaf(PaneEntry),
 }
 
-impl PaneNode {
-    pub fn into_tree(self) -> bintree::Tree<PaneEntry, SplitDirectionAndSize> {
-        match self {
-            PaneNode::Empty => bintree::Tree::Empty,
-            PaneNode::Split { left, right, node } => bintree::Tree::Node {
-                left: Box::new((*left).into_tree()),
-                right: Box::new((*right).into_tree()),
-                data: Some(node),
-            },
-            PaneNode::Leaf(e) => bintree::Tree::Leaf(e),
-        }
-    }
-
-    pub fn root_size(&self) -> Option<TerminalSize> {
-        match self {
-            PaneNode::Empty => None,
-            PaneNode::Split { node, .. } => Some(node.size()),
-            PaneNode::Leaf(entry) => Some(entry.size),
-        }
-    }
-
-    pub fn tab_id(&self) -> Option<TabId> {
-        match self {
-            PaneNode::Empty => None,
-            PaneNode::Split { left, right, .. } => match left.tab_id() {
-                Some(tab_id) => Some(tab_id),
-                None => right.tab_id(),
-            },
-            PaneNode::Leaf(entry) => Some(entry.tab_id),
-        }
-    }
-}
+impl PaneNode {}
 
 /// This type is used directly by the codec, take care to bump
 /// the codec version if you change this
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
 pub struct PaneEntry {
-    pub tab_id: TabId,
-    pub pane_id: PaneId,
+    tab_id: TabId,
+    pane_id: PaneId,
     pub title: String,
     pub size: TerminalSize,
     pub working_dir: Option<SerdeUrl>,

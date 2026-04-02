@@ -164,9 +164,9 @@ pub struct SelectionRange {
     pub end: SelectionCoordinate,
 }
 
-fn is_double_click_word(s: &str) -> bool {
+fn is_double_click_word(boundary: &str, s: &str) -> bool {
     match s.chars().count() {
-        1 => !config::configuration().selection_word_boundary.contains(s),
+        1 => !boundary.contains(s),
         0 => false,
         _ => true,
     }
@@ -237,7 +237,11 @@ impl SelectionRange {
     }
 
     /// Computes the selection range for the word around the specified coords
-    pub fn word_around(start: SelectionCoordinate, pane: &dyn OverlayPane) -> Self {
+    pub fn word_around(
+        start: SelectionCoordinate,
+        pane: &dyn OverlayPane,
+        selection_word_boundary: &str,
+    ) -> Self {
         for logical in pane.get_logical_lines(start.y..start.y + 1) {
             if !logical.contains_y(start.y) {
                 continue;
@@ -245,10 +249,9 @@ impl SelectionRange {
 
             if let SelectionX::Cell(start_x) = start.x {
                 let start_idx = logical.xy_to_logical_x(start_x, start.y);
-                return match logical
-                    .logical
-                    .compute_double_click_range(start_idx, is_double_click_word)
-                {
+                return match logical.logical.compute_double_click_range(start_idx, |s| {
+                    is_double_click_word(selection_word_boundary, s)
+                }) {
                     DoubleClickRange::RangeWithWrap(click_range)
                     | DoubleClickRange::Range(click_range) => {
                         let (start_y, start_x) =

@@ -8,10 +8,7 @@ pub enum StartupRecipeStep {
     TypeText(String),
     Enter,
     SleepMs(u64),
-    WaitFor {
-        needle: String,
-        timeout_ms: u64,
-    },
+    WaitFor { needle: String, timeout_ms: u64 },
 }
 
 const DEFAULT_WAIT_TIMEOUT_MS: u64 = 10_000;
@@ -172,7 +169,8 @@ impl RuntimeState {
                         &wait_baseline,
                         needle,
                         *timeout_ms,
-                    )? else {
+                    )?
+                    else {
                         return Ok(());
                     };
                     wait_baseline = current_tail;
@@ -196,9 +194,7 @@ impl RuntimeState {
             }
 
             let remaining = deadline.saturating_duration_since(now);
-            std::thread::sleep(remaining.min(Duration::from_millis(
-                STARTUP_RECIPE_WAIT_POLL_MS,
-            )));
+            std::thread::sleep(remaining.min(Duration::from_millis(STARTUP_RECIPE_WAIT_POLL_MS)));
         }
     }
 
@@ -279,7 +275,10 @@ mod tests {
     #[test]
     fn parse_plain_command_as_single_run_line() {
         let steps = parse_startup_recipe("claude").expect("parse recipe");
-        assert_eq!(steps, vec![StartupRecipeStep::RunLine("claude".to_string())]);
+        assert_eq!(
+            steps,
+            vec![StartupRecipeStep::RunLine("claude".to_string())]
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 //! Configuration for the gui portion of the terminal
 
-use anyhow::{anyhow, bail, Context, Error};
+use anyhow::{bail, Context, Error};
 use engine_dynamic::{FromDynamic, FromDynamicOptions, ToDynamic, UnknownFieldAction, Value};
 use engine_term::UnicodeVersion;
 use lazy_static::lazy_static;
@@ -36,9 +36,7 @@ mod scheme_data;
 mod serial;
 mod ssh;
 mod terminal;
-mod runtime_options;
 mod units;
-mod unix;
 mod version;
 pub mod window;
 
@@ -54,9 +52,7 @@ pub use keys::*;
 pub use serial::*;
 pub use ssh::*;
 pub use terminal::*;
-pub use runtime_options::*;
 pub use units::*;
-pub use unix::*;
 pub use version::*;
 
 type ErrorCallback = fn(&str);

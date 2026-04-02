@@ -1,32 +1,47 @@
-mod spawn_target;
 pub(crate) mod execution_bridge;
 pub(crate) mod session_engine;
 mod session_host;
 mod session_pane;
+mod spawn_target;
 
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::ffi::OsStr;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
+use std::sync::{Arc, Mutex};
 
 use crate::chatminal_runtime::ChatminalRuntimeClient;
 use anyhow::anyhow;
-use chatminal_runtime::RuntimeState;
+use chatminal_runtime::{RuntimeId, RuntimeState, SessionTerminalHandle};
 use config::keyassignment::{RotationDirection, SessionDirection};
 use config::ConfigHandle;
 use engine_dynamic::Value;
-use engine_term::TerminalSize;
+use engine_term::{ClipboardSelection, TerminalSize};
 use host_runtime::activity::Activity;
 use host_runtime::client::ClientId;
-use host_runtime::spawn_target::SpawnTarget;
 use host_runtime::pane::Pane;
-use host_runtime::window::{Window as MuxWindow, WindowId as EngineWindowId, ROOT_WINDOW_ID};
-use host_runtime::{Mux, MuxNotification};
+use host_runtime::spawn_target::SpawnTarget;
+use host_runtime::window::{Window as MuxWindow, WindowId as EngineWindowId};
+use host_runtime::{HostRuntimeNotification, MuxHandle};
 use portable_pty::CommandBuilder;
 use session_engine::TerminalInstanceId;
 
 pub(crate) use execution_bridge::DesktopRuntimeExecutionBridge;
-pub(crate) use session_host::{get_or_init_session_host, DesktopSessionHost};
+pub(crate) use session_host::{
+    get_or_init_session_host, legacy_activate_runtime_entry, legacy_active_frontend_client,
+    legacy_active_render_scope_id, legacy_active_workspace_for_client,
+    legacy_build_initial_host_mux, legacy_create_serial_spawn_target,
+    legacy_focus_terminal_handle_by_id, legacy_frontend_resolve_focused_pane,
+    legacy_frontend_resolve_pane, legacy_has_panes_in_workspace,
+    legacy_host_window_contains_render_scope, legacy_host_workspace_name,
+    legacy_primary_spawn_target, legacy_record_input_for_current_identity,
+    legacy_remove_runtime_entry_scope, legacy_resolve_public_pane_fallback,
+    legacy_set_active_workspace_for_client, legacy_set_primary_spawn_target,
+    legacy_shutdown_host_mux, legacy_spawn_host_runtime_entry, legacy_spawn_local_shell_runner,
+    legacy_with_window, legacy_with_window_mut, legacy_workspace_has_windows,
+    legacy_workspace_is_empty, legacy_workspace_names, DesktopSessionHost,
+};
 pub(crate) use session_pane::ChatminalSessionPane;
 
 pub(crate) const CHATMINAL_RUNTIME_SPAWN_TARGET_NAME: &str = "chatminal-runtime";
@@ -81,12 +96,10 @@ pub(crate) struct EmbeddedRuntime {
 }
 
 pub(crate) type FrontendClientHandle = Arc<ClientId>;
-pub(crate) type RuntimeNotification = MuxNotification;
 pub(crate) type RuntimeWindow = MuxWindow;
 pub(crate) type PrimaryHostWindowId = EngineWindowId;
-pub(crate) type HostMux = Mux;
-pub(crate) use host_runtime::spawn_target::SpawnTarget as HostSpawnTarget;
 pub(crate) use host_runtime::pane::Pane as HostTerminal;
+pub(crate) use host_runtime::spawn_target::SpawnTarget as HostSpawnTarget;
 pub(crate) type HostTerminalHandle = usize;
 pub(crate) type HostCachePolicy = host_runtime::pane::CachePolicy;
 pub(crate) type HostCloseReason = host_runtime::pane::CloseReason;
@@ -97,7 +110,7 @@ pub(crate) type HostRenderableDimensions = host_runtime::renderable::RenderableD
 pub(crate) type HostStableCursorPosition = host_runtime::renderable::StableCursorPosition;
 pub(crate) type HostRenderScope = host_runtime::tab::Tab;
 
-pub(crate) use host_runtime::pane::alloc_pane_id as alloc_host_terminal_handle;
+pub(crate) use host_runtime::alloc_terminal_handle_value as alloc_host_terminal_handle;
 pub(crate) use host_runtime::pane::impl_get_logical_lines_via_get_lines as host_impl_get_logical_lines_via_get_lines;
 pub(crate) use host_runtime::renderable::{
     terminal_for_each_logical_line_in_stable_range_mut as host_terminal_for_each_logical_line_in_stable_range_mut,
@@ -110,13 +123,13 @@ pub(crate) use host_runtime::renderable::{
 
 #[derive(Clone, Debug)]
 pub(crate) struct FrontendResolvedPane {
-    pub runtime_entry_id: u64,
+    pub runtime_id: RuntimeId,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct FrontendFocusedPane {
-    pub runtime_entry_id: u64,
-    pub pane_id: u64,
+    pub runtime_id: RuntimeId,
+    pub terminal_handle: SessionTerminalHandle,
 }
 
 #[derive(Clone, Debug)]
@@ -126,8 +139,160 @@ pub(crate) struct LauncherSessionEntry {
     pub pane_count: Option<usize>,
 }
 
+#[derive(Clone, Debug)]
+#[allow(dead_code)]
+pub(crate) enum RuntimeNotification {
+    PaneOutput(SessionTerminalHandle),
+    PaneAdded(SessionTerminalHandle),
+    PaneRemoved(SessionTerminalHandle),
+    WindowInvalidated,
+    WindowWorkspaceChanged,
+    ActiveWorkspaceChanged(FrontendClientHandle),
+    Alert {
+        pane_id: SessionTerminalHandle,
+        alert: engine_term::Alert,
+    },
+    Empty,
+    AssignClipboard {
+        pane_id: SessionTerminalHandle,
+        selection: ClipboardSelection,
+        clipboard: Option<String>,
+    },
+    SaveToDownloads {
+        name: Option<String>,
+        data: Arc<Vec<u8>>,
+    },
+    TabAddedToWindow {
+        runtime_id: RuntimeId,
+    },
+    PaneFocused(SessionTerminalHandle),
+    TabResized(RuntimeId),
+    TabTitleChanged {
+        runtime_id: RuntimeId,
+        title: String,
+    },
+    WindowTitleChanged {
+        title: String,
+    },
+    WorkspaceRenamed {
+        old_workspace: String,
+        new_workspace: String,
+    },
+}
+
+impl From<HostRuntimeNotification> for RuntimeNotification {
+    fn from(notification: HostRuntimeNotification) -> Self {
+        match notification {
+            HostRuntimeNotification::PaneOutput(pane_id) => Self::PaneOutput(pane_id),
+            HostRuntimeNotification::PaneAdded(pane_id) => Self::PaneAdded(pane_id),
+            HostRuntimeNotification::PaneRemoved(pane_id) => Self::PaneRemoved(pane_id),
+            HostRuntimeNotification::WindowInvalidated => Self::WindowInvalidated,
+            HostRuntimeNotification::WindowWorkspaceChanged => Self::WindowWorkspaceChanged,
+            HostRuntimeNotification::ActiveWorkspaceChanged(client_id) => {
+                Self::ActiveWorkspaceChanged(client_id)
+            }
+            HostRuntimeNotification::Alert { pane_id, alert } => Self::Alert { pane_id, alert },
+            HostRuntimeNotification::Empty => Self::Empty,
+            HostRuntimeNotification::AssignClipboard {
+                pane_id,
+                selection,
+                clipboard,
+            } => Self::AssignClipboard {
+                pane_id,
+                selection,
+                clipboard,
+            },
+            HostRuntimeNotification::SaveToDownloads { name, data } => {
+                Self::SaveToDownloads { name, data }
+            }
+            HostRuntimeNotification::TabAddedToWindow { runtime_id } => {
+                Self::TabAddedToWindow { runtime_id }
+            }
+            HostRuntimeNotification::PaneFocused(pane_id) => Self::PaneFocused(pane_id),
+            HostRuntimeNotification::TabResized(runtime_id) => Self::TabResized(runtime_id),
+            HostRuntimeNotification::TabTitleChanged { runtime_id, title } => {
+                Self::TabTitleChanged { runtime_id, title }
+            }
+            HostRuntimeNotification::WindowTitleChanged { title } => {
+                Self::WindowTitleChanged { title }
+            }
+            HostRuntimeNotification::WorkspaceRenamed {
+                old_workspace,
+                new_workspace,
+            } => Self::WorkspaceRenamed {
+                old_workspace,
+                new_workspace,
+            },
+        }
+    }
+}
+
+type RuntimeNotificationSubscriber = Box<dyn Fn(RuntimeNotification) -> bool + Send + Sync>;
+
+struct RuntimeNotificationHub {
+    subscribers: Mutex<HashMap<usize, RuntimeNotificationSubscriber>>,
+}
+
+impl RuntimeNotificationHub {
+    fn subscribe<F>(&self, subscriber: F)
+    where
+        F: Fn(RuntimeNotification) -> bool + 'static + Send + Sync,
+    {
+        let subscriber_id = RUNTIME_NOTIFICATION_SUBSCRIBER_ID.fetch_add(1, Ordering::Relaxed);
+        self.subscribers
+            .lock()
+            .unwrap()
+            .insert(subscriber_id, Box::new(subscriber));
+    }
+
+    fn publish(&self, notification: RuntimeNotification) {
+        self.subscribers
+            .lock()
+            .unwrap()
+            .retain(|_, subscriber| subscriber(notification.clone()));
+    }
+}
+
+static RUNTIME_NOTIFICATION_SUBSCRIBER_ID: AtomicUsize = AtomicUsize::new(1);
+static RUNTIME_NOTIFICATION_HUB: OnceLock<RuntimeNotificationHub> = OnceLock::new();
+
 static EMBEDDED_RUNTIME: OnceLock<Arc<EmbeddedRuntime>> = OnceLock::new();
 static PRIMARY_HOST_WINDOW_ID: OnceLock<EngineWindowId> = OnceLock::new();
+
+fn runtime_notification_hub() -> &'static RuntimeNotificationHub {
+    RUNTIME_NOTIFICATION_HUB.get_or_init(|| RuntimeNotificationHub {
+        subscribers: Mutex::new(HashMap::new()),
+    })
+}
+
+pub(crate) fn subscribe_desktop_runtime_notifications<F>(subscriber: F)
+where
+    F: Fn(RuntimeNotification) -> bool + 'static + Send + Sync,
+{
+    runtime_notification_hub().subscribe(subscriber);
+}
+
+pub(crate) fn publish_runtime_notification(notification: RuntimeNotification) {
+    runtime_notification_hub().publish(notification);
+}
+
+pub(crate) fn publish_runtime_notification_from_any_thread(notification: RuntimeNotification) {
+    if !promise::spawn::is_scheduler_configured() {
+        publish_runtime_notification(notification);
+        return;
+    }
+    promise::spawn::spawn_into_main_thread(async move {
+        publish_runtime_notification(notification);
+    })
+    .detach();
+}
+
+pub(crate) fn bridge_mux_notifications(mux_handle: &Arc<MuxHandle>) {
+    mux_handle.subscribe(|notification| {
+        publish_runtime_notification(notification.into());
+        true
+    });
+}
 
 impl EmbeddedRuntime {
     pub(crate) fn session_engine_shared(&self) -> Arc<session_engine::SessionEngineShared> {
@@ -154,13 +319,6 @@ impl EmbeddedRuntime {
 pub(crate) fn runtime_client() -> Result<ChatminalRuntimeClient, String> {
     let runtime = EmbeddedRuntime::global().map(Arc::clone)?;
     ChatminalRuntimeClient::new(runtime)
-}
-
-pub(crate) fn native_session_command(session_id: &str) -> Result<CommandBuilder, String> {
-    let launch = runtime_client()?.session_launch_spec(session_id)?;
-    let mut command = CommandBuilder::new(launch.shell);
-    command.cwd(launch.cwd);
-    Ok(command)
 }
 
 pub(crate) fn parse_proxy_session_id(builder: &CommandBuilder) -> Option<String> {
@@ -206,14 +364,22 @@ fn terminal_handle_terminal_instance_id(pane: &dyn Pane) -> Option<TerminalInsta
 }
 
 fn terminal_handle_matches_public_id(pane: &dyn Pane, public_id: u64) -> bool {
-    pane.pane_id() as u64 == public_id
+    host_runtime::terminal_handle_for_pane(pane).as_u64() == public_id
         || terminal_handle_terminal_instance_id(pane)
             .map(|terminal_instance_id| terminal_instance_id.as_u64() == public_id)
             .unwrap_or(false)
 }
 
 pub(crate) fn host_active_render_scope_id() -> Option<u64> {
-    Mux::get().root_active_tab().map(|tab| tab.tab_id() as u64)
+    crate::chatminal_runtime::desktop_current_active_session_id()
+        .as_deref()
+        .and_then(crate::chatminal_runtime::desktop_render_state_for_session)
+        .map(|state| state.render_target_id().as_u64())
+        .or_else(|| {
+            crate::chatminal_runtime::desktop_session_host()
+                .and_then(|host| host.active_render_scope_id())
+        })
+        .or_else(legacy_active_render_scope_id)
 }
 
 fn primary_host_window_engine_id() -> EngineWindowId {
@@ -223,9 +389,7 @@ fn primary_host_window_engine_id() -> EngineWindowId {
 }
 
 pub(crate) fn host_render_scope_capability(render_scope_id: u64) -> Option<Arc<HostRenderScope>> {
-    usize::try_from(render_scope_id)
-        .ok()
-        .and_then(host_runtime::runtime_entry_by_id)
+    host_runtime::runtime_entry_by_runtime_id(RuntimeId::new(render_scope_id))
 }
 
 fn with_host_render_scope_by_id<R, F>(render_scope_id: u64, func: F) -> Option<R>
@@ -237,7 +401,14 @@ where
 }
 
 pub(crate) fn host_render_scope_size(render_scope_id: u64) -> Option<TerminalSize> {
-    with_host_render_scope_by_id(render_scope_id, |render_scope| render_scope.get_size())
+    if let Some(session_id) = crate::chatminal_runtime::desktop_session_id_for_render_target(
+        chatminal_runtime::SessionRenderTargetId::new(render_scope_id),
+    ) {
+        return crate::chatminal_runtime::desktop_render_state_for_session(&session_id)
+            .map(|state| state.terminal_size);
+    }
+    host_runtime::runtime_entry_info_by_runtime_id(RuntimeId::new(render_scope_id))
+        .map(|info| info.size)
 }
 
 pub(crate) fn host_render_scope_can_close_without_prompting(
@@ -419,57 +590,83 @@ pub(crate) fn overlay_split_layouts(
 }
 
 pub(crate) fn terminal_handle_arc(pane_id: HostTerminalHandle) -> Option<Arc<dyn HostTerminal>> {
-    host_runtime::terminal_by_id(pane_id)
+    if let Some(host) = crate::chatminal_runtime::desktop_session_host() {
+        if let Some(pane) = host.pane_for_terminal_handle(pane_id) {
+            return Some(pane);
+        }
+    }
+    host_runtime::terminal_by_handle(SessionTerminalHandle::new(pane_id as u64))
 }
 
 pub(crate) fn terminal_handle_arc_by_public_id(pane_id: u64) -> Option<Arc<dyn HostTerminal>> {
+    if let Some(host) = crate::chatminal_runtime::desktop_session_host() {
+        if let Some(pane) = host.pane_for_public_id(pane_id) {
+            return Some(pane);
+        }
+    }
     let pane_id = HostTerminalHandle::try_from(pane_id).ok()?;
     terminal_handle_arc(pane_id)
 }
 
 pub(crate) fn remove_terminal_handle(pane_id: HostTerminalHandle) {
-    Mux::get().remove_pane(pane_id);
+    if let Some(host) = crate::chatminal_runtime::desktop_session_host() {
+        host.remove_terminal_handle(pane_id);
+        return;
+    }
+    let _ = host_runtime::remove_terminal_handle(SessionTerminalHandle::new(pane_id as u64));
 }
 
 pub(crate) fn with_host_window<R, F>(func: F) -> Option<R>
 where
     F: FnOnce(&MuxWindow) -> R,
 {
-    let mux = Mux::get();
-    let window = mux.root_window();
-    Some(func(&window))
+    if let Some(host) = crate::chatminal_runtime::desktop_session_host() {
+        return host.with_window(func);
+    }
+    legacy_with_window(func)
 }
 
 pub(crate) fn with_host_window_mut<R, F>(func: F) -> Option<R>
 where
     F: FnOnce(&mut MuxWindow) -> R,
 {
-    let mux = Mux::get();
-    let mut window = mux.root_window_mut();
-    Some(func(&mut window))
+    if let Some(host) = crate::chatminal_runtime::desktop_session_host() {
+        return host.with_window_mut(func);
+    }
+    legacy_with_window_mut(func)
 }
 
 pub(crate) fn remove_runtime_entry_scope(render_scope_id: u64) {
-    Mux::get().remove_tab(render_scope_id as _);
+    if crate::chatminal_runtime::desktop_close_view_or_session_for_render_target(
+        chatminal_runtime::SessionRenderTargetId::new(render_scope_id),
+    ) {
+        return;
+    }
+    if let Some(host) = crate::chatminal_runtime::desktop_session_host() {
+        host.remove_runtime_entry_scope(render_scope_id);
+        return;
+    }
+    legacy_remove_runtime_entry_scope(render_scope_id);
 }
 
 pub(crate) fn host_window_exists() -> bool {
-    with_host_window(|_| ()).is_some()
+    crate::chatminal_runtime::desktop_session_host()
+        .map(|host| host.window_exists())
+        .unwrap_or_else(|| with_host_window(|_| ()).is_some())
 }
 
 pub(crate) fn host_window_contains_render_scope(render_scope_id: u64) -> bool {
-    Mux::get().get_tab(render_scope_id as _).is_some()
+    crate::chatminal_runtime::desktop_session_host().is_some_and(|host| {
+        host.render_state_for_runtime(RuntimeId::new(render_scope_id))
+            .is_some()
+            || host.host_window_contains_render_scope(render_scope_id)
+    }) || legacy_host_window_contains_render_scope(render_scope_id)
 }
 
 pub(crate) fn host_workspace_name() -> String {
-    Mux::get().active_workspace().to_string()
-}
-
-pub(crate) fn set_host_workspace(name: &str) {
-    Mux::get().set_active_workspace(name);
-    let _ = with_host_window_mut(|window| {
-        window.set_workspace(name);
-    });
+    crate::chatminal_runtime::desktop_session_host()
+        .map(|host| host.host_workspace_name())
+        .unwrap_or_else(legacy_host_workspace_name)
 }
 
 pub(crate) fn configured_default_workspace_name(config: &ConfigHandle) -> String {
@@ -481,21 +678,33 @@ pub(crate) fn configured_default_workspace_name(config: &ConfigHandle) -> String
 }
 
 pub(crate) fn host_workspace_has_windows(name: &str) -> bool {
-    with_host_window(|window| {
-        window.get_workspace() == name
-    })
-    .unwrap_or(false)
-}
-
-pub(crate) fn focus_terminal_handle(pane_id: HostTerminalHandle) -> bool {
-    Mux::get().focus_pane_and_containing_tab(pane_id).is_ok()
+    crate::chatminal_runtime::desktop_session_host()
+        .map(|host| host.workspace_has_windows(name))
+        .unwrap_or_else(|| legacy_workspace_has_windows(name))
 }
 
 pub(crate) fn record_host_focus_for_current_identity(pane_id: HostTerminalHandle) {
-    Mux::get().record_focus_for_current_identity(pane_id);
+    if let Some(host) = crate::chatminal_runtime::desktop_session_host() {
+        host.record_focus_for_current_identity(pane_id);
+        return;
+    }
+    let _ =
+        host_runtime::record_focus_for_terminal_handle(SessionTerminalHandle::new(pane_id as u64));
+}
+
+pub(crate) fn record_host_input_for_current_identity() {
+    if let Some(host) = crate::chatminal_runtime::desktop_session_host() {
+        host.record_input_for_current_identity();
+        return;
+    }
+    legacy_record_input_for_current_identity();
 }
 
 pub(crate) fn resize_host_window_tabs(size: TerminalSize) {
+    if let Some(host) = crate::chatminal_runtime::desktop_session_host() {
+        host.resize_window_tabs(size);
+        return;
+    }
     let _ = with_host_window(|window| {
         for tab in window.iter() {
             tab.resize(size);
@@ -504,10 +713,16 @@ pub(crate) fn resize_host_window_tabs(size: TerminalSize) {
 }
 
 pub(crate) fn host_window_initial_position() -> Option<config::GuiPosition> {
+    if let Some(host) = crate::chatminal_runtime::desktop_session_host() {
+        return host.host_window_initial_position();
+    }
     with_host_window(|window| window.get_initial_position().clone()).flatten()
 }
 
 pub(crate) fn active_host_runtime_entry_size() -> Option<TerminalSize> {
+    if let Some(host) = crate::chatminal_runtime::desktop_session_host() {
+        return host.active_runtime_entry_size();
+    }
     with_host_window(|window| {
         window
             .get_by_idx(window.get_active_idx())
@@ -519,12 +734,19 @@ pub(crate) fn active_host_runtime_entry_size() -> Option<TerminalSize> {
 
 pub(crate) fn subscribe_runtime_notifications<F>(subscriber: F)
 where
-    F: Fn(MuxNotification) -> bool + 'static + Send + Sync,
+    F: Fn(RuntimeNotification) -> bool + 'static + Send + Sync,
 {
-    Mux::get().subscribe(subscriber);
+    if let Some(host) = crate::chatminal_runtime::desktop_session_host() {
+        host.subscribe_notifications(subscriber);
+        return;
+    }
+    subscribe_desktop_runtime_notifications(subscriber);
 }
 
 pub(crate) fn resolved_window_title() -> Option<String> {
+    if let Some(host) = crate::chatminal_runtime::desktop_session_host() {
+        return host.resolved_window_title();
+    }
     with_host_window(|window| window.get_title().to_string())
 }
 
@@ -532,23 +754,17 @@ pub(crate) fn resolve_public_pane(
     host_terminal_handle: u64,
     terminal_instance_id: u64,
 ) -> Option<Arc<dyn HostTerminal>> {
-    HostTerminalHandle::try_from(host_terminal_handle)
-        .ok()
-        .and_then(host_runtime::terminal_by_id)
-        .or_else(|| {
-            HostTerminalHandle::try_from(terminal_instance_id)
-                .ok()
-                .and_then(host_runtime::terminal_by_id)
-        })
-        .or_else(|| {
-            Mux::try_get()?
-                .iter_panes()
-                .into_iter()
-                .find(|pane| terminal_handle_matches_public_id(&**pane, terminal_instance_id))
-        })
+    if let Some(host) = crate::chatminal_runtime::desktop_session_host() {
+        return host.resolve_public_pane_fallback(host_terminal_handle, terminal_instance_id);
+    }
+
+    legacy_resolve_public_pane_fallback(host_terminal_handle, terminal_instance_id)
 }
 
 pub(crate) fn launcher_sessions() -> Vec<LauncherSessionEntry> {
+    if let Some(host) = crate::chatminal_runtime::desktop_session_host() {
+        return host.launcher_sessions();
+    }
     with_host_window(|window| {
         window
             .iter()
@@ -574,14 +790,20 @@ pub(crate) fn launcher_sessions() -> Vec<LauncherSessionEntry> {
 }
 
 pub(crate) fn active_frontend_client() -> Option<FrontendClientHandle> {
-    Mux::get().active_identity()
+    crate::chatminal_runtime::desktop_session_host()
+        .and_then(|host| host.active_frontend_client())
+        .or_else(legacy_active_frontend_client)
 }
 
 pub(crate) fn subscribe_frontend_notifications<F>(subscriber: F)
 where
-    F: Fn(MuxNotification) -> bool + 'static + Send + Sync,
+    F: Fn(RuntimeNotification) -> bool + 'static + Send + Sync,
 {
-    Mux::get().subscribe(subscriber);
+    if let Some(host) = crate::chatminal_runtime::desktop_session_host() {
+        host.subscribe_notifications(subscriber);
+        return;
+    }
+    subscribe_desktop_runtime_notifications(subscriber);
 }
 
 pub(crate) fn primary_host_window_id() -> u64 {
@@ -593,52 +815,62 @@ pub(crate) fn primary_host_window_exists() -> bool {
 }
 
 pub(crate) fn active_workspace_for_client(client_id: &FrontendClientHandle) -> String {
-    Mux::get().active_workspace_for_client(client_id)
+    crate::chatminal_runtime::desktop_session_host()
+        .map(|host| host.active_workspace_for_client(client_id))
+        .unwrap_or_else(|| legacy_active_workspace_for_client(client_id))
 }
 
 pub(crate) fn set_active_workspace_for_client(client_id: &FrontendClientHandle, workspace: &str) {
-    Mux::get().set_active_workspace_for_client(client_id, workspace);
+    if let Some(host) = crate::chatminal_runtime::desktop_session_host() {
+        host.set_active_workspace_for_client(client_id, workspace);
+        return;
+    }
+    legacy_set_active_workspace_for_client(client_id, workspace);
 }
 
 pub(crate) fn workspace_is_empty(workspace: &str) -> bool {
-    Mux::get().is_workspace_empty(workspace)
+    crate::chatminal_runtime::desktop_session_host()
+        .map(|host| host.workspace_is_empty(workspace))
+        .unwrap_or_else(|| legacy_workspace_is_empty(workspace))
 }
 
 pub(crate) fn workspace_names() -> Vec<String> {
-    Mux::get().iter_workspaces()
+    crate::chatminal_runtime::desktop_session_host()
+        .map(|host| host.workspace_names())
+        .unwrap_or_else(legacy_workspace_names)
 }
 
-pub(crate) fn focus_terminal_handle_by_id(pane_id: u64) -> anyhow::Result<()> {
-    let pane_id =
-        HostTerminalHandle::try_from(pane_id).map_err(|_| anyhow!("invalid pane id {pane_id}"))?;
-    Mux::get()
-        .focus_pane_and_containing_tab(pane_id)
-        .map_err(anyhow::Error::from)
+pub(crate) fn focus_terminal_handle_by_id(pane_id: SessionTerminalHandle) -> anyhow::Result<()> {
+    if crate::chatminal_runtime::desktop_focus_session_terminal_handle(pane_id).is_some() {
+        return Ok(());
+    }
+    legacy_focus_terminal_handle_by_id(pane_id)
 }
 
-pub(crate) fn frontend_resolve_pane(pane_id: u64) -> Option<FrontendResolvedPane> {
-    let pane_id = HostTerminalHandle::try_from(pane_id).ok()?;
-    let runtime_entry_id = Mux::get().resolve_pane_id(pane_id)?;
-    Some(FrontendResolvedPane {
-        runtime_entry_id: runtime_entry_id as u64,
-    })
+pub(crate) fn frontend_resolve_pane(
+    pane_id: SessionTerminalHandle,
+) -> Option<FrontendResolvedPane> {
+    if let Some(host) = crate::chatminal_runtime::desktop_session_host() {
+        return host.frontend_resolve_pane_fallback(pane_id);
+    }
+
+    legacy_frontend_resolve_pane(pane_id)
 }
 
 pub(crate) fn frontend_resolve_focused_pane(
     client_id: &FrontendClientHandle,
 ) -> Option<FrontendFocusedPane> {
-    let (runtime_entry_id, pane_id) = Mux::get().resolve_focused_pane(client_id)?;
-    Some(FrontendFocusedPane {
-        runtime_entry_id: runtime_entry_id as u64,
-        pane_id: pane_id as u64,
-    })
+    if let Some(host) = crate::chatminal_runtime::desktop_session_host() {
+        return host.frontend_resolve_focused_pane_fallback(client_id);
+    }
+    legacy_frontend_resolve_focused_pane(client_id)
 }
 
 pub(crate) async fn spawn_local_shell_runner() -> anyhow::Result<Arc<dyn HostTerminal>> {
-    let (_runtime_entry, pane) = Mux::get()
-        .spawn_tab(None, None, TerminalSize::default(), None)
-        .await?;
-    Ok(pane)
+    if let Some(host) = crate::chatminal_runtime::desktop_session_host() {
+        return host.spawn_local_shell_runner().await;
+    }
+    legacy_spawn_local_shell_runner().await
 }
 
 pub(crate) async fn spawn_host_runtime_entry(
@@ -649,43 +881,36 @@ pub(crate) async fn spawn_host_runtime_entry(
     workspace: String,
     _position: Option<config::GuiPosition>,
 ) -> anyhow::Result<Arc<dyn HostTerminal>> {
-    set_host_workspace(&workspace);
-    let (_runtime_entry, pane) = Mux::get()
-        .spawn_tab(
-            command,
-            command_dir,
-            size,
-            current_pane_id.and_then(|pane_id| HostTerminalHandle::try_from(pane_id).ok()),
-        )
-        .await?;
-    Ok(pane)
+    if let Some(host) = crate::chatminal_runtime::desktop_session_host() {
+        return host
+            .spawn_host_runtime_entry(command, command_dir, size, current_pane_id, workspace)
+            .await;
+    }
+    legacy_spawn_host_runtime_entry(command, command_dir, size, current_pane_id, workspace).await
 }
 
 pub(crate) fn set_host_spawn_target(spawn_target: &HostSpawnTargetHandle) {
-    Mux::get().set_primary_spawn_target(spawn_target);
+    if let Some(host) = crate::chatminal_runtime::desktop_session_host() {
+        host.set_primary_spawn_target(spawn_target);
+        return;
+    }
+    legacy_set_primary_spawn_target(spawn_target);
 }
 
 pub(crate) fn primary_host_spawn_target() -> HostSpawnTargetHandle {
-    Mux::get().primary_spawn_target()
+    if let Some(host) = crate::chatminal_runtime::desktop_session_host() {
+        return host.primary_spawn_target();
+    }
+    legacy_primary_spawn_target()
 }
 pub(crate) fn build_initial_host_mux(
     config: &ConfigHandle,
     default_workspace_name: Option<&str>,
 ) -> anyhow::Result<()> {
-    let desktop_spawn_target: HostSpawnTargetHandle =
-        Arc::new(spawn_target::DesktopSpawnTarget::new_local()?);
-    let mux = Arc::new(Mux::new(Some(desktop_spawn_target)));
-    Mux::set_mux(&mux);
-    let client_id = Arc::new(ClientId::new());
-    mux.register_client(client_id.clone());
-    mux.replace_identity(Some(client_id));
-
-    let workspace = default_workspace_name
-        .map(str::to_string)
-        .unwrap_or_else(|| configured_default_workspace_name(config));
-    mux.set_active_workspace(&workspace);
-    let _ = PRIMARY_HOST_WINDOW_ID.set(ROOT_WINDOW_ID);
-    Ok(())
+    if let Some(host) = crate::chatminal_runtime::desktop_session_host() {
+        return host.build_initial_host_mux(config, default_workspace_name);
+    }
+    legacy_build_initial_host_mux(config, default_workspace_name)
 }
 
 pub(crate) fn host_activity_count() -> usize {
@@ -703,46 +928,43 @@ pub(crate) fn show_host_configuration_error_message(err: &str) {
 pub(crate) fn create_serial_spawn_target(
     serial_target: config::SerialTarget,
 ) -> anyhow::Result<HostSpawnTargetHandle> {
-    Ok(Arc::new(spawn_target::DesktopSpawnTarget::new_serial(
-        serial_target,
-    )?))
+    if let Some(host) = crate::chatminal_runtime::desktop_session_host() {
+        return host.create_serial_spawn_target(serial_target);
+    }
+    legacy_create_serial_spawn_target(serial_target)
 }
 
 pub(crate) fn shutdown_host_mux() {
-    Mux::shutdown();
+    if let Some(host) = crate::chatminal_runtime::desktop_session_host() {
+        host.shutdown_host_mux();
+        return;
+    }
+    legacy_shutdown_host_mux();
 }
 
 pub(crate) fn activate_host_runtime_entry(render_scope_id: u64) -> anyhow::Result<()> {
-    let render_scope_id = usize::try_from(render_scope_id)
-        .map_err(|_| anyhow!("invalid runtime entry id {render_scope_id}"))?;
-    let mux = Mux::get();
-    let mut window = mux.root_window_mut();
-    let tab_idx = window.idx_by_id(render_scope_id).ok_or_else(|| {
-        anyhow!("runtime entry {render_scope_id} not attached to root window")
-    })?;
-    window.set_active_without_saving(tab_idx);
-    Ok(())
+    if let Some(session_id) = crate::chatminal_runtime::desktop_session_id_for_render_target(
+        chatminal_runtime::SessionRenderTargetId::new(render_scope_id),
+    ) {
+        let size = crate::chatminal_runtime::desktop_render_state_for_session(&session_id)
+            .map(|state| state.terminal_size)
+            .ok_or_else(|| {
+                anyhow!("missing render state for session render target {render_scope_id}")
+            })?;
+        crate::chatminal_runtime::desktop_activate_session(&session_id, None, size)
+            .ok_or_else(|| anyhow!("failed to activate session render target {render_scope_id}"))?;
+        return Ok(());
+    }
+
+    if let Some(host) = crate::chatminal_runtime::desktop_session_host() {
+        return host.activate_runtime_entry(render_scope_id);
+    }
+    legacy_activate_runtime_entry(render_scope_id)
 }
 
 pub(crate) fn host_has_panes_in_workspace(workspace: Option<&str>) -> bool {
-    let mux = Mux::get();
-    if mux.iter_panes().is_empty() {
-        return false;
+    if let Some(host) = crate::chatminal_runtime::desktop_session_host() {
+        return host.has_panes_in_workspace(workspace);
     }
-    let Some(workspace) = workspace else {
-        return true;
-    };
-    if !host_workspace_has_windows(workspace) {
-        return false;
-    }
-    with_host_window(|window| {
-        window.iter().any(|runtime_entry| {
-            runtime_entry
-                .iter_panes_ignoring_zoom()
-                .iter()
-                .next()
-                .is_some()
-        })
-    })
-    .unwrap_or(false)
+    legacy_has_panes_in_workspace(workspace)
 }

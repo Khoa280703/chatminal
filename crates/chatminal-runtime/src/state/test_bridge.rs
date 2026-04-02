@@ -2,20 +2,22 @@
 // Avoids the session_engine dev-dependency diamond problem.
 // Used by runtime unit tests that exercise native session execution.
 
-use std::io::{Read, Write};
 use std::collections::HashMap;
+use std::io::{Read, Write};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use portable_pty::{CommandBuilder, MasterPty, NativePtySystem, PtySize, PtySystem};
 
+use crate::RuntimeState;
 use crate::api::{RuntimeSessionBridgeAction, RuntimeSessionLookup};
 use crate::session::{InputWriteStats, SessionEvent, WriteInputError};
-use crate::state::runtime_bridge::{RuntimeExecutionAdapter, RuntimeHandle, RuntimeSessionHandleTrait};
+use crate::state::runtime_bridge::{
+    RuntimeExecutionAdapter, RuntimeHandle, RuntimeSessionHandleTrait,
+};
 use crate::workspace_ids::{RuntimeId, TerminalInstanceId};
 use crate::workspace_layout::WorkspaceLayoutRegistry;
-use crate::RuntimeState;
 
 // ─── TestSessionHandle ───────────────────────────────────────────────────────
 // Wraps master in Mutex to satisfy Sync bound on RuntimeSessionHandleTrait.
@@ -40,7 +42,10 @@ impl RuntimeSessionHandleTrait for TestSessionHandle {
         if self.closed {
             return Err(WriteInputError::Closing);
         }
-        let master = self.master.lock().map_err(|_| WriteInputError::Disconnected)?;
+        let master = self
+            .master
+            .lock()
+            .map_err(|_| WriteInputError::Disconnected)?;
         let mut writer = master
             .take_writer()
             .map_err(|_| WriteInputError::Disconnected)?;
@@ -51,7 +56,10 @@ impl RuntimeSessionHandleTrait for TestSessionHandle {
     }
 
     fn resize(&mut self, cols: usize, rows: usize) -> Result<(), String> {
-        let master = self.master.lock().map_err(|e| format!("lock master: {e}"))?;
+        let master = self
+            .master
+            .lock()
+            .map_err(|e| format!("lock master: {e}"))?;
         master
             .resize(PtySize {
                 rows: rows as u16,
@@ -132,9 +140,10 @@ impl RuntimeExecutionAdapter for TestExecutionBridge {
         // Spawn output reader thread if events channel is connected.
         if let Some(tx) = self.events_tx.get().cloned() {
             let session_id = session_id.to_string();
-            let mut reader = pair.master.try_clone_reader().map_err(|e| {
-                format!("clone pty reader: {e}")
-            })?;
+            let mut reader = pair
+                .master
+                .try_clone_reader()
+                .map_err(|e| format!("clone pty reader: {e}"))?;
             std::thread::spawn(move || {
                 let mut buf = [0u8; 4096];
                 loop {

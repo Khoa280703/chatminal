@@ -150,10 +150,13 @@ impl RuntimeState {
                         SpawnCommitOutcome::Stale
                     }
                     Some(_) => {
-                        let logical_snapshot = build_logical_snapshot(&inner.store, &plan.session_id)?;
-                        let prepend_run_boundary_on_next_output = !logical_snapshot.open_fragment.is_empty();
-                        let restored_trailing_fragment = (!logical_snapshot.open_fragment.is_empty())
-                            .then(|| logical_snapshot.open_fragment.clone());
+                        let logical_snapshot =
+                            build_logical_snapshot(&inner.store, &plan.session_id)?;
+                        let prepend_run_boundary_on_next_output =
+                            !logical_snapshot.open_fragment.is_empty();
+                        let restored_trailing_fragment =
+                            (!logical_snapshot.open_fragment.is_empty())
+                                .then(|| logical_snapshot.open_fragment.clone());
                         let canonical_open_fragment = logical_snapshot.open_fragment;
                         let canonical_cursor_col = canonical_open_fragment.chars().count();
                         if let Some(entry) = inner.sessions.get_mut(&plan.session_id) {

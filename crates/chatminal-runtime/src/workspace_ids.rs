@@ -40,16 +40,34 @@ workspace_id_type!(RuntimeId, "runtime");
 workspace_id_type!(TerminalInstanceId, "terminal-instance");
 workspace_id_type!(SessionViewId, "view");
 workspace_id_type!(WorkspaceNodeId, "workspace-node");
+workspace_id_type!(SessionRenderTargetId, "render-target");
+workspace_id_type!(SessionTerminalHandle, "terminal-handle");
+workspace_id_type!(SessionGroupId, "group");
 
 #[cfg(test)]
 mod tests {
-    use super::{RuntimeId, SessionViewId, TerminalInstanceId, WorkspaceNodeId};
+    use super::{
+        RuntimeId, SessionGroupId, SessionRenderTargetId, SessionTerminalHandle, SessionViewId,
+        TerminalInstanceId, WorkspaceNodeId,
+    };
 
     #[test]
     fn ids_format_with_stable_prefixes() {
         assert_eq!(RuntimeId::new(7).to_string(), "runtime-7");
-        assert_eq!(TerminalInstanceId::new(11).to_string(), "terminal-instance-11");
+        assert_eq!(
+            TerminalInstanceId::new(11).to_string(),
+            "terminal-instance-11"
+        );
         assert_eq!(SessionViewId::new(17).to_string(), "view-17");
         assert_eq!(WorkspaceNodeId::new(19).to_string(), "workspace-node-19");
+        assert_eq!(
+            SessionRenderTargetId::new(23).to_string(),
+            "render-target-23"
+        );
+        assert_eq!(
+            SessionTerminalHandle::new(29).to_string(),
+            "terminal-handle-29"
+        );
+        assert_eq!(SessionGroupId::new(31).to_string(), "group-31");
     }
 }

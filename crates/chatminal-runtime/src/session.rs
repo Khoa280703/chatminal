@@ -3,11 +3,11 @@ use std::io::{Read, Write};
 #[cfg(test)]
 use std::path::Path;
 #[cfg(test)]
+use std::sync::Mutex;
+#[cfg(test)]
 use std::sync::mpsc as std_mpsc;
 #[cfg(test)]
 use std::sync::mpsc::TrySendError;
-#[cfg(test)]
-use std::sync::Mutex;
 #[cfg(test)]
 use std::thread;
 #[cfg(test)]

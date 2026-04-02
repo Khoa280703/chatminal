@@ -1,4 +1,5 @@
 use crate::termwindow::{RenderFrame, TermWindowNotif};
+use crate::chatminal_runtime::record_host_focus_for_current_identity;
 use ::window::bitmaps::atlas::OutOfTextureSpace;
 use ::window::WindowOps;
 use anyhow::Context;
@@ -251,9 +252,7 @@ impl crate::TermWindow {
                 self.update_text_cursor(&pos);
                 if focused {
                     pos.pane.advise_focus();
-                    crate::chatminal_runtime::record_host_focus_for_current_identity(
-                        pos.pane.pane_id(),
-                    );
+                    record_host_focus_for_current_identity(pos.pane.pane_id());
                 }
             }
             self.paint_pane(&pos, &mut layers).context("paint_pane")?;

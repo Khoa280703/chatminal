@@ -1,6 +1,6 @@
 ---
 phase: 04
-status: pending
+status: partial
 priority: medium
 effort: medium-large
 risk: medium
@@ -41,6 +41,18 @@ chatminal-runtime/config.rs → DELETED (merged into chatminal-config)
 ```
 
 ## Steps
+
+## Status Audit (2026-04-02)
+- `Step 1 Audit config field usage`: `done`
+  - Lý do: audit đủ để cắt dead fields lớn, xác nhận field count đã xuống 194, và xác định rõ phần nào defer.
+- `Step 2 Remove unused config fields`: `partial`
+  - Lý do: dead SSH/TLS/WSL/auto-update/runtime-options cleanup đã xong, nhưng chưa có bằng chứng sweep exhaustive cho mọi dead field còn lại.
+- `Step 3 Restructure Config into sections`: `deferred`
+  - Lý do: churn lớn, payoff thấp ở thời điểm này, plan hiện đã chấp nhận defer.
+- `Step 4 Replace global singleton`: `deferred`
+  - Lý do: hot PTY/parser path vẫn phụ thuộc `configuration()`; thay toàn phần lúc này risk cao.
+- `Step 5 Simplify Lua config loading`: `partial`
+  - Lý do: `.chatminal.lua` đã là primary path và `.wezterm` compat đã được dọn mạnh, nhưng chưa thể nói toàn bộ legacy Lua surface đã được giản lược xong.
 
 ### 1. Audit config field usage (research)
 For each field in `Config` struct (~700 fields):
@@ -97,9 +109,40 @@ grep -r "configuration()" apps/ crates/ --include="*.rs"  # should be 0 (replace
 - Feature flag `cfg(feature = "legacy-config")` for fallback
 
 ## Success Criteria
-- [ ] Config struct < 300 fields (from 700+)
-- [ ] Zero `configuration()` global singleton calls
-- [ ] `chatminal-runtime/config.rs` deleted
-- [ ] Config passed explicitly via `Arc<ChatminalConfig>`
-- [ ] `.chatminal.lua` config file supported
-- [ ] All tests pass
+- [x] Config struct < 300 fields (from 700+) — now 194 fields (was ~202)
+- [ ] Zero `configuration()` global singleton calls — deferred (deep propagation into PTY reader threads, high risk)
+- [ ] `chatminal-runtime/config.rs` deleted — kept (independent env-based config, no merge needed)
+- [ ] Config passed explicitly via `Arc<ChatminalConfig>` — deferred (coupled with singleton replacement)
+- [x] `.chatminal.lua` config file supported — already implemented
+- [x] All tests pass
+
+## Completed Work (2026-04-02)
+- Removed 8 dead config fields: `color_scheme_dirs`, `command_palette_fg_color`, `command_palette_bg_color`, `pane_select_bg_color`, `runtime_options`, `ulimit_nofile`, `ulimit_nproc`, `xim_im_name`
+- Deleted dead `runtime_options.rs` module (daemon leftover)
+- Hardcoded ulimit defaults (were configurable with no user-facing knob)
+- Confirmed `.chatminal.lua` already primary config file
+- Confirmed `CHATMINAL_CONFIG_FILE` env var in place
+- Confirmed zero `.wezterm` references in config crate
+- Reduced desktop-side config singleton scatter:
+  - `frontend.rs` now keeps an initial config snapshot and refreshes it from config reload notifications
+  - `main.rs` passes `ConfigHandle` into frontend bootstrap instead of re-reading global config there
+  - `main.rs` now routes the root startup/bootstrap snapshots through `current_config_handle()` instead of duplicating direct singleton reads
+  - `selection.rs` now reads the word-boundary set from caller-owned config data
+  - `overlay/copy.rs` now renders from the `TermWindow` config snapshot instead of pulling global config on each render pass
+  - `colorease.rs` now receives `animation_fps` from caller-owned config at each construction site instead of reading the global singleton while scheduling animation frames
+  - `stats.rs` now seeds and refreshes `periodic_stat_logging` through an atomic snapshot instead of polling `configuration()` inside the background logging loop
+  - `stats.rs` now routes the remaining root reads through `periodic_stat_logging_secs()` instead of duplicating direct singleton expressions
+  - `customglyph.rs` now snapshots block AA policy once per draw path from the glyph-cache font/config snapshot instead of repeating singleton reads across hot render branches
+- Reduced host-runtime-side singleton scatter in low-risk flows:
+  - `spawn_target.rs` now snapshots config once per `build_command()` flow
+  - `tab.rs` now stores `unzoom_on_switch_pane` as constructor-time config on `TabInner`
+  - `localpane.rs` now reuses local config snapshots for exit-behavior and stateful-close checks instead of repeating singleton reads inside those flows
+  - `lua-bridge/src/lib.rs` now snapshots the fallback root-window size before entering the `with_root_window(...)` closure instead of reading the config singleton from inside that closure
+  - `host-runtime/src/lib.rs` now routes root exit/workspace fallback reads through `default_exit_behavior()` and `default_workspace_name()` helper boundaries instead of scattering those reads inline
+  - `host-runtime/src/lib.rs` now also centralizes `switch_to_last_active_tab_when_closing_tab()` and `unzoom_on_switch_pane()` helper reads
+  - `window.rs` and `tab.rs` now consume those helpers, so constructor-time behavior snapshots no longer pull `configuration()` directly from those files
+
+## Deferred Items
+- **Config sub-struct restructure** (Step 3): Organizational churn touching 100+ files with no functional benefit. Config is already clean at 194 fields.
+- **`configuration()` singleton replacement** (Step 4): Propagation depth into per-session PTY reader threads makes this extremely high risk. Would require injecting `Arc<Config>` into `read_from_pane_pty()` → `parse_buffered_data()` call chain. Recommend deferring to future focused sprint.
+- **RuntimeConfig merge** (partial Step 3): `chatminal-runtime/config.rs` is env-var-based, independent from Lua config. No merge needed.

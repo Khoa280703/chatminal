@@ -3,17 +3,17 @@ use chatminal_store::StoredSessionSnapshot;
 
 use super::{
     DEFAULT_KEEP_ALIVE_ON_CLOSE, DEFAULT_START_IN_TRAY, KEEP_ALIVE_ON_CLOSE_KEY, START_IN_TRAY_KEY,
-    StateInner, WORKSPACE_LAYOUT_PREFIX,
+    StateInner, WORKSPACE_LAYOUT_PREFIX, append_disconnected_restore_cleanup,
     canonical_scrollback::{
         build_logical_snapshot, materialize_output_chunk, render_snapshot,
         render_snapshot_for_terminal,
     },
-    append_disconnected_restore_cleanup, now_millis, strip_zsh_prompt_spacer_artifact,
+    now_millis, strip_zsh_prompt_spacer_artifact,
 };
-use chatminal_store::StoredSessionStatus;
 use crate::api::{
     RuntimeLifecyclePreferences, RuntimeProfile, RuntimeSessionSnapshot, RuntimeWorkspace,
 };
+use chatminal_store::StoredSessionStatus;
 
 impl StateInner {
     fn workspace_layout_key(&self, workspace_id: &str) -> String {

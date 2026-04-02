@@ -1120,7 +1120,7 @@ impl super::TermWindow {
                 window
                     .window
                     .notify(TermWindowNotif::PerformAssignmentForTerminalHandle {
-                        terminal_handle: pane.0 as u64,
+                        terminal_handle: pane.pane_id() as u64,
                         assignment,
                         tx: None,
                     });
@@ -1128,7 +1128,7 @@ impl super::TermWindow {
             Ok(())
         }
         let window = GuiWin::new(self);
-        let pane = TerminalRef(pane.pane_id());
+        let pane = TerminalRef::from_pane_id(pane.pane_id());
         promise::spawn::spawn(config::with_lua_config_on_main_thread(move |lua| {
             dispatch_new_tab_button(lua, window, pane, button, action)
         }))

@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::io::Write;
@@ -5,7 +6,6 @@ use std::ops::Range;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use std::borrow::Cow;
 
 use super::session_engine::{
     RuntimeId, SessionEngineShared, SessionRuntimeEvent, TerminalInstanceId,
@@ -20,28 +20,45 @@ use engine_term::{
 };
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
 use rangeset::RangeSet;
+use regex::Regex;
 use termwiz::escape::parser::Parser as EscapeParser;
 use termwiz::escape::Action;
 use termwiz::input::KeyboardEncoding;
 use termwiz::surface::{Line, SequenceNo};
 use url::Url;
-use regex::Regex;
 
 use super::{
     alloc_host_terminal_handle, host_impl_get_logical_lines_via_get_lines,
     host_terminal_for_each_logical_line_in_stable_range_mut, host_terminal_get_cursor_position,
     host_terminal_get_dimensions, host_terminal_get_dirty_lines, host_terminal_get_lines,
-    host_terminal_with_lines_mut, HostCachePolicy as CachePolicy, HostCloseReason as CloseReason,
-    HostLogicalLine as LogicalLine, HostMux, HostPattern as Pattern,
+    host_terminal_with_lines_mut, publish_runtime_notification_from_any_thread,
+    record_host_input_for_current_identity, HostCachePolicy as CachePolicy,
+    HostCloseReason as CloseReason, HostLogicalLine as LogicalLine, HostPattern as Pattern,
     HostRenderableDimensions as RenderableDimensions, HostSearchResult as SearchResult,
     HostStableCursorPosition as StableCursorPosition, HostTerminal, HostTerminalHandle,
+    RuntimeNotification,
 };
 use crate::chatminal_runtime::overlay_compat::{
     OverlayForEachLogicalLine as ForEachPaneLogicalLine, OverlayWithPaneLines as WithPaneLines,
 };
+use crate::chatminal_runtime::SessionTerminalHandle;
 
 const EVENT_POLL_TIMEOUT: Duration = Duration::from_millis(50);
 const DISPLAY_RESET_FLASH_DURATION: Duration = Duration::from_millis(75);
+
+fn notify_pane_output(pane_id: HostTerminalHandle) {
+    publish_runtime_notification_from_any_thread(RuntimeNotification::PaneOutput(
+        SessionTerminalHandle::new(pane_id as u64),
+    ));
+}
+
+fn record_input_for_current_identity() {
+    record_host_input_for_current_identity();
+}
+
+fn normalize_direct_terminal_key(key: KeyCode) -> KeyCode {
+    key
+}
 
 #[derive(Clone)]
 struct SessionPaneWriter {
@@ -156,9 +173,7 @@ impl ChatminalSessionPane {
             }
         }
 
-        HostMux::get().notify(crate::chatminal_runtime::RuntimeNotification::PaneOutput(
-            self.pane_id,
-        ));
+        notify_pane_output(self.pane_id);
     }
 
     pub(crate) fn reset_display_state_with_flash(self: &Arc<Self>) {
@@ -176,9 +191,7 @@ impl ChatminalSessionPane {
                 ))]);
             }
 
-            HostMux::get().notify(crate::chatminal_runtime::RuntimeNotification::PaneOutput(
-                pane.pane_id,
-            ));
+            notify_pane_output(pane.pane_id);
 
             thread::sleep(DISPLAY_RESET_FLASH_DURATION);
 
@@ -194,9 +207,7 @@ impl ChatminalSessionPane {
                 pane.terminal.lock().perform_actions(replay_actions);
             }
 
-            HostMux::get().notify(crate::chatminal_runtime::RuntimeNotification::PaneOutput(
-                pane.pane_id,
-            ));
+            notify_pane_output(pane.pane_id);
         });
     }
 
@@ -234,9 +245,7 @@ impl ChatminalSessionPane {
                 && terminal_instance_id == self.terminal_instance_id =>
             {
                 self.apply_output(&chunk);
-                HostMux::get().notify(crate::chatminal_runtime::RuntimeNotification::PaneOutput(
-                    self.pane_id,
-                ));
+                notify_pane_output(self.pane_id);
             }
             SessionRuntimeEvent::TerminalInstanceExited {
                 runtime_id,
@@ -246,9 +255,7 @@ impl ChatminalSessionPane {
                 && terminal_instance_id == self.terminal_instance_id =>
             {
                 *self.dead.lock() = true;
-                HostMux::get().notify(crate::chatminal_runtime::RuntimeNotification::PaneOutput(
-                    self.pane_id,
-                ));
+                notify_pane_output(self.pane_id);
             }
             SessionRuntimeEvent::TerminalInstanceError {
                 runtime_id,
@@ -259,17 +266,13 @@ impl ChatminalSessionPane {
                 && terminal_instance_id == self.terminal_instance_id =>
             {
                 self.apply_output(&format!("\r\n[chatminal session error] {}\r\n", message));
-                HostMux::get().notify(crate::chatminal_runtime::RuntimeNotification::PaneOutput(
-                    self.pane_id,
-                ));
+                notify_pane_output(self.pane_id);
             }
             SessionRuntimeEvent::RuntimeClosed { runtime_id, .. }
                 if runtime_id == self.runtime_id =>
             {
                 *self.dead.lock() = true;
-                HostMux::get().notify(crate::chatminal_runtime::RuntimeNotification::PaneOutput(
-                    self.pane_id,
-                ));
+                notify_pane_output(self.pane_id);
             }
             _ => {}
         }
@@ -478,19 +481,33 @@ impl HostTerminal for ChatminalSessionPane {
         Ok(())
     }
     fn key_down(&self, key: KeyCode, mods: KeyModifiers) -> anyhow::Result<()> {
-        HostMux::get().record_input_for_current_identity();
+        record_input_for_current_identity();
+        if matches!(key, KeyCode::Backspace) && mods == KeyModifiers::default() {
+            return self
+                .shared
+                .write_terminal_input(self.terminal_instance_id, [0x7f])
+                .map_err(anyhow::Error::msg);
+        }
         self.shared
-            .key_down_terminal_input(self.terminal_instance_id, key, mods)
+            .key_down_terminal_input(
+                self.terminal_instance_id,
+                normalize_direct_terminal_key(key),
+                mods,
+            )
             .map_err(anyhow::Error::msg)
     }
     fn key_up(&self, key: KeyCode, mods: KeyModifiers) -> anyhow::Result<()> {
-        HostMux::get().record_input_for_current_identity();
+        record_input_for_current_identity();
         self.shared
-            .key_up_terminal_input(self.terminal_instance_id, key, mods)
+            .key_up_terminal_input(
+                self.terminal_instance_id,
+                normalize_direct_terminal_key(key),
+                mods,
+            )
             .map_err(anyhow::Error::msg)
     }
     fn mouse_event(&self, event: MouseEvent) -> anyhow::Result<()> {
-        HostMux::get().record_input_for_current_identity();
+        record_input_for_current_identity();
         self.shared
             .mouse_terminal_input(self.terminal_instance_id, event)
             .map_err(anyhow::Error::msg)
@@ -773,7 +790,7 @@ fn decode_input_payload_chunks(pending: &mut Vec<u8>, payload: &[u8]) -> Vec<Str
 #[cfg(test)]
 mod tests {
     use std::sync::mpsc;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
     use std::time::{Duration, Instant};
 
     use engine_term::{KeyCode, KeyModifiers, StableRowIndex};
@@ -786,9 +803,29 @@ mod tests {
     };
     use super::super::{build_initial_host_mux, shutdown_host_mux};
     use super::{
-        Action, ChatminalSessionPane, HostTerminal, TerminalSize, decode_input_payload_chunks,
-        looks_like_chatminal_internal_title,
+        decode_input_payload_chunks, looks_like_chatminal_internal_title, Action,
+        ChatminalSessionPane, HostTerminal, TerminalSize,
     };
+
+    static HOST_MUX_TEST_GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+
+    struct HostMuxTestGuard {
+        _guard: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for HostMuxTestGuard {
+        fn drop(&mut self) {
+            shutdown_host_mux();
+        }
+    }
+
+    fn init_host_mux_test() -> HostMuxTestGuard {
+        let mutex = HOST_MUX_TEST_GUARD.get_or_init(|| Mutex::new(()));
+        let guard = mutex.lock().expect("lock host mux test guard");
+        shutdown_host_mux();
+        build_initial_host_mux(&config::configuration(), None).expect("init host mux");
+        HostMuxTestGuard { _guard: guard }
+    }
 
     fn shell_command(script: &str) -> CommandBuilder {
         let mut command = CommandBuilder::new("/bin/sh");
@@ -834,7 +871,9 @@ mod tests {
         assert!(looks_like_chatminal_internal_title(
             ">|Chatminal 20260327-085528-1b1caf5365"
         ));
-        assert!(looks_like_chatminal_internal_title("20260327-085528-1b1caf5365"));
+        assert!(looks_like_chatminal_internal_title(
+            "20260327-085528-1b1caf5365"
+        ));
         assert!(!looks_like_chatminal_internal_title("claude"));
         assert!(!looks_like_chatminal_internal_title("npm run dev"));
     }
@@ -853,7 +892,7 @@ mod tests {
 
     #[test]
     fn reset_display_state_replays_existing_output_immediately() {
-        build_initial_host_mux(&config::configuration(), None).expect("init host mux");
+        let _guard = init_host_mux_test();
         let runtime_id = RuntimeId::new(7);
         let terminal_instance_id = TerminalInstanceId::new(11);
         let core_state = Arc::new(Mutex::new(SessionCoreState::default()));
@@ -919,13 +958,11 @@ mod tests {
         let restored = rendered_text(&pane);
         assert!(restored.contains("restored-line-1"));
         assert!(restored.contains("restored-line-2"));
-
-        shutdown_host_mux();
     }
 
     #[test]
     fn replay_seed_stays_at_top_of_viewport_for_short_history() {
-        build_initial_host_mux(&config::configuration(), None).expect("init host mux");
+        let _guard = init_host_mux_test();
         let runtime_id = RuntimeId::new(17);
         let terminal_instance_id = TerminalInstanceId::new(18);
         let core_state = Arc::new(Mutex::new(SessionCoreState::default()));
@@ -985,13 +1022,11 @@ mod tests {
             "replay seed unexpectedly sank in viewport: {:?}",
             lines
         );
-
-        shutdown_host_mux();
     }
 
     #[test]
     fn search_finds_matches_in_replayed_runtime_output() {
-        build_initial_host_mux(&config::configuration(), None).expect("init host mux");
+        let _guard = init_host_mux_test();
         let runtime_id = RuntimeId::new(1);
         let terminal_instance_id = TerminalInstanceId::new(2);
         let core_state = Arc::new(Mutex::new(SessionCoreState::default()));
@@ -1023,9 +1058,7 @@ mod tests {
                     pixel_height: 0,
                     dpi: 96,
                 },
-                Some(
-                    "https://example.com\n/Users/khoa2807/test.txt\n12345678\n".to_string(),
-                ),
+                Some("https://example.com\n/Users/khoa2807/test.txt\n12345678\n".to_string()),
                 events_tx,
             )
             .expect("spawn runtime");
@@ -1047,20 +1080,23 @@ mod tests {
 
         let dims = pane.get_dimensions();
         let results = smol::block_on(pane.search(
-            Pattern::Regex("(?m)(https?://\\S+|(?:[.\\w\\-@~]+)?(?:/+[.\\w\\-@]+)+|[0-9]{4,})".into()),
+            Pattern::Regex(
+                "(?m)(https?://\\S+|(?:[.\\w\\-@~]+)?(?:/+[.\\w\\-@]+)+|[0-9]{4,})".into(),
+            ),
             dims.scrollback_top..dims.physical_top + dims.viewport_rows as StableRowIndex,
             None,
         ))
         .expect("search quick select patterns");
 
-        assert!(!results.is_empty(), "expected search matches in replayed output");
-
-        shutdown_host_mux();
+        assert!(
+            !results.is_empty(),
+            "expected search matches in replayed output"
+        );
     }
 
     #[test]
     fn pane_key_input_is_forwarded_to_runtime() {
-        build_initial_host_mux(&config::configuration(), None).expect("init host mux");
+        let _guard = init_host_mux_test();
         let runtime_id = RuntimeId::new(21);
         let terminal_instance_id = TerminalInstanceId::new(22);
         let core_state = Arc::new(Mutex::new(SessionCoreState::default()));
@@ -1122,19 +1158,17 @@ mod tests {
                 .as_deref()
                 .is_some_and(|output| output.contains('Z'))
             {
-                shutdown_host_mux();
                 return;
             }
             std::thread::sleep(Duration::from_millis(20));
         }
 
-        shutdown_host_mux();
         panic!("expected pane key input to reach runtime output");
     }
 
     #[test]
     fn pane_direct_writer_input_is_forwarded_to_runtime() {
-        build_initial_host_mux(&config::configuration(), None).expect("init host mux");
+        let _guard = init_host_mux_test();
         let runtime_id = RuntimeId::new(31);
         let terminal_instance_id = TerminalInstanceId::new(32);
         let core_state = Arc::new(Mutex::new(SessionCoreState::default()));
@@ -1197,18 +1231,16 @@ mod tests {
                 .as_deref()
                 .is_some_and(|output| output.contains('Z'))
             {
-                shutdown_host_mux();
                 return;
             }
             std::thread::sleep(Duration::from_millis(20));
         }
 
-        shutdown_host_mux();
         panic!("expected pane direct writer input to reach runtime output");
     }
 
     fn assert_key_input_hex(key: KeyCode, expected_hex: &str) {
-        build_initial_host_mux(&config::configuration(), None).expect("init host mux");
+        let _guard = init_host_mux_test();
         let runtime_id = RuntimeId::new(41);
         let terminal_instance_id = TerminalInstanceId::new(42);
         let core_state = Arc::new(Mutex::new(SessionCoreState::default()));
@@ -1232,7 +1264,9 @@ mod tests {
                 1,
                 runtime_id,
                 terminal_instance_id,
-                shell_command("printf 'ready\\n'; stty raw -echo; dd bs=1 count=1 2>/dev/null | od -An -t x1"),
+                shell_command(
+                    "printf 'ready\\n'; stty raw -echo; dd bs=1 count=1 2>/dev/null | od -An -t x1",
+                ),
                 chatminal_terminal_core::TerminalSize {
                     rows: 12,
                     cols: 80,
@@ -1282,18 +1316,17 @@ mod tests {
                 .as_deref()
                 .is_some_and(|output| output.contains(expected_hex))
             {
-                shutdown_host_mux();
                 return;
             }
             std::thread::sleep(Duration::from_millis(20));
         }
 
-        let observed = shared.replay_output(terminal_instance_id).unwrap_or_default();
-        shutdown_host_mux();
+        let observed = shared
+            .replay_output(terminal_instance_id)
+            .unwrap_or_default();
         panic!(
             "expected hex {} in runtime output, got {:?}",
-            expected_hex,
-            observed
+            expected_hex, observed
         );
     }
 

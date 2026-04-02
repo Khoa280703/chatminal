@@ -1,9 +1,9 @@
 use super::*;
 use engine_term::{SemanticZone, StableRowIndex};
+use host_runtime::pane::CachePolicy;
 use luahelper::mlua::LuaSerdeExt;
 use luahelper::{dynamic_to_lua_value, from_lua, to_lua};
 use mlua::Value;
-use host_runtime::pane::{CachePolicy, PaneId};
 use std::cmp::Ordering;
 use std::sync::Arc;
 use termwiz::cell::SemanticType;
@@ -11,76 +11,87 @@ use termwiz_funcs::lines_to_escapes;
 use url_funcs::Url;
 
 #[derive(Clone, Copy, Debug)]
-pub struct TerminalRef(pub PaneId);
+pub struct TerminalRef(usize);
 
 impl TerminalRef {
-    pub fn resolve<'a>(&self, mux: &'a Arc<Mux>) -> mlua::Result<Arc<dyn Pane>> {
-        mux.get_pane(self.0)
-            .ok_or_else(|| mlua::Error::external(format!("terminal handle {} not found in runtime", self.0)))
+    pub const fn from_pane_id(pane_id: usize) -> Self {
+        Self(pane_id)
     }
 
-    fn get_text_from_semantic_zone(&self, zone: SemanticZone) -> mlua::Result<String> {
-        let mux = get_mux()?;
-        let pane = self.resolve(&mux)?;
+    pub const fn from_terminal_handle(
+        terminal_handle: chatminal_runtime::SessionTerminalHandle,
+    ) -> Self {
+        Self(terminal_handle.as_u64() as usize)
+    }
 
-        let mut last_was_wrapped = false;
-        let first_row = zone.start_y;
-        let last_row = zone.end_y;
+    pub const fn pane_id(self) -> usize {
+        self.0
+    }
 
-        fn cols_for_row(zone: &SemanticZone, row: StableRowIndex) -> std::ops::Range<usize> {
-            if row < zone.start_y || row > zone.end_y {
-                0..0
-            } else if zone.start_y == zone.end_y {
-                // A single line zone
-                if zone.start_x <= zone.end_x {
-                    zone.start_x..zone.end_x.saturating_add(1)
-                } else {
-                    zone.end_x..zone.start_x.saturating_add(1)
-                }
-            } else if row == zone.end_y {
-                // last line of multi-line
-                0..zone.end_x.saturating_add(1)
-            } else if row == zone.start_y {
-                // first line of multi-line
-                zone.start_x..usize::max_value()
+    pub const fn terminal_handle(self) -> chatminal_runtime::SessionTerminalHandle {
+        chatminal_runtime::SessionTerminalHandle::new(self.0 as u64)
+    }
+}
+
+fn text_from_semantic_zone(pane: &Arc<dyn Pane>, zone: SemanticZone) -> String {
+    let mut last_was_wrapped = false;
+    let first_row = zone.start_y;
+    let last_row = zone.end_y;
+
+    fn cols_for_row(zone: &SemanticZone, row: StableRowIndex) -> std::ops::Range<usize> {
+        if row < zone.start_y || row > zone.end_y {
+            0..0
+        } else if zone.start_y == zone.end_y {
+            if zone.start_x <= zone.end_x {
+                zone.start_x..zone.end_x.saturating_add(1)
             } else {
-                // some "middle" line of multi-line
-                0..usize::max_value()
+                zone.end_x..zone.start_x.saturating_add(1)
             }
+        } else if row == zone.end_y {
+            0..zone.end_x.saturating_add(1)
+        } else if row == zone.start_y {
+            zone.start_x..usize::MAX
+        } else {
+            0..usize::MAX
         }
+    }
 
-        let mut s = String::new();
-        for line in pane.get_logical_lines(zone.start_y..zone.end_y + 1) {
-            if !s.is_empty() && !last_was_wrapped {
-                s.push('\n');
-            }
-            let last_idx = line.physical_lines.len().saturating_sub(1);
-            for (idx, phys) in line.physical_lines.iter().enumerate() {
-                let this_row = line.first_row + idx as StableRowIndex;
-                if this_row >= first_row && this_row <= last_row {
-                    let last_phys_idx = phys.len().saturating_sub(1);
+    let mut s = String::new();
+    for line in pane.get_logical_lines(zone.start_y..zone.end_y + 1) {
+        if !s.is_empty() && !last_was_wrapped {
+            s.push('\n');
+        }
+        let last_idx = line.physical_lines.len().saturating_sub(1);
+        for (idx, phys) in line.physical_lines.iter().enumerate() {
+            let this_row = line.first_row + idx as StableRowIndex;
+            if this_row >= first_row && this_row <= last_row {
+                let last_phys_idx = phys.len().saturating_sub(1);
 
-                    let cols = cols_for_row(&zone, this_row);
-                    let last_col_idx = cols.end.saturating_sub(1).min(last_phys_idx);
-                    let col_span = phys.columns_as_str(cols);
-                    // Only trim trailing whitespace if we are the last line
-                    // in a wrapped sequence
-                    if idx == last_idx {
-                        s.push_str(col_span.trim_end());
-                    } else {
-                        s.push_str(&col_span);
-                    }
-
-                    last_was_wrapped = last_col_idx == last_phys_idx
-                        && phys
-                            .get_cell(last_col_idx)
-                            .map(|c| c.attrs().wrapped())
-                            .unwrap_or(false);
+                let cols = cols_for_row(&zone, this_row);
+                let last_col_idx = cols.end.saturating_sub(1).min(last_phys_idx);
+                let col_span = phys.columns_as_str(cols);
+                if idx == last_idx {
+                    s.push_str(col_span.trim_end());
+                } else {
+                    s.push_str(&col_span);
                 }
+
+                last_was_wrapped = last_col_idx == last_phys_idx
+                    && phys
+                        .get_cell(last_col_idx)
+                        .map(|c| c.attrs().wrapped())
+                        .unwrap_or(false);
             }
         }
+    }
 
-        Ok(s)
+    s
+}
+
+impl TerminalRef {
+    fn get_text_from_semantic_zone(&self, zone: SemanticZone) -> mlua::Result<String> {
+        let host = get_host()?;
+        host.with_pane(*self, |pane| text_from_semantic_zone(pane, zone))
     }
 }
 
@@ -90,14 +101,12 @@ impl UserData for TerminalRef {
             Ok(format!("TerminalRef(pid:{})", unsafe { libc::getpid() }))
         });
         methods.add_method("terminal_instance_id", |_, this, _: ()| {
-            let mux = get_mux()?;
-            let pane = this.resolve(&mux)?;
-            Ok(pane_terminal_instance_id(&pane))
+            let host = get_host()?;
+            host.with_pane(*this, |pane| pane_terminal_instance_id(pane))
         });
         methods.add_method("session_id", |_, this, _: ()| {
-            let mux = get_mux()?;
-            let pane = this.resolve(&mux)?;
-            Ok(pane_session_id(&pane))
+            let host = get_host()?;
+            host.with_pane(*this, |pane| pane_session_id(pane))
         });
 
         methods.add_async_method("split", |_, this, args: Option<SplitSession>| async move {
@@ -105,110 +114,103 @@ impl UserData for TerminalRef {
         });
 
         methods.add_method("send_paste", |_, this, text: String| {
-            let mux = get_mux()?;
-            let pane = this.resolve(&mux)?;
-            pane.send_paste(&text)
-                .map_err(|e| mlua::Error::external(format!("{:#}", e)))?;
-            Ok(())
+            let host = get_host()?;
+            host.with_pane_result(*this, |pane| {
+                pane.send_paste(&text)
+                    .map_err(|e| mlua::Error::external(format!("{:#}", e)))?;
+                Ok(())
+            })
         });
 
         methods.add_method("paste", |_, this, text: String| {
-            let mux = get_mux()?;
-            let pane = this.resolve(&mux)?;
-            pane.send_paste(&text)
-                .map_err(|e| mlua::Error::external(format!("{:#}", e)))?;
-            Ok(())
+            let host = get_host()?;
+            host.with_pane_result(*this, |pane| {
+                pane.send_paste(&text)
+                    .map_err(|e| mlua::Error::external(format!("{:#}", e)))?;
+                Ok(())
+            })
         });
 
         methods.add_method("send_text", |_, this, text: String| {
-            let mux = get_mux()?;
-            let pane = this.resolve(&mux)?;
-            pane.writer()
-                .write_all(text.as_bytes())
-                .map_err(|e| mlua::Error::external(format!("{:#}", e)))?;
-            Ok(())
+            let host = get_host()?;
+            host.with_pane_result(*this, |pane| {
+                pane.writer()
+                    .write_all(text.as_bytes())
+                    .map_err(|e| mlua::Error::external(format!("{:#}", e)))?;
+                Ok(())
+            })
         });
         methods.add_method("window", |_, this, _: ()| {
-            let mux = get_mux()?;
-            Ok(mux
-                .resolve_pane_id(this.0)
-                .map(|_| WindowRef::root()))
+            let host = get_host()?;
+            Ok(host.terminal_window(*this))
         });
         methods.add_method("session", |_, this, _: ()| {
-            let mux = get_mux()?;
-            let pane = this.resolve(&mux)?;
-            // Returns None for SSH/serial panes that have no chatminal session_id.
-            Ok(pane_session_id(&pane).map(SessionRef))
+            let host = get_host()?;
+            host.terminal_session(*this)
         });
 
         methods.add_method("get_title", |_, this, _: ()| {
-            let mux = get_mux()?;
-            let pane = this.resolve(&mux)?;
-            Ok(pane.get_title())
+            let host = get_host()?;
+            host.with_pane(*this, |pane| pane.get_title())
         });
 
         methods.add_method("get_progress", |lua, this, _: ()| {
-            let mux = get_mux()?;
-            let pane = this.resolve(&mux)?;
-            let progress = pane.get_progress();
+            let host = get_host()?;
+            let progress = host.with_pane(*this, |pane| pane.get_progress())?;
             lua.to_value(&progress)
         });
 
         methods.add_method("get_current_working_dir", |_, this, _: ()| {
-            let mux = get_mux()?;
-            let pane = this.resolve(&mux)?;
-            Ok(pane
-                .get_current_working_dir(CachePolicy::FetchImmediate)
-                .map(|url| Url { url }))
+            let host = get_host()?;
+            host.with_pane(*this, |pane| {
+                pane.get_current_working_dir(CachePolicy::FetchImmediate)
+                    .map(|url| Url { url })
+            })
         });
 
         methods.add_method("get_metadata", |lua, this, _: ()| {
-            let mux = get_mux()?;
-            let pane = this.resolve(&mux)?;
-            let value = pane.get_metadata();
+            let host = get_host()?;
+            let value = host.with_pane(*this, |pane| pane.get_metadata())?;
             dynamic_to_lua_value(lua, value)
         });
 
         methods.add_method("get_foreground_process_name", |_, this, _: ()| {
-            let mux = get_mux()?;
-            let pane = this.resolve(&mux)?;
-            Ok(pane.get_foreground_process_name(CachePolicy::FetchImmediate))
+            let host = get_host()?;
+            host.with_pane(*this, |pane| {
+                pane.get_foreground_process_name(CachePolicy::FetchImmediate)
+            })
         });
 
         methods.add_method("get_foreground_process_info", |_, this, _: ()| {
-            let mux = get_mux()?;
-            let pane = this.resolve(&mux)?;
-            Ok(pane.get_foreground_process_info(CachePolicy::AllowStale))
+            let host = get_host()?;
+            host.with_pane(*this, |pane| {
+                pane.get_foreground_process_info(CachePolicy::AllowStale)
+            })
         });
 
         methods.add_method("get_cursor_position", |_, this, _: ()| {
-            let mux = get_mux()?;
-            let pane = this.resolve(&mux)?;
-            Ok(pane.get_cursor_position())
+            let host = get_host()?;
+            host.with_pane(*this, |pane| pane.get_cursor_position())
         });
 
         methods.add_method("get_dimensions", |_, this, _: ()| {
-            let mux = get_mux()?;
-            let pane = this.resolve(&mux)?;
-            Ok(pane.get_dimensions())
+            let host = get_host()?;
+            host.with_pane(*this, |pane| pane.get_dimensions())
         });
 
         methods.add_method("get_user_vars", |_, this, _: ()| {
-            let mux = get_mux()?;
-            let pane = this.resolve(&mux)?;
-            Ok(pane.copy_user_vars())
+            let host = get_host()?;
+            host.with_pane(*this, |pane| pane.copy_user_vars())
         });
 
         methods.add_method("has_unseen_output", |_, this, _: ()| {
-            let mux = get_mux()?;
-            let pane = this.resolve(&mux)?;
-            Ok(pane.has_unseen_output())
+            let host = get_host()?;
+            host.with_pane(*this, |pane| pane.has_unseen_output())
         });
 
         methods.add_method("is_alt_screen_active", |_, this, _: ()| {
-            let mux = get_mux()?;
-            let pane = this.resolve(&mux)?;
-            Ok(pane.is_alt_screen_active())
+            let host = get_host()?;
+            host.with_pane(*this, |pane| pane.is_alt_screen_active())
         });
 
         // When called with no arguments, returns the lines from the
@@ -217,52 +219,16 @@ impl UserData for TerminalRef {
         // last nlines lines of the terminal output.
         // The returned string will have trailing whitespace trimmed.
         methods.add_method("get_lines_as_text", |_, this, nlines: Option<usize>| {
-            let mux = get_mux()?;
-            let pane = this.resolve(&mux)?;
-            let dims = pane.get_dimensions();
-            let nlines = nlines.unwrap_or(dims.viewport_rows);
-            let bottom_row = dims.physical_top + dims.viewport_rows as isize;
-            let top_row = bottom_row.saturating_sub(nlines as isize);
-            let (_first_row, lines) = pane.get_lines(top_row..bottom_row);
-            let mut text = String::new();
-            for line in lines {
-                for cell in line.visible_cells() {
-                    text.push_str(cell.str());
-                }
-                let trimmed = text.trim_end().len();
-                text.truncate(trimmed);
-                text.push('\n');
-            }
-            let trimmed = text.trim_end().len();
-            text.truncate(trimmed);
-            Ok(text)
-        });
-
-        methods.add_method("get_lines_as_escapes", |_, this, nlines: Option<usize>| {
-            let mux = get_mux()?;
-            let pane = this.resolve(&mux)?;
-            let dims = pane.get_dimensions();
-            let nlines = nlines.unwrap_or(dims.viewport_rows);
-            let bottom_row = dims.physical_top + dims.viewport_rows as isize;
-            let top_row = bottom_row.saturating_sub(nlines as isize);
-            let (_first_row, lines) = pane.get_lines(top_row..bottom_row);
-            let text = lines_to_escapes(lines).map_err(mlua::Error::external)?;
-            Ok(text)
-        });
-
-        methods.add_method(
-            "get_logical_lines_as_text",
-            |_, this, nlines: Option<usize>| {
-                let mux = get_mux()?;
-                let pane = this.resolve(&mux)?;
+            let host = get_host()?;
+            host.with_pane(*this, |pane| {
                 let dims = pane.get_dimensions();
                 let nlines = nlines.unwrap_or(dims.viewport_rows);
                 let bottom_row = dims.physical_top + dims.viewport_rows as isize;
                 let top_row = bottom_row.saturating_sub(nlines as isize);
-                let lines = pane.get_logical_lines(top_row..bottom_row);
+                let (_first_row, lines) = pane.get_lines(top_row..bottom_row);
                 let mut text = String::new();
                 for line in lines {
-                    for cell in line.logical.visible_cells() {
+                    for cell in line.visible_cells() {
                         text.push_str(cell.str());
                     }
                     let trimmed = text.trim_end().len();
@@ -271,31 +237,67 @@ impl UserData for TerminalRef {
                 }
                 let trimmed = text.trim_end().len();
                 text.truncate(trimmed);
+                text
+            })
+        });
+
+        methods.add_method("get_lines_as_escapes", |_, this, nlines: Option<usize>| {
+            let host = get_host()?;
+            host.with_pane_result(*this, |pane| {
+                let dims = pane.get_dimensions();
+                let nlines = nlines.unwrap_or(dims.viewport_rows);
+                let bottom_row = dims.physical_top + dims.viewport_rows as isize;
+                let top_row = bottom_row.saturating_sub(nlines as isize);
+                let (_first_row, lines) = pane.get_lines(top_row..bottom_row);
+                let text = lines_to_escapes(lines).map_err(mlua::Error::external)?;
                 Ok(text)
+            })
+        });
+
+        methods.add_method(
+            "get_logical_lines_as_text",
+            |_, this, nlines: Option<usize>| {
+                let host = get_host()?;
+                host.with_pane(*this, |pane| {
+                    let dims = pane.get_dimensions();
+                    let nlines = nlines.unwrap_or(dims.viewport_rows);
+                    let bottom_row = dims.physical_top + dims.viewport_rows as isize;
+                    let top_row = bottom_row.saturating_sub(nlines as isize);
+                    let lines = pane.get_logical_lines(top_row..bottom_row);
+                    let mut text = String::new();
+                    for line in lines {
+                        for cell in line.logical.visible_cells() {
+                            text.push_str(cell.str());
+                        }
+                        let trimmed = text.trim_end().len();
+                        text.truncate(trimmed);
+                        text.push('\n');
+                    }
+                    let trimmed = text.trim_end().len();
+                    text.truncate(trimmed);
+                    text
+                })
             },
         );
 
         methods.add_method("inject_output", |_, this, text: String| {
-            let mux = get_mux()?;
-            let pane = this.resolve(&mux)?;
-
-            let mut parser = termwiz::escape::parser::Parser::new();
-            let mut actions = vec![];
-            parser.parse(text.as_bytes(), |action| actions.push(action));
-
-            pane.perform_actions(actions);
+            let host = get_host()?;
+            host.with_pane(*this, |pane| {
+                let mut parser = termwiz::escape::parser::Parser::new();
+                let mut actions = vec![];
+                parser.parse(text.as_bytes(), |action| actions.push(action));
+                pane.perform_actions(actions);
+            })?;
             Ok(())
         });
 
         methods.add_method("get_semantic_zones", |lua, this, of_type: Value| {
-            let mux = get_mux()?;
-            let pane = this.resolve(&mux)?;
-
+            let host = get_host()?;
             let of_type: Option<SemanticType> = from_lua(of_type)?;
-
-            let mut zones = pane
-                .get_semantic_zones()
-                .map_err(|e| mlua::Error::external(format!("{:#}", e)))?;
+            let mut zones = host.with_pane_result(*this, |pane| {
+                pane.get_semantic_zones()
+                    .map_err(|e| mlua::Error::external(format!("{:#}", e)))
+            })?;
 
             if let Some(of_type) = of_type {
                 zones.retain(|zone| zone.semantic_type == of_type);
@@ -308,10 +310,10 @@ impl UserData for TerminalRef {
         methods.add_method(
             "get_semantic_zone_at",
             |lua, this, (x, y): (usize, StableRowIndex)| {
-                let mux = get_mux()?;
-                let pane = this.resolve(&mux)?;
-
-                let zones = pane.get_semantic_zones().unwrap_or_else(|_| vec![]);
+                let host = get_host()?;
+                let zones = host.with_pane(*this, |pane| {
+                    pane.get_semantic_zones().unwrap_or_else(|_| vec![])
+                })?;
 
                 fn find_zone(x: usize, y: StableRowIndex, zone: &SemanticZone) -> Ordering {
                     match zone.start_y.cmp(&y) {
@@ -364,31 +366,13 @@ impl UserData for TerminalRef {
         });
 
         methods.add_method("activate", move |_lua, this, ()| {
-            let mux = Mux::get();
-            let pane = this.resolve(&mux)?;
-            let tab_id = mux
-                .resolve_pane_id(this.0)
-                .ok_or_else(|| mlua::Error::external(format!("leaf {} not found", this.0)))?;
-            {
-                let mut window = mux.root_window_mut();
-                let tab_idx = window.idx_by_id(tab_id).ok_or_else(|| {
-                    mlua::Error::external(format!(
-                        "session handle {tab_id} is not attached to root window"
-                    ))
-                })?;
-                window.save_and_then_set_active(tab_idx);
-            }
-            let tab = mux
-                .get_tab(tab_id)
-                .ok_or_else(|| mlua::Error::external(format!("session handle {tab_id} not found")))?;
-            tab.set_active_pane(&pane);
-            Ok(())
+            let host = get_host()?;
+            host.activate_terminal(*this)
         });
 
         methods.add_method("get_tty_name", move |_lua, this, ()| {
-            let mux = Mux::get();
-            let pane = this.resolve(&mux)?;
-            Ok(pane.tty_name())
+            let host = get_host()?;
+            host.with_pane(*this, |pane| pane.tty_name())
         });
     }
 }
@@ -427,7 +411,9 @@ impl SplitSession {
         };
 
         let direction = match self.direction {
-            SessionSplitDirection::Right | SessionSplitDirection::Left => SplitDirection::Horizontal,
+            SessionSplitDirection::Right | SessionSplitDirection::Left => {
+                SplitDirection::Horizontal
+            }
             SessionSplitDirection::Top | SessionSplitDirection::Bottom => SplitDirection::Vertical,
         };
 
@@ -441,12 +427,7 @@ impl SplitSession {
             size,
         };
 
-        let mux = get_mux()?;
-        let (pane, _size) = mux
-            .split_pane(pane.0, request, source)
-            .await
-            .map_err(|e| mlua::Error::external(format!("{:#?}", e)))?;
-
-        Ok(TerminalRef(pane.pane_id()))
+        let host = get_host()?;
+        host.split_terminal(*pane, request, source).await
     }
 }

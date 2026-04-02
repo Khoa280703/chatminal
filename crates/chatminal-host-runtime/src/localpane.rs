@@ -1,9 +1,9 @@
+use crate::localpane_hooks::LocalPaneHooks;
 use crate::pane::{
     CachePolicy, CloseReason, ForEachPaneLogicalLine, LogicalLine, Pane, PaneId, Pattern,
     SearchResult, WithPaneLines,
 };
 use crate::renderable::*;
-use crate::{Mux, MuxNotification};
 use anyhow::Error;
 use async_trait::async_trait;
 use config::{configuration, ExitBehavior, ExitBehaviorMessaging};
@@ -26,8 +26,7 @@ use std::io::{Result as IoResult, Write};
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use termwiz::escape::csi::{Sgr, CSI};
-use termwiz::escape::{Action, DeviceControlMode};
+use termwiz::escape::DeviceControlMode;
 use termwiz::input::KeyboardEncoding;
 use termwiz::surface::{Line, SequenceNo};
 use url::Url;
@@ -128,6 +127,7 @@ pub struct LocalPane {
     #[cfg(unix)]
     leader: Arc<Mutex<Option<CachedLeaderInfo>>>,
     command_description: String,
+    hooks: LocalPaneHooks,
 }
 
 #[async_trait(?Send)]
@@ -244,6 +244,7 @@ impl Pane for LocalPane {
 
     fn is_dead(&self) -> bool {
         let mut proc = self.process.lock();
+        let config = configuration();
 
         const EXIT_BEHAVIOR: &str = "This message is shown because \
             \x1b]8;;https://github.com/Khoa280703/chatminal\
@@ -270,14 +271,11 @@ impl Pane for LocalPane {
                 if let Some(status) = status {
                     let success = match status.success() {
                         true => true,
-                        false => configuration()
-                            .clean_exit_codes
-                            .contains(&status.exit_code()),
+                        false => config.clean_exit_codes.contains(&status.exit_code()),
                     };
 
                     match (
-                        self.exit_behavior()
-                            .unwrap_or_else(|| configuration().exit_behavior),
+                        self.exit_behavior().unwrap_or(config.exit_behavior),
                         success,
                         killed,
                     ) {
@@ -318,7 +316,7 @@ impl Pane for LocalPane {
 
         let mut notify = None;
         if !terse.is_empty() {
-            match configuration().exit_behavior_messaging {
+            match config.exit_behavior_messaging {
                 ExitBehaviorMessaging::Verbose => {
                     if terse == "done" {
                         notify = Some(format!("\r\n{brief}\r\n{trailer}"));
@@ -341,7 +339,7 @@ impl Pane for LocalPane {
         }
 
         if let Some(notify) = notify {
-            emit_output_for_pane(self.pane_id, &notify);
+            self.hooks.emit_inline_output(self.pane_id, notify);
         }
 
         match &*proc {
@@ -372,17 +370,17 @@ impl Pane for LocalPane {
     }
 
     fn mouse_event(&self, event: MouseEvent) -> Result<(), Error> {
-        Mux::get().record_input_for_current_identity();
+        self.hooks.record_input();
         self.terminal.lock().mouse_event(event)
     }
 
     fn key_down(&self, key: KeyCode, mods: KeyModifiers) -> Result<(), Error> {
-        Mux::get().record_input_for_current_identity();
+        self.hooks.record_input();
         self.terminal.lock().key_down(key, mods)
     }
 
     fn key_up(&self, key: KeyCode, mods: KeyModifiers) -> Result<(), Error> {
-        Mux::get().record_input_for_current_identity();
+        self.hooks.record_input();
         self.terminal.lock().key_up(key, mods)
     }
 
@@ -398,7 +396,7 @@ impl Pane for LocalPane {
     }
 
     fn writer(&self) -> MappedMutexGuard<'_, dyn std::io::Write> {
-        Mux::get().record_input_for_current_identity();
+        self.hooks.record_input();
         MutexGuard::map(self.writer.lock(), |writer| {
             let w: &mut dyn std::io::Write = writer;
             w
@@ -410,7 +408,7 @@ impl Pane for LocalPane {
     }
 
     fn send_paste(&self, text: &str) -> Result<(), Error> {
-        Mux::get().record_input_for_current_identity();
+        self.hooks.record_input();
         self.terminal.lock().send_paste(text)
     }
 
@@ -509,6 +507,11 @@ impl Pane for LocalPane {
                 "can_close_without_prompting? procs in pane {:#?}",
                 info.root
             );
+            let skip_close_confirmation_processes = configuration()
+                .skip_close_confirmation_for_processes_named
+                .iter()
+                .cloned()
+                .collect::<HashSet<_>>();
 
             let hook_result = config::run_immediate_with_lua_config(|lua| {
                 let lua = match lua {
@@ -526,7 +529,10 @@ impl Pane for LocalPane {
                 }
             });
 
-            fn default_stateful_check(proc_list: &LocalProcessInfo) -> bool {
+            fn default_stateful_check(
+                proc_list: &LocalProcessInfo,
+                skip_close_confirmation_processes: &HashSet<String>,
+            ) -> bool {
                 // Fig uses `figterm` a pseudo terminal for a lot of functionality, it runs between
                 // the shell and terminal. Unfortunately it is typically named `<shell> (figterm)`,
                 // which prevents the statuful check from passing. This strips the suffix from the
@@ -540,13 +546,7 @@ impl Pane for LocalPane {
                     })
                     .collect::<HashSet<_>>();
 
-                let skip = configuration()
-                    .skip_close_confirmation_for_processes_named
-                    .iter()
-                    .cloned()
-                    .collect::<HashSet<_>>();
-
-                if !names.is_subset(&skip) {
+                if !names.is_subset(skip_close_confirmation_processes) {
                     // There are other processes running than are listed,
                     // so we consider this to be stateful
                     return true;
@@ -555,7 +555,7 @@ impl Pane for LocalPane {
             }
 
             let is_stateful = match hook_result {
-                Ok(None) => default_stateful_check(&info.root),
+                Ok(None) => default_stateful_check(&info.root, &skip_close_confirmation_processes),
                 Ok(Some(s)) => s,
                 Err(err) => {
                     log::error!(
@@ -563,7 +563,7 @@ impl Pane for LocalPane {
                          hook: {:#}, falling back to default behavior",
                         err
                     );
-                    default_stateful_check(&info.root)
+                    default_stateful_check(&info.root, &skip_close_confirmation_processes)
                 }
             };
 
@@ -775,26 +775,16 @@ struct LocalPaneDCSHandler {
     pane_id: PaneId,
 }
 
-pub(crate) fn emit_output_for_pane(pane_id: PaneId, message: &str) {
-    let mut parser = termwiz::escape::parser::Parser::new();
-    let mut actions = vec![Action::CSI(CSI::Sgr(Sgr::Reset))];
-    parser.parse(message.as_bytes(), |action| actions.push(action));
-
-    promise::spawn::spawn_into_main_thread(async move {
-        let mux = Mux::get();
-        if let Some(pane) = mux.get_pane(pane_id) {
-            pane.perform_actions(actions);
-            mux.notify(MuxNotification::PaneOutput(pane_id));
-        }
-    })
-    .detach();
+fn log_unknown_escape_sequences_enabled() -> bool {
+    configuration().log_unknown_escape_sequences
 }
 
 impl engine_term::DeviceControlHandler for LocalPaneDCSHandler {
     fn handle_device_control(&mut self, control: termwiz::escape::DeviceControlMode) {
+        let log_unknown = log_unknown_escape_sequences_enabled();
         match control {
             DeviceControlMode::Data(c) => {
-                if configuration().log_unknown_escape_sequences {
+                if log_unknown {
                     log::warn!(
                         "unhandled DeviceControlMode::Data {:x} {}",
                         c,
@@ -803,7 +793,7 @@ impl engine_term::DeviceControlHandler for LocalPaneDCSHandler {
                 }
             }
             _ => {
-                if configuration().log_unknown_escape_sequences {
+                if log_unknown {
                     log::warn!("unhandled: {:?}", control);
                 }
             }
@@ -813,33 +803,12 @@ impl engine_term::DeviceControlHandler for LocalPaneDCSHandler {
 
 struct LocalPaneNotifHandler {
     pane_id: PaneId,
+    hooks: LocalPaneHooks,
 }
 
 impl AlertHandler for LocalPaneNotifHandler {
     fn alert(&mut self, alert: Alert) {
-        let pane_id = self.pane_id;
-        promise::spawn::spawn_into_main_thread(async move {
-            let mux = Mux::get();
-            match &alert {
-                Alert::WindowTitleChanged(title) => {
-                    if mux.resolve_pane_id(pane_id).is_some() {
-                        let mut window = mux.root_window_mut();
-                        window.set_title(title);
-                    }
-                }
-                Alert::TabTitleChanged(title) => {
-                    if let Some(tab_id) = mux.resolve_pane_id(pane_id) {
-                        if let Some(tab) = mux.get_tab(tab_id) {
-                            tab.set_title(title.as_deref().unwrap_or(""));
-                        }
-                    }
-                }
-                _ => {}
-            }
-
-            mux.notify(MuxNotification::Alert { pane_id, alert });
-        })
-        .detach();
+        self.hooks.emit_alert(self.pane_id, alert);
     }
 }
 
@@ -853,6 +822,7 @@ impl AlertHandler for LocalPaneNotifHandler {
 /// until something else triggered the mux to prune dead processes.
 fn split_child(
     mut process: Box<dyn Child>,
+    hooks: LocalPaneHooks,
 ) -> (
     Receiver<IoResult<ExitStatus>>,
     Box<dyn ChildKiller + Sync>,
@@ -866,11 +836,7 @@ fn split_child(
     std::thread::spawn(move || {
         let status = process.wait();
         tx.try_send(status).ok();
-        promise::spawn::spawn_into_main_thread(async move {
-            let mux = Mux::get();
-            mux.prune_dead_windows();
-        })
-        .detach();
+        hooks.prune_dead_windows();
     });
 
     (rx, signaller, pid)
@@ -879,18 +845,39 @@ fn split_child(
 impl LocalPane {
     pub fn new(
         pane_id: PaneId,
-        mut terminal: Terminal,
+        terminal: Terminal,
         process: Box<dyn Child + Send>,
         pty: Box<dyn MasterPty>,
         writer: Box<dyn Write + Send>,
         command_description: String,
     ) -> Self {
-        let (process, signaller, pid) = split_child(process);
-
-        terminal.set_device_control_handler(Box::new(LocalPaneDCSHandler {
+        Self::new_with_hooks(
             pane_id,
+            terminal,
+            process,
+            pty,
+            writer,
+            command_description,
+            LocalPaneHooks::mux_default(),
+        )
+    }
+
+    pub(crate) fn new_with_hooks(
+        pane_id: PaneId,
+        mut terminal: Terminal,
+        process: Box<dyn Child + Send>,
+        pty: Box<dyn MasterPty>,
+        writer: Box<dyn Write + Send>,
+        command_description: String,
+        hooks: LocalPaneHooks,
+    ) -> Self {
+        let (process, signaller, pid) = split_child(process, hooks.clone());
+
+        terminal.set_device_control_handler(Box::new(LocalPaneDCSHandler { pane_id }));
+        terminal.set_notification_handler(Box::new(LocalPaneNotifHandler {
+            pane_id,
+            hooks: hooks.clone(),
         }));
-        terminal.set_notification_handler(Box::new(LocalPaneNotifHandler { pane_id }));
 
         Self {
             pane_id,
@@ -907,6 +894,7 @@ impl LocalPane {
             #[cfg(unix)]
             leader: Arc::new(Mutex::new(None)),
             command_description,
+            hooks,
         }
     }
 
