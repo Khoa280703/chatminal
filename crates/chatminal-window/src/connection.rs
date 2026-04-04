@@ -1,8 +1,8 @@
 use crate::screen::Screens;
 use crate::{Appearance, Connection, GeometryOrigin, RequestedWindowGeometry, ResolvedGeometry};
 use anyhow::Result as Fallible;
-use config::ConfigHandle;
 use config::keyassignment::KeyAssignment;
+use config::ConfigHandle;
 use config::DimensionContext;
 use std::cell::RefCell;
 use std::rc::Rc;

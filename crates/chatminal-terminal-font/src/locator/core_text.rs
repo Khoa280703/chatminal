@@ -68,13 +68,12 @@ fn handles_from_descriptor(descriptor: &CTFontDescriptor) -> Vec<ParsedFont> {
     let mut result = vec![];
     if let Some(path) = descriptor.font_path() {
         let source = FontDataSource::OnDisk(path);
-        let _ =
-            crate::parser::parse_and_collect_font_info(
-                &source,
-                &mut result,
-                FontOrigin::CoreText,
-                Some(&runtime_config),
-            );
+        let _ = crate::parser::parse_and_collect_font_info(
+            &source,
+            &mut result,
+            FontOrigin::CoreText,
+            Some(&runtime_config),
+        );
     }
 
     result

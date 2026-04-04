@@ -550,8 +550,7 @@ impl ConfigInner {
             config: Arc::clone(&self.config),
             generation: self.generation,
         };
-        self.subscribers
-            .retain(|_, notify| notify(config.clone()));
+        self.subscribers.retain(|_, notify| notify(config.clone()));
     }
 
     fn watch_path(&mut self, path: PathBuf) {

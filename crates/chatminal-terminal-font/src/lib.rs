@@ -378,16 +378,18 @@ impl FallbackResolveInfo {
         }
 
         // iteratively reduce to just the fonts that we need
-        extra_handles.retain(|p| match p.coverage_intersection(&wanted, Some(&self.config)) {
-            Ok(cov) if cov.is_empty() => false,
-            Ok(cov) => {
-                // Remove the matches from the set, so that we avoid
-                // picking up multiple fonts for the same glyphs
-                wanted = wanted.difference(&cov);
-                true
-            }
-            Err(_) => false,
-        });
+        extra_handles.retain(
+            |p| match p.coverage_intersection(&wanted, Some(&self.config)) {
+                Ok(cov) if cov.is_empty() => false,
+                Ok(cov) => {
+                    // Remove the matches from the set, so that we avoid
+                    // picking up multiple fonts for the same glyphs
+                    wanted = wanted.difference(&cov);
+                    true
+                }
+                Err(_) => false,
+            },
+        );
 
         if !extra_handles.is_empty() {
             let mut pending = self.pending.lock().unwrap();

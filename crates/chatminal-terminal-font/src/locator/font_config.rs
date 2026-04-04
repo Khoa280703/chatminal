@@ -100,12 +100,10 @@ impl FontLocator for FontConfigFontLocator {
                             // fontconfig will give us a boatload of random fallbacks.
                             // so we need to parse the returned font
                             // here to see if we got what we asked for.
-                            if let Ok(parsed) =
-                                crate::parser::ParsedFont::from_locator(
-                                    &handle,
-                                    Some(&runtime_config),
-                                )
-                            {
+                            if let Ok(parsed) = crate::parser::ParsedFont::from_locator(
+                                &handle,
+                                Some(&runtime_config),
+                            ) {
                                 if parsed.matches_name(attr) {
                                     log::trace!("found font-config match for {:?}", parsed.names());
                                     candidates.push(parsed);
@@ -145,10 +143,7 @@ impl FontLocator for FontConfigFontLocator {
                     if spacing == FC_MONO || spacing == FC_DUAL {
                         let handle = to_handle(best_match, Some(attr.family.clone()))?;
                         if let Ok(parsed) =
-                            crate::parser::ParsedFont::from_locator(
-                                &handle,
-                                Some(&runtime_config),
-                            )
+                            crate::parser::ParsedFont::from_locator(&handle, Some(&runtime_config))
                         {
                             log::trace!(
                                 "found font-config fallback match for {:?}",
@@ -259,12 +254,10 @@ impl FontLocator for FontConfigFontLocator {
                                 origin: FontOrigin::FontConfig,
                                 coverage: pat.get_charset().ok().map(|c| c.to_range_set()),
                             };
-                            if let Ok(parsed) =
-                                crate::parser::ParsedFont::from_locator(
-                                    &handle,
-                                    Some(&runtime_config),
-                                )
-                            {
+                            if let Ok(parsed) = crate::parser::ParsedFont::from_locator(
+                                &handle,
+                                Some(&runtime_config),
+                            ) {
                                 fonts.push(parsed);
                                 pushed_this_pass += 1;
                             }

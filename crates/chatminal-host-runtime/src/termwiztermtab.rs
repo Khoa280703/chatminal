@@ -2,11 +2,11 @@
 //! The idea is to use these when Chatminal needs to request
 //! input from the user as part of setup flows.
 
+use crate::current_host_runtime_config;
 use crate::pane::{
     alloc_pane_id, CachePolicy, CloseReason, ForEachPaneLogicalLine, LogicalLine, Pane, PaneId,
     WithPaneLines,
 };
-use crate::current_host_runtime_config;
 use crate::register_pane_with_default_side_effects;
 use crate::renderable::*;
 use chatminal_runtime::SessionTerminalHandle;
@@ -50,7 +50,9 @@ impl TermWizTerminalPane {
         let terminal = Mutex::new(engine_term::Terminal::new(
             size,
             term_config.unwrap_or_else(|| {
-                Arc::new(config::TermConfig::with_config(current_host_runtime_config()))
+                Arc::new(config::TermConfig::with_config(
+                    current_host_runtime_config(),
+                ))
             }),
             "Chatminal",
             config::engine_version(),

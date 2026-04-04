@@ -268,7 +268,10 @@ impl Names {
 }
 
 impl ParsedFont {
-    pub fn from_locator(handle: &FontDataHandle, config: Option<&ConfigHandle>) -> anyhow::Result<Self> {
+    pub fn from_locator(
+        handle: &FontDataHandle,
+        config: Option<&ConfigHandle>,
+    ) -> anyhow::Result<Self> {
         let lib = crate::ftwrap::Library::new(config)?;
         let face = lib.face_from_locator(handle)?;
         Self::from_face(&face, handle.clone(), config)

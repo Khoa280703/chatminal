@@ -77,7 +77,12 @@ fn extract_font_data(
     let runtime_config = current_config_handle();
 
     let mut font_info = vec![];
-    parse_and_collect_font_info(&source, &mut font_info, FontOrigin::Gdi, Some(&runtime_config))?;
+    parse_and_collect_font_info(
+        &source,
+        &mut font_info,
+        FontOrigin::Gdi,
+        Some(&runtime_config),
+    )?;
     let matches = ParsedFont::best_match(attr, pixel_size, font_info);
 
     match matches {
@@ -155,7 +160,12 @@ pub fn parse_log_font(log_font: &LOGFONTW, hdc: HDC) -> anyhow::Result<(ParsedFo
 
         let runtime_config = current_config_handle();
         let mut font_info = vec![];
-        parse_and_collect_font_info(&source, &mut font_info, FontOrigin::Gdi, Some(&runtime_config))?;
+        parse_and_collect_font_info(
+            &source,
+            &mut font_info,
+            FontOrigin::Gdi,
+            Some(&runtime_config),
+        )?;
         let matches = ParsedFont::best_match(&attr, pixel_size, font_info);
 
         match matches {

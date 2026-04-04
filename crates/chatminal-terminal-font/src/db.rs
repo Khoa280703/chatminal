@@ -52,11 +52,11 @@ impl FontDatabase {
                     FontOrigin::FontDirs,
                     Some(&runtime_config),
                 )
-                    .map_err(|err| {
-                        log::trace!("failed to read {:?}: {:#}", source, err);
-                        err
-                    })
-                    .ok();
+                .map_err(|err| {
+                    log::trace!("failed to read {:?}: {:#}", source, err);
+                    err
+                })
+                .ok();
             }
         }
 

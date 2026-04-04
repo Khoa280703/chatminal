@@ -11,6 +11,7 @@ use crate::Appearance;
 use cocoa::appkit::{NSApp, NSApplication, NSApplicationActivationPolicyRegular, NSScreen};
 use cocoa::base::{id, nil};
 use cocoa::foundation::{NSArray, NSInteger};
+use config::ConfigHandle;
 use objc::runtime::{Object, BOOL, YES};
 use objc::*;
 use serde::Deserialize;
@@ -18,7 +19,6 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::AtomicUsize;
-use config::ConfigHandle;
 
 pub struct Connection {
     ns_app: id,
