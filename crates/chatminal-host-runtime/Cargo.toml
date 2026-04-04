@@ -30,7 +30,6 @@ log.workspace = true
 luahelper.workspace = true
 metrics.workspace = true
 mlua.workspace = true
-names.workspace = true
 nix = {workspace=true, features=["term"]}
 parking_lot.workspace = true
 percent-encoding.workspace = true
@@ -50,6 +49,7 @@ thiserror.workspace = true
 url.workspace = true
 engine-dynamic.workspace = true
 engine-term = { workspace=true, features=["use_serde"] }
+chatminal-runtime = { path = "../chatminal-runtime" }
 
 [target."cfg(windows)".dependencies]
 ntapi.workspace = true
@@ -63,3 +63,4 @@ winapi = { workspace=true, features = [
 
 [dev-dependencies]
 k9.workspace = true
+serde_json.workspace = true

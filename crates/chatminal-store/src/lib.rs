@@ -679,11 +679,12 @@ impl Store {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(ToString::to_string);
-        let affected = conn.execute(
-            "UPDATE sessions SET startup_command = ?1, updated_at = ?2 WHERE id = ?3",
-            params![startup_command, now_millis() as i64, session_id],
-        )
-        .map_err(|err| format!("set session startup command failed: {err}"))?;
+        let affected = conn
+            .execute(
+                "UPDATE sessions SET startup_command = ?1, updated_at = ?2 WHERE id = ?3",
+                params![startup_command, now_millis() as i64, session_id],
+            )
+            .map_err(|err| format!("set session startup command failed: {err}"))?;
         if affected == 0 {
             return Err("session not found".to_string());
         }
@@ -766,12 +767,16 @@ impl Store {
 
         let now = now_millis() as i64;
         if source_profile_id == target_profile_id {
-            let insert_at = target_index.unwrap_or(source_ids.len()).min(source_ids.len());
+            let insert_at = target_index
+                .unwrap_or(source_ids.len())
+                .min(source_ids.len());
             source_ids.insert(insert_at, session_id.to_string());
             self.resequence_sessions_for_profile_with_conn(&tx, &source_profile_id, &source_ids)?;
         } else {
             let mut target_ids = self.session_ids_by_profile_with_conn(&tx, target_profile_id)?;
-            let insert_at = target_index.unwrap_or(target_ids.len()).min(target_ids.len());
+            let insert_at = target_index
+                .unwrap_or(target_ids.len())
+                .min(target_ids.len());
             target_ids.insert(insert_at, session_id.to_string());
 
             tx.execute(
@@ -783,7 +788,10 @@ impl Store {
             self.resequence_sessions_for_profile_with_conn(&tx, &source_profile_id, &source_ids)?;
             self.resequence_sessions_for_profile_with_conn(&tx, target_profile_id, &target_ids)?;
 
-            if self.active_session_with_conn(&tx, &source_profile_id)?.as_deref() == Some(session_id)
+            if self
+                .active_session_with_conn(&tx, &source_profile_id)?
+                .as_deref()
+                == Some(session_id)
             {
                 self.set_active_session_with_conn(
                     &tx,
@@ -864,12 +872,16 @@ impl Store {
         }
 
         if source_profile_id == target_profile_id {
-            let insert_at = target_index.unwrap_or(source_ids.len()).min(source_ids.len());
+            let insert_at = target_index
+                .unwrap_or(source_ids.len())
+                .min(source_ids.len());
             source_ids.splice(insert_at..insert_at, moved_ids.iter().cloned());
             self.resequence_sessions_for_profile_with_conn(&tx, &source_profile_id, &source_ids)?;
         } else {
             let mut target_ids = self.session_ids_by_profile_with_conn(&tx, target_profile_id)?;
-            let insert_at = target_index.unwrap_or(target_ids.len()).min(target_ids.len());
+            let insert_at = target_index
+                .unwrap_or(target_ids.len())
+                .min(target_ids.len());
             target_ids.splice(insert_at..insert_at, moved_ids.iter().cloned());
             self.resequence_sessions_for_profile_with_conn(&tx, &source_profile_id, &source_ids)?;
             self.resequence_sessions_for_profile_with_conn(&tx, target_profile_id, &target_ids)?;
@@ -1022,7 +1034,9 @@ impl Store {
                 seq: row.get::<_, i64>(0).unwrap_or_default().max(0) as u64,
                 ord: row.get::<_, i64>(1).unwrap_or_default().max(0) as u64,
                 kind: scrollback_record_kind_from_db(
-                    row.get::<_, String>(2).unwrap_or_else(|_| "line".to_string()).as_str(),
+                    row.get::<_, String>(2)
+                        .unwrap_or_else(|_| "line".to_string())
+                        .as_str(),
                 ),
                 text: row.get::<_, String>(3).unwrap_or_default(),
                 ts: row.get::<_, i64>(4).unwrap_or_default().max(0) as u64,
@@ -1149,7 +1163,7 @@ impl Store {
                     WHERE session_id = ?1
                 ) sub
                 WHERE cumulative_lines >= ?2 AND kind = 'line'
-                ORDER BY seq ASC, ord ASC
+                ORDER BY seq DESC, ord DESC
                 LIMIT 1
                 "#,
                 params![session_id, max_lines as i64],
@@ -1415,7 +1429,9 @@ impl Store {
 
     fn list_profiles_with_conn(&self, conn: &Connection) -> Result<Vec<StoredProfile>, String> {
         let mut stmt = conn
-            .prepare("SELECT id, name FROM profiles ORDER BY sort_order ASC, created_at ASC, rowid ASC")
+            .prepare(
+                "SELECT id, name FROM profiles ORDER BY sort_order ASC, created_at ASC, rowid ASC",
+            )
             .map_err(|err| format!("prepare list profiles failed: {err}"))?;
         let mut rows = stmt
             .query([])
@@ -1470,7 +1486,10 @@ impl Store {
         Ok(sessions)
     }
 
-    fn list_sessions_with_conn(&self, conn: &Connection) -> Result<Vec<StoredSessionSummary>, String> {
+    fn list_sessions_with_conn(
+        &self,
+        conn: &Connection,
+    ) -> Result<Vec<StoredSessionSummary>, String> {
         let mut stmt = conn
             .prepare(
                 "SELECT id, profile_id, name, cwd, startup_command, status, persist_history, last_seq FROM sessions ORDER BY profile_id ASC, sort_order ASC, created_at ASC, rowid ASC",

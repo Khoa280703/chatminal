@@ -6,7 +6,8 @@ use crate::pane::{
 use crate::renderable::*;
 use anyhow::Error;
 use async_trait::async_trait;
-use config::{configuration, ExitBehavior, ExitBehaviorMessaging};
+use chatminal_runtime::SessionTerminalHandle;
+use config::{ConfigHandle, ExitBehavior, ExitBehaviorMessaging};
 use engine_dynamic::Value;
 use engine_term::color::ColorPalette;
 use engine_term::{
@@ -52,6 +53,35 @@ struct CachedProcInfo {
     root: LocalProcessInfo,
     updated: Instant,
     foreground: LocalProcessInfo,
+}
+
+#[derive(Clone)]
+struct LocalPaneConfigSnapshot {
+    exit_behavior: ExitBehavior,
+    exit_behavior_messaging: ExitBehaviorMessaging,
+    clean_exit_codes: Vec<u32>,
+    skip_close_confirmation: HashSet<String>,
+    output_parser_buffer_size: usize,
+    output_parser_coalesce_delay_ms: u64,
+    log_unknown_escape_sequences: bool,
+}
+
+impl LocalPaneConfigSnapshot {
+    fn from_handle(config: &ConfigHandle) -> Self {
+        Self {
+            exit_behavior: config.exit_behavior,
+            exit_behavior_messaging: config.exit_behavior_messaging,
+            clean_exit_codes: config.clean_exit_codes.clone(),
+            skip_close_confirmation: config
+                .skip_close_confirmation_for_processes_named
+                .iter()
+                .cloned()
+                .collect(),
+            output_parser_buffer_size: config.output_parser_buffer_size,
+            output_parser_coalesce_delay_ms: config.output_parser_coalesce_delay_ms,
+            log_unknown_escape_sequences: config.log_unknown_escape_sequences,
+        }
+    }
 }
 
 /// This is a bit horrible; it can take 700us to tcgetpgrp, so if we have
@@ -128,12 +158,13 @@ pub struct LocalPane {
     leader: Arc<Mutex<Option<CachedLeaderInfo>>>,
     command_description: String,
     hooks: LocalPaneHooks,
+    config_snapshot: Arc<Mutex<LocalPaneConfigSnapshot>>,
 }
 
 #[async_trait(?Send)]
 impl Pane for LocalPane {
-    fn pane_id(&self) -> PaneId {
-        self.pane_id
+    fn terminal_handle(&self) -> SessionTerminalHandle {
+        SessionTerminalHandle::new(self.pane_id as u64)
     }
 
     fn get_metadata(&self) -> Value {
@@ -244,7 +275,6 @@ impl Pane for LocalPane {
 
     fn is_dead(&self) -> bool {
         let mut proc = self.process.lock();
-        let config = configuration();
 
         const EXIT_BEHAVIOR: &str = "This message is shown because \
             \x1b]8;;https://github.com/Khoa280703/chatminal\
@@ -269,6 +299,7 @@ impl Pane for LocalPane {
                 };
 
                 if let Some(status) = status {
+                    let config = self.config_snapshot.lock().clone();
                     let success = match status.success() {
                         true => true,
                         false => config.clean_exit_codes.contains(&status.exit_code()),
@@ -316,7 +347,7 @@ impl Pane for LocalPane {
 
         let mut notify = None;
         if !terse.is_empty() {
-            match config.exit_behavior_messaging {
+            match self.config_snapshot.lock().exit_behavior_messaging {
                 ExitBehaviorMessaging::Verbose => {
                     if terse == "done" {
                         notify = Some(format!("\r\n{brief}\r\n{trailer}"));
@@ -358,6 +389,10 @@ impl Pane for LocalPane {
     }
 
     fn set_config(&self, config: Arc<dyn TerminalConfiguration>) {
+        if let Some(term_config) = config.as_ref().downcast_ref::<config::TermConfig>() {
+            *self.config_snapshot.lock() =
+                LocalPaneConfigSnapshot::from_handle(&term_config.current_config_handle());
+        }
         self.terminal.lock().set_config(config);
     }
 
@@ -507,11 +542,8 @@ impl Pane for LocalPane {
                 "can_close_without_prompting? procs in pane {:#?}",
                 info.root
             );
-            let skip_close_confirmation_processes = configuration()
-                .skip_close_confirmation_for_processes_named
-                .iter()
-                .cloned()
-                .collect::<HashSet<_>>();
+            let config = self.config_snapshot.lock().clone();
+            let skip_close_confirmation_processes = &config.skip_close_confirmation;
 
             let hook_result = config::run_immediate_with_lua_config(|lua| {
                 let lua = match lua {
@@ -555,7 +587,7 @@ impl Pane for LocalPane {
             }
 
             let is_stateful = match hook_result {
-                Ok(None) => default_stateful_check(&info.root, &skip_close_confirmation_processes),
+                Ok(None) => default_stateful_check(&info.root, skip_close_confirmation_processes),
                 Ok(Some(s)) => s,
                 Err(err) => {
                     log::error!(
@@ -563,7 +595,7 @@ impl Pane for LocalPane {
                          hook: {:#}, falling back to default behavior",
                         err
                     );
-                    default_stateful_check(&info.root, &skip_close_confirmation_processes)
+                    default_stateful_check(&info.root, skip_close_confirmation_processes)
                 }
             };
 
@@ -773,15 +805,12 @@ impl Pane for LocalPane {
 struct LocalPaneDCSHandler {
     #[allow(dead_code)]
     pane_id: PaneId,
-}
-
-fn log_unknown_escape_sequences_enabled() -> bool {
-    configuration().log_unknown_escape_sequences
+    config_snapshot: Arc<Mutex<LocalPaneConfigSnapshot>>,
 }
 
 impl engine_term::DeviceControlHandler for LocalPaneDCSHandler {
     fn handle_device_control(&mut self, control: termwiz::escape::DeviceControlMode) {
-        let log_unknown = log_unknown_escape_sequences_enabled();
+        let log_unknown = self.config_snapshot.lock().log_unknown_escape_sequences;
         match control {
             DeviceControlMode::Data(c) => {
                 if log_unknown {
@@ -821,6 +850,8 @@ impl AlertHandler for LocalPaneNotifHandler {
 /// Without this, typing `exit` in `cmd.exe` would keep the pane around
 /// until something else triggered the mux to prune dead processes.
 fn split_child(
+    pane_id: PaneId,
+    exit_behavior: ExitBehavior,
     mut process: Box<dyn Child>,
     hooks: LocalPaneHooks,
 ) -> (
@@ -836,7 +867,7 @@ fn split_child(
     std::thread::spawn(move || {
         let status = process.wait();
         tx.try_send(status).ok();
-        hooks.prune_dead_windows();
+        hooks.run_child_exit_cleanup(pane_id, exit_behavior);
     });
 
     (rx, signaller, pid)
@@ -850,6 +881,7 @@ impl LocalPane {
         pty: Box<dyn MasterPty>,
         writer: Box<dyn Write + Send>,
         command_description: String,
+        config: ConfigHandle,
     ) -> Self {
         Self::new_with_hooks(
             pane_id,
@@ -858,7 +890,8 @@ impl LocalPane {
             pty,
             writer,
             command_description,
-            LocalPaneHooks::mux_default(),
+            config,
+            LocalPaneHooks::default(),
         )
     }
 
@@ -869,11 +902,25 @@ impl LocalPane {
         pty: Box<dyn MasterPty>,
         writer: Box<dyn Write + Send>,
         command_description: String,
+        config: ConfigHandle,
         hooks: LocalPaneHooks,
     ) -> Self {
-        let (process, signaller, pid) = split_child(process, hooks.clone());
-
-        terminal.set_device_control_handler(Box::new(LocalPaneDCSHandler { pane_id }));
+        let config_snapshot = Arc::new(Mutex::new(LocalPaneConfigSnapshot::from_handle(&config)));
+        let initial_exit_cleanup_behavior = if pty.is::<crate::spawn_target::FailedSpawnPty>() {
+            ExitBehavior::CloseOnCleanExit
+        } else {
+            config_snapshot.lock().exit_behavior
+        };
+        let (process, signaller, pid) = split_child(
+            pane_id,
+            initial_exit_cleanup_behavior,
+            process,
+            hooks.clone(),
+        );
+        terminal.set_device_control_handler(Box::new(LocalPaneDCSHandler {
+            pane_id,
+            config_snapshot: Arc::clone(&config_snapshot),
+        }));
         terminal.set_notification_handler(Box::new(LocalPaneNotifHandler {
             pane_id,
             hooks: hooks.clone(),
@@ -895,9 +942,17 @@ impl LocalPane {
             leader: Arc::new(Mutex::new(None)),
             command_description,
             hooks,
+            config_snapshot,
         }
     }
 
+    pub(crate) fn output_parser_buffer_size(&self) -> usize {
+        self.config_snapshot.lock().output_parser_buffer_size
+    }
+
+    pub(crate) fn output_parser_coalesce_delay_ms(&self) -> u64 {
+        self.config_snapshot.lock().output_parser_coalesce_delay_ms
+    }
     #[cfg(unix)]
     fn get_leader(&self, policy: CachePolicy) -> CachedLeaderInfo {
         let mut leader = self.leader.lock();

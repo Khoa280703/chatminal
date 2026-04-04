@@ -6,8 +6,10 @@ use crate::pane::{
     alloc_pane_id, CachePolicy, CloseReason, ForEachPaneLogicalLine, LogicalLine, Pane, PaneId,
     WithPaneLines,
 };
+use crate::current_host_runtime_config;
 use crate::register_pane_with_default_side_effects;
 use crate::renderable::*;
+use chatminal_runtime::SessionTerminalHandle;
 use crossbeam::channel::{unbounded as channel, Receiver, Sender};
 use engine_term::color::ColorPalette;
 use engine_term::{
@@ -47,7 +49,9 @@ impl TermWizTerminalPane {
 
         let terminal = Mutex::new(engine_term::Terminal::new(
             size,
-            term_config.unwrap_or_else(|| Arc::new(config::TermConfig::new())),
+            term_config.unwrap_or_else(|| {
+                Arc::new(config::TermConfig::with_config(current_host_runtime_config()))
+            }),
             "Chatminal",
             config::engine_version(),
             Box::new(Vec::new()), // FIXME: connect to something?
@@ -65,8 +69,8 @@ impl TermWizTerminalPane {
 }
 
 impl Pane for TermWizTerminalPane {
-    fn pane_id(&self) -> PaneId {
-        self.pane_id
+    fn terminal_handle(&self) -> SessionTerminalHandle {
+        SessionTerminalHandle::new(self.pane_id as u64)
     }
 
     fn get_cursor_position(&self) -> StableCursorPosition {

@@ -1,3 +1,4 @@
+use crate::chatminal_runtime::terminal_handle_for_overlay_pane;
 use crate::commands::{CommandDef, ExpandedCommand};
 use crate::overlay::selector::{matcher_pattern, matcher_score};
 use crate::termwindow::box_model::*;
@@ -354,7 +355,9 @@ impl CommandPalette {
 
         let pane_ref = term_window
             .active_terminal_instance_or_overlay()
-            .map(|pane| TerminalRef::from_pane_id(pane.pane_id()));
+            .map(|pane| {
+                TerminalRef::from_terminal_handle(terminal_handle_for_overlay_pane(&*pane))
+            });
         let session_ui_mode = term_window.active_session_id().is_some();
 
         let commands = build_commands(
@@ -697,6 +700,7 @@ impl CommandPalette {
                 ),
                 metrics: &metrics,
                 gl_state: term_window.render_state.as_ref().unwrap(),
+                custom_block_glyphs: term_window.config.custom_block_glyphs,
                 zindex: 100,
             },
             &element,

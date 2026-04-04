@@ -33,6 +33,7 @@ use winreg::RegKey;
 
 pub struct Connection {
     event_handle: HANDLE,
+    config: RefCell<ConfigHandle>,
     pub(crate) windows: RefCell<HashMap<HWindow, Rc<RefCell<WindowInner>>>>,
     pub(crate) gl_connection: RefCell<Option<Rc<crate::egl::GlConnection>>>,
 }
@@ -53,6 +54,14 @@ pub(crate) fn get_appearance() -> Appearance {
 }
 
 impl ConnectionOps for Connection {
+    fn config(&self) -> ConfigHandle {
+        self.config.borrow().clone()
+    }
+
+    fn update_config(&self, config: &ConfigHandle) {
+        *self.config.borrow_mut() = config.clone();
+    }
+
     fn terminate_message_loop(&self) {
         unsafe {
             PostQuitMessage(0);
@@ -119,10 +128,11 @@ impl ConnectionOps for Connection {
 }
 
 impl Connection {
-    pub(crate) fn create_new() -> anyhow::Result<Self> {
+    pub(crate) fn create_new(config: ConfigHandle) -> anyhow::Result<Self> {
         let event_handle = SPAWN_QUEUE.event_handle.0;
         Ok(Self {
             event_handle,
+            config: RefCell::new(config),
             windows: RefCell::new(HashMap::new()),
             gl_connection: RefCell::new(None),
         })
@@ -192,7 +202,9 @@ impl ScreenInfoHelper {
             active_handle: unsafe { MonitorFromWindow(GetFocus(), MONITOR_DEFAULTTONEAREST) },
             friendly_names: gdi_display_name_to_friendly_monitor_names()?,
             gdi_to_adapater: gdi_display_name_to_adapter_names(),
-            config: config::configuration(),
+            config: Connection::get()
+                .expect("Connection::init has not been called")
+                .config(),
         })
     }
 

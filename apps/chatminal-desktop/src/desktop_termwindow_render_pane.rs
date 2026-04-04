@@ -1,8 +1,10 @@
-use crate::quad::{HeapQuadAllocator, QuadTrait, TripleLayerQuadAllocator};
-use crate::selection::SelectionRange;
 use crate::chatminal_runtime::overlay_compat::{
     OverlayWithPaneLines as WithPaneLines, RenderableDimensions, StableCursorPosition,
 };
+use crate::desktop_termwindow_types::terminal_ui_key_for_pane;
+use crate::desktop_termwindow_types::{TerminalPaneLayout, TerminalUiKey};
+use crate::quad::{HeapQuadAllocator, QuadTrait, TripleLayerQuadAllocator};
+use crate::selection::SelectionRange;
 use crate::termwindow::box_model::*;
 use crate::termwindow::render::{
     same_hyperlink, CursorProperties, LineQuadCacheKey, LineQuadCacheValue, LineToEleShapeCacheKey,
@@ -16,12 +18,11 @@ use config::VisualBellTarget;
 use engine_dynamic::Value;
 use engine_term::color::{ColorAttribute, ColorPalette};
 use engine_term::{Line, StableRowIndex};
-use crate::desktop_termwindow_types::{TerminalPaneLayout, TerminalUiKey};
 use ordered_float::NotNan;
 use std::time::Instant;
+use window::color::LinearRgba;
 use window::PointF;
 use window::RectF;
-use window::color::LinearRgba;
 
 struct PanePixelRects {
     background_rect: RectF,
@@ -109,7 +110,7 @@ impl crate::TermWindow {
         let pos = self
             .get_panes_to_render()
             .into_iter()
-            .find(|pos| pos.pane.pane_id() as u64 == pane_id)?;
+            .find(|pos| terminal_ui_key_for_pane(&*pos.pane) == pane_id)?;
         let pane_rects = self.pane_pixel_rects(&pos);
         let padding = self.effective_right_padding(&self.config);
         let thumb_x = pane_rects
@@ -145,7 +146,7 @@ impl crate::TermWindow {
         let zone = {
             let dims = pos.pane.get_dimensions();
             let position = self
-                .get_viewport(pos.pane.pane_id() as u64)
+                .get_viewport(terminal_ui_key_for_pane(&*pos.pane))
                 .unwrap_or(dims.physical_top);
 
             let zones = self.get_semantic_zones(&pos.pane);
@@ -163,15 +164,15 @@ impl crate::TermWindow {
         let palette = pos.pane.palette();
         let pane_rects = self.pane_pixel_rects(pos);
 
-        let top_pixel_y =
-            pane_rects.grid_origin.y + (pos.top as f32 * self.render_metrics.cell_size.height as f32);
+        let top_pixel_y = pane_rects.grid_origin.y
+            + (pos.top as f32 * self.render_metrics.cell_size.height as f32);
 
         let cursor = pos.pane.get_cursor_position();
         if pos.is_active {
             self.prev_cursor.update(&cursor);
         }
 
-        let pane_id = pos.pane.pane_id() as u64;
+        let pane_id = terminal_ui_key_for_pane(&*pos.pane);
         let current_viewport = self.get_viewport(pane_id);
         let dims = clamp_renderable_dimensions_to_layout(pos.pane.get_dimensions(), pos);
 
@@ -267,8 +268,8 @@ impl crate::TermWindow {
         }
 
         if self.show_scroll_bar {
-            let pane_id = pos.pane.pane_id() as u64;
-            let thumb_y_offset = pane_rects.content_rect.min_y().max(pane_rects.content_top) as usize;
+            let thumb_y_offset =
+                pane_rects.content_rect.min_y().max(pane_rects.content_top) as usize;
             let track_height = pane_rects.content_rect.height().max(0.0).round() as usize;
             if track_height > 0 {
                 let min_height = self.min_scroll_bar_height();
@@ -310,7 +311,8 @@ impl crate::TermWindow {
                     width: padding as usize,
                     y: abs_thumb_top + thumb_size,
                     height: self
-                        .dimensions.pixel_height
+                        .dimensions
+                        .pixel_height
                         .min(track_bottom)
                         .saturating_sub(below_thumb_y),
                     item_type: UIItemType::BelowScrollThumb(pane_id),
@@ -345,7 +347,7 @@ impl crate::TermWindow {
         }
 
         let (selrange, rectangular) = {
-            let sel = self.selection(pos.pane.pane_id() as u64);
+            let sel = self.selection(pane_id);
             (sel.range.clone(), sel.rectangular)
         };
 
@@ -392,8 +394,8 @@ impl crate::TermWindow {
                 error: Option<anyhow::Error>,
             }
 
-            let left_pixel_x =
-                pane_rects.grid_origin.x + (pos.left as f32 * self.render_metrics.cell_size.width as f32);
+            let left_pixel_x = pane_rects.grid_origin.x
+                + (pos.left as f32 * self.render_metrics.cell_size.width as f32);
 
             let mut render = LineRender {
                 term_window: self,

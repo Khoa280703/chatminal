@@ -68,10 +68,6 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 pub use selection::SelectionMode;
 pub use termwindow::{set_window_class, set_window_position, TermWindow, ICON_DATA};
 
-fn current_config_handle() -> ConfigHandle {
-    config::configuration()
-}
-
 #[derive(Debug, Parser)]
 #[command(
     about = "Chatminal Desktop",
@@ -339,7 +335,7 @@ fn run_terminal_gui(opts: StartCommand) -> anyhow::Result<()> {
         set_window_position(pos.clone());
     }
 
-    let config = current_config_handle();
+    let config = config::current_config_handle();
     let need_builder = !opts.prog.is_empty() || opts.cwd.is_some();
 
     let cmd = if need_builder {
@@ -518,7 +514,7 @@ pub fn run_ls_fonts(config: config::ConfigHandle, cmd: &LsFontsCommand) -> anyho
             Some(&unicode_version),
         );
         let cell_clusters = line.cluster(bidi_hint);
-        let ft_lib = engine_font::ftwrap::Library::new()?;
+        let ft_lib = engine_font::ftwrap::Library::new(Some(&config))?;
 
         let mut glyph_cache = GlyphCache::new_in_memory(&font_config, 256)?;
 
@@ -808,7 +804,8 @@ fn run() -> anyhow::Result<()> {
     config::lua::add_context_setup_func(crate::scripting::register);
     config::lua::add_context_setup_func(crate::stats::register);
 
-    stats::Stats::init()?;
+    let initial_config = config::current_config_handle();
+    stats::Stats::init(&initial_config)?;
     let _saver = umask::UmaskSaver::new();
 
     let mut config_overrides = opts.config_override.clone();
@@ -829,7 +826,7 @@ fn run() -> anyhow::Result<()> {
         &config_overrides,
         opts.skip_config,
     )?;
-    let config = current_config_handle();
+    let config = config::current_config_handle();
 
     let sub = match opts.cmd.as_ref().cloned() {
         Some(SubCommand::BlockingStart(start)) => {

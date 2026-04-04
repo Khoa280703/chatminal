@@ -159,7 +159,7 @@ impl GlContextPair {
     /// project (and MetalANGLE) both provide implementations.
     /// The ANGLE EGL implementation wants a CALayer descendant passed
     /// as the EGLNativeWindowType.
-    pub fn create(view: id) -> anyhow::Result<Self> {
+    pub fn create(view: id, config: &ConfigHandle) -> anyhow::Result<Self> {
         let behavior = if cfg!(debug_assertions) {
             glium::debug::DebugCallbackBehavior::DebugMessageOnError
         } else {
@@ -167,7 +167,8 @@ impl GlContextPair {
         };
 
         // Let's first try to initialize EGL...
-        let (context, backend) = match if config::configuration().prefer_egl {
+        let conn = Connection::get().unwrap();
+        let (context, backend) = match if config.prefer_egl {
             // ANGLE wants a layer, so tell the view to create one.
             // Importantly, we must set its scale to 1.0 prior to initializing
             // EGL to prevent undesirable scaling.
@@ -178,8 +179,6 @@ impl GlContextPair {
                 let _: () = msg_send![layer, setContentsScale: 1.0f64];
                 let _: () = msg_send![layer, setOpaque: NO];
             };
-
-            let conn = Connection::get().unwrap();
 
             let state = match conn.gl_connection.borrow().as_ref() {
                 None => crate::egl::GlState::create(None, layer as *const c_void),
@@ -443,7 +442,9 @@ impl Window {
     {
         let config = match config {
             Some(c) => c.clone(),
-            None => config::configuration(),
+            None => Connection::get()
+                .expect("Connection::init has not been called")
+                .config(),
         };
 
         let conn = Connection::get().expect("new_window called on gui thread");
@@ -1727,7 +1728,7 @@ impl Keyboard {
 impl Inner {
     fn enable_opengl(&mut self) -> anyhow::Result<Rc<glium::backend::Context>> {
         let view = self.view_id.as_ref().unwrap().load();
-        let glium_context = GlContextPair::create(*view)?;
+        let glium_context = GlContextPair::create(*view, &self.config)?;
 
         self.gl_context_pair.replace(glium_context.clone());
 
@@ -1839,7 +1840,7 @@ fn dpi_for_window_screen(ns_window: *mut Object, config: &ConfigHandle) -> Optio
     }
 
     let screen = unsafe { msg_send![ns_window, screen] };
-    let info = crate::os::macos::connection::nsscreen_to_screen_info(screen);
+    let info = crate::os::macos::connection::nsscreen_to_screen_info(screen, config);
 
     config.dpi_by_screen.get(&info.name).copied()
 }
@@ -2603,7 +2604,9 @@ impl WindowView {
             return;
         };
 
-        let config_handle = config::configuration();
+        let config_handle = Connection::get()
+            .expect("Connection::init has not been called")
+            .config();
         let use_ime = config_handle.use_ime;
         let send_composed_key_when_left_alt_is_pressed =
             config_handle.send_composed_key_when_left_alt_is_pressed;

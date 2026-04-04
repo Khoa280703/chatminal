@@ -15,6 +15,7 @@ use crate::chatminal_runtime::{
     activate_runtime_session, resolve_target_session_id, runtime_session_attachment,
     ChatminalRuntimeClient,
 };
+use crate::frontend::current_frontend_config;
 
 pub(crate) struct DesktopSpawnTarget {
     local: LocalSpawnTarget,
@@ -23,7 +24,7 @@ pub(crate) struct DesktopSpawnTarget {
 impl DesktopSpawnTarget {
     pub(crate) fn new_local() -> anyhow::Result<Self> {
         Ok(Self {
-            local: LocalSpawnTarget::new_with_hooks("local", LocalSpawnHooks::default())?,
+            local: LocalSpawnTarget::new_with_hooks("local", LocalSpawnHooks::host_default())?,
         })
     }
 
@@ -31,7 +32,7 @@ impl DesktopSpawnTarget {
         Ok(Self {
             local: LocalSpawnTarget::new_serial_target_with_hooks(
                 serial_target,
-                LocalSpawnHooks::default(),
+                LocalSpawnHooks::host_default(),
             )?,
         })
     }
@@ -77,6 +78,7 @@ impl SpawnTarget for DesktopSpawnTarget {
                 runtime_id,
                 terminal_instance_id,
                 size,
+                current_frontend_config(),
             )
             .map(|pane| pane as Arc<dyn HostTerminal>)
             .context("create chatminal session pane");

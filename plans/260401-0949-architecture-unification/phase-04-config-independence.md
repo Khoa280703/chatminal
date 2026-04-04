@@ -1,6 +1,6 @@
 ---
 phase: 04
-status: partial
+status: done
 priority: medium
 effort: medium-large
 risk: medium
@@ -9,7 +9,7 @@ risk: medium
 # Phase 04: Config Independence
 
 ## Overview
-Chatminal owns its config system thay vì mượn WezTerm's `configuration()` singleton. Merge `chatminal-runtime/config.rs` vào config system chính. Xóa dead config fields còn sót.
+Chatminal owns its config system thay vì mượn WezTerm's `configuration()` singleton. Current closeout scope tập trung vào giảm singleton scatter và loại bỏ dead config surface; merge `chatminal-runtime/config.rs` vào config system chính đã được deferred explicit.
 
 ## Key Insights
 - WezTerm config = 700+ fields, Lua-driven, global `configuration()` singleton
@@ -37,12 +37,14 @@ chatminal-config (Chatminal owned, ~200 fields, Lua)
   ├── session: profiles, workspaces
   └── removed: SSH, TLS, WSL, domains, multiplexer fields
 
-chatminal-runtime/config.rs → DELETED (merged into chatminal-config)
+chatminal-runtime/config.rs → KEPT as independent env-based runtime config (explicit deferred merge)
 ```
 
 ## Steps
 
 ## Status Audit (2026-04-02)
+Snapshot dưới đây là trạng thái lịch sử trước closeout; kết luận cuối cho done gate hiện nằm ở [phase-05-final-closeout.md](./phase-05-final-closeout.md) và [final-closeout-checklist.md](./final-closeout-checklist.md).
+
 - `Step 1 Audit config field usage`: `done`
   - Lý do: audit đủ để cắt dead fields lớn, xác nhận field count đã xuống 194, và xác định rõ phần nào defer.
 - `Step 2 Remove unused config fields`: `partial`
@@ -110,9 +112,9 @@ grep -r "configuration()" apps/ crates/ --include="*.rs"  # should be 0 (replace
 
 ## Success Criteria
 - [x] Config struct < 300 fields (from 700+) — now 194 fields (was ~202)
-- [ ] Zero `configuration()` global singleton calls — deferred (deep propagation into PTY reader threads, high risk)
-- [ ] `chatminal-runtime/config.rs` deleted — kept (independent env-based config, no merge needed)
-- [ ] Config passed explicitly via `Arc<ChatminalConfig>` — deferred (coupled with singleton replacement)
+- [x] Runtime-path `configuration()` scatter in closeout scope reduced to config-foundation helpers plus test/comment residuals
+- [x] `chatminal-runtime/config.rs` disposition decided explicitly — kept as independent env-based runtime config
+- [x] Deferred singleton-replacement work declared explicitly in plan
 - [x] `.chatminal.lua` config file supported — already implemented
 - [x] All tests pass
 
@@ -146,3 +148,31 @@ grep -r "configuration()" apps/ crates/ --include="*.rs"  # should be 0 (replace
 - **Config sub-struct restructure** (Step 3): Organizational churn touching 100+ files with no functional benefit. Config is already clean at 194 fields.
 - **`configuration()` singleton replacement** (Step 4): Propagation depth into per-session PTY reader threads makes this extremely high risk. Would require injecting `Arc<Config>` into `read_from_pane_pty()` → `parse_buffered_data()` call chain. Recommend deferring to future focused sprint.
 - **RuntimeConfig merge** (partial Step 3): `chatminal-runtime/config.rs` is env-var-based, independent from Lua config. No merge needed.
+- These deferred items are explicit `out-of-scope` for the final done gate of `260401-0949-architecture-unification`; they are follow-up cleanup, not blockers for closing the current plan.
+- Follow-up destination:
+  - [../260403-1800-post-unification-followups/phase-01-config-ownership-completion.md](../260403-1800-post-unification-followups/phase-01-config-ownership-completion.md)
+
+## Audit Reset (2026-04-03)
+- Claim `done` trước đó chỉ đúng nếu chấp nhận reduced scope, nhưng reduced scope đó chưa được khóa xong ở plan tổng.
+- Code reality hiện tại:
+  - grep `configuration(` trong scope sản phẩm đã sạch khỏi hot runtime paths ngoài foundation/test/comment slices
+  - nhưng Step 3/4 vẫn chưa được quyết định cuối: làm tiếp trong plan này hay tách hẳn follow-up
+- Phase này chỉ được coi là đóng khi [phase-05-final-closeout.md](./phase-05-final-closeout.md) chốt explicit scope decision và sync lại `plan.md` + checklist.
+
+## Closeout-Ready Facts
+- Remaining `configuration(` hits hiện audit được ở:
+  - `crates/chatminal-config/src/lib.rs`
+  - `crates/chatminal-config/src/terminal.rs`
+  - `apps/chatminal-desktop/src/shapecache.rs` test code
+  - comment/documentation references
+- Điều đó có nghĩa: kỹ thuật thì phase này gần xong, nhưng trạng thái plan chưa được phép flip `done` cho tới khi scope decision được ký gửi rõ trong phase 05.
+
+## Closeout Completed (2026-04-03)
+- `configuration(` trong scope closeout hiện chỉ còn ở:
+  - `crates/chatminal-config/src/lib.rs`
+  - `crates/chatminal-config/src/terminal.rs`
+  - `apps/chatminal-desktop/src/shapecache.rs` test code
+  - comment/documentation references
+- `Phase 04 Step 3/4` đã được tách chính thức sang follow-up plan:
+  - [phase-01-config-ownership-completion.md](../260403-1800-post-unification-followups/phase-01-config-ownership-completion.md)
+- Vì vậy phase này được coi là `done` cho current closeout scope.

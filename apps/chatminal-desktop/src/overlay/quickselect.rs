@@ -1,8 +1,10 @@
 use crate::chatminal_runtime::overlay_compat::{
-    OverlayCachePolicy, OverlayForEachLogicalLine, OverlayLogicalLine, OverlayPane,
-    OverlayPaneHandle, OverlayPattern, OverlaySearchResult, OverlayWithPaneLines,
+    OverlayCachePolicy, OverlayForEachLogicalLine, OverlayLogicalLine, OverlayPane, OverlayPattern,
+    OverlaySearchResult, OverlayWithPaneLines,
     RenderableDimensions, StableCursorPosition,
 };
+use crate::chatminal_runtime::SessionTerminalHandle;
+use crate::desktop_termwindow_types::terminal_ui_key_for_pane;
 use crate::selection::{SelectionCoordinate, SelectionRange};
 use crate::termwindow::{TermWindow, TermWindowNotif};
 use config::keyassignment::{ClipboardCopyDestination, QuickSelectArguments};
@@ -239,7 +241,7 @@ impl QuickSelectOverlay {
         pane: &Arc<dyn OverlayPane>,
         args: &QuickSelectArguments,
     ) -> Arc<dyn OverlayPane> {
-        let viewport = term_window.get_viewport(pane.pane_id() as u64);
+        let viewport = term_window.get_viewport(terminal_ui_key_for_pane(&**pane));
         let dims = pane.get_dimensions();
 
         let config = term_window.config.clone();
@@ -321,8 +323,8 @@ impl QuickSelectOverlay {
 }
 
 impl OverlayPane for QuickSelectOverlay {
-    fn pane_id(&self) -> OverlayPaneHandle {
-        self.delegate.pane_id()
+    fn terminal_handle(&self) -> SessionTerminalHandle {
+        self.delegate.terminal_handle()
     }
 
     fn get_title(&self) -> String {
@@ -740,16 +742,16 @@ impl QuickSelectRenderable {
     fn close(&self) {
         TermWindow::schedule_cancel_overlay_for_terminal_handle(
             self.window.clone(),
-            self.delegate.pane_id() as u64,
+            terminal_ui_key_for_pane(&*self.delegate),
         );
     }
 
     fn set_viewport(&self, row: Option<StableRowIndex>) {
         let dims = self.delegate.get_dimensions();
-        let pane_id = self.delegate.pane_id();
+        let pane_id = terminal_ui_key_for_pane(&*self.delegate);
         self.window
             .notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                term_window.set_viewport(pane_id as u64, row, dims);
+                term_window.set_viewport(pane_id, row, dims);
             })));
     }
 
@@ -876,10 +878,10 @@ impl QuickSelectRenderable {
                 let mut results = pane.search(pattern, range, limit).await?;
                 results.sort();
 
-                let pane_id = pane.pane_id();
+                let terminal_ui_key = terminal_ui_key_for_pane(&*pane);
                 let mut results = Some(results);
                 window.notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                    let state = term_window.terminal_ui_state(pane_id as u64);
+                    let state = term_window.terminal_ui_state(terminal_ui_key);
                     if let Some(overlay) = state.overlay.as_ref() {
                         if let Some(search_overlay) =
                             overlay.pane.downcast_ref::<QuickSelectOverlay>()
@@ -922,10 +924,10 @@ impl QuickSelectRenderable {
     }
 
     fn clear_selection(&mut self) {
-        let pane_id = self.delegate.pane_id();
+        let terminal_ui_key = terminal_ui_key_for_pane(&*self.delegate);
         self.window
             .notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                let mut selection = term_window.selection(pane_id as u64);
+                let mut selection = term_window.selection(terminal_ui_key);
                 selection.origin.take();
                 selection.range.take();
             })));
@@ -934,14 +936,14 @@ impl QuickSelectRenderable {
     fn select_and_copy_match_number(&mut self, n: usize, paste: bool) {
         let result = self.results[n].clone();
 
-        let pane_id = self.delegate.pane_id();
+        let terminal_ui_key = terminal_ui_key_for_pane(&*self.delegate);
         let action = self.args.action.clone();
         let skip_action_on_paste = self.args.skip_action_on_paste;
         self.window
             .notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                if let Ok(pane) = term_window.resolve_terminal_handle(pane_id as u64) {
+                if let Ok(pane) = term_window.resolve_terminal_handle(terminal_ui_key) {
                     {
-                        let mut selection = term_window.selection(pane_id as u64);
+                        let mut selection = term_window.selection(terminal_ui_key);
                         let start = SelectionCoordinate::x_y(result.start_x, result.start_y);
                         selection.origin = Some(start);
                         selection.range = Some(SelectionRange {

@@ -1,19 +1,23 @@
-use crate::chatminal_runtime::overlay_compat::{
-    OverlayPane, OverlayWithPaneLines as WithPaneLines,
+use crate::chatminal_runtime::{
+    desktop_focus_session_view,
+    overlay_compat::{OverlayPane, OverlayWithPaneLines as WithPaneLines},
+    terminal_handle_for_overlay_pane,
 };
 use crate::chatminal_sidebar::SidebarSessionDropTarget;
-use crate::desktop_termwindow_types::{TerminalSplit, TerminalSplitDirection};
+use crate::desktop_termwindow_types::{
+    TerminalSplit, TerminalSplitDirection, terminal_ui_key_for_pane,
+};
 use crate::tabbar::SessionBarItem;
 use crate::termwindow::{
-    GuiWin, MouseCapture, ScrollHit, TermWindowNotif, UIItem, UIItemType, TMB,
+    GuiWin, MouseCapture, ScrollHit, TMB, TermWindowNotif, UIItem, UIItemType,
 };
 use ::window::{
     MouseButtons as WMB, MouseCursor, MouseEvent, MouseEventKind as WMEK, MousePress,
     WindowDecorations, WindowOps, WindowState,
 };
 use chatminal_lua_bridge::TerminalRef;
-use config::keyassignment::{KeyAssignment, MouseEventTrigger};
 use config::MouseEventAltScreen;
+use config::keyassignment::{KeyAssignment, MouseEventTrigger};
 use engine_dynamic::ToDynamic;
 use engine_term::input::{MouseButton, MouseEventKind as TMEK};
 use engine_term::{ClickPosition, LastMouseClick, StableRowIndex};
@@ -447,17 +451,17 @@ impl super::TermWindow {
         let Some(pane) = self
             .get_panes_to_render()
             .into_iter()
-            .find(|pos| pos.pane.pane_id() as u64 == pane_id)
+            .find(|pos| terminal_ui_key_for_pane(&*pos.pane) == pane_id)
             .map(|pos| pos.pane)
         else {
             return;
         };
 
         let dims = self.renderable_dimensions_for_pane(&pane);
-        let current_viewport = self.get_viewport(pane.pane_id() as u64);
+        let pane_id = terminal_ui_key_for_pane(&*pane);
+        let current_viewport = self.get_viewport(pane_id);
 
-        let Some((_, y_offset, _, track_height)) =
-            self.scroll_bar_track_geometry_for_pane(pane_id)
+        let Some((_, y_offset, _, track_height)) = self.scroll_bar_track_geometry_for_pane(pane_id)
         else {
             return;
         };
@@ -478,7 +482,7 @@ impl super::TermWindow {
             track_height,
             self.min_scroll_bar_height() as usize,
         );
-        self.set_viewport(pane.pane_id() as u64, Some(row), dims);
+        self.set_viewport(pane_id, Some(row), dims);
         context.invalidate();
         self.dragging.replace((item, start_event));
     }
@@ -1120,7 +1124,7 @@ impl super::TermWindow {
                 window
                     .window
                     .notify(TermWindowNotif::PerformAssignmentForTerminalHandle {
-                        terminal_handle: pane.pane_id() as u64,
+                        terminal_handle: pane.terminal_handle_value(),
                         assignment,
                         tx: None,
                     });
@@ -1128,7 +1132,7 @@ impl super::TermWindow {
             Ok(())
         }
         let window = GuiWin::new(self);
-        let pane = TerminalRef::from_pane_id(pane.pane_id());
+        let pane = TerminalRef::from_terminal_handle(terminal_handle_for_overlay_pane(&*pane));
         promise::spawn::spawn(config::with_lua_config_on_main_thread(move |lua| {
             dispatch_new_tab_button(lua, window, pane, button, action)
         }))
@@ -1155,9 +1159,7 @@ impl super::TermWindow {
                     ..
                 } => {
                     if let Some(view_id) = view_id {
-                        if let Some(focused_session_id) =
-                            crate::chatminal_runtime::desktop_focus_session_view(view_id)
-                        {
+                        if let Some(focused_session_id) = desktop_focus_session_view(view_id) {
                             self.switch_chatminal_session_target(&focused_session_id, None);
                             return;
                         }
@@ -1284,17 +1286,18 @@ impl super::TermWindow {
         let Some(pane) = self
             .get_panes_to_render()
             .into_iter()
-            .find(|pos| pos.pane.pane_id() as u64 == pane_id)
+            .find(|pos| terminal_ui_key_for_pane(&*pos.pane) == pane_id)
             .map(|pos| pos.pane)
         else {
             return;
         };
         if let WMEK::Press(MousePress::Left) = event.kind {
             let dims = self.renderable_dimensions_for_pane(&pane);
-            let current_viewport = self.get_viewport(pane.pane_id() as u64);
+            let pane_id = terminal_ui_key_for_pane(&*pane);
+            let current_viewport = self.get_viewport(pane_id);
             // Page up
             self.set_viewport(
-                pane.pane_id() as u64,
+                pane_id,
                 Some(
                     current_viewport
                         .unwrap_or(dims.physical_top)
@@ -1317,17 +1320,18 @@ impl super::TermWindow {
         let Some(pane) = self
             .get_panes_to_render()
             .into_iter()
-            .find(|pos| pos.pane.pane_id() as u64 == pane_id)
+            .find(|pos| terminal_ui_key_for_pane(&*pos.pane) == pane_id)
             .map(|pos| pos.pane)
         else {
             return;
         };
         if let WMEK::Press(MousePress::Left) = event.kind {
             let dims = self.renderable_dimensions_for_pane(&pane);
-            let current_viewport = self.get_viewport(pane.pane_id() as u64);
+            let pane_id = terminal_ui_key_for_pane(&*pane);
+            let current_viewport = self.get_viewport(pane_id);
             // Page down
             self.set_viewport(
-                pane.pane_id() as u64,
+                pane_id,
                 Some(
                     current_viewport
                         .unwrap_or(dims.physical_top)
@@ -1403,7 +1407,7 @@ impl super::TermWindow {
                 && column <= pos.left + pos.width
             {
                 matched_rendered_pane = true;
-                if pane.pane_id() != pos.pane.pane_id() {
+                if pane.terminal_handle() != pos.pane.terminal_handle() {
                     // We're over a pane that isn't active
                     match &event.kind {
                         WMEK::Press(_) => {
@@ -1446,7 +1450,7 @@ impl super::TermWindow {
                 column = column.saturating_sub(pos.left);
                 row = row.saturating_sub(pos.top as i64);
                 break;
-            } else if is_already_captured && pane.pane_id() == pos.pane.pane_id() {
+            } else if is_already_captured && pane.terminal_handle() == pos.pane.terminal_handle() {
                 column = column.saturating_sub(pos.left);
                 row = row.saturating_sub(pos.top as i64).max(0);
 
@@ -1480,7 +1484,8 @@ impl super::TermWindow {
         }
 
         if capture_mouse {
-            self.current_mouse_capture = Some(MouseCapture::TerminalPane(pane.pane_id() as u64));
+            self.current_mouse_capture =
+                Some(MouseCapture::TerminalPane(terminal_ui_key_for_pane(&*pane)));
         }
 
         let is_focused = if let Some(focused) = self.focused.as_ref() {
@@ -1523,12 +1528,11 @@ impl super::TermWindow {
         );
 
         let dims = self.renderable_dimensions_for_pane(&pane);
-        let stable_row = self
-            .get_viewport(pane.pane_id() as u64)
-            .unwrap_or(dims.physical_top)
-            + row as StableRowIndex;
+        let pane_id = terminal_ui_key_for_pane(&*pane);
+        let stable_row =
+            self.get_viewport(pane_id).unwrap_or(dims.physical_top) + row as StableRowIndex;
 
-        self.terminal_ui_state(pane.pane_id() as u64)
+        self.terminal_ui_state(pane_id)
             .mouse_terminal_coords
             .replace((
                 ClickPosition {

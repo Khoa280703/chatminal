@@ -1,5 +1,7 @@
 use crate::chatminal_runtime::{
-    host_workspace_name, spawn_host_runtime_entry, start_host_activity, DesktopSplitRequest,
+    desktop_create_split_session_view, desktop_current_active_session_id,
+    desktop_current_active_terminal_handle, host_workspace_name, spawn_host_runtime_entry,
+    start_host_activity, DesktopSplitRequest,
 };
 use anyhow::{anyhow, Context};
 use config::keyassignment::SpawnCommand;
@@ -37,7 +39,7 @@ pub async fn spawn_command_internal(
     size: TerminalSize,
     term_config: Arc<TermConfig>,
 ) -> anyhow::Result<()> {
-    let current_pane_id = crate::chatminal_runtime::desktop_current_active_terminal_handle();
+    let current_pane_id = desktop_current_active_terminal_handle();
 
     let cwd = if let Some(cwd) = spawn.cwd.as_ref() {
         Some(cwd.to_str().map(|s| s.to_owned()).ok_or_else(|| {
@@ -77,15 +79,10 @@ pub async fn spawn_command_internal(
 
     match spawn_where {
         SpawnWhere::SplitSession(direction) => {
-            if let Some(_session_id) = crate::chatminal_runtime::desktop_current_active_session_id()
-            {
+            if let Some(_session_id) = desktop_current_active_session_id() {
                 if can_use_session_view_split {
-                    crate::chatminal_runtime::desktop_create_split_session_view(
-                        direction,
-                        size,
-                        cwd.clone(),
-                    )
-                    .context("create_split_session_view")?;
+                    desktop_create_split_session_view(direction, size, cwd.clone())
+                        .context("create_split_session_view")?;
                     return Ok(());
                 }
                 anyhow::bail!(

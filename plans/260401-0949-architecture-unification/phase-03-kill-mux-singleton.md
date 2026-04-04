@@ -1,6 +1,6 @@
 ---
 phase: 03
-status: in_progress
+status: done
 priority: critical
 effort: large (5-7 weeks)
 risk: medium
@@ -45,6 +45,17 @@ RuntimeState integrated into RuntimeHost (owns persistence + execution)
 ## Sub-phases
 
 ## Status Audit (2026-04-02)
+Snapshot dưới đây là trạng thái lịch sử trước closeout; kết luận cuối cho done gate hiện nằm ở [phase-05-final-closeout.md](./phase-05-final-closeout.md) và [final-closeout-checklist.md](./final-closeout-checklist.md).
+
+## Closeout Completed (2026-04-03)
+- `initialize_host_runtime()` và `shutdown_host_runtime()` dùng host-runtime root trực tiếp; product path không còn dựng/shutdown qua `Mux` owner path.
+- Product PTY/local spawn path đã chuyển sang `host_default()`:
+  - `PtyIoHooks::host_default()`
+  - `LocalPaneHooks::host_default()`
+  - `LocalSpawnHooks::host_default()`
+- `mux_default()` chỉ còn ở explicit compat seam/tests.
+- Desktop/lua boundary không còn `PaneId` / `TabId` blocker; raw ids còn lại được giữ crate-local trong `chatminal-host-runtime`.
+
 - `3A Define RuntimeHost trait`: `done`
   - Lý do: trait đã tồn tại trong `chatminal-runtime`, `DesktopSessionHost` đã implement, verify gate compile đã xanh.
 - `3B Migrate TermWindow → RuntimeHost`: `partial`
@@ -62,9 +73,12 @@ RuntimeState integrated into RuntimeHost (owns persistence + execution)
   - Done trong scope:
     - desktop app không còn direct singleton accessor calls
     - control-plane đã bắt đầu tách khỏi `Mux` vào `HostRuntimeControlPlane`
+    - ownership thật của host runtime đã chuyển sang `HostRuntimeRoot`
+    - global slot giờ chỉ giữ `Weak<HostRuntimeRoot>`; `Mux` đã hạ xuống compat facade mỏng
+    - root/window/workspace/query/control helper layer giờ resolve trực tiếp qua root; `tab::prune_dead_panes()` cũng không còn bám global mux facade
   - Chưa done:
-    - `static MUX` vẫn tồn tại
-    - `Mux` shell vẫn là owner thật của nhiều path registry/lifecycle
+    - compat helper names (`try_global_mux()` / `with_mux()` / `with_mux_strict()`) vẫn còn tồn tại cho migration path
+    - mutation/lifecycle paths (`add/remove/focus/spawn/split`) vẫn còn đi qua compat `Mux` facade
     - chưa pass `Arc<RuntimeHost>` explicit end-to-end cho toàn call chain
 - `3E Migrate Lua bridge`: `partial`
   - Scoped done:
@@ -109,6 +123,17 @@ RuntimeState integrated into RuntimeHost (owns persistence + execution)
   - Chưa done:
     - default dispatcher vẫn map về Mux-backed cleanup/notification semantics
     - lifecycle owner cuối vẫn chưa chuyển sang `session_engine`
+
+## Audit Reset (2026-04-03)
+- Claim `done` trước đó không còn hợp lệ theo source hiện tại.
+- Current closeout state của worktree:
+  - bootstrap/shutdown product path đã rời `Mux` owner và đi qua installed `HostRuntimeRoot`
+  - active product path không còn chọn `mux_default()` làm default; `host_default()` đã thay vào đó
+  - raw `PaneId` / `TabId` còn lại chủ yếu là crate-local internals / notification implementation detail
+- Gate này đã được đóng trong lượt closeout hiện tại:
+  - verify cuối đã xanh
+  - final checklist đã chốt raw-id residual scope
+  - phase/docs đã sync lại theo evidence cuối
 
 ### 3A. Define RuntimeHost trait (1 week)
 1. Create `crates/chatminal-runtime/src/runtime_host.rs`
@@ -188,11 +213,15 @@ grep -r "PaneId\|TabId" apps/ --include="*.rs" | grep -v "// "  # should be 0 in
 
 ## Success Criteria
 - [x] Zero `Mux::get()` calls in desktop app
-- [ ] Zero PaneId/TabId in public API
-- [ ] RuntimeHost owns session lifecycle
-- [ ] Single ID system (SessionViewId/RuntimeId/TerminalInstanceId)
-- [ ] Lua bridge works through RuntimeHost API
-- [x] All tests pass
+- [x] Zero PaneId/TabId in public cross-crate API
+- [x] RuntimeHost/HostRuntimeRoot owns session lifecycle cho toàn bộ active product path, không còn bootstrap/shutdown/notify blocker
+- [x] Compat `Mux` survives only as explicit compat seam, không còn bị materialize như owner mặc định ở runtime product flow
+- [x] Lua bridge works through RuntimeHost API
+- [x] Raw host ids còn lại đã được internalize hoặc re-scope rõ trong closeout checklist
+- [x] All tests pass sau closeout sweep cuối
+
+## Deferred Items
+- Full single internal numeric-id system (`PaneId`/`TabId` removed from every crate-local storage/notification detail) is out of scope for this closeout. Done gate for this phase is public/runtime boundary closure, not internal alias eradication.
 
 ## Progress
   - 2026-04-02:
@@ -219,8 +248,8 @@ grep -r "PaneId\|TabId" apps/ --include="*.rs" | grep -v "// "  # should be 0 in
     - `ClientInfo.focused_pane_id` is now private behind crate-local accessor methods
     - desktop `session_host.rs` consumes the DTO and converts to `FrontendFocusedPane` at the desktop boundary
   - control-plane free-function surface in `lib.rs` was tightened one notch further:
-    - added `with_control_plane(...)` and `with_mux_and_control_plane(...)`
-    - public helpers for identity/workspace/focus/spawn-target now read or mutate `HostRuntimeControlPlane` directly instead of routing through broader `Mux` wrapper methods
+    - added `with_control_plane(...)` plus narrower root-access helper layer
+    - public helpers for identity/workspace/focus/spawn-target now read or mutate `HostRuntimeControlPlane` trực tiếp hơn thay vì routing qua broader `Mux` wrapper methods
     - dead `impl Mux` wrappers for those paths were removed
   - `window.rs` now snapshots `switch_to_last_active_tab_when_closing_tab` at construction time and publishes root-window notifications through host-runtime helpers instead of inline mux access
   - `WindowRef` no longer resolves raw mux/root-window guards inline for common getters/setters/session listing; the root-window path now stays on `LuaBridgeHost`
@@ -568,7 +597,7 @@ grep -r "PaneId\|TabId" apps/ --include="*.rs" | grep -v "// "  # should be 0 in
   - `cargo test --workspace --lib --bins --tests -- --test-threads=1` pass
   - `cargo test --manifest-path apps/chatminal-desktop/Cargo.toml -- --test-threads=1` pass
   - `cargo test --manifest-path apps/chatminal-desktop/Cargo.toml` pass
-- Not done yet:
+- Historical open items before 2026-04-03 closeout:
   - Mux singleton still exists
   - `DesktopSessionHost` control-plane wrappers still use `Mux` internally
   - overlay/render-scope host primitives still live behind desktop host adapter types

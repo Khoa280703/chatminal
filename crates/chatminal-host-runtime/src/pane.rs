@@ -1,6 +1,7 @@
 use crate::renderable::*;
 use crate::ExitBehavior;
 use async_trait::async_trait;
+use chatminal_runtime::SessionTerminalHandle;
 use config::keyassignment::KeyAssignment;
 use downcast_rs::{impl_downcast, DowncastSync};
 use engine_dynamic::Value;
@@ -13,6 +14,7 @@ use parking_lot::MappedMutexGuard;
 use rangeset::RangeSet;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::ops::Range;
 use std::sync::Arc;
 use termwiz::hyperlink::Rule;
@@ -21,10 +23,21 @@ use termwiz::surface::{Line, SequenceNo};
 use url::Url;
 
 static PANE_ID: ::std::sync::atomic::AtomicUsize = ::std::sync::atomic::AtomicUsize::new(0);
-pub type PaneId = usize;
+pub(crate) type PaneId = usize;
 
 pub(crate) fn alloc_pane_id() -> PaneId {
     PANE_ID.fetch_add(1, ::std::sync::atomic::Ordering::Relaxed)
+}
+
+pub(crate) fn pane_id_from_terminal_handle(
+    terminal_handle: SessionTerminalHandle,
+) -> Option<PaneId> {
+    usize::try_from(terminal_handle.as_u64()).ok()
+}
+
+pub(crate) fn pane_id_for_pane(pane: &dyn Pane) -> PaneId {
+    pane_id_from_terminal_handle(pane.terminal_handle())
+        .expect("terminal handle must map to a host runtime pane id")
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -164,7 +177,7 @@ impl LogicalLine {
 /// A Pane represents a view on a terminal
 #[async_trait(?Send)]
 pub trait Pane: DowncastSync + Send + Sync {
-    fn pane_id(&self) -> PaneId;
+    fn terminal_handle(&self) -> SessionTerminalHandle;
 
     /// Returns the 0-based cursor position relative to the top left of
     /// the visible screen
@@ -550,12 +563,13 @@ mod test {
     use termwiz::surface::SEQ_ZERO;
 
     struct FakePane {
+        id: PaneId,
         lines: Mutex<Vec<Line>>,
     }
 
     impl Pane for FakePane {
-        fn pane_id(&self) -> PaneId {
-            unimplemented!()
+        fn terminal_handle(&self) -> SessionTerminalHandle {
+            SessionTerminalHandle::new(self.id as u64)
         }
         fn get_cursor_position(&self) -> StableCursorPosition {
             unimplemented!()
@@ -719,6 +733,7 @@ mod test {
         );
 
         let pane = FakePane {
+            id: 1,
             lines: Mutex::new(physical_lines),
         };
 
@@ -1080,5 +1095,19 @@ mod test {
             }
             _ => unreachable!(),
         }
+    }
+
+    #[test]
+    fn pane_trait_exposes_typed_terminal_handle_default() {
+        let pane = FakePane {
+            id: 42,
+            lines: Mutex::new(vec![]),
+        };
+
+        assert_eq!(pane.terminal_handle(), SessionTerminalHandle::new(42));
+        assert_eq!(
+            pane_id_from_terminal_handle(SessionTerminalHandle::new(42)),
+            Some(42)
+        );
     }
 }

@@ -276,6 +276,59 @@ fn close_runtime_native_removes_state_and_publishes_closed_event() {
 }
 
 #[test]
+fn leaf_process_metadata_is_cleared_after_runtime_exit() {
+    let engine = StatefulSessionEngine::new(Arc::new(Mutex::new(SessionCoreState::default())));
+    let events = engine.subscribe();
+    let state = engine
+        .spawn_detached_runtime(
+            "session-a",
+            1,
+            shell_command("printf 'done'"),
+            TerminalSize {
+                rows: 20,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+                dpi: 96,
+            },
+            None,
+        )
+        .expect("spawn");
+
+    let _ = events.recv_timeout(Duration::from_secs(1)); // drain RuntimeAttached
+
+    let runtime_id = state.snapshot.runtime_id;
+    let terminal_instance_id = state.snapshot.active_terminal_instance_id.expect("leaf");
+    let started = std::time::Instant::now();
+    let mut saw_exit = false;
+    while started.elapsed() < Duration::from_secs(3) {
+        match events.recv_timeout(Duration::from_millis(200)).unwrap() {
+            Some(SessionRuntimeEvent::TerminalInstanceExited {
+                runtime_id: event_runtime_id,
+                terminal_instance_id: event_terminal_instance_id,
+                ..
+            }) if event_runtime_id == runtime_id
+                && event_terminal_instance_id == terminal_instance_id =>
+            {
+                saw_exit = true;
+                break;
+            }
+            Some(_) | None => {}
+        }
+    }
+
+    assert!(saw_exit, "expected terminal instance exit event");
+    assert!(engine
+        .core_state_handle()
+        .lock()
+        .unwrap()
+        .runtime(runtime_id)
+        .and_then(|runtime| runtime.leaves.get(&terminal_instance_id))
+        .and_then(|leaf| leaf.process.as_ref())
+        .is_none());
+}
+
+#[test]
 fn ensure_session_runtime_native_focuses_existing_runtime_without_spawn() {
     let engine = StatefulSessionEngine::new(Arc::new(Mutex::new(SessionCoreState::default())));
     let events = engine.subscribe();

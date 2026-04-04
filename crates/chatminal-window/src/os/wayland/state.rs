@@ -35,6 +35,7 @@ use wayland_protocols::wp::text_input::zv3::client::zwp_text_input_v3::ZwpTextIn
 use wayland_protocols_plasma::blur::client::org_kde_kwin_blur_manager::OrgKdeKwinBlurManager;
 
 use crate::x11::KeyboardWithFallback;
+use config::ConfigHandle;
 
 use super::inputhandler::{TextInputData, TextInputState};
 use super::pointer::{PendingMouse, PointerUserData};
@@ -43,6 +44,7 @@ use super::{OutputManagerData, OutputManagerState, SurfaceUserData, WaylandWindo
 // We can't combine WaylandState and WaylandConnection together because
 // the run_message_loop has &self(WaylandConnection) and needs to update WaylandState as mut
 pub(super) struct WaylandState {
+    pub(super) config: ConfigHandle,
     registry: RegistryState,
     pub(super) output: OutputState,
     pub(super) compositor: CompositorState,
@@ -76,7 +78,11 @@ pub(super) struct WaylandState {
 }
 
 impl WaylandState {
-    pub(super) fn new(globals: &GlobalList, qh: &QueueHandle<Self>) -> anyhow::Result<Self> {
+    pub(super) fn new(
+        globals: &GlobalList,
+        qh: &QueueHandle<Self>,
+        config: ConfigHandle,
+    ) -> anyhow::Result<Self> {
         let shm = Shm::bind(&globals, qh)?;
         let mem_pool = SlotPool::new(1, &shm)?;
 
@@ -86,13 +92,14 @@ impl WaylandState {
 
         let blur_manager: Option<OrgKdeKwinBlurManager> = globals.bind(qh, 1..=1, GlobalData).ok();
         let wayland_state = WaylandState {
+            config: config.clone(),
             registry: RegistryState::new(globals),
             output: OutputState::new(globals, qh),
             compositor,
             subcompositor: Arc::new(subcompositor),
             text_input: TextInputState::bind(globals, qh).ok(),
-            output_manager: if config::configuration().enable_zwlr_output_manager {
-                Some(OutputManagerState::bind(globals, qh)?)
+            output_manager: if config.enable_zwlr_output_manager {
+                Some(OutputManagerState::bind(globals, qh, config.clone())?)
             } else {
                 None
             },

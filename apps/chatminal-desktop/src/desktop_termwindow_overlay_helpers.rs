@@ -5,15 +5,17 @@ impl TermWindow {
         host_terminal_handle: Option<TerminalUiKey>,
     ) {
         if host_terminal_handle.is_some() {
-            let current = self
-                .render_target_overlay(render_scope_id)
-                .map(|overlay| overlay.pane_id() as u64);
+            let current = self.render_target_overlay(render_scope_id).map(|overlay| {
+                crate::desktop_termwindow_types::terminal_ui_key_for_pane(&*overlay)
+            });
             if current != host_terminal_handle {
                 return;
             }
         }
         if let Some(overlay) = self.runtime_ui_state(render_scope_id).overlay.take() {
-            self.remove_terminal_handle(overlay.pane.pane_id() as u64);
+            self.remove_terminal_handle(crate::desktop_termwindow_types::terminal_ui_key_for_pane(
+                &*overlay.pane,
+            ));
         }
         if let Some(window) = self.window.as_ref() {
             window.invalidate();
@@ -37,8 +39,10 @@ impl TermWindow {
             // added to the mux and instead it reports the overlaid
             // pane id.  Take care to avoid killing ourselves off
             // when closing the CopyOverlay
-            if terminal_handle != overlay.pane.pane_id() as u64 {
-                self.remove_terminal_handle(overlay.pane.pane_id() as u64);
+            let overlay_handle =
+                crate::desktop_termwindow_types::terminal_ui_key_for_pane(&*overlay.pane);
+            if terminal_handle != overlay_handle {
+                self.remove_terminal_handle(overlay_handle);
             }
         }
         if let Some(window) = self.window.as_ref() {
@@ -47,7 +51,9 @@ impl TermWindow {
     }
 
     pub fn schedule_cancel_overlay_for_terminal_handle(window: Window, terminal_handle: u64) {
-        window.notify(TermWindowNotif::CancelOverlayForTerminalHandle(terminal_handle));
+        window.notify(TermWindowNotif::CancelOverlayForTerminalHandle(
+            terminal_handle,
+        ));
     }
 
     pub fn assign_overlay_for_terminal_handle(
@@ -85,5 +91,4 @@ impl TermWindow {
             window.invalidate();
         }
     }
-
 }

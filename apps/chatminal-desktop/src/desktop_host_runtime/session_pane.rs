@@ -11,7 +11,7 @@ use super::session_engine::{
     RuntimeId, SessionEngineShared, SessionRuntimeEvent, TerminalInstanceId,
 };
 use chatminal_terminal_core::TerminalSize as CoreTerminalSize;
-use config::TermConfig;
+use config::{ConfigHandle, TermConfig};
 use engine_dynamic::Value;
 use engine_term::color::ColorPalette;
 use engine_term::{
@@ -47,9 +47,7 @@ const EVENT_POLL_TIMEOUT: Duration = Duration::from_millis(50);
 const DISPLAY_RESET_FLASH_DURATION: Duration = Duration::from_millis(75);
 
 fn notify_pane_output(pane_id: HostTerminalHandle) {
-    publish_runtime_notification_from_any_thread(RuntimeNotification::PaneOutput(
-        SessionTerminalHandle::new(pane_id as u64),
-    ));
+    publish_runtime_notification_from_any_thread(RuntimeNotification::PaneOutput(pane_id));
 }
 
 fn record_input_for_current_identity() {
@@ -122,6 +120,7 @@ impl ChatminalSessionPane {
         runtime_id: RuntimeId,
         terminal_instance_id: TerminalInstanceId,
         size: TerminalSize,
+        config: ConfigHandle,
     ) -> anyhow::Result<Arc<Self>> {
         let input_writer = SessionPaneWriter::new(Arc::clone(&shared), terminal_instance_id);
         let pane = Arc::new(Self {
@@ -134,7 +133,7 @@ impl ChatminalSessionPane {
             parser: Mutex::new(EscapeParser::new()),
             terminal: Mutex::new(Terminal::new(
                 size,
-                Arc::new(TermConfig::new()),
+                Arc::new(TermConfig::with_config(config.clone())),
                 "Chatminal",
                 config::engine_version(),
                 Box::new(std::io::sink()),
@@ -345,7 +344,12 @@ mod parser_tests {
 pub(crate) fn pane_id_for_terminal_instance(
     terminal_instance_id: TerminalInstanceId,
 ) -> HostTerminalHandle {
-    usize::try_from(terminal_instance_id.as_u64()).unwrap_or_else(|_| alloc_host_terminal_handle())
+    SessionTerminalHandle::new(
+        u64::try_from(alloc_host_terminal_handle())
+            .ok()
+            .filter(|_| terminal_instance_id.as_u64() > usize::MAX as u64)
+            .unwrap_or_else(|| terminal_instance_id.as_u64()),
+    )
 }
 
 fn looks_like_chatminal_internal_title(title: &str) -> bool {
@@ -384,7 +388,7 @@ fn looks_like_chatminal_internal_title(title: &str) -> bool {
 
 #[async_trait::async_trait(?Send)]
 impl HostTerminal for ChatminalSessionPane {
-    fn pane_id(&self) -> HostTerminalHandle {
+    fn terminal_handle(&self) -> SessionTerminalHandle {
         self.pane_id
     }
     fn get_cursor_position(&self) -> StableCursorPosition {
@@ -790,7 +794,7 @@ fn decode_input_payload_chunks(pending: &mut Vec<u8>, payload: &[u8]) -> Vec<Str
 #[cfg(test)]
 mod tests {
     use std::sync::mpsc;
-    use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+    use std::sync::{Arc, Mutex, MutexGuard};
     use std::time::{Duration, Instant};
 
     use engine_term::{KeyCode, KeyModifiers, StableRowIndex};
@@ -801,13 +805,13 @@ mod tests {
         LayoutNodeId, RuntimeId, SessionCoreState, SessionEngineShared, SessionLayoutSnapshot,
         TerminalInstanceId,
     };
-    use super::super::{build_initial_host_mux, shutdown_host_mux};
+    use super::super::{
+        acquire_legacy_host_mux_test_lock, build_initial_host_mux, shutdown_host_mux,
+    };
     use super::{
         decode_input_payload_chunks, looks_like_chatminal_internal_title, Action,
         ChatminalSessionPane, HostTerminal, TerminalSize,
     };
-
-    static HOST_MUX_TEST_GUARD: OnceLock<Mutex<()>> = OnceLock::new();
 
     struct HostMuxTestGuard {
         _guard: MutexGuard<'static, ()>,
@@ -820,10 +824,10 @@ mod tests {
     }
 
     fn init_host_mux_test() -> HostMuxTestGuard {
-        let mutex = HOST_MUX_TEST_GUARD.get_or_init(|| Mutex::new(()));
-        let guard = mutex.lock().expect("lock host mux test guard");
+        let guard = acquire_legacy_host_mux_test_lock();
         shutdown_host_mux();
-        build_initial_host_mux(&config::configuration(), None).expect("init host mux");
+        let config = config::current_config_handle();
+        build_initial_host_mux(&config, None).expect("init host mux");
         HostMuxTestGuard { _guard: guard }
     }
 
@@ -941,6 +945,7 @@ mod tests {
                 pixel_height: 0,
                 dpi: 96,
             },
+            config::current_config_handle(),
         )
         .expect("create pane");
 
@@ -1011,6 +1016,7 @@ mod tests {
                 pixel_height: 0,
                 dpi: 96,
             },
+            config::current_config_handle(),
         )
         .expect("create pane");
 
@@ -1075,6 +1081,7 @@ mod tests {
                 pixel_height: 0,
                 dpi: 96,
             },
+            config::current_config_handle(),
         )
         .expect("create pane");
 
@@ -1145,6 +1152,7 @@ mod tests {
                 pixel_height: 0,
                 dpi: 96,
             },
+            config::current_config_handle(),
         )
         .expect("create pane");
 
@@ -1217,6 +1225,7 @@ mod tests {
                 pixel_height: 0,
                 dpi: 96,
             },
+            config::current_config_handle(),
         )
         .expect("create pane");
 
@@ -1265,7 +1274,7 @@ mod tests {
                 runtime_id,
                 terminal_instance_id,
                 shell_command(
-                    "printf 'ready\\n'; stty raw -echo; dd bs=1 count=1 2>/dev/null | od -An -t x1",
+                    "printf 'ready\\n'; stty raw -echo; printf 'input-ready\\n'; dd bs=1 count=1 2>/dev/null | od -An -t x1",
                 ),
                 chatminal_terminal_core::TerminalSize {
                     rows: 12,
@@ -1291,6 +1300,7 @@ mod tests {
                 pixel_height: 0,
                 dpi: 96,
             },
+            config::current_config_handle(),
         )
         .expect("create pane");
 
@@ -1299,7 +1309,7 @@ mod tests {
             if shared
                 .replay_output(terminal_instance_id)
                 .as_deref()
-                .is_some_and(|output| output.contains("ready"))
+                .is_some_and(|output| output.contains("input-ready"))
             {
                 break;
             }

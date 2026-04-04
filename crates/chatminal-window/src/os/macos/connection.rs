@@ -18,16 +18,18 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::AtomicUsize;
+use config::ConfigHandle;
 
 pub struct Connection {
     ns_app: id,
+    config: RefCell<ConfigHandle>,
     pub(crate) windows: RefCell<HashMap<usize, Rc<RefCell<WindowInner>>>>,
     pub(crate) next_window_id: AtomicUsize,
     pub(crate) gl_connection: RefCell<Option<Rc<crate::egl::GlConnection>>>,
 }
 
 impl Connection {
-    pub(crate) fn create_new() -> anyhow::Result<Self> {
+    pub(crate) fn create_new(config: ConfigHandle) -> anyhow::Result<Self> {
         // Ensure that the SPAWN_QUEUE is created; it will have nothing
         // to run right now.
         SPAWN_QUEUE.run();
@@ -41,6 +43,7 @@ impl Connection {
 
             let conn = Self {
                 ns_app,
+                config: RefCell::new(config),
                 windows: RefCell::new(HashMap::new()),
                 next_window_id: AtomicUsize::new(1),
                 gl_connection: RefCell::new(None),
@@ -99,6 +102,14 @@ impl SoftwareVersion {
 }
 
 impl ConnectionOps for Connection {
+    fn config(&self) -> ConfigHandle {
+        self.config.borrow().clone()
+    }
+
+    fn update_config(&self, config: &ConfigHandle) {
+        *self.config.borrow_mut() = config.clone();
+    }
+
     fn name(&self) -> String {
         if let Ok(vers) = SoftwareVersion::load() {
             format!(
@@ -175,20 +186,21 @@ impl ConnectionOps for Connection {
     fn screens(&self) -> anyhow::Result<Screens> {
         let mut by_name = HashMap::new();
         let mut virtual_rect = euclid::rect(0, 0, 0, 0);
+        let config = self.config();
 
         let screens = unsafe { NSScreen::screens(nil) };
         for idx in 0..unsafe { screens.count() } {
             let screen = unsafe { screens.objectAtIndex(idx) };
-            let screen = nsscreen_to_screen_info(screen);
+            let screen = nsscreen_to_screen_info(screen, &config);
             virtual_rect = virtual_rect.union(&screen.rect);
             by_name.insert(screen.name.clone(), screen);
         }
 
         // The screen with the menu bar is always index 0
-        let main = nsscreen_to_screen_info(unsafe { screens.objectAtIndex(0) });
+        let main = nsscreen_to_screen_info(unsafe { screens.objectAtIndex(0) }, &config);
 
         // The active screen is known as the "main" screen in macOS
-        let active = nsscreen_to_screen_info(unsafe { NSScreen::mainScreen(nil) });
+        let active = nsscreen_to_screen_info(unsafe { NSScreen::mainScreen(nil) }, &config);
 
         Ok(Screens {
             by_name,
@@ -199,7 +211,7 @@ impl ConnectionOps for Connection {
     }
 }
 
-pub fn nsscreen_to_screen_info(screen: *mut Object) -> ScreenInfo {
+pub fn nsscreen_to_screen_info(screen: *mut Object, config: &ConfigHandle) -> ScreenInfo {
     let frame = unsafe { NSScreen::frame(screen) };
     let backing_frame = unsafe { NSScreen::convertRectToBacking_(screen, frame) };
     let rect = euclid::rect(
@@ -232,7 +244,6 @@ pub fn nsscreen_to_screen_info(screen: *mut Object) -> ScreenInfo {
 
     let scale = backing_frame.size.width / frame.size.width;
 
-    let config = config::configuration();
     let effective_dpi = if let Some(dpi) = config.dpi_by_screen.get(&name).copied() {
         Some(dpi)
     } else if let Some(dpi) = config.dpi {

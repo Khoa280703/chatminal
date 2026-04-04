@@ -2,6 +2,7 @@
 
 use crate::screen::{ScreenInfo, Screens};
 use crate::ScreenRect;
+use config::ConfigHandle;
 use smithay_client_toolkit::globals::GlobalData;
 use smithay_client_toolkit::reexports::protocols_wlr::output_management::v1::client::zwlr_output_head_v1::{ZwlrOutputHeadV1, self, Event as ZwlrOutputHeadEvent};
 use smithay_client_toolkit::reexports::protocols_wlr::output_management::v1::client::zwlr_output_manager_v1::{ZwlrOutputManagerV1, self, Event as ZwlrOutputEvent};
@@ -9,6 +10,7 @@ use smithay_client_toolkit::reexports::protocols_wlr::output_management::v1::cli
 use wayland_client::{Dispatch, event_created_child, Proxy};
 use wayland_client::globals::{GlobalList, BindError};
 use std::collections::HashMap;
+use std::cell::RefCell;
 use std::sync::Mutex;
 use wayland_client::backend::ObjectId;
 use wayland_client::protocol::wl_output::Transform;
@@ -53,6 +55,7 @@ struct Inner {
 }
 
 pub struct OutputManagerState {
+    config: RefCell<ConfigHandle>,
     _zwlr: ZwlrOutputManagerV1,
     inner: Mutex<Inner>,
 }
@@ -61,12 +64,18 @@ impl OutputManagerState {
     pub(super) fn bind(
         globals: &GlobalList,
         queue_handle: &wayland_client::QueueHandle<WaylandState>,
+        config: ConfigHandle,
     ) -> Result<Self, BindError> {
         let _zwlr = globals.bind(queue_handle, 1..=1, GlobalData)?;
         Ok(Self {
+            config: RefCell::new(config),
             _zwlr,
             inner: Mutex::new(Inner::default()),
         })
+    }
+
+    pub fn update_config(&self, config: &ConfigHandle) {
+        *self.config.borrow_mut() = config.clone();
     }
 
     pub fn screens(&self) -> Option<Screens> {
@@ -74,7 +83,7 @@ impl OutputManagerState {
 
         let mut by_name = HashMap::new();
         let mut virtual_rect: ScreenRect = euclid::rect(0, 0, 0, 0);
-        let config = config::configuration();
+        let config = self.config.borrow();
 
         log::debug!("zwlr_head_info: {:#?}", inner.zwlr_head_info);
 

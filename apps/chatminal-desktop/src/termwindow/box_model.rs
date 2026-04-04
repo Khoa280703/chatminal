@@ -404,6 +404,7 @@ pub struct LayoutContext<'a> {
     pub bounds: RectF,
     pub metrics: &'a RenderMetrics,
     pub gl_state: &'a RenderState,
+    pub custom_block_glyphs: bool,
     pub zindex: i8,
 }
 
@@ -590,6 +591,7 @@ impl super::TermWindow {
                 bounds: context.bounds,
                 gl_state: context.gl_state,
                 metrics: &local_metrics,
+                custom_block_glyphs: context.custom_block_glyphs,
                 zindex: context.zindex,
             };
             &local_context
@@ -632,7 +634,9 @@ impl super::TermWindow {
                 let infos = element.font.shape(
                     &s,
                     move || window.notify(TermWindowNotif::InvalidateShapeCache),
-                    BlockKey::filter_out_synthetic,
+                    move |glyphs| {
+                        BlockKey::filter_out_synthetic(glyphs, context.custom_block_glyphs);
+                    },
                     element.presentation,
                     direction,
                     None,
@@ -796,6 +800,7 @@ impl super::TermWindow {
                                 pixel_cell: context.width.pixel_cell,
                                 pixel_max: max_width,
                             },
+                            custom_block_glyphs: context.custom_block_glyphs,
                             zindex: context.zindex + element.zindex,
                         },
                         child,

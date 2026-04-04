@@ -2,6 +2,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use chatminal_terminal_core::TerminalSize;
+use config::current_config_handle;
 use portable_pty::CommandBuilder;
 
 use super::super::{RuntimeId, TerminalInstanceId};
@@ -20,6 +21,7 @@ fn runtime_spawn(script: &str) -> TerminalInstanceRuntimeSpawn {
         generation: 1,
         runtime_id: RuntimeId::new(7),
         terminal_instance_id: TerminalInstanceId::new(11),
+        config: current_config_handle(),
         command: shell_command(script),
         size: TerminalSize {
             rows: 12,
@@ -113,4 +115,46 @@ fn leaf_runtime_write_input_reaches_child_immediately() {
     }
 
     assert!(saw_output, "expected child to echo immediate input back");
+}
+
+#[test]
+fn leaf_runtime_closes_input_after_process_exit() {
+    let (events_tx, events_rx) = mpsc::sync_channel(32);
+    let runtime = TerminalInstanceRuntime::spawn(runtime_spawn("printf 'done'"), events_tx)
+        .expect("spawn runtime");
+
+    let started = Instant::now();
+    let mut saw_exit = false;
+    while started.elapsed() < Duration::from_secs(3) {
+        match events_rx.recv_timeout(Duration::from_millis(200)) {
+            Ok(TerminalInstanceRuntimeEvent::Exited { .. }) => {
+                saw_exit = true;
+                break;
+            }
+            Ok(_) => {}
+            Err(_) => {}
+        }
+    }
+
+    assert!(saw_exit, "expected runtime to exit");
+    assert!(runtime.write_input(b"late").is_err());
+}
+
+#[test]
+fn leaf_runtime_emits_exit_event_with_child_status() {
+    let (events_tx, events_rx) = mpsc::sync_channel(32);
+    let _runtime = TerminalInstanceRuntime::spawn(runtime_spawn("exit 7"), events_tx)
+        .expect("spawn runtime that exits");
+
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_secs(3) {
+        if let Ok(TerminalInstanceRuntimeEvent::Exited { exit_code, .. }) =
+            events_rx.recv_timeout(Duration::from_millis(200))
+        {
+            assert_eq!(exit_code, Some(7));
+            return;
+        }
+    }
+
+    panic!("expected exited event with exit code");
 }

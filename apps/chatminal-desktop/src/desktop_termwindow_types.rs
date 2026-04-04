@@ -1,13 +1,23 @@
-use std::convert::TryFrom;
-
-use crate::chatminal_runtime::overlay_compat::{
-    OverlayPane, OverlayPaneHandle, OverlayPaneLayout, OverlaySplitDirection, OverlaySplitLayout,
+use crate::chatminal_runtime::{
+    overlay_compat::{
+        OverlayPane, OverlayPaneHandle, OverlayPaneLayout, OverlaySplitDirection,
+        OverlaySplitLayout,
+    },
+    terminal_handle_for_overlay_pane, SessionTerminalHandle,
 };
 
 pub type TerminalUiKey = u64;
 
 pub fn pane_id_from_terminal_ui_key(key: TerminalUiKey) -> Option<OverlayPaneHandle> {
-    OverlayPaneHandle::try_from(key).ok()
+    Some(SessionTerminalHandle::new(key))
+}
+
+pub fn terminal_ui_key_for_pane(pane: &dyn OverlayPane) -> TerminalUiKey {
+    terminal_handle_for_overlay_pane(pane).as_u64()
+}
+
+pub fn terminal_handle_for_ui_key(key: TerminalUiKey) -> SessionTerminalHandle {
+    SessionTerminalHandle::new(key)
 }
 
 #[derive(Clone)]

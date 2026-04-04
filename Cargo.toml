@@ -35,23 +35,23 @@ members = [
   "crates/chatminal-umask",
   "crates/chatminal-url-funcs",
   "crates/chatminal-vtparse",
-  "crates/chatminal-engine-config-derive",
-  "crates/chatminal-engine-bidi",
-  "crates/chatminal-engine-blob-leases",
-  "crates/chatminal-engine-cell",
-  "crates/chatminal-engine-char-props",
-  "crates/chatminal-engine-color-types",
-  "crates/chatminal-engine-dynamic",
-  "crates/chatminal-engine-dynamic-derive",
-  "crates/chatminal-engine-escape-parser",
-  "crates/chatminal-engine-font",
-  "crates/chatminal-engine-gui-subcommands",
-  "crates/chatminal-engine-input-types",
-  "crates/chatminal-engine-open-url",
-  "crates/chatminal-engine-surface",
-  "crates/chatminal-engine-term",
-  "crates/chatminal-engine-toast-notification",
-  "crates/chatminal-engine-uds",
+  "crates/chatminal-config-derive",
+  "crates/chatminal-terminal-bidi",
+  "crates/chatminal-terminal-blob-leases",
+  "crates/chatminal-terminal-cell",
+  "crates/chatminal-terminal-char-props",
+  "crates/chatminal-terminal-color-types",
+  "crates/chatminal-dynamic",
+  "crates/chatminal-dynamic-derive",
+  "crates/chatminal-terminal-escape-parser",
+  "crates/chatminal-terminal-font",
+  "crates/chatminal-gui-subcommands",
+  "crates/chatminal-terminal-input-types",
+  "crates/chatminal-open-url",
+  "crates/chatminal-terminal-surface",
+  "crates/chatminal-terminal-emulator",
+  "crates/chatminal-toast-notification",
+  "crates/chatminal-uds",
   "crates/chatminal-store",
   "crates/chatminal-window",
   "crates/chatminal-window-funcs",
@@ -272,24 +272,24 @@ wayland-client = "0.31"
 wayland-egl = "0.32"
 wayland-protocols = "0.32"
 wayland-protocols-plasma = { version = "0.3.6", features = ["client"] }
-engine-bidi = { package = "chatminal-engine-bidi", path = "crates/chatminal-engine-bidi", version = "0.2.3", default-features = false }
-engine-blob-leases = { package = "chatminal-engine-blob-leases", path = "crates/chatminal-engine-blob-leases", version = "0.1.1" }
-engine-cell = { package = "chatminal-engine-cell", path = "crates/chatminal-engine-cell" }
-engine-char-props = { package = "chatminal-engine-char-props", path = "crates/chatminal-engine-char-props", default-features = false }
-engine-color-types = { package = "chatminal-engine-color-types", path = "crates/chatminal-engine-color-types", version = "0.3", default-features = false }
-engine-config-derive = { package = "chatminal-engine-config-derive", path = "crates/chatminal-engine-config-derive", version = "0.1" }
-engine-dynamic = { package = "chatminal-engine-dynamic", path = "crates/chatminal-engine-dynamic", version = "0.2.1", default-features = false }
-engine-dynamic-derive = { package = "chatminal-engine-dynamic-derive", path = "crates/chatminal-engine-dynamic-derive", version = "0.1.1" }
-engine-escape-parser = { package = "chatminal-engine-escape-parser", path = "crates/chatminal-engine-escape-parser", version = "0.1.0" }
-engine-font = { package = "chatminal-engine-font", path = "crates/chatminal-engine-font" }
-engine-gui-subcommands = { package = "chatminal-engine-gui-subcommands", path = "crates/chatminal-engine-gui-subcommands" }
-engine-input-types = { package = "chatminal-engine-input-types", path = "crates/chatminal-engine-input-types", version = "0.1", default-features = false }
-engine-open-url = { package = "chatminal-engine-open-url", path = "crates/chatminal-engine-open-url" }
-engine-surface = { package = "chatminal-engine-surface", path = "crates/chatminal-engine-surface" }
-engine-term = { package = "chatminal-engine-term", path = "crates/chatminal-engine-term" }
-engine-toast-notification = { package = "chatminal-engine-toast-notification", path = "crates/chatminal-engine-toast-notification" }
-engine-uds = { package = "chatminal-engine-uds", path = "crates/chatminal-engine-uds" }
-engine-version = { package = "chatminal-engine-version", path = "crates/chatminal-engine-version" }
+engine-bidi = { package = "chatminal-terminal-bidi", path = "crates/chatminal-terminal-bidi", version = "0.2.3", default-features = false }
+engine-blob-leases = { package = "chatminal-terminal-blob-leases", path = "crates/chatminal-terminal-blob-leases", version = "0.1.1" }
+engine-cell = { package = "chatminal-terminal-cell", path = "crates/chatminal-terminal-cell" }
+engine-char-props = { package = "chatminal-terminal-char-props", path = "crates/chatminal-terminal-char-props", default-features = false }
+engine-color-types = { package = "chatminal-terminal-color-types", path = "crates/chatminal-terminal-color-types", version = "0.3", default-features = false }
+engine-config-derive = { package = "chatminal-config-derive", path = "crates/chatminal-config-derive", version = "0.1" }
+engine-dynamic = { package = "chatminal-dynamic", path = "crates/chatminal-dynamic", version = "0.2.1", default-features = false }
+engine-dynamic-derive = { package = "chatminal-dynamic-derive", path = "crates/chatminal-dynamic-derive", version = "0.1.1" }
+engine-escape-parser = { package = "chatminal-terminal-escape-parser", path = "crates/chatminal-terminal-escape-parser", version = "0.1.0" }
+engine-font = { package = "chatminal-terminal-font", path = "crates/chatminal-terminal-font" }
+engine-gui-subcommands = { package = "chatminal-gui-subcommands", path = "crates/chatminal-gui-subcommands" }
+engine-input-types = { package = "chatminal-terminal-input-types", path = "crates/chatminal-terminal-input-types", version = "0.1", default-features = false }
+engine-open-url = { package = "chatminal-open-url", path = "crates/chatminal-open-url" }
+engine-surface = { package = "chatminal-terminal-surface", path = "crates/chatminal-terminal-surface" }
+engine-term = { package = "chatminal-terminal-emulator", path = "crates/chatminal-terminal-emulator" }
+engine-toast-notification = { package = "chatminal-toast-notification", path = "crates/chatminal-toast-notification" }
+engine-uds = { package = "chatminal-uds", path = "crates/chatminal-uds" }
+engine-version = { package = "chatminal-version", path = "crates/chatminal-version" }
 wgpu = "25.0.2"
 whoami = "1.5"
 winapi = "0.3.9"

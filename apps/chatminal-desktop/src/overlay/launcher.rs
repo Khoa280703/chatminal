@@ -47,7 +47,7 @@ pub struct LauncherArgs {
 }
 
 impl LauncherArgs {
-    /// Must be called on the Mux thread!
+    /// Must be called on the main UI thread.
     pub async fn new(
         config: ConfigHandle,
         title: &str,

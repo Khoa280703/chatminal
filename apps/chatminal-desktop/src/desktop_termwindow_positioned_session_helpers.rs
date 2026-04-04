@@ -4,7 +4,7 @@ impl TermWindow {
         let Some(session_pane) = desktop_pane_for_session(session_id) else {
             return vec![];
         };
-        let pane_id = session_pane.pane_id_value() as u64;
+        let pane_id = crate::desktop_termwindow_types::terminal_ui_key_for_pane(&*session_pane);
         let cell_width = self.render_metrics.cell_size.width.max(0) as usize;
         let cell_height = self.render_metrics.cell_size.height.max(0) as usize;
         let dims = session_pane.get_dimensions();
@@ -86,5 +86,4 @@ impl TermWindow {
             self.active_render_target_splits()
         }
     }
-
 }

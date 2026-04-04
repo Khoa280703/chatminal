@@ -36,10 +36,10 @@ pub enum Window {
 }
 
 impl Connection {
-    pub(crate) fn create_new() -> anyhow::Result<Connection> {
+    pub(crate) fn create_new(config: ConfigHandle) -> anyhow::Result<Connection> {
         #[cfg(feature = "wayland")]
-        if config::configuration().enable_wayland {
-            match WaylandConnection::create_new() {
+        if config.enable_wayland {
+            match WaylandConnection::create_new(config.clone()) {
                 Ok(w) => {
                     log::debug!("Using wayland connection!");
                     return Ok(Connection::Wayland(Rc::new(w)));
@@ -49,7 +49,7 @@ impl Connection {
                 }
             }
         }
-        Ok(Connection::X11(XConnection::create_new()?))
+        Ok(Connection::X11(XConnection::create_new(config)?))
     }
 
     pub async fn new_window<F>(
@@ -118,6 +118,22 @@ impl Connection {
 }
 
 impl ConnectionOps for Connection {
+    fn config(&self) -> ConfigHandle {
+        match self {
+            Self::X11(x) => x.config(),
+            #[cfg(feature = "wayland")]
+            Self::Wayland(w) => w.config(),
+        }
+    }
+
+    fn update_config(&self, config: &ConfigHandle) {
+        match self {
+            Self::X11(x) => x.update_config(config),
+            #[cfg(feature = "wayland")]
+            Self::Wayland(w) => w.update_config(config),
+        }
+    }
+
     fn name(&self) -> String {
         match self {
             Self::X11(x) => x.name(),

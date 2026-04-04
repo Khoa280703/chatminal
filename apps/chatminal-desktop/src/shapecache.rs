@@ -114,6 +114,7 @@ impl<'a> std::hash::Hash for dyn ShapeCacheKeyTrait + 'a {
 
 #[cfg(test)]
 mod test {
+    use crate::desktop_host_runtime::acquire_legacy_host_mux_test_lock;
     use crate::glyphcache::GlyphCache;
     use crate::shapecache::{GlyphPosition, ShapedInfo};
     use crate::utilsprites::RenderMetrics;
@@ -124,6 +125,16 @@ mod test {
     use std::rc::Rc;
     use termwiz::cell::CellAttributes;
     use termwiz::surface::{Line, SEQ_ZERO};
+
+    fn test_fonts(config: &config::ConfigHandle) -> Rc<FontConfiguration> {
+        Rc::new(
+            FontConfiguration::new(
+                Some(config.clone()),
+                config.dpi.unwrap_or_else(|| ::window::default_dpi()) as usize,
+            )
+            .unwrap(),
+        )
+    }
 
     fn cluster_and_shape(
         render_metrics: &RenderMetrics,
@@ -188,13 +199,14 @@ mod test {
 
     #[test]
     fn ligatures_fira() {
+        let _guard = acquire_legacy_host_mux_test_lock();
         config::use_test_configuration();
         let _ = env_logger::Builder::new()
             .is_test(true)
             .filter_level(log::LevelFilter::Trace)
             .try_init();
 
-        let config = config::configuration();
+        let config = config::current_config_handle();
 
         let mut config: config::Config = (*config).clone();
         config.font = TextStyle {
@@ -205,13 +217,7 @@ mod test {
         config.compute_extra_defaults(None);
         config::use_this_configuration(config.clone());
 
-        let fonts = Rc::new(
-            FontConfiguration::new(
-                None,
-                config.dpi.unwrap_or_else(|| ::window::default_dpi()) as usize,
-            )
-            .unwrap(),
-        );
+        let fonts = test_fonts(&config::current_config_handle());
         let render_metrics = RenderMetrics::new(&fonts).unwrap();
         let mut glyph_cache = GlyphCache::new_in_memory(&fonts, 128).unwrap();
 
@@ -257,27 +263,21 @@ mod test {
 
     #[test]
     fn bench_shaping() {
+        let _guard = acquire_legacy_host_mux_test_lock();
         config::use_test_configuration();
 
         // let mut glyph_cache = GlyphCache::new_in_memory(&fonts, 128, &render_metrics).unwrap();
         // let render_metrics = RenderMetrics::new(&fonts).unwrap();
 
         benchmarking::warm_up();
+        let config = config::current_config_handle();
 
         for &n in &[100, 1000, 10_000] {
+            let config = config.clone();
             let bench_result = benchmarking::measure_function(move |measurer| {
                 let text: String = (0..n).map(|_| ' ').collect();
 
-                let fonts = Rc::new(
-                    FontConfiguration::new(
-                        None,
-                        config::configuration()
-                            .dpi
-                            .unwrap_or_else(|| ::window::default_dpi())
-                            as usize,
-                    )
-                    .unwrap(),
-                );
+                let fonts = test_fonts(&config);
                 let style = TextStyle::default();
                 let font = fonts.resolve_font(&style).unwrap();
                 let line = Line::from_text(&text, &CellAttributes::default(), SEQ_ZERO, None);
@@ -307,20 +307,15 @@ mod test {
 
     #[test]
     fn ligatures_jetbrains() {
+        let _guard = acquire_legacy_host_mux_test_lock();
         config::use_test_configuration();
         let _ = env_logger::Builder::new()
             .is_test(true)
             .filter_level(log::LevelFilter::Trace)
             .try_init();
-        let config = config::configuration();
+        let config = config::current_config_handle();
 
-        let fonts = Rc::new(
-            FontConfiguration::new(
-                None,
-                config.dpi.unwrap_or_else(|| ::window::default_dpi()) as usize,
-            )
-            .unwrap(),
-        );
+        let fonts = test_fonts(&config);
         let render_metrics = RenderMetrics::new(&fonts).unwrap();
         let mut glyph_cache = GlyphCache::new_in_memory(&fonts, 128).unwrap();
 

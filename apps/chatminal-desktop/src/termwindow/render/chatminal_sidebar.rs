@@ -249,7 +249,12 @@ impl crate::TermWindow {
         self.filled_rectangle(
             &mut layers,
             0,
-            euclid::rect(sb.sidebar_x, sb.sidebar_y, sb.sidebar_width, sb.sidebar_height),
+            euclid::rect(
+                sb.sidebar_x,
+                sb.sidebar_y,
+                sb.sidebar_width,
+                sb.sidebar_height,
+            ),
             background,
         )?;
         Ok(())
@@ -342,6 +347,7 @@ impl crate::TermWindow {
                 bounds: euclid::rect(sb.sidebar_x, sb.sidebar_y, sidebar_width, sidebar_height),
                 metrics: &self.render_metrics,
                 gl_state: self.render_state.as_ref().unwrap(),
+                custom_block_glyphs: self.config.custom_block_glyphs,
                 zindex: 1,
             },
             &root,
@@ -402,6 +408,7 @@ impl crate::TermWindow {
                 ),
                 metrics: &self.render_metrics,
                 gl_state: self.render_state.as_ref().unwrap(),
+                custom_block_glyphs: self.config.custom_block_glyphs,
                 zindex: 2,
             },
             &header,
@@ -536,6 +543,7 @@ impl crate::TermWindow {
                 ),
                 metrics: &self.render_metrics,
                 gl_state: self.render_state.as_ref().unwrap(),
+                custom_block_glyphs: self.config.custom_block_glyphs,
                 zindex: 1,
             },
             &tree,
@@ -762,6 +770,7 @@ impl crate::TermWindow {
                 bounds: euclid::rect(tooltip_x, tooltip_y, estimated_width.max(60.0), 28.0),
                 metrics: &self.render_metrics,
                 gl_state: self.render_state.as_ref().unwrap(),
+                custom_block_glyphs: self.config.custom_block_glyphs,
                 zindex: 6,
             },
             &tooltip,
@@ -923,6 +932,7 @@ impl crate::TermWindow {
                 bounds: euclid::rect(x, y, width, estimated_height),
                 metrics: &self.render_metrics,
                 gl_state: self.render_state.as_ref().unwrap(),
+                custom_block_glyphs: self.config.custom_block_glyphs,
                 zindex: 7,
             },
             &root,
@@ -1161,7 +1171,9 @@ impl crate::TermWindow {
             .map(|edit| edit.session_id == session.session_id && edit.select_all)
             .unwrap_or(false);
         let session_label = if is_inline_edit {
-            let edit = inline_edit.as_ref().filter(|edit| edit.session_id == session.session_id);
+            let edit = inline_edit
+                .as_ref()
+                .filter(|edit| edit.session_id == session.session_id);
             format!("{}_", edit.map(|edit| edit.input.as_str()).unwrap_or(""))
         } else {
             session.name.clone()
@@ -1253,7 +1265,7 @@ impl crate::TermWindow {
                     .colors(text_colors(connector_color)),
             },
             inline_icon(terminal.colors(text_colors(terminal_fg)), 7.0),
-                Element::new(body_font, ElementContent::Text(session_label))
+            Element::new(body_font, ElementContent::Text(session_label))
                 .display(crate::termwindow::box_model::DisplayType::Inline)
                 .vertical_align(VerticalAlign::Middle)
                 .padding(if is_inline_edit {
@@ -1420,6 +1432,7 @@ impl crate::TermWindow {
                 bounds: euclid::rect(x, y, width, height),
                 metrics: &self.render_metrics,
                 gl_state: self.render_state.as_ref().unwrap(),
+                custom_block_glyphs: self.config.custom_block_glyphs,
                 zindex: 2,
             },
             &root,
@@ -1490,6 +1503,7 @@ impl crate::TermWindow {
                 bounds: euclid::rect(x, y, width, height),
                 metrics: &self.render_metrics,
                 gl_state: self.render_state.as_ref().unwrap(),
+                custom_block_glyphs: self.config.custom_block_glyphs,
                 zindex: 2,
             },
             &root,
@@ -1607,6 +1621,7 @@ impl crate::TermWindow {
                 bounds: euclid::rect(x, y, width, height),
                 metrics: &self.render_metrics,
                 gl_state: self.render_state.as_ref().unwrap(),
+                custom_block_glyphs: self.config.custom_block_glyphs,
                 zindex: 2,
             },
             &root,
@@ -1648,9 +1663,7 @@ fn sidebar_tree_rows(
                 .filter(|session| session.profile_id == profile.profile_id)
                 .collect();
             if profile_sessions.is_empty() {
-                rows.push(SidebarTreeRow::EmptyNestedHint(
-                    "No sessions yet".into(),
-                ));
+                rows.push(SidebarTreeRow::EmptyNestedHint("No sessions yet".into()));
             } else {
                 for session in profile_sessions {
                     rows.push(SidebarTreeRow::Session(session.clone()));

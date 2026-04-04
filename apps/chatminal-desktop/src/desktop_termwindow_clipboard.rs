@@ -27,10 +27,10 @@ impl TermWindow {
         pane: &Arc<dyn OverlayPane>,
         clipboard: ClipboardPasteSource,
     ) {
-        let pane_id = pane.pane_id();
+        let pane_id = pane.terminal_handle().as_u64();
         log::trace!(
             "paste_from_clipboard in pane {} {:?}",
-            pane.pane_id(),
+            pane_id,
             clipboard
         );
         let window = self.window.as_ref().unwrap().clone();
@@ -47,7 +47,7 @@ impl TermWindow {
                         .overlay
                         .as_ref()
                         .map(|overlay| overlay.pane.clone())
-                        .or_else(|| myself.resolve_terminal_handle(pane_id as u64).ok())
+                        .or_else(|| myself.resolve_terminal_handle(pane_id).ok())
                     {
                         pane.send_paste(&clip).ok();
                     }

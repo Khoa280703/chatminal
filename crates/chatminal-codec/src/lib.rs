@@ -15,9 +15,8 @@ use config::keyassignment::SessionDirection;
 use engine_term::color::ColorPalette;
 use engine_term::{Alert, ClipboardSelection, StableRowIndex, TerminalSize};
 use host_runtime::client::{ClientId, ClientInfo};
-use host_runtime::pane::PaneId;
 use host_runtime::renderable::{RenderableDimensions, StableCursorPosition};
-use host_runtime::tab::{PaneNode, SerdeUrl, SplitRequest, TabId};
+use host_runtime::tab::{PaneNode, SerdeUrl, SplitRequest};
 use portable_pty::CommandBuilder;
 use rangeset::*;
 use serde::{Deserialize, Serialize};
@@ -32,6 +31,9 @@ use termwiz::hyperlink::Hyperlink;
 use termwiz::image::{ImageData, TextureCoordinate};
 use termwiz::surface::{Line, SequenceNo};
 use thiserror::Error;
+
+type PaneId = usize;
+type TabId = usize;
 
 #[derive(Error, Debug)]
 #[error("Corrupt Response: {0}")]

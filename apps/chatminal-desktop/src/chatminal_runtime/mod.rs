@@ -38,8 +38,6 @@ pub(crate) use chatminal_runtime::{
 pub(crate) use client::resolve_target_session_id;
 pub(crate) use client::ChatminalRuntimeClient;
 
-type HostTerminalHandle = crate::desktop_host_runtime::HostTerminalHandle;
-
 pub(crate) mod overlay_compat {
     pub(crate) use crate::desktop_host_runtime::overlay_compat::{
         allocate_overlay_terminal, OverlayAssignmentResult, OverlayCachePolicy, OverlayCloseReason,
@@ -351,7 +349,7 @@ pub fn desktop_session_id_for_terminal_handle(
         let Some(pane) = desktop_pane_for_session(&view.session_id) else {
             continue;
         };
-        if pane.pane_id_value() as u64 == terminal_handle.as_u64() {
+        if terminal_handle_for_overlay_pane(&*pane) == terminal_handle {
             return Some(view.session_id);
         }
     }
@@ -595,24 +593,32 @@ pub(crate) fn host_active_render_scope_id() -> Option<u64> {
     crate::desktop_host_runtime::host_active_render_scope_id()
 }
 
-pub(crate) fn terminal_handle_arc(pane_id: HostTerminalHandle) -> Option<Arc<dyn HostTerminal>> {
-    crate::desktop_host_runtime::terminal_handle_arc(pane_id)
+pub(crate) fn terminal_handle_arc(
+    terminal_handle: SessionTerminalHandle,
+) -> Option<Arc<dyn HostTerminal>> {
+    crate::desktop_host_runtime::terminal_handle_arc(terminal_handle)
+}
+
+pub(crate) fn terminal_handle_for_overlay_pane(
+    pane: &dyn overlay_compat::OverlayPane,
+) -> SessionTerminalHandle {
+    crate::desktop_host_runtime::terminal_handle_for_pane(pane)
 }
 
 pub(crate) fn terminal_handle_arc_by_public_id(pane_id: u64) -> Option<Arc<dyn HostTerminal>> {
     crate::desktop_host_runtime::terminal_handle_arc_by_public_id(pane_id)
 }
 
-pub(crate) fn remove_terminal_handle(pane_id: HostTerminalHandle) {
-    crate::desktop_host_runtime::remove_terminal_handle(pane_id);
+pub(crate) fn remove_terminal_handle(terminal_handle: SessionTerminalHandle) {
+    crate::desktop_host_runtime::remove_terminal_handle(terminal_handle);
 }
 
 pub(crate) fn remove_runtime_entry_scope(render_scope_id: u64) {
     crate::desktop_host_runtime::remove_runtime_entry_scope(render_scope_id);
 }
 
-pub(crate) fn record_host_focus_for_current_identity(pane_id: HostTerminalHandle) {
-    crate::desktop_host_runtime::record_host_focus_for_current_identity(pane_id);
+pub(crate) fn record_host_focus_for_current_identity(terminal_handle: SessionTerminalHandle) {
+    crate::desktop_host_runtime::record_host_focus_for_current_identity(terminal_handle);
 }
 
 pub(crate) fn resolve_public_pane(
@@ -686,6 +692,7 @@ pub(crate) fn desktop_session_host() -> Option<Arc<DesktopSessionHost>> {
     let shared = session_engine_shared()?;
     Some(crate::desktop_host_runtime::get_or_init_session_host(
         shared,
+        crate::frontend::current_frontend_config(),
     ))
 }
 
@@ -1373,6 +1380,11 @@ pub fn desktop_create_split_session_view(
 
     let state = desktop_activate_session(&created.session_id, None, size)
         .ok_or_else(|| anyhow::anyhow!("failed to ensure session runtime for split view"))?;
+    // Split-view creation changes the visible workspace geometry immediately.
+    // Re-apply derived per-session terminal sizes in the same action so panes
+    // with existing scrollback/cursor state don't wait for an external window
+    // resize before their viewport catches up to the new layout.
+    let _ = desktop_resize_visible_sessions(size);
     if let Err(err) = notify_runtime_session_activated(&created.session_id, state.runtime_id) {
         log::error!("failed to notify runtime bridge about split-view focus: {err}");
     }

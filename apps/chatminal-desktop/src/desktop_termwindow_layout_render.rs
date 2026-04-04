@@ -1,8 +1,11 @@
-use crate::chatminal_layout::workspace_store::{DesktopWorkspaceLayoutStore, DEFAULT_LAYOUT_WORKSPACE_ID};
+use crate::chatminal_layout::workspace_store::{
+    DesktopWorkspaceLayoutStore, DEFAULT_LAYOUT_WORKSPACE_ID,
+};
 use crate::chatminal_render::ChatminalRenderPane;
 use crate::chatminal_runtime::{
-    SessionViewId, WorkspaceLayoutNodeKind, WorkspaceLayoutState, WorkspaceNodeId,
-    WorkspaceSplitAxis,
+    desktop_render_state_for_session, desktop_resize_layout_split, desktop_resize_visible_sessions,
+    terminal_handle_arc_by_public_id, SessionViewId, WorkspaceLayoutNodeKind, WorkspaceLayoutState,
+    WorkspaceNodeId, WorkspaceSplitAxis,
 };
 use crate::desktop_termwindow_types::{TerminalPaneLayout, TerminalSplit, TerminalSplitDirection};
 const WORKSPACE_SPLIT_INDEX_BASE: usize = 1_000_000;
@@ -49,7 +52,8 @@ impl crate::TermWindow {
         if !self.chatminal_sidebar.is_enabled() {
             return Vec::new();
         }
-        let Some(layout) = DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID).snapshot() else {
+        let Some(layout) = DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID).snapshot()
+        else {
             return Vec::new();
         };
         let active_view_id = Some(layout.active_view_id);
@@ -96,9 +100,7 @@ impl crate::TermWindow {
         let cell_height = self.render_metrics.cell_size.height.max(0) as usize;
         let mut next_index = 0;
         for target in self.layout_render_targets() {
-            let Some(render_state) =
-                crate::chatminal_runtime::desktop_render_state_for_session(&target.session_id)
-            else {
+            let Some(render_state) = desktop_render_state_for_session(&target.session_id) else {
                 continue;
             };
             if let Some(overlay) = self.session_render_target_overlay(&target.session_id) {
@@ -137,8 +139,7 @@ impl crate::TermWindow {
                     next_index += 1;
                     continue;
                 }
-                let Some(pane) = crate::chatminal_runtime::terminal_handle_arc_by_public_id(pane_id)
-                else {
+                let Some(pane) = terminal_handle_arc_by_public_id(pane_id) else {
                     continue;
                 };
                 let geometry = map_render_pane_geometry(
@@ -206,21 +207,19 @@ impl crate::TermWindow {
             TerminalSplitDirection::Horizontal => {
                 target.split.left.saturating_sub(target.bounds.left)
             }
-            TerminalSplitDirection::Vertical => {
-                target.split.top.saturating_sub(target.bounds.top)
-            }
+            TerminalSplitDirection::Vertical => target.split.top.saturating_sub(target.bounds.top),
         };
         let max_first = usable.saturating_sub(1);
         let next_first = current_first
             .saturating_add_signed(delta)
             .clamp(1, max_first);
         let ratio = ((next_first as u64) * 1000 / (usable as u64)) as u16;
-        crate::chatminal_runtime::desktop_resize_layout_split(target.node_id, ratio)?;
+        desktop_resize_layout_split(target.node_id, ratio)?;
         // Divider drag mutates only the persisted workspace ratio. We must eagerly
         // push the derived per-session terminal sizes as part of the same gesture;
         // otherwise pane viewports/scroll regions stay at the prior size until some
         // later action (such as switching sessions) happens to refresh them.
-        let _ = crate::chatminal_runtime::desktop_resize_visible_sessions(self.terminal_size);
+        let _ = desktop_resize_visible_sessions(self.terminal_size);
         self.resize_overlays();
         self.workspace_split_targets()
             .into_iter()
@@ -232,7 +231,8 @@ impl crate::TermWindow {
         if !self.chatminal_sidebar.is_enabled() {
             return Vec::new();
         }
-        let Some(layout) = DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID).snapshot() else {
+        let Some(layout) = DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID).snapshot()
+        else {
             return Vec::new();
         };
         if layout.views.len() <= 1 {
@@ -348,9 +348,7 @@ fn collect_workspace_splits(
     };
 
     let direction = match axis {
-        WorkspaceSplitAxis::Horizontal => {
-            TerminalSplitDirection::Horizontal
-        }
+        WorkspaceSplitAxis::Horizontal => TerminalSplitDirection::Horizontal,
         WorkspaceSplitAxis::Vertical => TerminalSplitDirection::Vertical,
     };
     let (first_bounds, second_bounds) = split_bounds(bounds, axis, ratio);
@@ -453,8 +451,18 @@ fn map_render_pane_geometry(
     // activation/window-resize/layout-commit paths, never in layout paint.
     let source_cols = source_size.cols.max(1);
     let source_rows = source_size.rows.max(1);
-    let width = map_span(render_pane.left, render_pane.width, source_cols, target.width);
-    let height = map_span(render_pane.top, render_pane.height, source_rows, target.height);
+    let width = map_span(
+        render_pane.left,
+        render_pane.width,
+        source_cols,
+        target.width,
+    );
+    let height = map_span(
+        render_pane.top,
+        render_pane.height,
+        source_rows,
+        target.height,
+    );
     RenderPaneGeometry {
         left: target.left + map_offset(render_pane.left, source_cols, target.width),
         top: target.top + map_offset(render_pane.top, source_rows, target.height),

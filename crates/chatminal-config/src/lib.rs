@@ -2,6 +2,7 @@
 
 use anyhow::{bail, Context, Error};
 use engine_dynamic::{FromDynamic, FromDynamicOptions, ToDynamic, UnknownFieldAction, Value};
+use engine_term::TerminalSize;
 use engine_term::UnicodeVersion;
 use lazy_static::lazy_static;
 use mlua::Lua;
@@ -56,6 +57,7 @@ pub use units::*;
 pub use version::*;
 
 type ErrorCallback = fn(&str);
+type ConfigReloadSubscriber = dyn Fn(ConfigHandle) -> bool + Send;
 
 lazy_static! {
     pub static ref HOME_DIR: PathBuf = dirs::home_dir().expect("can't find HOME dir");
@@ -235,6 +237,13 @@ impl Drop for ConfigSubscription {
 pub fn subscribe_to_config_reload<F>(subscriber: F) -> ConfigSubscription
 where
     F: Fn() -> bool + 'static + Send,
+{
+    ConfigSubscription(CONFIG.subscribe(move |_| subscriber()))
+}
+
+pub fn subscribe_to_config_reload_with_config<F>(subscriber: F) -> ConfigSubscription
+where
+    F: Fn(ConfigHandle) -> bool + 'static + Send,
 {
     ConfigSubscription(CONFIG.subscribe(subscriber))
 }
@@ -434,6 +443,48 @@ pub fn configuration() -> ConfigHandle {
     CONFIG.get()
 }
 
+pub fn current_config_handle() -> ConfigHandle {
+    configuration()
+}
+
+pub fn default_workspace_name_or(fallback: &str) -> String {
+    configuration()
+        .default_workspace
+        .as_deref()
+        .unwrap_or(fallback)
+        .to_string()
+}
+
+pub fn current_switch_to_last_active_tab_when_closing_tab() -> bool {
+    configuration().switch_to_last_active_tab_when_closing_tab
+}
+
+pub fn current_unzoom_on_switch_pane() -> bool {
+    configuration().unzoom_on_switch_pane
+}
+
+pub fn current_initial_terminal_size() -> TerminalSize {
+    configuration().initial_size(0, None)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OutputParserConfig {
+    pub buffer_size: usize,
+    pub coalesce_delay_ms: u64,
+}
+
+pub fn current_output_parser_config() -> OutputParserConfig {
+    let config = configuration();
+    OutputParserConfig {
+        buffer_size: config.output_parser_buffer_size,
+        coalesce_delay_ms: config.output_parser_coalesce_delay_ms,
+    }
+}
+
+pub fn current_exit_behavior() -> ExitBehavior {
+    configuration().exit_behavior
+}
+
 /// Returns a version of the config (loaded from the config file)
 /// with some field overridden based on the supplied overrides object.
 pub fn overridden_config(overrides: &engine_dynamic::Value) -> Result<ConfigHandle, Error> {
@@ -465,7 +516,7 @@ struct ConfigInner {
     warnings: Vec<String>,
     generation: usize,
     watcher: Option<notify::RecommendedWatcher>,
-    subscribers: HashMap<usize, Box<dyn Fn() -> bool + Send>>,
+    subscribers: HashMap<usize, Box<ConfigReloadSubscriber>>,
 }
 
 impl ConfigInner {
@@ -482,7 +533,7 @@ impl ConfigInner {
 
     fn subscribe<F>(&mut self, subscriber: F) -> usize
     where
-        F: Fn() -> bool + 'static + Send,
+        F: Fn(ConfigHandle) -> bool + 'static + Send,
     {
         static SUB_ID: AtomicUsize = AtomicUsize::new(0);
         let sub_id = SUB_ID.fetch_add(1, Ordering::Relaxed);
@@ -495,7 +546,12 @@ impl ConfigInner {
     }
 
     fn notify(&mut self) {
-        self.subscribers.retain(|_, notify| notify());
+        let config = ConfigHandle {
+            config: Arc::clone(&self.config),
+            generation: self.generation,
+        };
+        self.subscribers
+            .retain(|_, notify| notify(config.clone()));
     }
 
     fn watch_path(&mut self, path: PathBuf) {
@@ -700,7 +756,7 @@ impl Configuration {
     /// Subscribe to config reload events
     fn subscribe<F>(&self, subscriber: F) -> usize
     where
-        F: Fn() -> bool + 'static + Send,
+        F: Fn(ConfigHandle) -> bool + 'static + Send,
     {
         let mut inner = self.inner.lock().unwrap();
         inner.subscribe(subscriber)

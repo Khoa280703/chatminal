@@ -1,11 +1,13 @@
-use crate::pane::{Pane, PaneId};
+use crate::localpane::LocalPane;
+use crate::pane::{pane_id_for_pane, Pane, PaneId};
 use crate::{
-    notify_mux_any_thread, prune_dead_windows_on_main_thread, remove_pane_on_main_thread,
-    terminal_by_id, MuxNotification,
+    current_host_exit_behavior, current_host_output_parser_config, notify_mux_any_thread,
+    prune_dead_windows_on_main_thread, remove_pane_on_main_thread, terminal_by_id,
+    MuxNotification,
 };
 use anyhow::Context;
 use chatminal_runtime::SessionTerminalHandle;
-use config::{configuration, ExitBehavior};
+use config::ExitBehavior;
 use filedescriptor::{poll, pollfd, socketpair, AsRawSocketDescriptor, FileDescriptor, POLLIN};
 #[cfg(unix)]
 use libc::{c_int, SOL_SOCKET, SO_RCVBUF, SO_SNDBUF};
@@ -31,6 +33,11 @@ struct OutputParserConfigSnapshot {
     coalesce_delay_ms: u64,
 }
 
+#[derive(Clone, Copy)]
+struct PtyIoConfigSnapshot {
+    parser: OutputParserConfigSnapshot,
+}
+
 #[derive(Clone)]
 struct PtyIoDispatcher {
     on_output: Arc<dyn Fn(SessionTerminalHandle) + Send + Sync>,
@@ -38,55 +45,112 @@ struct PtyIoDispatcher {
     on_inline_error_output: Arc<dyn Fn(PaneId, String) + Send + Sync>,
 }
 
-#[derive(Clone, Default)]
+type PtyCleanupHook = Arc<dyn Fn(PaneId, Option<ExitBehavior>, ExitBehavior) + Send + Sync>;
+type PtyInlineErrorOutputHook =
+    Arc<dyn Fn(PaneId, String, Arc<dyn Fn(SessionTerminalHandle) + Send + Sync>) + Send + Sync>;
+
+#[derive(Clone)]
 pub(crate) struct PtyIoHooks {
-    on_output: Option<Arc<dyn Fn(SessionTerminalHandle) + Send + Sync>>,
-    on_cleanup: Option<Arc<dyn Fn(PaneId, Option<ExitBehavior>) + Send + Sync>>,
-    on_inline_error_output: Option<Arc<dyn Fn(PaneId, String) + Send + Sync>>,
+    on_output: Arc<dyn Fn(SessionTerminalHandle) + Send + Sync>,
+    on_cleanup: PtyCleanupHook,
+    on_inline_error_output: PtyInlineErrorOutputHook,
 }
 
 impl PtyIoHooks {
+    pub(crate) fn noop() -> Self {
+        Self {
+            on_output: Arc::new(|_| {}),
+            on_cleanup: Arc::new(|_, _, _| {}),
+            on_inline_error_output: Arc::new(|_, _, _| {}),
+        }
+    }
+
+    // Product default for host-runtime PTY side effects.
+    pub(crate) fn host_default() -> Self {
+        Self {
+            on_output: Arc::new(dispatch_default_output_for_terminal_handle),
+            on_cleanup: Arc::new(dispatch_default_exit_cleanup_for_pane),
+            on_inline_error_output: Arc::new(|pane_id, message, on_output| {
+                dispatch_inline_output_for_pane(pane_id, message, on_output);
+            }),
+        }
+    }
+
+    // Explicit compat seam kept for legacy callers/tests that still speak in
+    // terms of "mux" semantics. Product code should use `host_default()`.
+    pub(crate) fn mux_default() -> Self {
+        Self::host_default()
+    }
+
     pub(crate) fn with_output(
         on_output: Option<Arc<dyn Fn(SessionTerminalHandle) + Send + Sync>>,
     ) -> Self {
-        Self {
-            on_output,
-            ..Self::default()
+        let mut hooks = Self::noop();
+        if let Some(on_output) = on_output {
+            hooks.on_output = on_output;
         }
+        hooks
     }
 
     pub(crate) fn set_output(
         &mut self,
         on_output: Option<Arc<dyn Fn(SessionTerminalHandle) + Send + Sync>>,
     ) {
-        self.on_output = on_output;
+        if let Some(on_output) = on_output {
+            self.on_output = on_output;
+        }
     }
 
     pub(crate) fn set_cleanup(
         &mut self,
         on_cleanup: Option<Arc<dyn Fn(PaneId, Option<ExitBehavior>) + Send + Sync>>,
     ) {
-        self.on_cleanup = on_cleanup;
+        if let Some(on_cleanup) = on_cleanup {
+            self.on_cleanup = Arc::new(move |pane_id, exit_behavior, _default_exit_behavior| {
+                on_cleanup(pane_id, exit_behavior);
+            });
+        }
     }
 
     pub(crate) fn set_inline_error_output(
         &mut self,
         on_inline_error_output: Option<Arc<dyn Fn(PaneId, String) + Send + Sync>>,
     ) {
-        self.on_inline_error_output = on_inline_error_output;
+        if let Some(on_inline_error_output) = on_inline_error_output {
+            self.on_inline_error_output = Arc::new(move |pane_id, message, _on_output| {
+                on_inline_error_output(pane_id, message);
+            });
+        }
     }
 }
 
-fn output_parser_config_snapshot() -> OutputParserConfigSnapshot {
-    let config = configuration();
-    OutputParserConfigSnapshot {
-        buffer_size: config.output_parser_buffer_size,
-        coalesce_delay_ms: config.output_parser_coalesce_delay_ms,
+impl Default for PtyIoHooks {
+    fn default() -> Self {
+        Self::noop()
     }
 }
 
-fn default_exit_behavior() -> ExitBehavior {
-    configuration().exit_behavior
+fn pty_io_config_snapshot() -> PtyIoConfigSnapshot {
+    let parser = current_host_output_parser_config();
+    PtyIoConfigSnapshot {
+        parser: OutputParserConfigSnapshot {
+            buffer_size: parser.buffer_size,
+            coalesce_delay_ms: parser.coalesce_delay_ms,
+        },
+    }
+}
+
+fn pty_io_config_snapshot_for_pane(pane: &Arc<dyn Pane>) -> PtyIoConfigSnapshot {
+    if let Some(local_pane) = pane.downcast_ref::<LocalPane>() {
+        return PtyIoConfigSnapshot {
+            parser: OutputParserConfigSnapshot {
+                buffer_size: local_pane.output_parser_buffer_size(),
+                coalesce_delay_ms: local_pane.output_parser_coalesce_delay_ms(),
+            },
+        };
+    }
+
+    pty_io_config_snapshot()
 }
 
 pub(crate) fn dispatch_inline_output_for_pane(
@@ -114,8 +178,12 @@ pub(crate) fn dispatch_default_output_for_terminal_handle(terminal_handle: Sessi
     notify_mux_any_thread(MuxNotification::PaneOutput(pane_id));
 }
 
-fn dispatch_default_exit_cleanup_for_pane(pane_id: PaneId, exit_behavior: Option<ExitBehavior>) {
-    match exit_behavior.unwrap_or_else(default_exit_behavior) {
+pub(crate) fn dispatch_default_exit_cleanup_for_pane(
+    pane_id: PaneId,
+    exit_behavior: Option<ExitBehavior>,
+    default_exit_behavior: ExitBehavior,
+) {
+    match exit_behavior.unwrap_or(default_exit_behavior) {
         ExitBehavior::Hold | ExitBehavior::CloseOnCleanExit => {
             log::trace!("checking for dead windows after EOF on pane {}", pane_id);
             prune_dead_windows_on_main_thread();
@@ -126,24 +194,22 @@ fn dispatch_default_exit_cleanup_for_pane(pane_id: PaneId, exit_behavior: Option
     }
 }
 
-fn default_pty_io_dispatcher(hooks: PtyIoHooks) -> PtyIoDispatcher {
-    let on_output = hooks
-        .on_output
-        .unwrap_or_else(|| Arc::new(dispatch_default_output_for_terminal_handle));
-    let on_output_for_inline_error = Arc::clone(&on_output);
-    let on_cleanup = hooks.on_cleanup.unwrap_or_else(|| {
-        Arc::new(|pane_id: PaneId, exit_behavior: Option<ExitBehavior>| {
-            dispatch_default_exit_cleanup_for_pane(pane_id, exit_behavior);
-        })
-    });
-    let on_inline_error_output = hooks.on_inline_error_output.unwrap_or_else(|| {
-        Arc::new(move |pane_id: PaneId, message: String| {
-            dispatch_inline_output_for_pane(
+fn default_pty_io_dispatcher(hooks: PtyIoHooks, _config: PtyIoConfigSnapshot) -> PtyIoDispatcher {
+    let on_output = hooks.on_output;
+    let cleanup_hook = hooks.on_cleanup;
+    let inline_error_output_hook = hooks.on_inline_error_output;
+    let on_cleanup = Arc::new(
+        move |pane_id: PaneId, exit_behavior: Option<ExitBehavior>| {
+            cleanup_hook(
                 pane_id,
-                message,
-                Arc::clone(&on_output_for_inline_error),
+                exit_behavior,
+                current_host_exit_behavior(),
             );
-        })
+        },
+    );
+    let on_output_for_inline_error = Arc::clone(&on_output);
+    let on_inline_error_output = Arc::new(move |pane_id: PaneId, message: String| {
+        inline_error_output_hook(pane_id, message, Arc::clone(&on_output_for_inline_error));
     });
 
     PtyIoDispatcher {
@@ -162,8 +228,7 @@ fn send_actions_to_pane(
     let start = Instant::now();
     match pane.upgrade() {
         Some(pane) => {
-            let pane_id = pane.pane_id();
-            let terminal_handle = SessionTerminalHandle::new(pane_id as u64);
+            let terminal_handle = pane.terminal_handle();
             pane.perform_actions(actions);
             histogram!("send_actions_to_mux.perform_actions.latency").record(start.elapsed());
             (dispatcher.on_output)(terminal_handle);
@@ -311,13 +376,14 @@ fn read_from_pane_pty(
     pane: Weak<dyn Pane>,
     banner: Option<String>,
     mut reader: Box<dyn Read>,
+    config: PtyIoConfigSnapshot,
     dispatcher: PtyIoDispatcher,
 ) {
     let mut buf = vec![0; BUFSIZE];
     let dead = Arc::new(AtomicBool::new(false));
 
     let (pane_id, exit_behavior) = match pane.upgrade() {
-        Some(pane) => (pane.pane_id(), pane.exit_behavior()),
+        Some(pane) => (pane_id_for_pane(pane.as_ref()), pane.exit_behavior()),
         None => return,
     };
 
@@ -335,11 +401,10 @@ fn read_from_pane_pty(
         }
     };
 
-    let parser_config = output_parser_config_snapshot();
     std::thread::spawn({
         let dead = Arc::clone(&dead);
         let dispatcher = dispatcher.clone();
-        move || parse_buffered_data(pane, &dead, rx, parser_config, dispatcher)
+        move || parse_buffered_data(pane, &dead, rx, config.parser, dispatcher)
     });
 
     if let Some(banner) = banner {
@@ -377,9 +442,95 @@ fn read_from_pane_pty(
 
 pub(crate) fn start_pane_pty_reader(pane: &Arc<dyn Pane>, hooks: PtyIoHooks) -> anyhow::Result<()> {
     if let Some(reader) = pane.reader()? {
+        let config = pty_io_config_snapshot_for_pane(pane);
         let pane = Arc::downgrade(pane);
-        let dispatcher = default_pty_io_dispatcher(hooks);
-        thread::spawn(move || read_from_pane_pty(pane, None, reader, dispatcher));
+        let dispatcher = default_pty_io_dispatcher(hooks, config);
+        thread::spawn(move || read_from_pane_pty(pane, None, reader, config, dispatcher));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PtyIoHooks;
+    use chatminal_runtime::SessionTerminalHandle;
+    use config::ExitBehavior;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn with_output_keeps_explicit_output_owner() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let seen_clone = Arc::clone(&seen);
+        let hooks = PtyIoHooks::with_output(Some(Arc::new(move |handle| {
+            seen_clone.lock().unwrap().push(handle.as_u64());
+        })));
+
+        (hooks.on_output)(SessionTerminalHandle::new(42));
+
+        assert_eq!(seen.lock().unwrap().as_slice(), &[42]);
+    }
+
+    #[test]
+    fn with_output_does_not_install_hidden_inline_error_fallbacks() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let seen_clone = Arc::clone(&seen);
+        let hooks = PtyIoHooks::with_output(Some(Arc::new(move |handle| {
+            seen_clone.lock().unwrap().push(handle.as_u64());
+        })));
+
+        (hooks.on_inline_error_output)(9, "spawn failed".to_string(), Arc::clone(&hooks.on_output));
+
+        assert!(seen.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn default_does_not_install_hidden_inline_error_output_owner() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let seen_clone = Arc::clone(&seen);
+        let hooks = PtyIoHooks::default();
+
+        (hooks.on_inline_error_output)(
+            9,
+            "spawn failed".to_string(),
+            Arc::new(move |handle| {
+                seen_clone.lock().unwrap().push(handle.as_u64());
+            }),
+        );
+
+        assert!(seen.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn set_cleanup_wraps_custom_cleanup_owner() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let seen_clone = Arc::clone(&seen);
+        let mut hooks = PtyIoHooks::mux_default();
+        hooks.set_cleanup(Some(Arc::new(move |pane_id, exit_behavior| {
+            seen_clone.lock().unwrap().push((pane_id, exit_behavior));
+        })));
+
+        (hooks.on_cleanup)(7, Some(ExitBehavior::Hold), ExitBehavior::Close);
+
+        assert_eq!(
+            seen.lock().unwrap().as_slice(),
+            &[(7, Some(ExitBehavior::Hold))]
+        );
+    }
+
+    #[test]
+    fn set_inline_error_output_wraps_custom_inline_owner() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let seen_clone = Arc::clone(&seen);
+        let mut hooks = PtyIoHooks::mux_default();
+        hooks.set_inline_error_output(Some(Arc::new(move |pane_id, message| {
+            seen_clone.lock().unwrap().push((pane_id, message));
+        })));
+
+        (hooks.on_inline_error_output)(9, "spawn failed".to_string(), Arc::new(|_| {}));
+
+        assert_eq!(
+            seen.lock().unwrap().as_slice(),
+            &[(9, "spawn failed".to_string())]
+        );
+    }
 }

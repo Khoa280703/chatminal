@@ -10,15 +10,24 @@ use crate::chatminal_runtime::overlay_compat::{
     RenderableDimensions,
 };
 use crate::chatminal_runtime::{
-    active_host_runtime_entry_size, desktop_session_entry_bindings, host_active_render_scope_id,
-    host_window_initial_position, resize_host_window_tabs, resolve_public_pane,
-    resolved_window_title, subscribe_runtime_notifications, PrimaryHostWindowId, RuntimeId,
-    RuntimeNotification, RuntimeWindow, SessionViewId, TerminalInstanceId,
+    active_host_runtime_entry_size, desktop_activate_session, desktop_can_close_view_only,
+    desktop_detach_session_runtime_and_notify, desktop_focus_session_view_with_previous,
+    desktop_last_active_session_id, desktop_prepare_workspace_layout,
+    desktop_resize_visible_sessions, desktop_session_entry_bindings,
+    desktop_session_window_snapshot, host_active_render_scope_id, host_window_initial_position,
+    notify_runtime_session_activated, reconcile_runtime_session_lookup, resize_host_window_tabs,
+    resolve_public_pane, resolved_window_title, run_runtime_session_startup_command,
+    subscribe_runtime_notifications, DesktopSessionBridgeAction, DesktopSessionRuntimeSummary,
+    PrimaryHostWindowId, RuntimeId, RuntimeNotification, RuntimeWindow, SessionViewId,
+    TerminalInstanceId, WorkspaceLayoutState,
 };
 use crate::chatminal_sidebar::{ChatminalSidebar, SidebarSessionDropTarget};
 use crate::colorease::ColorEase;
 use crate::desktop_overlay_actions::show_close_runtime_entry_overlay;
-use crate::desktop_termwindow_types::{TerminalPaneLayout, TerminalSplit, TerminalUiKey};
+use crate::desktop_termwindow_types::{
+    terminal_handle_for_ui_key, terminal_ui_key_for_pane, TerminalPaneLayout, TerminalSplit,
+    TerminalUiKey,
+};
 use crate::frontend::{front_end, try_front_end};
 use crate::inputmap::InputMap;
 use crate::overlay::{
@@ -136,7 +145,7 @@ fn pane_metadata_terminal_instance_id(pane: &dyn OverlayPane) -> Option<Terminal
 }
 
 fn pane_matches_public_id(pane: &dyn OverlayPane, public_id: u64) -> bool {
-    pane.pane_id() as u64 == public_id
+    terminal_ui_key_for_pane(pane) == public_id
         || pane_metadata_terminal_instance_id(pane)
             .map(|terminal_instance_id| terminal_instance_id.as_u64() == public_id)
             .unwrap_or(false)
@@ -768,8 +777,11 @@ impl TermWindow {
     }
 
     fn refresh_chatminal_visible_layout(&self) {
-        let _ = crate::chatminal_runtime::desktop_prepare_workspace_layout(self.terminal_size);
-        let _ = crate::chatminal_runtime::desktop_resize_visible_sessions(self.terminal_size);
+        let _ = desktop_prepare_workspace_layout(self.terminal_size);
+        let _ = desktop_resize_visible_sessions(self.terminal_size);
+        if let Some(window) = self.window.as_ref() {
+            window.invalidate();
+        }
     }
 
     fn restore_chatminal_profile_layout_if_needed(
@@ -791,28 +803,22 @@ impl TermWindow {
         &self,
         session_id: &str,
         preferred_runtime_id: Option<RuntimeId>,
-    ) -> Option<crate::chatminal_runtime::DesktopSessionRuntimeSummary> {
-        crate::chatminal_runtime::desktop_activate_session(
-            session_id,
-            preferred_runtime_id,
-            self.terminal_size,
-        )
+    ) -> Option<DesktopSessionRuntimeSummary> {
+        desktop_activate_session(session_id, preferred_runtime_id, self.terminal_size)
     }
 
     fn notify_desktop_session_activated(&self, session_id: &str, runtime_id: RuntimeId) {
-        if let Err(err) =
-            crate::chatminal_runtime::notify_runtime_session_activated(session_id, runtime_id)
-        {
+        if let Err(err) = notify_runtime_session_activated(session_id, runtime_id) {
             log::error!("failed to notify runtime bridge about session activation: {err}");
         }
     }
 
     fn detach_desktop_session_runtime_and_notify(&self, session_id: &str) -> bool {
-        crate::chatminal_runtime::desktop_detach_session_runtime_and_notify(session_id)
+        desktop_detach_session_runtime_and_notify(session_id)
     }
 
     fn can_close_chatminal_view_only(&self) -> bool {
-        crate::chatminal_runtime::desktop_can_close_view_only()
+        desktop_can_close_view_only()
     }
 
     fn focus_chatminal_view_with_previous(
@@ -820,15 +826,11 @@ impl TermWindow {
         view_id: SessionViewId,
         previous_session_id: Option<String>,
     ) {
-        let _ = crate::chatminal_runtime::desktop_focus_session_view_with_previous(
-            view_id,
-            previous_session_id,
-        );
+        let _ = desktop_focus_session_view_with_previous(view_id, previous_session_id);
     }
 
     fn run_session_startup_command(&self, session_id: &str) {
-        if let Err(err) = crate::chatminal_runtime::run_runtime_session_startup_command(session_id)
-        {
+        if let Err(err) = run_runtime_session_startup_command(session_id) {
             log::error!("failed to run startup command for session {session_id}: {err}");
         }
     }
@@ -991,9 +993,7 @@ impl TermWindow {
                 &source_profile_id,
                 session_ids.iter().map(String::as_str),
             );
-            if let Some(layout) =
-                crate::chatminal_runtime::WorkspaceLayoutState::grouped_sessions(session_ids)
-            {
+            if let Some(layout) = WorkspaceLayoutState::grouped_sessions(session_ids) {
                 for session_id in session_ids {
                     let _ = DesktopWorkspaceLayoutStore::new(
                         DesktopWorkspaceLayoutStore::profile_group_workspace_id(
@@ -1041,9 +1041,7 @@ impl TermWindow {
             let _ = DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID)
                 .save_as_profile_layout(&anchor_profile_id);
         }
-        let Some(layout) =
-            crate::chatminal_runtime::WorkspaceLayoutState::grouped_sessions(&ordered_session_ids)
-        else {
+        let Some(layout) = WorkspaceLayoutState::grouped_sessions(&ordered_session_ids) else {
             log::error!("failed to build joined session layout");
             return;
         };
@@ -1150,7 +1148,7 @@ impl TermWindow {
     }
 
     fn activate_last_chatminal_session(&mut self) -> anyhow::Result<()> {
-        let Some(session_id) = crate::chatminal_runtime::desktop_last_active_session_id() else {
+        let Some(session_id) = desktop_last_active_session_id() else {
             return Ok(());
         };
         self.switch_chatminal_session(&session_id);
@@ -1211,7 +1209,7 @@ impl TermWindow {
         &mut self,
         session_id: &str,
         preferred_runtime_id: Option<RuntimeId>,
-    ) -> Option<crate::chatminal_runtime::DesktopSessionRuntimeSummary> {
+    ) -> Option<DesktopSessionRuntimeSummary> {
         let runtime_state = self.activate_desktop_session_runtime(session_id, preferred_runtime_id);
         if let Some(state) = runtime_state {
             self.notify_desktop_session_activated(session_id, state.runtime_id);
@@ -1270,9 +1268,7 @@ impl TermWindow {
             .map(|layout| layout.active_view_id.as_u64())
     }
 
-    fn chatminal_workspace_layout_snapshot(
-        &self,
-    ) -> Option<crate::chatminal_runtime::WorkspaceLayoutState> {
+    fn chatminal_workspace_layout_snapshot(&self) -> Option<WorkspaceLayoutState> {
         DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID).snapshot()
     }
 
@@ -2458,7 +2454,7 @@ impl TermWindow {
                 state
                     .overlay
                     .as_ref()
-                    .map(|overlay| overlay.pane.pane_id() as u64)
+                    .map(|overlay| terminal_ui_key_for_pane(&*overlay.pane))
             })
             .collect::<Vec<_>>();
 
@@ -2502,7 +2498,7 @@ impl TermWindow {
     fn is_pane_visible(&mut self, pane_id: TerminalUiKey) -> bool {
         self.get_panes_to_render()
             .into_iter()
-            .any(|pos| pos.pane.pane_id() as u64 == pane_id)
+            .any(|pos| terminal_ui_key_for_pane(&*pos.pane) == pane_id)
     }
 
     fn handle_pane_output_event(&mut self, pane_id: TerminalUiKey) {
@@ -2624,9 +2620,9 @@ impl TermWindow {
         &self,
         pos: &TerminalPaneLayout,
     ) -> TerminalInstanceInformation {
-        let host_terminal_handle = pos.pane.pane_id() as u64;
+        let host_terminal_handle = terminal_ui_key_for_pane(&*pos.pane);
         let terminal_instance_id =
-            desktop_session_terminal_binding(SessionTerminalHandle::new(host_terminal_handle))
+            desktop_session_terminal_binding(terminal_handle_for_ui_key(host_terminal_handle))
                 .map(|binding| binding.terminal_instance_id.as_u64())
                 .or_else(|| {
                     pane_metadata_terminal_instance_id(&*pos.pane)
@@ -2769,7 +2765,7 @@ impl TermWindow {
                 crate::desktop_host_runtime::host_overlay_pane_layouts_by_id(render_target_id);
             for p in &mut panes {
                 if let Some(overlay) = self
-                    .terminal_ui_state(p.pane.pane_id() as u64)
+                    .terminal_ui_state(terminal_ui_key_for_pane(&*p.pane))
                     .overlay
                     .as_ref()
                 {

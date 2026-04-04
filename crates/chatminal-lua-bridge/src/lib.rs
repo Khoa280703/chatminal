@@ -1,11 +1,11 @@
-use chatminal_runtime::RuntimeId;
+use chatminal_runtime::{RuntimeId, SessionTerminalHandle};
 use config::keyassignment::SessionDirection;
 use config::lua::mlua::{self, Lua, UserData, UserDataMethods, Value as LuaValue};
 use config::lua::{get_or_create_module, get_or_create_sub_module};
 use engine_dynamic::{FromDynamic, ToDynamic, Value};
 use host_runtime::pane::Pane;
 use host_runtime::spawn_target::SplitSource;
-use host_runtime::tab::{SplitDirection, SplitRequest, SplitSize, Tab};
+use host_runtime::tab::{SplitDirection, SplitRequest, SplitSize};
 use host_runtime::RuntimeEntryInfo;
 use luahelper::impl_lua_conversion_dynamic;
 use portable_pty::CommandBuilder;
@@ -19,6 +19,7 @@ mod window;
 pub use leaf::TerminalRef;
 pub use session::SessionRef;
 pub use window::WindowRef;
+pub(crate) type PaneCachePolicy = host_runtime::pane::CachePolicy;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct RootTabRef(RuntimeId);
@@ -31,6 +32,20 @@ impl RootTabRef {
     const fn runtime_id(self) -> RuntimeId {
         self.0
     }
+}
+
+pub(crate) fn root_window_id() -> host_runtime::window::WindowId {
+    host_runtime::window::ROOT_WINDOW_ID
+}
+
+pub(crate) fn terminal_handle_for_pane(pane: &dyn Pane) -> SessionTerminalHandle {
+    host_runtime::terminal_handle_for_pane(pane)
+}
+
+#[derive(Clone, Debug)]
+struct SpawnedSessionHandle {
+    session: SessionRef,
+    terminal: TerminalRef,
 }
 
 #[derive(Clone)]
@@ -50,15 +65,90 @@ impl LuaBridgeHost {
         Ok(Self)
     }
 
+    fn ensure_runtime_available(&self) -> mlua::Result<()> {
+        if host_runtime::is_host_runtime_available() {
+            Ok(())
+        } else {
+            Err(mlua::Error::external("root window not available"))
+        }
+    }
+
+    fn terminal_by_handle(&self, terminal_handle: SessionTerminalHandle) -> Option<Arc<dyn Pane>> {
+        host_runtime::terminal_by_handle(terminal_handle)
+    }
+
+    fn runtime_entry_info_by_runtime_id(&self, runtime_id: RuntimeId) -> Option<RuntimeEntryInfo> {
+        host_runtime::runtime_entry_info_by_runtime_id(runtime_id)
+    }
+
+    fn runtime_entry_info_by_session_id(&self, session_id: &str) -> Option<RuntimeEntryInfo> {
+        host_runtime::runtime_entry_info_by_session_id(session_id)
+    }
+
+    fn runtime_id_for_terminal(&self, terminal: TerminalRef) -> Option<RuntimeId> {
+        host_runtime::resolve_runtime_id_for_terminal_handle(terminal.terminal_handle())
+    }
+
+    fn focus_root_runtime_id(&self, runtime_id: RuntimeId) -> bool {
+        host_runtime::focus_root_runtime_entry(runtime_id)
+    }
+
+    fn root_window_spawn_state(
+        &self,
+    ) -> (engine_term::TerminalSize, Option<SessionTerminalHandle>) {
+        host_runtime::root_window_spawn_context_state()
+    }
+
+    async fn spawn_root_session(
+        &self,
+        cmd_builder: Option<CommandBuilder>,
+        cwd: Option<String>,
+        size: engine_term::TerminalSize,
+        pane: Option<SessionTerminalHandle>,
+    ) -> anyhow::Result<SpawnedSessionHandle> {
+        let (_tab, pane) = host_runtime::spawn_tab(cmd_builder, cwd, size, pane).await?;
+        let terminal = terminal_ref_for_pane(pane.as_ref());
+        let session = SessionRef::new(
+            pane_session_id(&pane)
+                .ok_or_else(|| anyhow::anyhow!("spawned session has no chatminal session_id"))?,
+        );
+        Ok(SpawnedSessionHandle { session, terminal })
+    }
+
+    async fn split_terminal_handle(
+        &self,
+        terminal: TerminalRef,
+        request: SplitRequest,
+        source: SplitSource,
+    ) -> anyhow::Result<TerminalRef> {
+        let (pane, _size) =
+            host_runtime::split_pane(terminal.terminal_handle(), request, source).await?;
+        Ok(terminal_ref_for_pane(pane.as_ref()))
+    }
+
     pub(crate) fn active_workspace(&self) -> mlua::Result<String> {
+        host_runtime::active_identity()
+            .and_then(|client_id| host_runtime::active_workspace_for_client(&client_id))
+            .or_else(host_runtime::root_window_workspace_name)
+            .or_else(host_runtime::active_workspace_name)
+            .ok_or_else(|| mlua::Error::external("root window not available"))
+    }
+
+    pub(crate) fn root_workspace(&self) -> mlua::Result<String> {
         host_runtime::root_window_workspace_name()
             .ok_or_else(|| mlua::Error::external("root window not available"))
     }
 
-    pub(crate) fn workspace_names(&self) -> mlua::Result<Vec<String>> {
-        if !host_runtime::is_host_runtime_available() {
-            return Err(mlua::Error::external("root window not available"));
+    pub(crate) fn set_root_workspace(&self, workspace: &str) -> mlua::Result<()> {
+        if host_runtime::set_root_window_workspace_name(workspace) {
+            Ok(())
+        } else {
+            Err(mlua::Error::external("root window not available"))
         }
+    }
+
+    pub(crate) fn workspace_names(&self) -> mlua::Result<Vec<String>> {
+        self.ensure_runtime_available()?;
         Ok(host_runtime::iter_workspaces())
     }
 
@@ -91,40 +181,78 @@ impl LuaBridgeHost {
                 "failed to rename workspace '{old_workspace}' to '{new_workspace}': host runtime is not available"
             )));
         }
-        let workspaces = self.workspace_names()?;
-        if workspaces
-            .iter()
-            .any(|workspace| workspace == new_workspace)
-        {
-            Ok(())
-        } else {
-            Err(mlua::Error::external(format!(
-                "failed to rename workspace '{old_workspace}' to '{new_workspace}'"
-            )))
-        }
+        Ok(())
     }
 
     pub(crate) fn root_tab_infos(&self) -> mlua::Result<Vec<RuntimeEntryInfo>> {
-        if !host_runtime::is_host_runtime_available() {
-            return Err(mlua::Error::external("root window not available"));
-        }
+        self.ensure_runtime_available()?;
         Ok(host_runtime::root_runtime_entry_infos())
     }
 
-    pub(crate) fn panes(&self) -> mlua::Result<Vec<Arc<dyn Pane>>> {
-        if !host_runtime::is_host_runtime_available() {
-            return Err(mlua::Error::external("root window not available"));
+    pub(crate) fn root_sessions(&self) -> mlua::Result<Vec<SessionRef>> {
+        Ok(self
+            .root_tab_infos()?
+            .into_iter()
+            .filter_map(|info| info.session_id.map(SessionRef::new))
+            .collect())
+    }
+
+    pub(crate) fn root_title(&self) -> mlua::Result<String> {
+        host_runtime::root_window_title()
+            .ok_or_else(|| mlua::Error::external("root window not available"))
+    }
+
+    pub(crate) fn set_root_title(&self, title: &str) -> mlua::Result<()> {
+        if host_runtime::set_root_window_title(title) {
+            Ok(())
+        } else {
+            Err(mlua::Error::external("root window not available"))
         }
+    }
+
+    pub(crate) fn root_active_runtime_id(&self) -> Option<RuntimeId> {
+        host_runtime::root_active_runtime_id()
+    }
+
+    pub(crate) fn root_active_tab_info(&self) -> mlua::Result<Option<RuntimeEntryInfo>> {
+        Ok(self.root_active_runtime_id().and_then(|runtime_id| {
+            self.tab_info_by_ref(RootTabRef::from_runtime_id(runtime_id))
+                .ok()
+        }))
+    }
+
+    pub(crate) fn root_active_session(&self) -> mlua::Result<Option<SessionRef>> {
+        Ok(self
+            .root_active_tab_info()?
+            .and_then(|info| info.session_id.map(SessionRef::new)))
+    }
+
+    pub(crate) fn root_active_session_id(&self) -> mlua::Result<Option<String>> {
+        Ok(self
+            .root_active_tab_info()?
+            .and_then(|info| info.session_id))
+    }
+
+    pub(crate) fn root_active_terminal(&self) -> mlua::Result<Option<TerminalRef>> {
+        Ok(self
+            .root_active_tab_info()?
+            .and_then(|info| info.active_terminal_handle)
+            .map(TerminalRef::from_terminal_handle))
+    }
+
+    pub(crate) fn panes(&self) -> mlua::Result<Vec<Arc<dyn Pane>>> {
+        self.ensure_runtime_available()?;
         Ok(host_runtime::iter_panes())
     }
 
     pub(crate) fn pane(&self, terminal: TerminalRef) -> mlua::Result<Arc<dyn Pane>> {
-        host_runtime::terminal_by_handle(terminal.terminal_handle()).ok_or_else(|| {
-            mlua::Error::external(format!(
-                "terminal handle {} not found in runtime",
-                terminal.pane_id()
-            ))
-        })
+        self.terminal_by_handle(terminal.terminal_handle())
+            .ok_or_else(|| {
+                mlua::Error::external(format!(
+                    "terminal handle {} not found in runtime",
+                    terminal.terminal_handle_value()
+                ))
+            })
     }
 
     pub(crate) fn with_pane<R>(
@@ -145,92 +273,75 @@ impl LuaBridgeHost {
         func(&pane)
     }
 
-    pub(crate) fn tab_by_ref(&self, tab: RootTabRef) -> mlua::Result<Arc<Tab>> {
-        host_runtime::runtime_entry_by_runtime_id(tab.runtime_id()).ok_or_else(|| {
-            mlua::Error::external(format!(
-                "session handle {} not found",
-                tab.runtime_id().as_u64()
-            ))
-        })
-    }
-
     pub(crate) fn tab_info_by_ref(&self, tab: RootTabRef) -> mlua::Result<RuntimeEntryInfo> {
-        host_runtime::runtime_entry_info_by_runtime_id(tab.runtime_id()).ok_or_else(|| {
-            mlua::Error::external(format!(
-                "session handle {} not found",
-                tab.runtime_id().as_u64()
-            ))
-        })
+        self.runtime_entry_info_by_runtime_id(tab.runtime_id())
+            .ok_or_else(|| {
+                mlua::Error::external(format!(
+                    "session handle {} not found",
+                    tab.runtime_id().as_u64()
+                ))
+            })
     }
 
-    pub(crate) fn tab_by_session_id(&self, session_id: &str) -> mlua::Result<Arc<Tab>> {
-        host_runtime::runtime_entry_by_session_id(session_id).ok_or_else(|| {
-            mlua::Error::external(format!("session '{}' not found in runtime", session_id))
-        })
+    fn session_tab_info(&self, session_id: &str) -> mlua::Result<RuntimeEntryInfo> {
+        self.runtime_entry_info_by_session_id(session_id)
+            .ok_or_else(|| {
+                mlua::Error::external(format!("session '{}' not found in runtime", session_id))
+            })
     }
 
     pub(crate) fn session_active_terminal_instance_id(
         &self,
         session_id: &str,
     ) -> mlua::Result<Option<u64>> {
-        host_runtime::runtime_entry_info_by_session_id(session_id)
+        self.session_tab_info(session_id)
             .map(|info| info.active_terminal_instance_id)
-            .ok_or_else(|| {
-                mlua::Error::external(format!("session '{}' not found in runtime", session_id))
-            })
     }
 
     pub(crate) fn session_window(&self, session_id: &str) -> mlua::Result<Option<WindowRef>> {
-        let info = host_runtime::runtime_entry_info_by_session_id(session_id).ok_or_else(|| {
-            mlua::Error::external(format!("session '{}' not found in runtime", session_id))
-        })?;
+        let info = self.session_tab_info(session_id)?;
         Ok(info
             .active_terminal_handle
-            .and_then(|handle| {
-                self.root_tab_for_terminal(TerminalRef::from_terminal_handle(handle))
-                    .ok()
-            })
+            .and_then(|handle| self.terminal_by_handle(handle))
             .map(|_| WindowRef::root()))
     }
 
     pub(crate) fn session_title(&self, session_id: &str) -> mlua::Result<String> {
-        host_runtime::runtime_entry_info_by_session_id(session_id)
-            .map(|info| info.title)
-            .ok_or_else(|| {
-                mlua::Error::external(format!("session '{}' not found in runtime", session_id))
-            })
+        self.session_tab_info(session_id).map(|info| info.title)
     }
 
     pub(crate) fn set_session_title(&self, session_id: &str, title: &str) -> mlua::Result<()> {
-        let tab = self.tab_by_session_id(session_id)?;
-        tab.set_title(title);
-        Ok(())
+        if host_runtime::set_runtime_entry_title_by_session_id(session_id, title) {
+            Ok(())
+        } else {
+            Err(mlua::Error::external(format!(
+                "session '{}' not found in runtime",
+                session_id
+            )))
+        }
     }
 
     pub(crate) fn active_terminal_for_session(
         &self,
         session_id: &str,
     ) -> mlua::Result<Option<TerminalRef>> {
-        host_runtime::runtime_entry_info_by_session_id(session_id)
-            .map(|info| {
-                info.active_terminal_handle
-                    .map(TerminalRef::from_terminal_handle)
-            })
-            .ok_or_else(|| {
-                mlua::Error::external(format!("session '{}' not found in runtime", session_id))
-            })
+        self.session_tab_info(session_id).map(|info| {
+            info.active_terminal_handle
+                .map(TerminalRef::from_terminal_handle)
+        })
     }
 
     pub(crate) fn terminals_for_session(&self, session_id: &str) -> mlua::Result<Vec<TerminalRef>> {
-        let tab = self.tab_by_session_id(session_id)?;
-        Ok(tab
-            .iter_panes_ignoring_zoom()
+        let handles = host_runtime::runtime_entry_terminal_handles_by_session_id(session_id);
+        if handles.is_empty() && !host_runtime::runtime_entry_exists_for_session(session_id) {
+            return Err(mlua::Error::external(format!(
+                "session '{}' not found in runtime",
+                session_id
+            )));
+        }
+        Ok(handles
             .into_iter()
-            .map(|info| {
-                TerminalRef::from_terminal_handle(host_runtime::terminal_handle_for_pane(
-                    info.pane.as_ref(),
-                ))
-            })
+            .map(TerminalRef::from_terminal_handle)
             .collect())
     }
 
@@ -239,76 +350,91 @@ impl LuaBridgeHost {
         session_id: &str,
         direction: SessionDirection,
     ) -> mlua::Result<Option<TerminalRef>> {
-        let tab = self.tab_by_session_id(session_id)?;
-        let panes = tab.iter_panes_ignoring_zoom();
-        Ok(tab.get_pane_direction(direction, true).map(|pane_index| {
-            TerminalRef::from_terminal_handle(host_runtime::terminal_handle_for_pane(
-                panes[pane_index].pane.as_ref(),
-            ))
-        }))
+        if !host_runtime::runtime_entry_exists_for_session(session_id) {
+            return Err(mlua::Error::external(format!(
+                "session '{}' not found in runtime",
+                session_id
+            )));
+        }
+        Ok(
+            host_runtime::runtime_entry_terminal_handle_in_direction_by_session_id(
+                session_id, direction,
+            )
+            .map(TerminalRef::from_terminal_handle),
+        )
     }
 
     pub(crate) fn set_session_zoomed(&self, session_id: &str, zoomed: bool) -> mlua::Result<bool> {
-        let tab = self.tab_by_session_id(session_id)?;
-        Ok(tab.set_zoomed(zoomed))
+        host_runtime::set_runtime_entry_zoomed_by_session_id(session_id, zoomed).ok_or_else(|| {
+            mlua::Error::external(format!("session '{}' not found in runtime", session_id))
+        })
     }
 
     pub(crate) fn session_terminals_with_info(
         &self,
         session_id: &str,
     ) -> mlua::Result<Vec<SessionTerminalInfo>> {
-        let tab = self.tab_by_session_id(session_id)?;
-        Ok(tab
-            .iter_panes_ignoring_zoom()
+        let infos = host_runtime::runtime_entry_terminal_infos_by_session_id(session_id);
+        if infos.is_empty() && !host_runtime::runtime_entry_exists_for_session(session_id) {
+            return Err(mlua::Error::external(format!(
+                "session '{}' not found in runtime",
+                session_id
+            )));
+        }
+        Ok(infos
             .into_iter()
-            .map(|pos| SessionTerminalInfo {
+            .map(|info| SessionTerminalInfo {
                 leaf: LeafInfo {
-                    index: pos.index,
-                    is_active: pos.is_active,
-                    is_zoomed: pos.is_zoomed,
-                    left: pos.left,
-                    top: pos.top,
-                    width: pos.width,
-                    pixel_width: pos.pixel_width,
-                    height: pos.height,
-                    pixel_height: pos.pixel_height,
+                    index: info.index,
+                    is_active: info.is_active,
+                    is_zoomed: info.is_zoomed,
+                    left: info.left,
+                    top: info.top,
+                    width: info.width,
+                    pixel_width: info.pixel_width,
+                    height: info.height,
+                    pixel_height: info.pixel_height,
                 },
-                terminal: TerminalRef::from_terminal_handle(
-                    host_runtime::terminal_handle_for_pane(pos.pane.as_ref()),
-                ),
-                session_id: pane_session_id(&pos.pane),
-                terminal_instance_id: pane_terminal_instance_id(&pos.pane),
+                terminal: TerminalRef::from_terminal_handle(info.terminal_handle),
+                session_id: info.session_id,
+                terminal_instance_id: info.terminal_instance_id,
             })
             .collect())
     }
 
     pub(crate) fn rotate_session_counter_clockwise(&self, session_id: &str) -> mlua::Result<()> {
-        let tab = self.tab_by_session_id(session_id)?;
-        tab.rotate_counter_clockwise();
-        Ok(())
+        if host_runtime::rotate_runtime_entry_counter_clockwise_by_session_id(session_id) {
+            Ok(())
+        } else {
+            Err(mlua::Error::external(format!(
+                "session '{}' not found in runtime",
+                session_id
+            )))
+        }
     }
 
     pub(crate) fn rotate_session_clockwise(&self, session_id: &str) -> mlua::Result<()> {
-        let tab = self.tab_by_session_id(session_id)?;
-        tab.rotate_clockwise();
-        Ok(())
+        if host_runtime::rotate_runtime_entry_clockwise_by_session_id(session_id) {
+            Ok(())
+        } else {
+            Err(mlua::Error::external(format!(
+                "session '{}' not found in runtime",
+                session_id
+            )))
+        }
     }
 
     pub(crate) fn session_size(&self, session_id: &str) -> mlua::Result<engine_term::TerminalSize> {
-        host_runtime::runtime_entry_info_by_session_id(session_id)
-            .map(|info| info.size)
-            .ok_or_else(|| {
-                mlua::Error::external(format!("session '{}' not found in runtime", session_id))
-            })
+        self.session_tab_info(session_id).map(|info| info.size)
     }
 
     pub(crate) fn root_tab_for_terminal(&self, terminal: TerminalRef) -> mlua::Result<RootTabRef> {
-        host_runtime::resolve_runtime_id_for_terminal_handle(terminal.terminal_handle())
+        self.runtime_id_for_terminal(terminal)
             .map(RootTabRef::from_runtime_id)
             .ok_or_else(|| {
                 mlua::Error::external(format!(
                     "terminal handle {} not found in runtime",
-                    terminal.pane_id()
+                    terminal.terminal_handle_value()
                 ))
             })
     }
@@ -327,7 +453,7 @@ impl LuaBridgeHost {
     }
 
     pub(crate) fn activate_root_tab(&self, tab: RootTabRef) -> mlua::Result<()> {
-        let updated = host_runtime::focus_root_runtime_entry(tab.runtime_id());
+        let updated = self.focus_root_runtime_id(tab.runtime_id());
         if updated {
             Ok(())
         } else {
@@ -339,12 +465,19 @@ impl LuaBridgeHost {
     }
 
     pub(crate) fn activate_terminal(&self, terminal: TerminalRef) -> mlua::Result<()> {
-        let pane = self.pane(terminal)?;
         let tab = self.root_tab_for_terminal(terminal)?;
         self.activate_root_tab(tab)?;
-        let tab = self.tab_by_ref(tab)?;
-        tab.set_active_pane(&pane);
-        Ok(())
+        if host_runtime::set_runtime_entry_active_terminal(
+            tab.runtime_id(),
+            terminal.terminal_handle(),
+        ) {
+            Ok(())
+        } else {
+            Err(mlua::Error::external(format!(
+                "terminal handle {} not found in runtime",
+                terminal.terminal_handle_value()
+            )))
+        }
     }
 
     pub(crate) fn activate_session(&self, session: &SessionRef) -> mlua::Result<()> {
@@ -362,10 +495,8 @@ impl LuaBridgeHost {
     pub(crate) fn root_window_spawn_context(
         &self,
     ) -> mlua::Result<(engine_term::TerminalSize, Option<TerminalRef>)> {
-        if !host_runtime::is_host_runtime_available() {
-            return Err(mlua::Error::external("root window not available"));
-        }
-        let (size, pane) = host_runtime::root_window_spawn_context_state();
+        self.ensure_runtime_available()?;
+        let (size, pane) = self.root_window_spawn_state();
         let pane = pane.map(TerminalRef::from_terminal_handle);
         Ok((size, pane))
     }
@@ -376,31 +507,16 @@ impl LuaBridgeHost {
         cwd: Option<String>,
     ) -> mlua::Result<(SessionRef, TerminalRef)> {
         let (size, pane) = self.root_window_spawn_context()?;
-        let (_tab, pane) = host_runtime::spawn_tab(
-            cmd_builder,
-            cwd,
-            size,
-            pane.map(TerminalRef::terminal_handle),
-        )
-        .await
-        .map_err(|e| mlua::Error::external(format!("{:#?}", e)))?;
-        let terminal_handle = host_runtime::terminal_handle_for_pane(pane.as_ref());
-        let terminal_ref = TerminalRef::from_terminal_handle(terminal_handle);
-        let session_id = pane_session_id(&pane).ok_or_else(|| {
-            mlua::Error::external("spawned session has no chatminal session_id")
-        })?;
-        Ok((SessionRef::new(session_id), terminal_ref))
-    }
-
-    pub(crate) async fn split_pane(
-        &self,
-        terminal: TerminalRef,
-        request: SplitRequest,
-        source: SplitSource,
-    ) -> mlua::Result<(Arc<dyn Pane>, engine_term::TerminalSize)> {
-        host_runtime::split_pane(terminal.terminal_handle(), request, source)
+        let spawned = self
+            .spawn_root_session(
+                cmd_builder,
+                cwd,
+                size,
+                pane.map(TerminalRef::terminal_handle),
+            )
             .await
-            .map_err(|e| mlua::Error::external(format!("{:#?}", e)))
+            .map_err(|e| mlua::Error::external(format!("{:#?}", e)))?;
+        Ok((spawned.session, spawned.terminal))
     }
 
     pub(crate) async fn split_terminal(
@@ -409,15 +525,27 @@ impl LuaBridgeHost {
         request: SplitRequest,
         source: SplitSource,
     ) -> mlua::Result<TerminalRef> {
-        let (pane, _size) = self.split_pane(terminal, request, source).await?;
-        Ok(TerminalRef::from_terminal_handle(
-            host_runtime::terminal_handle_for_pane(pane.as_ref()),
-        ))
+        self.split_terminal_handle(terminal, request, source)
+            .await
+            .map_err(|e| mlua::Error::external(format!("{:#?}", e)))
     }
 }
 
 fn get_host() -> mlua::Result<LuaBridgeHost> {
     LuaBridgeHost::global()
+}
+
+fn bind_host_to_lua(lua: &Lua) {
+    if lua.app_data_ref::<LuaBridgeHost>().is_none() {
+        let _ = lua.set_app_data(LuaBridgeHost);
+    }
+}
+
+fn get_host_for_lua(lua: &Lua) -> mlua::Result<LuaBridgeHost> {
+    if let Some(host) = lua.app_data_ref::<LuaBridgeHost>() {
+        return Ok((*host).clone());
+    }
+    get_host()
 }
 
 pub(crate) fn pane_metadata_string(pane: &Arc<dyn Pane>, key: &str) -> Option<String> {
@@ -455,30 +583,34 @@ pub(crate) fn pane_terminal_instance_id(pane: &Arc<dyn Pane>) -> Option<u64> {
     pane_metadata_u64(pane, "chatminal_terminal_instance_id")
 }
 
+pub(crate) fn terminal_ref_for_pane(pane: &dyn Pane) -> TerminalRef {
+    TerminalRef::from_terminal_handle(terminal_handle_for_pane(pane))
+}
 
 pub fn register(lua: &Lua) -> anyhow::Result<()> {
+    bind_host_to_lua(lua);
     let session_module = get_or_create_sub_module(lua, "session")?;
 
     session_module.set(
         "get_active_workspace",
-        lua.create_function(|_, _: ()| {
-            let host = get_host()?;
+        lua.create_function(|lua, _: ()| {
+            let host = get_host_for_lua(lua)?;
             host.active_workspace()
         })?,
     )?;
 
     session_module.set(
         "get_workspace_names",
-        lua.create_function(|_, _: ()| {
-            let host = get_host()?;
+        lua.create_function(|lua, _: ()| {
+            let host = get_host_for_lua(lua)?;
             host.workspace_names()
         })?,
     )?;
 
     session_module.set(
         "set_active_workspace",
-        lua.create_function(|_, workspace: String| {
-            let host = get_host()?;
+        lua.create_function(|lua, workspace: String| {
+            let host = get_host_for_lua(lua)?;
             let workspaces = host.workspace_names()?;
             if workspaces.contains(&workspace) {
                 host.set_active_workspace(&workspace)
@@ -493,8 +625,8 @@ pub fn register(lua: &Lua) -> anyhow::Result<()> {
 
     session_module.set(
         "rename_workspace",
-        lua.create_function(|_, (old_workspace, new_workspace): (String, String)| {
-            let host = get_host()?;
+        lua.create_function(|lua, (old_workspace, new_workspace): (String, String)| {
+            let host = get_host_for_lua(lua)?;
             host.rename_workspace(&old_workspace, &new_workspace)
         })?,
     )?;
@@ -506,40 +638,22 @@ pub fn register(lua: &Lua) -> anyhow::Result<()> {
 
     session_module.set(
         "all_sessions",
-        lua.create_function(|_, _: ()| {
-            let host = get_host()?;
-            Ok(host
-                .root_tab_infos()?
-                .into_iter()
-                .filter_map(|info| info.session_id.map(SessionRef::new))
-                .collect::<Vec<SessionRef>>())
-        })?,
+        lua.create_function(|lua, _: ()| get_host_for_lua(lua)?.root_sessions())?,
     )?;
 
     session_module.set(
         "list_sessions",
-        lua.create_function(|_, _: ()| {
-            let host = get_host()?;
-            Ok(host
-                .root_tab_infos()?
-                .into_iter()
-                .filter_map(|info| info.session_id.map(SessionRef::new))
-                .collect::<Vec<SessionRef>>())
-        })?,
+        lua.create_function(|lua, _: ()| get_host_for_lua(lua)?.root_sessions())?,
     )?;
 
     session_module.set(
         "all_terminals",
-        lua.create_function(|_, _: ()| {
-            let host = get_host()?;
+        lua.create_function(|lua, _: ()| {
+            let host = get_host_for_lua(lua)?;
             Ok(host
                 .panes()?
                 .into_iter()
-                .map(|pane| {
-                    TerminalRef::from_terminal_handle(host_runtime::terminal_handle_for_pane(
-                        pane.as_ref(),
-                    ))
-                })
+                .map(|pane| terminal_ref_for_pane(pane.as_ref()))
                 .collect::<Vec<TerminalRef>>())
         })?,
     )?;
@@ -595,8 +709,12 @@ struct SpawnSession {
 impl_lua_conversion_dynamic!(SpawnSession);
 
 impl SpawnSession {
-    async fn spawn(self, window: &WindowRef) -> mlua::Result<(SessionRef, TerminalRef, WindowRef)> {
-        let host = get_host()?;
+    async fn spawn(
+        self,
+        lua: &Lua,
+        window: &WindowRef,
+    ) -> mlua::Result<(SessionRef, TerminalRef, WindowRef)> {
+        let host = get_host_for_lua(lua)?;
         let (cmd_builder, cwd) = self.cmd_builder.to_command_builder();
         let (session_ref, terminal_ref) = host
             .spawn_session_from_root_window(cmd_builder, cwd)
@@ -632,4 +750,77 @@ pub(crate) struct SessionTerminalInfo {
     pub terminal: TerminalRef,
     pub session_id: Option<String>,
     pub terminal_instance_id: Option<u64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use host_runtime::client::ClientId;
+    use std::sync::{Arc, Mutex};
+
+    static LUA_BRIDGE_HOST_RUNTIME_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn bind_host_to_lua_registers_vm_local_host() {
+        let lua = Lua::new();
+
+        assert!(lua.app_data_ref::<LuaBridgeHost>().is_none());
+
+        bind_host_to_lua(&lua);
+
+        assert!(lua.app_data_ref::<LuaBridgeHost>().is_some());
+    }
+
+    #[test]
+    fn get_host_for_lua_prefers_bound_vm_host() {
+        let lua = Lua::new();
+        bind_host_to_lua(&lua);
+
+        assert!(get_host_for_lua(&lua).is_ok());
+    }
+
+    #[test]
+    fn rename_workspace_accepts_non_root_workspace_rename() {
+        let _guard = LUA_BRIDGE_HOST_RUNTIME_TEST_LOCK.lock().unwrap();
+        host_runtime::shutdown_host_runtime();
+
+        let mux = host_runtime::initialize_host_runtime(None).expect("init host runtime");
+        let client = Arc::new(ClientId::new());
+        mux.register_client(Arc::clone(&client));
+        mux.replace_identity(Some(Arc::clone(&client)));
+        assert!(host_runtime::set_root_window_workspace_name(
+            "root-workspace"
+        ));
+        assert!(host_runtime::set_active_workspace_for_client(
+            &client,
+            "detached-workspace",
+        ));
+
+        let host = LuaBridgeHost;
+        assert_eq!(
+            host.active_workspace().expect("active workspace"),
+            "detached-workspace"
+        );
+        host.rename_workspace("detached-workspace", "renamed-workspace")
+            .expect("rename detached workspace");
+
+        assert_eq!(
+            host_runtime::active_workspace_for_client(&client).as_deref(),
+            Some("renamed-workspace")
+        );
+        assert_eq!(
+            host.active_workspace().expect("renamed active workspace"),
+            "renamed-workspace"
+        );
+        assert_eq!(
+            host_runtime::root_window_workspace_name().as_deref(),
+            Some("root-workspace")
+        );
+        assert_eq!(
+            host.root_workspace().expect("root workspace"),
+            "root-workspace"
+        );
+
+        host_runtime::shutdown_host_runtime();
+    }
 }

@@ -295,11 +295,7 @@ fn canonical_retention_keeps_newest_logical_lines_and_tail_fragment() {
         )
         .expect("create session");
 
-    for (seq, line, fragment) in [
-        (1, "l1", "p1 % "),
-        (2, "l2", "p2 % "),
-        (3, "l3", "p3 % "),
-    ] {
+    for (seq, line, fragment) in [(1, "l1", "p1 % "), (2, "l2", "p2 % "), (3, "l3", "p3 % ")] {
         store
             .append_scrollback_records(
                 &session.session_id,
@@ -629,7 +625,9 @@ fn profiles_keep_creation_order_after_updates() {
     let created_profiles: Vec<_> = workspace
         .profiles
         .into_iter()
-        .filter(|profile| profile.profile_id == first.profile_id || profile.profile_id == second.profile_id)
+        .filter(|profile| {
+            profile.profile_id == first.profile_id || profile.profile_id == second.profile_id
+        })
         .collect();
 
     assert_eq!(created_profiles.len(), 2);
@@ -676,7 +674,9 @@ fn sessions_keep_creation_order_after_runtime_updates() {
     let created_sessions: Vec<_> = workspace
         .sessions
         .into_iter()
-        .filter(|session| session.session_id == first.session_id || session.session_id == second.session_id)
+        .filter(|session| {
+            session.session_id == first.session_id || session.session_id == second.session_id
+        })
         .collect();
 
     assert_eq!(created_sessions.len(), 2);
@@ -746,7 +746,10 @@ fn move_session_to_profile_reparents_without_losing_order_contract() {
     assert_eq!(target_sessions[0].session_id, second.session_id);
     assert_eq!(target_sessions[1].session_id, target_existing.session_id);
     assert_eq!(workspace.active_profile_id, default_profile_id);
-    assert_eq!(workspace.active_session_id.as_deref(), Some(first.session_id.as_str()));
+    assert_eq!(
+        workspace.active_session_id.as_deref(),
+        Some(first.session_id.as_str())
+    );
 }
 
 #[test]
@@ -906,7 +909,10 @@ fn move_sessions_to_profile_moves_group_transactionally_across_profiles() {
         ]
     );
     assert_eq!(workspace.active_profile_id, source_profile_id);
-    assert_eq!(workspace.active_session_id.as_deref(), Some(first.session_id.as_str()));
+    assert_eq!(
+        workspace.active_session_id.as_deref(),
+        Some(first.session_id.as_str())
+    );
 }
 
 #[test]

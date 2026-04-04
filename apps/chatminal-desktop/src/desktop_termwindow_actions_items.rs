@@ -4,6 +4,9 @@ impl TermWindow {
         pane: &Arc<dyn OverlayPane>,
         assignment: &KeyAssignment,
     ) -> anyhow::Result<PerformAssignmentResult> {
+        use crate::chatminal_runtime::{
+            DesktopSplitDirection, DesktopSplitRequest, DesktopSplitSize,
+        };
         use KeyAssignment::*;
 
         if let Some(modal) = self.get_modal() {
@@ -89,10 +92,10 @@ impl TermWindow {
                 log::trace!("SplitHorizontal {:?}", spawn);
                 self.spawn_command(
                     spawn,
-                    SpawnWhere::SplitSession(crate::chatminal_runtime::DesktopSplitRequest {
-                        direction: crate::chatminal_runtime::DesktopSplitDirection::Horizontal,
+                    SpawnWhere::SplitSession(DesktopSplitRequest {
+                        direction: DesktopSplitDirection::Horizontal,
                         target_is_second: true,
-                        size: crate::chatminal_runtime::DesktopSplitSize::Percent(50),
+                        size: DesktopSplitSize::Percent(50),
                         top_level: false,
                     }),
                 );
@@ -101,10 +104,10 @@ impl TermWindow {
                 log::trace!("SplitVertical {:?}", spawn);
                 self.spawn_command(
                     spawn,
-                    SpawnWhere::SplitSession(crate::chatminal_runtime::DesktopSplitRequest {
-                        direction: crate::chatminal_runtime::DesktopSplitDirection::Vertical,
+                    SpawnWhere::SplitSession(DesktopSplitRequest {
+                        direction: DesktopSplitDirection::Vertical,
                         target_is_second: true,
-                        size: crate::chatminal_runtime::DesktopSplitSize::Percent(50),
+                        size: DesktopSplitSize::Percent(50),
                         top_level: false,
                     }),
                 );
@@ -237,6 +240,7 @@ impl TermWindow {
             }
             Search(pattern) => {
                 if let Some(pane) = self.active_terminal_instance_or_overlay() {
+                    let pane_id = crate::desktop_termwindow_types::terminal_ui_key_for_pane(&*pane);
                     let mut replace_current = false;
                     if let Some(existing) = pane.downcast_ref::<CopyOverlay>() {
                         let mut params = existing.get_params();
@@ -255,9 +259,9 @@ impl TermWindow {
                                 editing_search: true,
                             },
                         )?;
-                        self.assign_overlay_for_terminal_handle(pane.pane_id() as u64, search);
+                        self.assign_overlay_for_terminal_handle(pane_id, search);
                     }
-                    self.terminal_ui_state(pane.pane_id() as u64)
+                    self.terminal_ui_state(pane_id)
                         .overlay
                         .as_mut()
                         .map(|overlay| {
@@ -274,22 +278,25 @@ impl TermWindow {
             }
             QuickSelect => {
                 if let Some(pane) = self.active_terminal_instance_no_overlay() {
+                    let pane_id = crate::desktop_termwindow_types::terminal_ui_key_for_pane(&*pane);
                     let qa = QuickSelectOverlay::with_pane(
                         self,
                         &pane,
                         &QuickSelectArguments::default(),
                     );
-                    self.assign_overlay_for_terminal_handle(pane.pane_id() as u64, qa);
+                    self.assign_overlay_for_terminal_handle(pane_id, qa);
                 }
             }
             QuickSelectArgs(args) => {
                 if let Some(pane) = self.active_terminal_instance_no_overlay() {
+                    let pane_id = crate::desktop_termwindow_types::terminal_ui_key_for_pane(&*pane);
                     let qa = QuickSelectOverlay::with_pane(self, &pane, args);
-                    self.assign_overlay_for_terminal_handle(pane.pane_id() as u64, qa);
+                    self.assign_overlay_for_terminal_handle(pane_id, qa);
                 }
             }
             ActivateCopyMode => {
                 if let Some(pane) = self.active_terminal_instance_or_overlay() {
+                    let pane_id = crate::desktop_termwindow_types::terminal_ui_key_for_pane(&*pane);
                     let mut replace_current = false;
                     if let Some(existing) = pane.downcast_ref::<CopyOverlay>() {
                         let mut params = existing.get_params();
@@ -305,9 +312,9 @@ impl TermWindow {
                                 editing_search: false,
                             },
                         )?;
-                        self.assign_overlay_for_terminal_handle(pane.pane_id() as u64, copy);
+                        self.assign_overlay_for_terminal_handle(pane_id, copy);
                     }
-                    self.terminal_ui_state(pane.pane_id() as u64)
+                    self.terminal_ui_state(pane_id)
                         .overlay
                         .as_mut()
                         .map(|overlay| {
@@ -377,13 +384,13 @@ impl TermWindow {
                 log::trace!("SplitSession {:?}", split);
                 self.spawn_command(
                     &split.command,
-                    SpawnWhere::SplitSession(crate::chatminal_runtime::DesktopSplitRequest {
+                    SpawnWhere::SplitSession(DesktopSplitRequest {
                         direction: match split.direction {
                             SessionDirection::Down | SessionDirection::Up => {
-                                crate::chatminal_runtime::DesktopSplitDirection::Vertical
+                                DesktopSplitDirection::Vertical
                             }
                             SessionDirection::Left | SessionDirection::Right => {
-                                crate::chatminal_runtime::DesktopSplitDirection::Horizontal
+                                DesktopSplitDirection::Horizontal
                             }
                             SessionDirection::Next | SessionDirection::Prev => {
                                 log::error!(
@@ -399,12 +406,8 @@ impl TermWindow {
                             SessionDirection::Next | SessionDirection::Prev => unreachable!(),
                         },
                         size: match split.size {
-                            SplitSize::Percent(n) => {
-                                crate::chatminal_runtime::DesktopSplitSize::Percent(n)
-                            }
-                            SplitSize::Cells(n) => {
-                                crate::chatminal_runtime::DesktopSplitSize::Cells(n)
-                            }
+                            SplitSize::Percent(n) => DesktopSplitSize::Percent(n),
+                            SplitSize::Cells(n) => DesktopSplitSize::Cells(n),
                         },
                         top_level: split.top_level,
                     }),

@@ -1,6 +1,6 @@
 ---
 phase: 02
-status: deferred
+status: done
 priority: medium
 effort: medium
 risk: low
@@ -11,10 +11,17 @@ risk: low
 ## Overview
 Rename 18 `chatminal-engine-*` crates → `chatminal-terminal-*` cho naming consistency. Đây là terminal infrastructure, không phải "engine".
 
+## Closeout Decision (2026-04-03)
+- Phase này ban đầu được giữ `deferred / out-of-scope` cho closeout của plan `260401-0949-architecture-unification`.
+- Sau đó đã được thực hiện và verify qua follow-up plan `260403-1800-post-unification-followups`.
+- Kết quả:
+  - package/path/docs vocabulary đã chuyển sang `chatminal-terminal-*` / `chatminal-*`
+  - `lib.name` và compatibility alias `engine-*` vẫn được giữ để tránh churn import Rust hàng loạt
+
 ## Key Insights
 - "engine-" prefix gây confusion — ngụ ý rendering engine, thực tế là terminal primitives
-- Rename = Cargo.toml metadata + import paths, không đổi code logic
-- Phải rename cả workspace aliases (e.g., `engine-term = { package = "chatminal-engine-term" }`)
+- Rename chủ yếu là package/path/docs; lượt này giữ `lib.name` và Cargo alias `engine-*` để tránh churn import Rust hàng loạt.
+- Workspace dependency keys vẫn giữ dạng `engine-*` như compatibility layer, nhưng package/path vocabulary đã chuyển sang `chatminal-terminal-*` / `chatminal-*`.
 
 ## Mapping
 
@@ -52,15 +59,15 @@ for each crate: mv crates/chatminal-engine-X crates/chatminal-terminal-X
 
 ### 3. Update workspace root Cargo.toml
 - `[workspace.members]`: update paths
-- `[workspace.dependencies]`: update package names + aliases
+- `[workspace.dependencies]`: update package names + paths; giữ compatibility aliases `engine-*` trong lượt rename này
 
 ### 4. Update all consumer Cargo.toml files
 - Desktop, config, host-runtime, lua-bridge, etc.
-- Change `engine-term.workspace = true` → `terminal-emulator.workspace = true`
+- Consumer manifests tiếp tục dùng compatibility alias `engine-*.workspace = true`; không bắt buộc churn alias ở lượt này
 
-### 5. Update Rust imports
-- `use engine_term::` → `use terminal_emulator::` (hoặc alias giữ nguyên)
-- **Strategy**: giữ workspace alias ngắn gọn, e.g. `terminal-emulator = { package = "chatminal-terminal-emulator" }`
+### 5. Rust imports
+- Giữ nguyên `use engine_term::`, `use engine_font::`, ... bằng cách giữ `lib.name` và compatibility alias hiện tại
+- Không đổi code logic trong phase này
 
 ### 6. Update author metadata
 - Replace `Wez Furlong` → `Chatminal Contributors` trong Cargo.toml
@@ -79,7 +86,12 @@ grep -r "engine_" crates/ apps/ --include="*.rs" | grep -v "// " | head -20
 - End with core crates: engine-term, engine-font (most dependents)
 
 ## Success Criteria
-- [ ] Zero `chatminal-engine-*` crate names in workspace
-- [ ] All imports updated
-- [ ] `cargo check --workspace` clean
-- [ ] Author metadata updated
+- [x] Zero `chatminal-engine-*` crate names in workspace manifests/docs active scope
+- [x] Active package/path/docs vocabulary updated; compatibility imports vẫn build
+- [x] `cargo check --workspace` clean
+- [x] Author metadata updated
+
+## Follow-Up Plan
+- Phase này đã được tách khỏi closeout của `260401-0949-architecture-unification`.
+- Follow-up explicit:
+  - [../260403-1800-post-unification-followups/phase-02-terminal-crate-rename.md](../260403-1800-post-unification-followups/phase-02-terminal-crate-rename.md)

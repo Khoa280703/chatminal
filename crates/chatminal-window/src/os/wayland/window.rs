@@ -197,7 +197,9 @@ impl WaylandWindow {
     {
         let config = match config {
             Some(c) => c.clone(),
-            None => config::configuration(),
+            None => WaylandConnection::get()
+                .expect("Connection::init has not been called")
+                .config(),
         };
 
         let conn = WaylandConnection::get()

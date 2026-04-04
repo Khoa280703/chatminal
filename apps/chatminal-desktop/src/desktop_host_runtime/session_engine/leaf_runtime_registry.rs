@@ -9,6 +9,7 @@ use super::leaf_runtime::{
     TerminalInstanceRuntime, TerminalInstanceRuntimeEvent, TerminalInstanceRuntimeSpawn,
 };
 use super::{RuntimeId, SessionCoreState, TerminalInstanceId};
+use crate::frontend::current_frontend_config;
 
 #[derive(Default)]
 pub struct TerminalInstanceRuntimeRegistry {
@@ -51,6 +52,7 @@ impl TerminalInstanceRuntimeRegistry {
             generation,
             runtime_id,
             terminal_instance_id,
+            config: current_frontend_config(),
             command,
             size,
             initial_scrollback,

@@ -1,15 +1,18 @@
 impl TermWindow {
     pub fn selection(&self, pane_id: TerminalUiKey) -> RefMut<'_, Selection> {
-        RefMut::map(self.terminal_ui_state(pane_id), |state| &mut state.selection)
+        RefMut::map(self.terminal_ui_state(pane_id), |state| {
+            &mut state.selection
+        })
     }
 
     /// Returns the selection region as a series of Line
     pub fn selection_lines(&self, pane: &Arc<dyn OverlayPane>) -> Vec<Line> {
         let mut result = vec![];
+        let pane_id = crate::desktop_termwindow_types::terminal_ui_key_for_pane(&**pane);
 
-        let rectangular = self.selection(pane.pane_id() as u64).rectangular;
+        let rectangular = self.selection(pane_id).rectangular;
         if let Some(sel) = self
-            .selection(pane.pane_id() as u64)
+            .selection(pane_id)
             .range
             .as_ref()
             .map(|r| r.normalize())
@@ -57,9 +60,10 @@ impl TermWindow {
     /// Returns the selection text only
     pub fn selection_text(&self, pane: &Arc<dyn OverlayPane>) -> String {
         let mut s = String::new();
-        let rectangular = self.selection(pane.pane_id() as u64).rectangular;
+        let pane_id = crate::desktop_termwindow_types::terminal_ui_key_for_pane(&**pane);
+        let rectangular = self.selection(pane_id).rectangular;
         if let Some(sel) = self
-            .selection(pane.pane_id() as u64)
+            .selection(pane_id)
             .range
             .as_ref()
             .map(|r| r.normalize())
@@ -102,7 +106,8 @@ impl TermWindow {
     }
 
     pub fn clear_selection(&mut self, pane: &Arc<dyn OverlayPane>) {
-        let mut selection = self.selection(pane.pane_id() as u64);
+        let pane_id = crate::desktop_termwindow_types::terminal_ui_key_for_pane(&**pane);
+        let mut selection = self.selection(pane_id);
         selection.clear();
         selection.seqno = pane.get_current_seqno();
         self.window.as_ref().unwrap().invalidate();
@@ -113,8 +118,9 @@ impl TermWindow {
         mode: SelectionMode,
         pane: &Arc<dyn OverlayPane>,
     ) {
-        self.selection(pane.pane_id() as u64).seqno = pane.get_current_seqno();
-        let (position, y) = match self.terminal_ui_state(pane.pane_id() as u64).mouse_terminal_coords {
+        let pane_id = crate::desktop_termwindow_types::terminal_ui_key_for_pane(&**pane);
+        self.selection(pane_id).seqno = pane.get_current_seqno();
+        let (position, y) = match self.terminal_ui_state(pane_id).mouse_terminal_coords {
             Some(coords) => coords,
             None => return,
         };
@@ -124,11 +130,11 @@ impl TermWindow {
                 // Origin is the cell in which the selection action started. E.g. the cell
                 // that had the mouse over it when the left mouse button was pressed
                 let origin = self
-                    .selection(pane.pane_id() as u64)
+                    .selection(pane_id)
                     .origin
                     .unwrap_or(crate::selection::SelectionCoordinate::x_y(x, y));
-                self.selection(pane.pane_id() as u64).origin = Some(origin);
-                self.selection(pane.pane_id() as u64).rectangular = mode == SelectionMode::Block;
+                self.selection(pane_id).origin = Some(origin);
+                self.selection(pane_id).rectangular = mode == SelectionMode::Block;
 
                 // Compute the start and end horizontall cell of the selection.
                 // The selection extent depends on the mouse cursor position in relation
@@ -172,24 +178,23 @@ impl TermWindow {
                     }
                 };
 
-                self.selection(pane.pane_id() as u64).range =
-                    if mode == SelectionMode::Block && origin.x == x {
-                        // Ignore rectangle selections with a width of zero
-                        None
-                    } else if origin.x != x || origin.y != y {
-                        // Only considers a selection if the cursor moved from the origin point
-                        Some(
-                            crate::selection::SelectionRange::start(
-                                crate::selection::SelectionCoordinate {
+                self.selection(pane_id).range = if mode == SelectionMode::Block && origin.x == x {
+                    // Ignore rectangle selections with a width of zero
+                    None
+                } else if origin.x != x || origin.y != y {
+                    // Only considers a selection if the cursor moved from the origin point
+                    Some(
+                        crate::selection::SelectionRange::start(
+                            crate::selection::SelectionCoordinate {
                                 x: start_x,
                                 y: origin.y,
-                                },
-                            )
-                            .extend(crate::selection::SelectionCoordinate { x: end_x, y }),
+                            },
                         )
-                    } else {
-                        None
-                    };
+                        .extend(crate::selection::SelectionCoordinate { x: end_x, y }),
+                    )
+                } else {
+                    None
+                };
             }
             SelectionMode::Word => {
                 let selection_word_boundary = &self.config.selection_word_boundary;
@@ -200,7 +205,7 @@ impl TermWindow {
                 );
 
                 let start_coord = self
-                    .selection(pane.pane_id() as u64)
+                    .selection(pane_id)
                     .origin
                     .clone()
                     .unwrap_or(end_word.start);
@@ -211,8 +216,8 @@ impl TermWindow {
                 );
 
                 let selection_range = start_word.extend_with(end_word);
-                self.selection(pane.pane_id() as u64).range = Some(selection_range);
-                self.selection(pane.pane_id() as u64).rectangular = false;
+                self.selection(pane_id).range = Some(selection_range);
+                self.selection(pane_id).rectangular = false;
             }
             SelectionMode::Line => {
                 let end_line = crate::selection::SelectionRange::line_around(
@@ -221,15 +226,16 @@ impl TermWindow {
                 );
 
                 let start_coord = self
-                    .selection(pane.pane_id() as u64)
+                    .selection(pane_id)
                     .origin
                     .clone()
                     .unwrap_or(end_line.start);
-                let start_line = crate::selection::SelectionRange::line_around(start_coord, &**pane);
+                let start_line =
+                    crate::selection::SelectionRange::line_around(start_coord, &**pane);
 
                 let selection_range = start_line.extend_with(end_line);
-                self.selection(pane.pane_id() as u64).range = Some(selection_range);
-                self.selection(pane.pane_id() as u64).rectangular = false;
+                self.selection(pane_id).range = Some(selection_range);
+                self.selection(pane_id).rectangular = false;
             }
             SelectionMode::SemanticZone => {
                 let end_word = crate::selection::SelectionRange::zone_around(
@@ -238,15 +244,16 @@ impl TermWindow {
                 );
 
                 let start_coord = self
-                    .selection(pane.pane_id() as u64)
+                    .selection(pane_id)
                     .origin
                     .clone()
                     .unwrap_or(end_word.start);
-                let start_word = crate::selection::SelectionRange::zone_around(start_coord, &**pane);
+                let start_word =
+                    crate::selection::SelectionRange::zone_around(start_coord, &**pane);
 
                 let selection_range = start_word.extend_with(end_word);
-                self.selection(pane.pane_id() as u64).range = Some(selection_range);
-                self.selection(pane.pane_id() as u64).rectangular = false;
+                self.selection(pane_id).range = Some(selection_range);
+                self.selection(pane_id).rectangular = false;
             }
         }
 
@@ -254,12 +261,10 @@ impl TermWindow {
 
         // Scroll viewport when mouse mouves out of its vertical bounds
         if position.row == 0 && position.y_pixel_offset < 0 {
-            self.set_viewport(pane.pane_id() as u64, Some(y.saturating_sub(1)), dims);
+            self.set_viewport(pane_id, Some(y.saturating_sub(1)), dims);
         } else if position.row >= dims.viewport_rows as i64 {
-            let top = self
-                .get_viewport(pane.pane_id() as u64)
-                .unwrap_or(dims.physical_top);
-            self.set_viewport(pane.pane_id() as u64, Some(top + 1), dims);
+            let top = self.get_viewport(pane_id).unwrap_or(dims.physical_top);
+            self.set_viewport(pane_id, Some(top + 1), dims);
         }
 
         self.window.as_ref().unwrap().invalidate();
@@ -270,7 +275,8 @@ impl TermWindow {
         mode: SelectionMode,
         pane: &Arc<dyn OverlayPane>,
     ) {
-        let (x, y) = match self.terminal_ui_state(pane.pane_id() as u64).mouse_terminal_coords {
+        let pane_id = crate::desktop_termwindow_types::terminal_ui_key_for_pane(&**pane);
+        let (x, y) = match self.terminal_ui_state(pane_id).mouse_terminal_coords {
             Some(coords) => (coords.0.column, coords.1),
             None => return,
         };
@@ -279,9 +285,9 @@ impl TermWindow {
                 let start = crate::selection::SelectionCoordinate::x_y(x, y);
                 let selection_range = crate::selection::SelectionRange::line_around(start, &**pane);
 
-                self.selection(pane.pane_id() as u64).origin = Some(start);
-                self.selection(pane.pane_id() as u64).range = Some(selection_range);
-                self.selection(pane.pane_id() as u64).rectangular = false;
+                self.selection(pane_id).origin = Some(start);
+                self.selection(pane_id).range = Some(selection_range);
+                self.selection(pane_id).rectangular = false;
             }
             SelectionMode::Word => {
                 let selection_range = crate::selection::SelectionRange::word_around(
@@ -290,29 +296,28 @@ impl TermWindow {
                     &self.config.selection_word_boundary,
                 );
 
-                self.selection(pane.pane_id() as u64).origin = Some(selection_range.start);
-                self.selection(pane.pane_id() as u64).range = Some(selection_range);
-                self.selection(pane.pane_id() as u64).rectangular = false;
+                self.selection(pane_id).origin = Some(selection_range.start);
+                self.selection(pane_id).range = Some(selection_range);
+                self.selection(pane_id).rectangular = false;
             }
             SelectionMode::SemanticZone => {
-                let selection_range =
-                    crate::selection::SelectionRange::zone_around(
-                        crate::selection::SelectionCoordinate::x_y(x, y),
-                        &**pane,
-                    );
+                let selection_range = crate::selection::SelectionRange::zone_around(
+                    crate::selection::SelectionCoordinate::x_y(x, y),
+                    &**pane,
+                );
 
-                self.selection(pane.pane_id() as u64).origin = Some(selection_range.start);
-                self.selection(pane.pane_id() as u64).range = Some(selection_range);
-                self.selection(pane.pane_id() as u64).rectangular = false;
+                self.selection(pane_id).origin = Some(selection_range.start);
+                self.selection(pane_id).range = Some(selection_range);
+                self.selection(pane_id).rectangular = false;
             }
             SelectionMode::Cell | SelectionMode::Block => {
-                self.selection(pane.pane_id() as u64)
+                self.selection(pane_id)
                     .begin(crate::selection::SelectionCoordinate::x_y(x, y));
-                self.selection(pane.pane_id() as u64).rectangular = mode == SelectionMode::Block;
+                self.selection(pane_id).rectangular = mode == SelectionMode::Block;
             }
         }
 
-        self.selection(pane.pane_id() as u64).seqno = pane.get_current_seqno();
+        self.selection(pane_id).seqno = pane.get_current_seqno();
         self.window.as_ref().unwrap().invalidate();
     }
 }

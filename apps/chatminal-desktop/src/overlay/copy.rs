@@ -1,9 +1,12 @@
 use crate::chatminal_runtime::overlay_compat::{
     OverlayAssignmentResult, OverlayCachePolicy, OverlayForEachLogicalLine, OverlayLogicalLine,
-    OverlayPane, OverlayPaneHandle, OverlayPattern, OverlayPatternType, OverlayRuntimeEntryHandle,
-    OverlaySearchResult, OverlayWithPaneLines, RenderableDimensions, StableCursorPosition,
+    OverlayPane, OverlayPattern, OverlayPatternType, OverlayRuntimeEntryHandle, OverlaySearchResult,
+    OverlayWithPaneLines, RenderableDimensions, StableCursorPosition,
 };
-use crate::chatminal_runtime::{frontend_resolve_pane, SessionTerminalHandle};
+use crate::chatminal_runtime::{
+    frontend_resolve_pane, terminal_handle_for_overlay_pane, SessionTerminalHandle,
+};
+use crate::desktop_termwindow_types::terminal_ui_key_for_pane;
 use crate::selection::{SelectionCoordinate, SelectionRange, SelectionX};
 use crate::termwindow::keyevent::KeyTableArgs;
 use crate::termwindow::{TermWindow, TermWindowNotif};
@@ -21,7 +24,6 @@ use ordered_float::NotNan;
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
 use rangeset::RangeSet;
 use std::collections::HashMap;
-use std::convert::TryFrom;
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
@@ -34,7 +36,8 @@ use url::Url;
 use window::{DeadKeyStatus, KeyCode as WKeyCode, Modifiers, WindowOps};
 
 lazy_static::lazy_static! {
-    static ref SAVED_PATTERN: Mutex<HashMap<OverlayRuntimeEntryHandle, OverlayPattern>> = Mutex::new(HashMap::new());
+    static ref SAVED_PATTERN: parking_lot::Mutex<HashMap<OverlayRuntimeEntryHandle, OverlayPattern>> =
+        parking_lot::Mutex::new(HashMap::new());
 }
 
 const SEARCH_CHUNK_SIZE: StableRowIndex = 1000;
@@ -123,8 +126,8 @@ impl CopyOverlay {
         cursor.shape = termwiz::surface::CursorShape::SteadyBlock;
         cursor.visibility = CursorVisibility::Visible;
 
-        let tab_id = frontend_resolve_pane(SessionTerminalHandle::new(pane.pane_id() as u64))
-            .and_then(|pane| OverlayRuntimeEntryHandle::try_from(pane.runtime_id.as_u64()).ok())
+        let tab_id = frontend_resolve_pane(terminal_handle_for_overlay_pane(&**pane))
+            .map(|pane| pane.runtime_id)
             .ok_or_else(|| anyhow::anyhow!("no runtime entry contains the current pane"))?;
 
         let window = term_window
@@ -149,7 +152,7 @@ impl CopyOverlay {
             window,
             delegate: Arc::clone(pane),
             start: None,
-            viewport: term_window.get_viewport(pane.pane_id() as u64),
+            viewport: term_window.get_viewport(terminal_ui_key_for_pane(&**pane)),
             results: vec![],
             by_line: HashMap::new(),
             dirty_results: RangeSet::default(),
@@ -315,12 +318,12 @@ impl CopyRenderable {
         let cookie = self.typing_cookie;
 
         let window = self.window.clone();
-        let pane_id = self.delegate.pane_id();
+        let terminal_ui_key = terminal_ui_key_for_pane(&*self.delegate);
 
         promise::spawn::spawn(async move {
             smol::Timer::after(Duration::from_millis(350)).await;
             window.notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                let state = term_window.terminal_ui_state(pane_id as u64);
+                let state = term_window.terminal_ui_state(terminal_ui_key);
                 if let Some(overlay) = state.overlay.as_ref() {
                     if let Some(copy_overlay) = overlay.pane.downcast_ref::<CopyOverlay>() {
                         let mut r = copy_overlay.render.lock();
@@ -373,10 +376,10 @@ impl CopyRenderable {
                 log::trace!("Searching for {pattern:?} in {range:?}");
                 let results = pane.search(pattern.clone(), range.clone(), limit).await?;
 
-                let pane_id = pane.pane_id();
+                let terminal_ui_key = terminal_ui_key_for_pane(&*pane);
                 let mut results = Some(results);
                 window.notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                    let state = term_window.terminal_ui_state(pane_id as u64);
+                    let state = term_window.terminal_ui_state(terminal_ui_key);
                     if let Some(overlay) = state.overlay.as_ref() {
                         if let Some(copy_overlay) = overlay.pane.downcast_ref::<CopyOverlay>() {
                             let mut r = copy_overlay.render.lock();
@@ -440,10 +443,10 @@ impl CopyRenderable {
             log::trace!("Searching for {pattern:?} in {range:?}");
             let results = pane.search(pattern.clone(), range.clone(), limit).await?;
 
-            let pane_id = pane.pane_id();
+            let terminal_ui_key = terminal_ui_key_for_pane(&*pane);
             let mut results = Some(results);
             window.notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                let state = term_window.terminal_ui_state(pane_id as u64);
+                let state = term_window.terminal_ui_state(terminal_ui_key);
                 if let Some(overlay) = state.overlay.as_ref() {
                     if let Some(copy_overlay) = overlay.pane.downcast_ref::<CopyOverlay>() {
                         let mut r = copy_overlay.render.lock();
@@ -458,10 +461,10 @@ impl CopyRenderable {
     }
 
     fn clear_selection(&mut self) {
-        let pane_id = self.delegate.pane_id();
+        let terminal_ui_key = terminal_ui_key_for_pane(&*self.delegate);
         self.window
             .notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                let mut selection = term_window.selection(pane_id as u64);
+                let mut selection = term_window.selection(terminal_ui_key);
                 selection.origin.take();
                 selection.range.take();
             })));
@@ -547,12 +550,12 @@ impl CopyRenderable {
     }
 
     fn adjust_selection(&self, start: SelectionCoordinate, range: SelectionRange) {
-        let pane_id = self.delegate.pane_id();
+        let terminal_ui_key = terminal_ui_key_for_pane(&*self.delegate);
         let window = self.window.clone();
         let mode = self.selection_mode;
         self.window
             .notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                let mut selection = term_window.selection(pane_id as u64);
+                let mut selection = term_window.selection(terminal_ui_key);
                 selection.origin = Some(start);
                 selection.range = Some(range);
                 selection.rectangular = mode == SelectionMode::Block;
@@ -601,17 +604,17 @@ impl CopyRenderable {
 
     fn set_viewport(&self, row: Option<StableRowIndex>) {
         let dims = self.delegate.get_dimensions();
-        let pane_id = self.delegate.pane_id();
+        let pane_id = terminal_ui_key_for_pane(&*self.delegate);
         self.window
             .notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                term_window.set_viewport(pane_id as u64, row, dims);
+                term_window.set_viewport(pane_id, row, dims);
             })));
     }
 
     fn close(&self) {
         TermWindow::schedule_cancel_overlay_for_terminal_handle(
             self.window.clone(),
-            self.delegate.pane_id() as u64,
+            terminal_ui_key_for_pane(&*self.delegate),
         );
     }
 
@@ -746,10 +749,10 @@ impl CopyRenderable {
 
     fn update_key_table(&mut self) {
         let window = self.window.clone();
-        let pane_id = self.delegate.pane_id();
+        let terminal_ui_key = terminal_ui_key_for_pane(&*self.delegate);
 
         window.notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-            let mut state = term_window.terminal_ui_state(pane_id as u64);
+            let mut state = term_window.terminal_ui_state(terminal_ui_key);
             if let Some(overlay) = state.overlay.as_mut() {
                 if let Some(copy_overlay) = overlay.pane.downcast_ref::<CopyOverlay>() {
                     let editing_search = copy_overlay.render.lock().editing_search;
@@ -1181,8 +1184,8 @@ impl CopyRenderable {
 }
 
 impl OverlayPane for CopyOverlay {
-    fn pane_id(&self) -> OverlayPaneHandle {
-        self.delegate.pane_id()
+    fn terminal_handle(&self) -> SessionTerminalHandle {
+        self.delegate.terminal_handle()
     }
 
     fn get_title(&self) -> String {

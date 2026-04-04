@@ -3,7 +3,7 @@ use crate::chatminal_runtime::overlay_compat::{
 };
 use crate::colorease::ColorEase;
 use crate::customglyph::{BlockKey, *};
-use crate::desktop_termwindow_types::TerminalUiKey;
+use crate::desktop_termwindow_types::{terminal_ui_key_for_pane, TerminalUiKey};
 use crate::glyphcache::{CachedGlyph, GlyphCache};
 use crate::quad::{
     HeapQuadAllocator, QuadAllocator, QuadImpl, QuadTrait, TripleLayerQuadAllocator,
@@ -250,7 +250,7 @@ impl crate::TermWindow {
         config: &ConfigHandle,
         target: VisualBellTarget,
     ) -> Option<f32> {
-        let mut per_pane = self.terminal_ui_state(pane.pane_id() as u64);
+        let mut per_pane = self.terminal_ui_state(terminal_ui_key_for_pane(&**pane));
         if let Some(ringing) = per_pane.bell_start {
             if config.visual_bell.target == target {
                 let mut color_ease = ColorEase::new(
@@ -805,11 +805,14 @@ impl crate::TermWindow {
                 let window = self.window.as_ref().unwrap().clone();
 
                 let presentation_width = PresentationWidth::with_cluster(&cluster);
+                let custom_block_glyphs = self.config.custom_block_glyphs;
 
                 match font.shape(
                     &cluster.text,
                     move || window.notify(TermWindowNotif::InvalidateShapeCache),
-                    BlockKey::filter_out_synthetic,
+                    move |glyphs| {
+                        BlockKey::filter_out_synthetic(glyphs, custom_block_glyphs);
+                    },
                     Some(cluster.presentation),
                     cluster.direction,
                     None, // FIXME: need more paragraph context

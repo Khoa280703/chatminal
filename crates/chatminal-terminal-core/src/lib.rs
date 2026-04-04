@@ -3,7 +3,7 @@
 //! Provides [`TerminalSize`], [`CursorPosition`], [`ScreenLine`], and the
 //! [`TerminalConfiguration`] trait. Zero heavy dependencies (no termwiz).
 //!
-//! Counterpart: `chatminal-engine-term` provides the full termwiz-based terminal
+//! Counterpart: `chatminal-terminal-emulator` provides the full termwiz-based terminal
 //! emulator used by the desktop GUI. Runtime host code should depend on this crate only.
 
 use std::ops::Range;

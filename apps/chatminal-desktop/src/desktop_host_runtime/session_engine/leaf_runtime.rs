@@ -3,6 +3,7 @@ use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex};
 
 use chatminal_terminal_core::TerminalSize;
+use config::ConfigHandle;
 use engine_term::{
     KeyCode as IoKeyCode, KeyModifiers as IoKeyModifiers, MouseEvent as IoMouseEvent,
     Terminal as IoTerminal, TerminalSize as IoTerminalSize,
@@ -22,6 +23,7 @@ pub struct TerminalInstanceRuntimeSpawn {
     pub generation: u64,
     pub runtime_id: RuntimeId,
     pub terminal_instance_id: TerminalInstanceId,
+    pub config: ConfigHandle,
     pub command: CommandBuilder,
     pub size: TerminalSize,
     pub initial_scrollback: Option<String>,
@@ -164,7 +166,7 @@ impl TerminalInstanceRuntime {
                 pixel_height: spawn.size.pixel_height,
                 dpi: spawn.size.dpi,
             },
-            Arc::new(config::TermConfig::new()),
+            Arc::new(config::TermConfig::with_config(spawn.config.clone())),
             "Chatminal",
             config::engine_version(),
             Box::new(SharedPtyWriter::new(Arc::clone(&writer))),
@@ -191,6 +193,7 @@ impl TerminalInstanceRuntime {
             spawn.clone(),
             hooks,
             reader,
+            Arc::clone(&writer),
             Arc::clone(&child),
         );
         log::debug!(

@@ -7,7 +7,7 @@ impl TermWindow {
         let Some(layout) = self
             .get_panes_to_render()
             .into_iter()
-            .find(|pos| pos.pane.pane_id() == pane.pane_id())
+            .find(|pos| pos.pane.terminal_handle() == pane.terminal_handle())
         else {
             return dims;
         };
@@ -23,7 +23,9 @@ impl TermWindow {
 
     pub fn terminal_ui_state(&self, pane_id: TerminalUiKey) -> RefMut<'_, TerminalUiState> {
         RefMut::map(self.terminal_ui_state_by_handle.borrow_mut(), |state| {
-            state.entry(pane_id).or_insert_with(TerminalUiState::default)
+            state
+                .entry(pane_id)
+                .or_insert_with(TerminalUiState::default)
         })
     }
 
@@ -31,7 +33,12 @@ impl TermWindow {
         self.terminal_ui_state_by_handle
             .borrow()
             .get(&pane_id)
-            .and_then(|state| state.overlay.as_ref().map(|overlay| Arc::clone(&overlay.pane)))
+            .and_then(|state| {
+                state
+                    .overlay
+                    .as_ref()
+                    .map(|overlay| Arc::clone(&overlay.pane))
+            })
     }
 
     pub fn runtime_ui_state(&self, render_scope_id: u64) -> RefMut<'_, RuntimeUiState> {
@@ -50,7 +57,7 @@ impl TermWindow {
             }
         }
         for (pane_id, state) in self.terminal_ui_state_by_handle.borrow().iter() {
-                if let Some(overlay) = state.overlay.as_ref().map(|o| &o.pane) {
+            if let Some(overlay) = state.overlay.as_ref().map(|o| &o.pane) {
                 if let Some(pane) = self.terminal_handle_arc(*pane_id) {
                     let dims = self.renderable_dimensions_for_pane(&pane);
                     overlay
@@ -117,11 +124,13 @@ impl TermWindow {
 
     fn scroll_to_top(&mut self, pane: &Arc<dyn OverlayPane>) {
         let dims = self.renderable_dimensions_for_pane(pane);
-        self.set_viewport(pane.pane_id() as u64, Some(dims.scrollback_top), dims);
+        let pane_id = crate::desktop_termwindow_types::terminal_ui_key_for_pane(&**pane);
+        self.set_viewport(pane_id, Some(dims.scrollback_top), dims);
     }
 
     fn scroll_to_bottom(&mut self, pane: &Arc<dyn OverlayPane>) {
-        self.terminal_ui_state(pane.pane_id() as u64).viewport = None;
+        let pane_id = crate::desktop_termwindow_types::terminal_ui_key_for_pane(&**pane);
+        self.terminal_ui_state(pane_id).viewport = None;
     }
 
     fn active_terminal_instance(&self) -> Option<Arc<dyn OverlayPane>> {
@@ -153,7 +162,7 @@ impl TermWindow {
             Some(render_target_overlay)
         } else {
             let pane = self.active_terminal_instance()?;
-            let pane_id = pane.pane_id() as u64;
+            let pane_id = crate::desktop_termwindow_types::terminal_ui_key_for_pane(&*pane);
             self.terminal_ui_state(pane_id)
                 .overlay
                 .as_ref()
@@ -161,5 +170,4 @@ impl TermWindow {
                 .or_else(|| Some(pane))
         }
     }
-
 }

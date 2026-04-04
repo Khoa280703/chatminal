@@ -2,6 +2,7 @@
 //! in smithay_client_toolkit 0.11 which is Copyright (c) 2018 Victor Berger
 //! and provided under the terms of the MIT license.
 
+use crate::connection::ConnectionOps;
 use crate::os::wayland::pointer::make_theme_manager;
 use config::{ConfigHandle, RgbaColor, WindowFrameConfig};
 use smithay_client_toolkit::output::{add_output_listener, with_output_info, OutputListener};
@@ -51,7 +52,9 @@ impl Default for ConceptConfig {
     fn default() -> Self {
         Self {
             font_config: None,
-            config: config::configuration(),
+            config: crate::Connection::get()
+                .expect("Connection::init has not been called")
+                .config(),
         }
     }
 }

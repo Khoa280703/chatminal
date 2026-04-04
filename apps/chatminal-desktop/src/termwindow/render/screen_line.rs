@@ -153,8 +153,7 @@ impl crate::TermWindow {
                 shape_key: &params.shape_key,
             };
 
-            let (shaped, clusters, invalidate_on_hover) =
-                self.build_line_element_shape(params)?;
+            let (shaped, clusters, invalidate_on_hover) = self.build_line_element_shape(params)?;
             invalidate_on_hover_change = invalidate_on_hover;
             (shaped, clusters)
         };

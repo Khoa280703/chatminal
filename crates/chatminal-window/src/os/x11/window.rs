@@ -1367,7 +1367,9 @@ impl XWindow {
     {
         let config = match config {
             Some(c) => c.clone(),
-            None => config::configuration(),
+            None => Connection::get()
+                .expect("Connection::init has not been called")
+                .config(),
         };
         let conn = Connection::get()
             .ok_or_else(|| {

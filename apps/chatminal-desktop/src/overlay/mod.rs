@@ -40,14 +40,14 @@ where
 
     let window = term_window.window.clone().unwrap();
 
-    let overlay_pane_id = tw_tab.pane_id();
+    let overlay_pane_id = tw_tab.terminal_handle().as_u64();
 
     let future = promise::spawn::spawn_into_new_thread(move || {
         let res = func(tab_id, tw_term);
         TermWindow::schedule_cancel_overlay_for_render_scope(
             window,
             tab_id,
-            Some(overlay_pane_id as u64),
+            Some(overlay_pane_id),
         );
         res
     });

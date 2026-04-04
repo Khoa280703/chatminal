@@ -30,44 +30,44 @@ impl UserData for SessionRef {
         });
         // O(1): session_id is the identity itself — no lookup needed.
         methods.add_method("session_id", |_, this, _: ()| Ok(this.to_owned_id()));
-        methods.add_method("active_terminal_instance_id", |_, this, _: ()| {
-            let host = get_host()?;
+        methods.add_method("active_terminal_instance_id", |lua, this, _: ()| {
+            let host = get_host_for_lua(lua)?;
             host.session_active_terminal_instance_id(this.as_str())
         });
-        methods.add_method("window", |_, this, _: ()| {
-            let host = get_host()?;
+        methods.add_method("window", |lua, this, _: ()| {
+            let host = get_host_for_lua(lua)?;
             host.session_window(this.as_str())
         });
-        methods.add_method("get_title", |_, this, _: ()| {
-            let host = get_host()?;
+        methods.add_method("get_title", |lua, this, _: ()| {
+            let host = get_host_for_lua(lua)?;
             host.session_title(this.as_str())
         });
-        methods.add_method("set_title", |_, this, title: String| {
-            let host = get_host()?;
+        methods.add_method("set_title", |lua, this, title: String| {
+            let host = get_host_for_lua(lua)?;
             host.set_session_title(this.as_str(), &title)
         });
-        methods.add_method("active_terminal", |_, this, _: ()| {
-            let host = get_host()?;
+        methods.add_method("active_terminal", |lua, this, _: ()| {
+            let host = get_host_for_lua(lua)?;
             host.active_terminal_for_session(this.as_str())
         });
-        methods.add_method("terminals", |_, this, _: ()| {
-            let host = get_host()?;
+        methods.add_method("terminals", |lua, this, _: ()| {
+            let host = get_host_for_lua(lua)?;
             host.terminals_for_session(this.as_str())
         });
 
-        methods.add_method("get_terminal_direction", |_, this, direction: Value| {
-            let host = get_host()?;
+        methods.add_method("get_terminal_direction", |lua, this, direction: Value| {
+            let host = get_host_for_lua(lua)?;
             let dir: SessionDirection = from_lua(direction)?;
             host.terminal_direction_for_session(this.as_str(), dir)
         });
 
-        methods.add_method("set_zoomed", |_, this, zoomed: bool| {
-            let host = get_host()?;
+        methods.add_method("set_zoomed", |lua, this, zoomed: bool| {
+            let host = get_host_for_lua(lua)?;
             host.set_session_zoomed(this.as_str(), zoomed)
         });
 
         methods.add_method("terminals_with_info", |lua, this, _: ()| {
-            let host = get_host()?;
+            let host = get_host_for_lua(lua)?;
             let terminals = host.session_terminals_with_info(this.as_str())?;
             let result = lua.create_table()?;
             for (idx, terminal_info) in terminals.into_iter().enumerate() {
@@ -86,23 +86,23 @@ impl UserData for SessionRef {
             Ok(result)
         });
 
-        methods.add_method("rotate_counter_clockwise", |_, this, _: ()| {
-            let host = get_host()?;
+        methods.add_method("rotate_counter_clockwise", |lua, this, _: ()| {
+            let host = get_host_for_lua(lua)?;
             host.rotate_session_counter_clockwise(this.as_str())
         });
 
-        methods.add_method("rotate_clockwise", |_, this, _: ()| {
-            let host = get_host()?;
+        methods.add_method("rotate_clockwise", |lua, this, _: ()| {
+            let host = get_host_for_lua(lua)?;
             host.rotate_session_clockwise(this.as_str())
         });
 
         methods.add_method("get_size", |lua, this, _: ()| {
-            let host = get_host()?;
+            let host = get_host_for_lua(lua)?;
             to_lua(lua, host.session_size(this.as_str())?)
         });
 
-        methods.add_method("activate", move |_lua, this, ()| {
-            let host = get_host()?;
+        methods.add_method("activate", move |lua, this, ()| {
+            let host = get_host_for_lua(lua)?;
             host.activate_session(this)
         });
     }

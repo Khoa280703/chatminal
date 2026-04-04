@@ -14,11 +14,13 @@ use wayland_client::{Connection as WConnection, EventQueue};
 use crate::screen::{ScreenInfo, Screens};
 use crate::spawn::SPAWN_QUEUE;
 use crate::{Appearance, Connection, ConnectionOps, ScreenRect};
+use config::ConfigHandle;
 
 use super::state::WaylandState;
 use super::WaylandWindowInner;
 
 pub struct WaylandConnection {
+    pub(crate) config: RefCell<ConfigHandle>,
     pub(crate) should_terminate: RefCell<bool>,
     pub(crate) next_window_id: AtomicUsize,
     pub(super) gl_connection: RefCell<Option<Rc<crate::egl::GlConnection>>>,
@@ -28,13 +30,14 @@ pub struct WaylandConnection {
 }
 
 impl WaylandConnection {
-    pub(crate) fn create_new() -> anyhow::Result<Self> {
+    pub(crate) fn create_new(config: ConfigHandle) -> anyhow::Result<Self> {
         let conn = WConnection::connect_to_env()?;
         let (globals, event_queue) = registry_queue_init::<WaylandState>(&conn)?;
         let qh = event_queue.handle();
 
-        let wayland_state = WaylandState::new(&globals, &qh)?;
+        let wayland_state = WaylandState::new(&globals, &qh, config.clone())?;
         let wayland_connection = WaylandConnection {
+            config: RefCell::new(config),
             connection: conn,
             should_terminate: RefCell::new(false),
             next_window_id: AtomicUsize::new(1),
@@ -158,6 +161,19 @@ impl WaylandConnection {
 }
 
 impl ConnectionOps for WaylandConnection {
+    fn config(&self) -> ConfigHandle {
+        self.config.borrow().clone()
+    }
+
+    fn update_config(&self, config: &ConfigHandle) {
+        *self.config.borrow_mut() = config.clone();
+        let mut state = self.wayland_state.borrow_mut();
+        state.config = config.clone();
+        if let Some(output_manager) = state.output_manager.as_ref() {
+            output_manager.update_config(config);
+        }
+    }
+
     fn name(&self) -> String {
         "Wayland".to_string()
     }
@@ -199,7 +215,7 @@ impl ConnectionOps for WaylandConnection {
 
         let mut by_name = HashMap::new();
         let mut virtual_rect: ScreenRect = euclid::rect(0, 0, 0, 0);
-        let config = config::configuration();
+        let config = self.config();
 
         let output_state = &self.wayland_state.borrow().output;
 

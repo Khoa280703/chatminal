@@ -44,8 +44,7 @@ impl GuiFrontEnd {
         self.config.borrow().clone()
     }
 
-    fn refresh_config_snapshot(&self) -> ConfigHandle {
-        let config = config::configuration();
+    fn refresh_config_snapshot(&self, config: ConfigHandle) -> ConfigHandle {
         *self.config.borrow_mut() = config.clone();
         config
     }
@@ -56,7 +55,7 @@ impl GuiFrontEnd {
     }
 
     pub fn try_new(initial_config: ConfigHandle) -> anyhow::Result<Rc<GuiFrontEnd>> {
-        let connection = Connection::init()?;
+        let connection = Connection::init_with_config(initial_config.clone())?;
         connection.set_event_handler(Self::app_event_handler);
 
         let client_id = active_frontend_client().expect("to have set my own id");
@@ -177,11 +176,11 @@ impl GuiFrontEnd {
                                 .map(|fe| fe.can_terminate_on_mux_empty())
                                 .unwrap_or(false);
                             if activity_count == 0 && should_terminate {
-                                log::trace!("Mux is now empty, terminate gui");
+                                log::trace!("host runtime is now empty, terminate gui");
                                 Connection::get().unwrap().terminate_message_loop();
                             } else {
                                 log::debug!(
-                                    "skip gui terminate on mux empty: activity_count={activity_count}, should_terminate={should_terminate}"
+                                    "skip gui terminate on host-runtime empty: activity_count={activity_count}, should_terminate={should_terminate}"
                                 );
                             }
                         })
@@ -235,7 +234,7 @@ impl GuiFrontEnd {
         // `chatminal.gui.get_appearance()` can have that take effect
         // before any windows are created
         config::reload();
-        front_end.refresh_config_snapshot();
+        front_end.refresh_config_snapshot(config::current_config_handle());
 
         // And build the initial menu bar.
         // TODO: arrange for this to happen on config reload.
@@ -267,7 +266,10 @@ impl GuiFrontEnd {
 
                     match spawn_local_shell_runner().await {
                         Ok(pane) => {
-                            log::trace!("Spawned {file_name} as pane_id {}", pane.pane_id());
+                            log::trace!(
+                                "Spawned {file_name} as terminal_handle {}",
+                                pane.terminal_handle().as_u64()
+                            );
                             let mut writer = pane.writer();
                             write!(writer, "{quoted_file_name} ; exit\n").ok();
                         }
@@ -339,7 +341,6 @@ impl GuiFrontEnd {
     pub fn reconcile_workspace(&self) -> Future<()> {
         let mut promise = Promise::new();
         let workspace = active_workspace_for_client(&self.client_id);
-
         if workspace_is_empty(&workspace) {
             // We don't want to silently kill off things that might
             // be running in other workspaces, so let's pick one
@@ -359,7 +360,6 @@ impl GuiFrontEnd {
 
         let workspace = active_workspace_for_client(&self.client_id);
         log::debug!("workspace is {}, fixup windows", workspace);
-
         self.prune_closing_primary_window();
         let desired_primary_window_id = if primary_host_window_exists() {
             Some(primary_host_window_id())
@@ -538,7 +538,7 @@ pub fn front_end() -> Rc<GuiFrontEnd> {
 pub(crate) fn current_frontend_config() -> ConfigHandle {
     try_front_end()
         .map(|front_end| front_end.effective_config())
-        .unwrap_or_else(config::configuration)
+        .unwrap_or_else(config::current_config_handle)
 }
 
 pub struct WorkspaceSwitcher {
@@ -568,11 +568,13 @@ pub fn try_new(initial_config: ConfigHandle) -> Result<Rc<GuiFrontEnd>, Error> {
     let front_end = GuiFrontEnd::try_new(initial_config)?;
     FRONT_END.with(|f| *f.borrow_mut() = Some(Rc::clone(&front_end)));
 
-    let config_subscription = config::subscribe_to_config_reload({
-        move || {
+    let config_subscription = config::subscribe_to_config_reload_with_config({
+        move |config| {
             promise::spawn::spawn_into_main_thread(async {
                 let front_end = crate::frontend::front_end();
-                front_end.refresh_config_snapshot();
+                let config = front_end.refresh_config_snapshot(config);
+                front_end.connection.update_config(&config);
+                crate::desktop_host_runtime::apply_host_runtime_config(&config);
                 front_end.recreate_menubar();
             })
             .detach();

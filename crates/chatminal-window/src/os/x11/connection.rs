@@ -8,6 +8,7 @@ use crate::screen::{ScreenInfo, Screens};
 use crate::spawn::*;
 use crate::{Appearance, DeadKeyStatus, ScreenRect};
 use anyhow::{anyhow, bail, Context as _};
+use config::ConfigHandle;
 use mio::event::Source;
 use mio::unix::SourceFd;
 use mio::{Events, Interest, Poll, Registry, Token};
@@ -50,6 +51,7 @@ impl ScreenResources {
 
 pub struct XConnection {
     pub conn: xcb::Connection,
+    config: RefCell<ConfigHandle>,
     default_dpi: RefCell<f64>,
     pub(crate) xsettings: RefCell<XSettingsMap>,
     pub screen_num: i32,
@@ -205,6 +207,14 @@ fn get_wm_name(
 }
 
 impl ConnectionOps for XConnection {
+    fn config(&self) -> ConfigHandle {
+        self.config.borrow().clone()
+    }
+
+    fn update_config(&self, config: &ConfigHandle) {
+        *self.config.borrow_mut() = config.clone();
+    }
+
     fn name(&self) -> String {
         match get_wm_name(
             &self.conn,
@@ -263,7 +273,7 @@ impl ConnectionOps for XConnection {
             anyhow::bail!("XRANDR is not available, cannot query screen geometry");
         }
 
-        let config = config::configuration();
+        let config = self.config();
 
         // NOTE: GetScreenResourcesCurrent is fast, but may sometimes return nothing. In this case,
         // fallback to slow GetScreenResources.
@@ -532,7 +542,7 @@ impl XConnection {
         // check for previous errors produced by the IME forward_event callback
         self.ime_process_event_result.replace(Ok(()))?;
 
-        if config::configuration().use_ime && self.ime.borrow_mut().process_event(event) {
+        if self.config().use_ime && self.ime.borrow_mut().process_event(event) {
             self.ime_process_event_result.replace(Ok(()))
         } else {
             self.process_xcb_event(event)
@@ -662,7 +672,7 @@ impl XConnection {
         Ok(reply.atom())
     }
 
-    pub(crate) fn create_new() -> anyhow::Result<Rc<XConnection>> {
+    pub(crate) fn create_new(config: ConfigHandle) -> anyhow::Result<Rc<XConnection>> {
         let (conn, screen_num) = xcb::Connection::connect_with_xlib_display_and_extensions(
             &[xcb::Extension::Xkb],
             &[
@@ -796,6 +806,7 @@ impl XConnection {
 
         let conn = Rc::new(XConnection {
             conn,
+            config: RefCell::new(config.clone()),
             default_dpi,
             xsettings: RefCell::new(xsettings),
             cursor_font_id,
@@ -870,7 +881,7 @@ impl XConnection {
                     }
                 });
         }
-        if config::configuration().ime_preedit_rendering == config::ImePreeditRendering::Builtin {
+        if config.ime_preedit_rendering == config::ImePreeditRendering::Builtin {
             let conn = conn.clone();
             conn.clone()
                 .ime
@@ -883,7 +894,7 @@ impl XConnection {
                     }
                 });
         }
-        if config::configuration().ime_preedit_rendering == config::ImePreeditRendering::Builtin {
+        if config.ime_preedit_rendering == config::ImePreeditRendering::Builtin {
             let conn = conn.clone();
             conn.clone()
                 .ime

@@ -17,6 +17,7 @@ pub(crate) fn spawn_reader_waiter_loop(
     spawn: TerminalInstanceRuntimeSpawn,
     hooks: TerminalInstanceRuntimeHooks,
     mut reader: Box<dyn Read + Send>,
+    writer: Arc<Mutex<Option<Box<dyn std::io::Write + Send>>>>,
     child: Arc<Mutex<Box<dyn Child + Send + Sync>>>,
 ) {
     thread::spawn(move || {
@@ -94,6 +95,7 @@ pub(crate) fn spawn_reader_waiter_loop(
                 }
             }
         }
+        writer.lock().unwrap().take();
 
         // Waiter phase — reader EOF/error means child is exiting or exited.
         // Poll try_wait until the child process fully exits.
@@ -104,6 +106,7 @@ pub(crate) fn spawn_reader_waiter_loop(
                 .and_then(|mut guard| guard.try_wait().ok())
                 .flatten();
             if let Some(status) = status {
+                writer.lock().unwrap().take();
                 (hooks.on_exit)(TerminalInstanceRuntimeEvent::Exited {
                     session_id,
                     generation: spawn.generation,

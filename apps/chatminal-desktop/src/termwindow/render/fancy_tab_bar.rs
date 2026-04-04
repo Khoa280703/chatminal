@@ -60,8 +60,7 @@ impl crate::TermWindow {
         let tab_bar_height = sb.session_bar_height;
         let tab_bar_x = sb.session_bar_x;
         let tab_bar_width = sb.session_bar_width;
-        let reserve_integrated_title_button_space =
-            !crate::chatminal_sidebar::sidebar_enabled();
+        let reserve_integrated_title_button_space = !crate::chatminal_sidebar::sidebar_enabled();
         let font = self.fonts.title_font()?;
         let metrics = RenderMetrics::with_font_metrics(&font.metrics());
         let items = self.tab_bar.items();
@@ -498,6 +497,7 @@ impl crate::TermWindow {
                 bounds: euclid::rect(tab_bar_x, 0., tab_bar_width, tab_bar_height),
                 metrics: &metrics,
                 gl_state: self.render_state.as_ref().unwrap(),
+                custom_block_glyphs: self.config.custom_block_glyphs,
                 zindex: 10,
             },
             &tabs,

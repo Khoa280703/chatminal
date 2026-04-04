@@ -1,3 +1,4 @@
+use crate::chatminal_runtime::desktop_current_active_session_id;
 use crate::inputmap::InputMap;
 use config::keyassignment::*;
 use config::window::WindowLevel;
@@ -103,7 +104,7 @@ fn session_ui_mode_for_menubar() -> bool {
         .map(|front_end| {
             front_end.gui_windows().into_iter().any(|window| {
                 let _ = window;
-                crate::chatminal_runtime::desktop_current_active_session_id().is_some()
+                desktop_current_active_session_id().is_some()
             })
         })
         .unwrap_or(false)

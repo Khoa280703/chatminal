@@ -1,5 +1,313 @@
 # Project Changelog
 
+## 2026-04-04
+
+### Fixed
+- Join/split session layout now eagerly reapplies visible session sizes and invalidates the window in the same action, reducing stale cursor/scroll viewport state until an external resize.
+- Startup crash `make window` trên macOS đã được sửa:
+  - root cause thật là `chatminal-host-runtime` giữ `HOST_RUNTIME_ROOT` bằng `Weak<HostRuntimeRoot>`, nên queued GUI startup work có thể chạm vào runtime sau khi root effective owner đã rơi khỏi seam bootstrap
+  - symptom user thấy là app mở lên rồi Apple báo down unexpectedly; crash thật là `SIGABRT` sau panic `host runtime root must exist` trong main-thread spawn queue
+  - fix thật:
+    - `crates/chatminal-host-runtime/src/lib.rs` đổi `HOST_RUNTIME_ROOT` sang strong `Arc<HostRuntimeRoot>`
+    - `apps/chatminal-desktop/src/desktop_host_runtime/session_host.rs` bỏ local fallback spawn-target từng được thêm để che bug ownership
+  - verify xanh:
+    - `cargo check -p chatminal-host-runtime`
+    - `cargo check -p chatminal-desktop`
+    - `cargo test -p chatminal-host-runtime root_window_info_is_none_without_runtime -- --nocapture`
+    - `cargo test -p chatminal-host-runtime spawn_runtime_entry_returns_runtime_info_without_exposing_tab -- --nocapture`
+    - `make window`
+
+## 2026-04-03
+
+### Changed
+- Follow-up phase 02 terminal crate rename landed:
+  - package/path vocabulary đã chuyển từ `chatminal-engine-*` sang `chatminal-terminal-*` / `chatminal-*`
+  - `lib.name` và Cargo compatibility aliases `engine_*` / `engine-*` được giữ nguyên để tránh churn import Rust hàng loạt
+  - verify xanh:
+    - `cargo check --workspace`
+    - `cargo test --workspace --lib --bins --tests`
+    - `git diff --check`
+- Follow-up phase 01 config ownership completion landed:
+  - `chatminal-window`, `chatminal-terminal-font`, `chatminal-time-funcs`, and `chatminal-ratelim` product paths now use explicit config ownership/snapshot wiring instead of live `configuration()` polling
+  - residual `configuration()` reads are now limited to `chatminal-config` foundation helpers plus tests/comment seams
+  - follow-up plan `plans/260403-1800-post-unification-followups/plan.md` is now fully completed
+- Architecture unification plan `260401-0949-architecture-unification` đã được chốt `done`:
+  - final closeout checklist đã được hoàn tất
+  - `with_mux(` / `with_mux_strict(` sạch trong code `crates/` + `apps/`
+  - `mux_default(` chỉ còn ở explicit compat seams
+  - `configuration(` trong closeout scope chỉ còn ở `chatminal-config` foundation helpers và desktop test/comment paths
+  - full verify cuối xanh:
+    - `cargo check --workspace`
+    - `cargo test --workspace --lib --bins --tests`
+    - `cargo test --manifest-path apps/chatminal-desktop/Cargo.toml -- --test-threads=1`
+    - `make window` bounded smoke launch
+  - deferred scope đã có follow-up plan rõ ràng, và follow-up đó hiện đã hoàn tất:
+    - `plans/260403-1800-post-unification-followups/plan.md`
+    - `Phase 02` rename/cosmetic sweep
+- Merge-wave blocker cuối của architecture unification đã được gỡ:
+  - desktop tests đụng `build_initial_host_mux()` / `shutdown_host_mux()` giờ dùng shared lock ở `desktop_host_runtime`, nên `session_pane` và `session_host` không còn race nhau trên global host-mux lifecycle
+  - shared helper cũng recover poisoned mutex bằng `into_inner()`, nên không còn cascade fail sau assertion đầu tiên
+  - verify xanh:
+    - `cargo check --workspace`
+    - `cargo test --workspace --lib --bins --tests`
+    - `cargo test --manifest-path apps/chatminal-desktop/Cargo.toml`
+    - `make window`
+- Architecture unification tiếp tục cắt singleton ownership/helper ở host-runtime:
+  - `chatminal-host-runtime/src/lib.rs` đưa ownership thật của host runtime về `HostRuntimeRoot`; ở nhịp này global slot chỉ còn giữ `Weak<HostRuntimeRoot>` thay vì strong owner
+  - `Mux` bị hạ tiếp thành compat facade mỏng materialize từ root; helper/query/control paths đi thẳng qua root thay vì dựa vào `Mux::get()` / `Mux::try_get()`
+  - `tab.rs::prune_dead_panes()` cũng đã đọc pane registry từ root thay vì giữ dependency vào global mux facade chỉ để kiểm tra liveness
+  - giả thuyết lúc đó là desktop lifecycle seam giữ strong owner qua `MuxHandle`; startup crash fix ngày 2026-04-04 đã thay seam này bằng global strong-root ownership để bỏ dependency ngầm đó
+  - verify xanh:
+    - `cargo check --workspace`
+    - `cargo test -p chatminal-host-runtime --lib -- --test-threads=1`
+    - `cargo test -p chatminal-lua-bridge`
+    - `cargo test --manifest-path apps/chatminal-desktop/Cargo.toml -- --test-threads=1`
+- Employee A lanes cho architecture unification tiến thêm ở foundation contract + config boundary:
+  - `chatminal-host-runtime/src/client.rs` giữ focus metadata theo `SessionTerminalHandle`, nhưng vẫn serialize wire field cũ `focused_pane_id` để không gãy mixed-version codec/client readers
+  - `chatminal-host-runtime/src/lib.rs` chuyển `FocusedPaneBinding` sang typed storage hoàn toàn (`RuntimeId` + `SessionTerminalHandle`) và dùng config helper entry points thay vì kéo thẳng singleton reads ở helper foundation slice này
+  - `chatminal-host-runtime/src/lib.rs` thêm capability helpers mới để phase cutover sau không còn phải luôn kéo `Arc<Tab>` cho các thao tác title/zoom/rotate/terminal-direction/active-terminal/terminal layout info
+  - helper surface mới này cũng có mirror theo `session_id`, để Lua/runtime consumer cutover sau có thể bớt phụ thuộc `tab_by_session_id(...)`
+  - `chatminal-host-runtime/src/lib.rs` giờ cũng có `RootWindowInfo` + `root_window_info()` / `root_last_active_runtime_id()` để root-window read paths bớt phải giữ `with_root_window(...)` chỉ để đọc metadata
+  - cùng slice này có thêm `create_attached_runtime_entry_for_terminal(...)`, để caller phase sau có thể dựng/attach runtime entry từ `Pane` mà không phải tự dựng `Arc<Tab>` ngoài boundary
+  - `chatminal-host-runtime/src/spawn_target.rs` đã dùng cùng runtime-entry builder path nội bộ này, tránh nhân đôi logic tạo tab root-entry
+  - thêm một lớp capability helper nữa cho mutate/read paths vốn vẫn thường kéo `Arc<Tab>`:
+    - `toggle_runtime_entry_zoom(...)`
+    - `resize_runtime_entry(...)`
+    - `adjust_runtime_entry_active_terminal_size(...)`
+    - `swap_runtime_entry_active_with_terminal(...)`
+    - `runtime_entry_active_terminal_handle(...)`
+    - `activate_runtime_entry_terminal_index(...)`
+    - `activate_runtime_entry_terminal_direction(...)`
+    - `runtime_entry_can_close_without_prompting(...)`
+    - `runtime_entry_split_infos(...)`
+    - `resize_runtime_entry_split(...)`
+    - toàn bộ nhóm này cũng có mirror theo `session_id`
+  - root-window read surface cũng được kéo thêm một nhịp để phase desktop wiring sau không còn phải giữ nhiều `with_root_window(...)` chỉ để đọc state:
+    - `root_window_initial_position()`
+    - `root_active_runtime_entry_info()`
+    - `root_runtime_entry_summaries()`
+    - `RootWindowInfo` giờ giữ luôn `initial_position`
+  - root-window navigation/order helper cũng được mở rộng thêm nhưng vẫn additive-only:
+    - `root_runtime_entry_count()`
+    - `root_active_runtime_entry_index()`
+    - `root_last_active_runtime_entry_index()`
+    - `root_runtime_id_at_index()`
+    - `root_runtime_entry_info_at_index()`
+    - `focus_root_runtime_entry_index()`
+    - `focus_root_last_runtime_entry()`
+    - `focus_root_runtime_entry_relative()`
+    - `move_root_active_runtime_entry_to_index()`
+    - mục tiêu là để merge step sau có thể cắt thêm các caller đang chỉ cần index/order mutation mà chưa phải mở raw `with_root_window_mut(...)`
+  - foundation helper cho session-id/spawn path cũng được chốt thêm:
+    - `runtime_id_for_session_id(...)`
+    - `focus_root_runtime_entry_by_session_id(...)`
+    - async `spawn_runtime_entry(...)` trả `RuntimeEntryInfo + Pane` thay vì buộc caller phải nhận `Arc<Tab>`
+  - metadata lookup contract cũng được gom xuống host-runtime:
+    - `terminal_instance_id_for_pane(...)`
+    - `terminal_by_terminal_instance_id(...)`
+    - `terminal_by_public_id(...)`
+    - `resolve_runtime_id_for_terminal_instance_id(...)`
+    - mục tiêu là cắt dần các vòng scan lặp theo `terminal_instance_id`/public id ở desktop và Lua phase sau
+  - host-runtime test suite giờ có test lock chung cho các case đụng global mux, để unit tests mới không race với các test env/control-plane cũ
+  - `chatminal-config/src/lib.rs` thêm nhóm helper entry points nhỏ cho config foundation: `current_config_handle()`, `default_workspace_name_or(...)`, `current_initial_terminal_size()`, `current_output_parser_config()`, `current_exit_behavior()`
+  - `chatminal-config/src/terminal.rs` cũng route `enq_answerback()` qua `self.configuration()` để injected `ConfigHandle` không còn rơi về global singleton ở slice này
+  - `chatminal-host-runtime/src/spawn_target.rs` chỉ re-apply `CHATMINAL_PANE` trên flatpak host path; socket env không còn bị nhét lại từ sandbox sau `fixup_command()`
+  - `SSH_AUTH_SOCK` ở local spawn path giờ ưu tiên env hiện tại trước snapshot identity cũ
+  - `chatminal-codec/src/lib.rs` không còn import `PaneId` / `TabId` từ host-runtime; codec giữ local raw-id aliases để compile không phụ thuộc public raw boundary cũ
+  - verify gate xanh:
+    - `cargo check -p chatminal-host-runtime`
+    - `cargo check -p chatminal-config`
+    - `cargo test -p chatminal-host-runtime --lib`
+- Employee D lanes cho architecture unification tiến thêm một nhát ở PTY/host-runtime:
+  - `chatminal-host-runtime/src/spawn_target.rs` re-apply `CHATMINAL_UNIX_SOCKET`, `CHATMINAL_PANE`, và `SSH_AUTH_SOCK` sau `fixup_command()` để giữ startup/runtime env ở local spawn path
+  - precedence của `SSH_AUTH_SOCK` giờ ưu tiên active-identity snapshot trước env hiện tại, và flatpak host path chỉ giữ `CHATMINAL_PANE`
+  - `chatminal-host-runtime/src/pty_io.rs` snapshot PTY parser config + default exit behavior qua config helper foundation, và `localpane.rs` cũng chuyển constructor snapshot sang `current_config_handle()`, nên direct `configuration()` reads trong scope D đã bị cắt tiếp
+  - `chatminal-host-runtime/src/localpane.rs` và `localpane_hooks.rs` đổi compat child-exit cleanup sang explicit exit-behavior cleanup callback thay vì prune mù
+  - `chatminal-host-runtime/src/pty_io.rs` giờ giữ callback concrete cho `output / cleanup / inline error`; compat PTY dispatcher không còn `unwrap_or_else` fallback ngầm về Mux
+  - `chatminal-host-runtime/src/pty_io.rs` thêm `PtyIoHooks::noop()`, nên path `register_pane_with_output_callback(...)` không còn lôi theo hidden inline-error/cleanup Mux semantics chỉ vì caller cần override output
+  - `chatminal-host-runtime/src/localpane_hooks.rs` để `LocalPaneHooks::default()` thành no-op, còn `spawn_target.rs` dồn Mux-backed semantics lên `LocalSpawnHooks::mux_default()` để owner mặc định hiện ra ở boundary rõ ràng hơn
+  - `chatminal-host-runtime/src/localpane.rs::LocalPane::new(...)` cũng đã bỏ hard-code `LocalPaneHooks::mux_default()`, và `spawn_target.rs` có thêm `LocalSpawnHooks::noop()` để future non-Mux callers có bundle explicit rõ hơn
+  - `desktop_host_runtime/session_engine/*` đóng writer, publish exit code ổn định hơn, và clear leaf process metadata khi runtime exit để session-native PTY lifecycle rõ owner hơn
+  - `chatminal-host-runtime/src/client.rs` giữ backward-compatible wire name `focused_pane_id` đồng thời chấp nhận alias `focused_terminal_handle`
+  - verify xanh trong current tree:
+    - `cargo check -p chatminal-host-runtime`
+    - `cargo test -p chatminal-host-runtime --lib -- --test-threads=1`
+    - `cargo check -p chatminal-host-runtime -p chatminal-desktop`
+    - `cargo test --manifest-path apps/chatminal-desktop/Cargo.toml session_engine -- --test-threads=1`
+    - `cargo test --manifest-path apps/chatminal-desktop/Cargo.toml session_pane -- --test-threads=1`
+  - ghi chú trạng thái:
+    - `07A` vẫn là `partial`: hidden fallback trong compat PTY path đã giảm thêm ở output-only/localpane constructor path, nhưng spawn boundary vẫn đang chọn Mux owner mặc định
+    - `09B` advanced thêm rõ rệt nhưng chưa nên coi là closed toàn phase
+
+## 2026-04-02
+
+### Changed
+- Architecture unification follow-up tiếp tục đẩy 03F/04 bằng một nhát typed/config cut nhỏ nhưng verify thật:
+  - `chatminal-host-runtime/src/tab.rs` thêm `Tab::runtime_id()`
+  - `chatminal-host-runtime/src/lib.rs` thêm `root_runtime_ids()` để consumer có root-window runtime listing theo `RuntimeId` thay vì phải luôn kéo `Vec<Arc<Tab>>` trước
+  - `crates/chatminal-lua-bridge/src/lib.rs` đổi `RootTabRef` từ `usize` sang `RuntimeId`; `window.rs` và root session-list helpers đi theo typed path này
+  - `apps/chatminal-desktop/src/main.rs`, `termwindow/mod.rs`, `desktop_termwindow_close_helpers.rs`, và `desktop_host_runtime/session_host.rs` đổi các read-only runtime-id callsites từ `tab.tab_id() as u64` sang `tab.runtime_id().as_u64()`
+  - `desktop_host_runtime/session_host.rs` cũng chuyển các loop chỉ cần runtime ids sang `root_runtime_ids()` trước, chỉ rehydrate `Arc<Tab>` khi vẫn thực sự cần behavior trên tab
+  - `chatminal-host-runtime/src/lib.rs` thêm read-only DTO `RuntimeEntryInfo` cùng `runtime_entry_info_by_runtime_id(...)` / `root_runtime_entry_infos(...)`
+  - `chatminal-host-runtime/src/lib.rs` thêm tiếp `runtime_entry_info_by_session_id(...)` cho slice query đọc theo `session_id`
+  - `chatminal-host-runtime/src/lib.rs` thêm `terminal_handle_for_pane(&dyn Pane)` để boundary helpers bớt tự wrap `pane_id()` thành `SessionTerminalHandle`
+  - Lua root-window read queries giờ đi qua DTO này:
+    - `WindowRef.sessions`
+    - `WindowRef.sessions_with_info`
+    - `WindowRef.active_session`
+    - `WindowRef.active_session_id`
+    - `WindowRef.active_terminal`
+    - `session.all_sessions`
+    - `session.list_sessions`
+    nên các path này không còn phải hydrate `Arc<Tab>` chỉ để đọc `session_id`/active-terminal metadata
+  - thêm một nhát nữa ở Lua read-only session queries:
+    - `session_active_terminal_instance_id`
+    - `session_title`
+    - `active_terminal_for_session`
+    - `session_size`
+    các path này giờ cũng đi qua `RuntimeEntryInfo` thay vì fetch `Arc<Tab>` trước
+  - desktop `host_render_scope_size(...)` cũng đổi sang DTO path ở host fallback slice, nên không còn cần `Arc<Tab>` chỉ để đọc `TerminalSize`
+  - `chatminal-host-runtime/src/lib.rs` gom thêm hai constructor-time config reads vào helper boundary:
+    - `switch_to_last_active_tab_when_closing_tab()`
+    - `unzoom_on_switch_pane()`
+  - `chatminal-host-runtime/src/window.rs` và `tab.rs` dùng các helper này thay vì tự gọi `configuration()` ở constructor
+  - verify gate xanh:
+    - `cargo check -p chatminal-host-runtime`
+    - `cargo check -p chatminal-lua-bridge`
+    - `cargo check -p chatminal-desktop`
+    - `cargo test --manifest-path apps/chatminal-desktop/Cargo.toml -- --test-threads=1`
+- Architecture unification follow-up tiếp tục siết desktop/runtime typed boundary:
+  - `apps/chatminal-desktop/src/chatminal_runtime/mod.rs` đã thu hẹp thêm compat surface từ `pub` xuống `pub(crate)` cho `SessionEngineShared` và nhóm re-export typed ids/runtime facade nội bộ
+  - `FrontendResolvedPane` và `FrontendFocusedPane` không còn trả `u64` thô cho runtime/pane binding; desktop boundary giờ mang `RuntimeId` và `SessionTerminalHandle`
+  - `frontend_resolve_pane(...)` và `focus_terminal_handle_by_id(...)` đã đổi sang nhận `SessionTerminalHandle` ở desktop facade thay vì `u64`
+  - `overlay/copy.rs` và `frontend.rs` đã consume typed ids thay vì tự giữ raw numeric boundary ở các path này
+  - `RuntimeNotification` cũng được siết thêm ở desktop boundary cho pane-centric paths:
+    - `PaneOutput`, `PaneAdded`, `PaneRemoved`, `PaneFocused`
+    - `Alert.pane_id`
+    - `AssignClipboard.pane_id`
+    - các payload này giờ dùng `SessionTerminalHandle` thay vì raw host terminal handle
+  - desktop boundary cho tab/render-scope paths cũng đã siết thêm:
+    - `RuntimeNotification::TabAddedToWindow`
+    - `RuntimeNotification::TabResized`
+    - `RuntimeNotification::TabTitleChanged.runtime_id`
+    - các payload này giờ dùng `RuntimeId` thay vì raw host `usize`
+  - `session_host.rs` cũng đổi `session_tab_shim` sang `HashMap<String, RuntimeId>` và giữ host-tab lookup/remove/focus flow ở `RuntimeId` cho tới điểm convert cuối vào host runtime
+  - `chatminal-host-runtime/src/lib.rs` thêm typed helper surface cho terminal-handle fallback:
+    - `terminal_by_handle(...)`
+    - `remove_terminal_handle(...)`
+    - `record_focus_for_terminal_handle(...)`
+  - desktop fallback path (`desktop_host_runtime/mod.rs`, `session_host.rs`) và Lua bridge (`crates/chatminal-lua-bridge/src/lib.rs`, `leaf.rs`) đã chuyển thêm một nhát sang `SessionTerminalHandle` thay vì chỉ giữ raw pane-id helpers ở slice này
+  - `chatminal-lua-bridge::LuaBridgeHost::tab_by_ref(...)` cũng đã đổi sang `RuntimeId` helper, nhờ đó `terminal_by_id(...)`, `tab_by_id(...)`, `resolve_pane_id(...)`, và `focus_pane_and_tab(...)` có thể bị hạ lại về crate-scope trong `chatminal-host-runtime`
+  - cleanup tiếp một nhát ở `chatminal-host-runtime`:
+    - xóa `runtime_entry_by_id(...)`
+    - xóa `has_tab(...)`
+    - inline các one-hop helper cũ phía sau `root_active_runtime_id(...)`, `remove_terminal_handle(...)`, `record_focus_for_terminal_handle(...)`
+  - trim thêm một raw public edge:
+    - `remove_tab_by_id(TabId)` bị hạ về crate scope
+    - Lua bridge session lookup đổi sang `runtime_entry_by_session_id(...)`, không còn bám helper tên `tab_by_chatminal_session_id(...)` ở cross-crate boundary
+  - execution-path typed cut tiếp tục tiến thêm:
+    - `chatminal-host-runtime::spawn_tab(...)` đổi từ `Option<PaneId>` sang `Option<SessionTerminalHandle>`
+    - `chatminal-host-runtime::split_pane(...)` đổi từ `PaneId` sang `SessionTerminalHandle`
+    - desktop `session_host.rs` và Lua bridge spawn/split flow đã chuyển theo boundary mới
+  - notification/control boundary cũng được siết thêm:
+    - `MuxHandle::subscribe(...)` giờ trả `HostRuntimeNotification`
+    - desktop bridge ở `desktop_host_runtime/mod.rs` consume typed host notification trực tiếp
+    - `MuxNotification` bị kéo về nội bộ `chatminal-host-runtime`
+  - PTY output callback boundary cũng được typed hóa thêm một nấc:
+    - `register_pane_with_output_callback(...)` và full callback path trong `chatminal-host-runtime` giờ dùng `SessionTerminalHandle` thay vì raw `usize`
+    - desktop `session_host.rs` không còn phải re-wrap raw pane ids khi publish `RuntimeNotification::PaneOutput`
+  - split boundary cũng được typed hóa thêm một nấc:
+    - `chatminal-host-runtime::spawn_target::SplitSource::MovePane(PaneId)` đã đổi thành `MoveTerminal(SessionTerminalHandle)`
+    - public `SpawnTarget::split_pane(...)` cũng đã đổi từ `TabId + PaneId` sang `RuntimeId + SessionTerminalHandle`
+    - raw numeric conversion của split flow giờ nằm gọn trong host-runtime internals thay vì lộ ra public trait surface
+  - trim thêm một cụm public surface nhỏ:
+    - `pane::alloc_pane_id()` không còn public cross-crate; desktop chuyển sang `host_runtime::alloc_terminal_handle_value()`
+    - `Window::{idx_by_id, remove_by_id, prune_dead_tabs}` bị kéo về crate scope vì chỉ còn caller nội bộ `chatminal-host-runtime`
+  - trim tiếp một cụm raw-id methods ở `Mux`:
+    - `record_focus_for_client`
+    - `focus_pane_and_containing_tab`
+    - `get_pane`
+    - `get_tab`
+    - `remove_pane`
+    - `remove_tab`
+    - `resolve_pane_id`
+    các method này giờ chỉ còn crate-local; caller ngoài crate đã dùng các free helper hẹp hơn từ trước
+  - `tab.rs` cũng được typed hóa thêm một nấc:
+    - `Tab::contains_pane(...)` không còn nhận `PaneId`; nó nhận `SessionTerminalHandle`
+    - desktop caller duy nhất ở `desktop_termwindow_event_helpers.rs` đã chuyển theo boundary mới
+  - root-window helper boundary được siết thêm:
+    - `chatminal-host-runtime` thêm `root_window_workspace_name(...)`, `root_window_title(...)`, `set_root_window_workspace_name(...)`, `set_root_window_title(...)`, `focus_root_runtime_entry(...)`
+    - `session_host.rs` dùng `focus_root_runtime_entry(...)` thay vì tự mở mutable root-window closure để focus tab
+    - `chatminal-lua-bridge/src/window.rs` chuyển workspace/title getter-setter sang explicit helper APIs thay vì direct mutation closure ở slice này
+  - Lua root-window query slice được đẩy thêm một nhát:
+    - `WindowRef.sessions`, `sessions_with_info`, `active_session`, `active_session_id`, `active_terminal`
+    - `LuaBridgeHost::root_tabs`
+    - `LuaBridgeHost::root_window_spawn_context`
+    giờ ưu tiên root-runtime helper path thay vì direct root-window iteration closure
+  - `crates/chatminal-lua-bridge` hiện không còn active `with_root_window(...)` / `with_root_window_result(...)` callsites trong product path của slice này
+  - dead desktop raw-focus wrappers của slice trên đã bị xóa sau khi typed path compile/test xanh
+- Architecture unification phase 03G đã bắt đầu bằng nhát tách ownership an toàn:
+  - `chatminal-host-runtime/src/lib.rs` thêm `PtyIoDispatcher` để gom side effects PTY pipeline (`on_output`, `on_cleanup`, `on_inline_error_output`)
+  - `send_actions_to_mux(...)`, `parse_buffered_data(...)`, `read_from_pane_pty(...)` đã route qua dispatcher thay vì encode trực tiếp mọi side effect inline
+  - `add_pane_internal(...)` được tách bước đầu thành phần register pane và phần start PTY reader (`register_pane_internal(...)` + `start_pane_pty_reader(...)`)
+  - socketpair inline-error path không còn gọi thẳng `localpane::emit_output_for_pane(...)`; inline output của path này và helper `emit_output_for_pane(...)` giờ đi chung một dispatch helper
+  - default output fallback và default exit-cleanup fallback cũng đã được helper hóa, nên setup dispatcher không còn chứa branch logic inline cho hai path này
+  - cụm parser/read loop PTY đã được kéo khỏi `chatminal-host-runtime/src/lib.rs` sang module nội bộ `chatminal-host-runtime/src/pty_io.rs`, nên `lib.rs` không còn ôm implementation detail của parser loop này
+  - `chatminal-host-runtime/src/localpane_hooks.rs` thêm hook layer mặc định cho `LocalPane`, nên input accounting, inline output, alert propagation, và child-exit cleanup không còn bị hard-code trực tiếp trong từng path của `localpane.rs`
+  - `chatminal-host-runtime/src/pty_io.rs` cũng đã mở rộng internal seam thành `PtyIoHooks`, nên PTY reader startup không còn chỉ override được `on_output`; cleanup và inline-error path cũng đã có injection point đồng bộ
+  - `apps/chatminal-desktop/src/desktop_host_runtime/session_engine/leaf_runtime.rs` và `leaf_runtime_threads.rs` cũng đã được siết cùng hướng:
+    - `TerminalInstanceRuntime::spawn(...)` giờ đi qua `TerminalInstanceRuntimeHooks`
+    - PTY reader/waiter loop của session-native runtime không còn hard-code `events.send(...)` trực tiếp cho `Output / Error / Exited`
+  - local fallback spawn path cũng đã được mở seam thêm một nấc:
+    - `chatminal-host-runtime/src/spawn_target.rs` thêm `LocalSpawnHooks`
+    - `LocalSpawnTarget::{new_with_hooks,new_serial_target_with_hooks}` cho phép inject typed callbacks theo `SessionTerminalHandle` cho local fallback path mà không làm rò `PaneId` ra public cross-crate boundary
+    - `LocalSpawnTarget::spawn_pane(...)` giờ đi qua `LocalPane::new_with_hooks(...)` và `register_pane_with_default_side_effects_and_io_hooks(...)`, nên default clipboard/download side effects vẫn giữ được đồng thời PTY hooks đã có seam riêng
+    - `apps/chatminal-desktop/src/desktop_host_runtime/spawn_target.rs` đã chuyển local/serial fallback constructors sang explicit `LocalSpawnHooks::default()`
+  - default dispatcher vẫn giữ semantics Mux-backed cho compat/non-session paths; đây là preparatory cut cho 03G chứ chưa phải final cutover
+- Architecture unification phase 04 có thêm một cut helper-level ở host runtime:
+  - `chatminal-host-runtime/src/lib.rs` thêm `default_exit_behavior()` và `default_workspace_name()` để gom các root config reads còn lại của host bootstrap/exit path vào boundary helper hẹp hơn
+- Architecture unification follow-up tiếp tục siết host/runtime boundary:
+  - `chatminal-host-runtime` thêm `FocusedPaneBinding` để thay raw `(TabId, PaneId)` tuple ở focused-pane boundary
+  - `ClientInfo.focused_pane_id` không còn là public field
+  - `Tab::kill_pane` dead API đã bị xóa, `Tab::remove_pane` bị thu hẹp về crate scope
+  - `chatminal-host-runtime/src/lib.rs` thêm helper control-plane/root access hẹp hơn để đưa public/free-function helpers gần `HostRuntimeControlPlane` hơn thay vì đi vòng qua `Mux` wrapper methods
+- Architecture unification phase 04 có thêm một cut low-risk:
+  - `chatminal-lua-bridge/src/lib.rs` snapshot fallback root-window size trước closure thay vì đọc `configuration()` trong closure đó
+  - `apps/chatminal-desktop/src/main.rs` thêm `current_config_handle()` để gom các root config snapshots ở startup/bootstrap
+  - `apps/chatminal-desktop/src/stats.rs` thêm `periodic_stat_logging_secs()` để gom nốt direct singleton reads còn lại trong stats bootstrap/reload path
+- Desktop session-pane input path trả `KeyCode::Backspace` thẳng cho leaf runtime encoder thay vì ép sang `Char(...)`; đây là root cause fix để khôi phục session-pane key forwarding tests.
+- Architecture unification phase 04 follow-up đã cắt thêm config singleton reads ở desktop boundary:
+  - `frontend.rs` nhận `ConfigHandle` snapshot lúc init, rồi refresh lại snapshot khi config reload
+  - `main.rs` thread `ConfigHandle` xuyên qua desktop bootstrap/serial startup thay vì re-read config giữa chừng
+  - `stats.rs` cache `periodic_stat_logging` bằng atomic + config subscription, bỏ polling singleton trong background loop
+  - `customglyph.rs` reuse block anti-alias decision từ glyph cache config snapshot thay vì đọc singleton lặp lại trong hot draw path
+  - `selection.rs` không còn tự đọc `selection_word_boundary` qua global config singleton trong word-selection path
+  - `overlay/copy.rs` dùng palette từ `TermWindow.config` thay vì kéo config singleton trong render path
+  - `colorease.rs` nhận `animation_fps` từ caller-owned config thay vì tự đọc global config trong animation path
+- `chatminal-host-runtime` được harden thêm quanh singleton lifecycle:
+  - `initialize_host_runtime()` re-use handle hiện có nếu mux đã được bootstrap, tránh split-brain re-init
+  - async cleanup trên main thread đổi sang best-effort path nếu mux đã shutdown trước khi task chạy
+  - `lib.rs` tách control-plane nội bộ thành `HostRuntimeControlPlane`, gom `primary_spawn_target`, subscribers, và client/identity/focus metadata khỏi phần registry/path PTY
+  - `window.rs` snapshot config `switch_to_last_active_tab_when_closing_tab` lúc tạo root window và route window notifications qua helper thay vì chạm `Mux` inline
+  - `lib.rs` giờ gom `primary_spawn_target`, subscribers, client registry, active identity, workspace metadata, và per-client focus metadata vào `HostRuntimeControlPlane` thay vì để logic này rải trong `Mux`
+- `chatminal-lua-bridge` Phase 03E được siết thêm ở root-window boundary:
+  - `WindowRef` không còn resolve raw mux/root-window guards cho workspace/title/session queries
+  - `active_session_id` / `active_terminal` dùng helper constructors/owned ids thay vì đụng internal representation
+  - `TerminalRef` tuple field giờ là private; desktop-side Lua entrypoint đã chuyển sang `pane_id()` helper thay vì chạm raw numeric field
+- Root-window path được dọn theo cùng nguyên tắc snapshot/local-helper:
+  - window-side notify/getter path ưu tiên helper wrappers thay vì raw singleton access
+  - Lua bridge root-window queries ưu tiên closure-based helpers, nên boundary bớt leak lock guards ra ngoài
+- Direct `session_pane` input boundary được normalize lại cho `Backspace`, để path gọi trực tiếp vào runtime khớp với engine input stack và giữ regression test ổn định
+
+### Verification
+- `cargo check -p chatminal-desktop` pass
+- `cargo check -p chatminal-host-runtime` pass
+- `cargo check -p chatminal-lua-bridge` pass
+- `cargo check --workspace` pass
+- `cargo test -p chatminal-runtime` pass (`104/104`)
+- `cargo test --manifest-path apps/chatminal-desktop/Cargo.toml -- --test-threads=1` pass (`87/87`)
+- `git diff --check` pass
+
 ## 2026-04-01
 
 ### Changed
@@ -14,11 +322,46 @@
 - Desktop startup path cũng đã được unify:
   - desktop sidebar không còn gate bởi `CHATMINAL_DESKTOP_SESSIONS_SIDEBAR`
   - `chatminal-desktop` mặc định boot vào unified desktop shell path thay vì terminal-only fallback
+- Architecture unification Phase 03 tiếp tục tiến thêm ở desktop host boundary:
+  - `session_pane.rs` bỏ hẳn direct `HostMux` access; pane output/input hook giờ đi qua desktop-owned wrappers
+  - `session_host.rs` thêm desktop-local public-id binding resolution, để session-native pane lookup và frontend pane fallback ưu tiên `DesktopSessionHost` registry trước legacy mux lookup
+  - `session_host.rs` local-first cleanup giờ prune session-native pane/session/runtime indexes trước khi mới fallback sang legacy mux removal
+  - desktop app direct `HostMux::{get,try_get}` / `Mux::{get,try_get}` hiện đã về `0`; singleton accessor bị đẩy xuống `chatminal-host-runtime`
+  - `chatminal-lua-bridge` bắt đầu Phase 03E theo hướng incremental:
+    - thêm `LuaBridgeHost` wrapper để gom runtime access hiện tại vào một chỗ
+    - `SessionRef` / `TerminalRef` / `WindowRef` không còn thread `Arc<Mux>` qua các module
+    - `TerminalRef` đổi public shape từ `PaneId` sang `usize`
+    - `LuaBridgeHost` và `WindowRef` vừa cắt thêm nhát `window/workspace metadata`:
+      - bridge không còn trả `MappedRwLock*Guard` cho root window
+      - `WindowRef` không còn `resolve()` / `resolve_mut()` guard paths
+      - `SpawnSession::spawn()` lấy root-window snapshot qua closure-based host helper thay vì giữ read-guard
+    - tiếp theo, `SessionRef` common surface cũng đã được gom về host:
+      - `LuaBridgeHost` giữ `Arc<Mux>` ổn định cho mỗi Lua call
+      - `session.rs` không còn resolve `Tab` trực tiếp cho title/window/activation/terminal-list paths
+      - `session.all_terminals()` giữ nguyên semantics compat là đọc pane registry của mux
+    - tiếp theo nữa, `TerminalRef` common surface cũng đã được gom về host:
+      - `leaf.rs` không còn resolve pane trực tiếp cho phần lớn metadata/query paths
+      - lookup pane chung đi qua `LuaBridgeHost::with_pane(...)` / `with_pane_result(...)`
+      - activation terminal được gom về `LuaBridgeHost::activate_terminal(...)`
+      - sửa luôn bug compat cũ: `rotate_clockwise()` không còn quay ngược chiều
+    - cuối cùng, phần spawn/split của Lua bridge cũng đã được gom về host:
+      - `SpawnSession::spawn()` không còn tự giữ spawn context/runtime spawn flow
+      - `SplitSession::run()` không còn tự giữ split runtime flow
+      - `LuaBridgeHost` là nơi tập trung backend cho cả spawn/split/query paths trong bridge
+  - thêm regression tests trực tiếp cho `session_host.rs` để khóa:
+    - public-id → terminal binding resolution
+    - frontend pane fallback resolution từ local registry
+    - local prune trước legacy fallback
+    - stale-session prune trong `reconcile_visible_sessions()`
 
 ### Verification
 - `cargo check --workspace` pass
 - `cargo test -p chatminal-config --lib` pass
 - `cargo test -p chatminal-host-runtime --lib` pass
+- `cargo check -p chatminal-lua-bridge` pass
+- `cargo test -p chatminal-lua-bridge` pass
+- `cargo check -p chatminal-desktop` pass
+- `cargo test --manifest-path apps/chatminal-desktop/Cargo.toml -- --test-threads=1` pass (`87/87`)
 
 ## 2026-03-29
 
@@ -617,3 +960,19 @@
   - `bash scripts/smoke/window-wezterm-smoke.sh` PASS
   - `bash scripts/migration/phase08-wezterm-gui-killswitch-verify.sh` PASS
   - `cargo check -p chatminal-wezterm-gui` từng bị chặn ở `x11-xcb.pc`; sau batch remap mới, blocker host hiện tại đã tiến tới `xcb-util.pc`
+
+### Phase 05 Final Closeout (2026-04-03)
+- Host-runtime product ownership cleanup:
+  - host-runtime product path now initializes, shuts down, and publishes root notifications through `HostRuntimeRoot` ownership instead of treating `Mux` as the runtime owner
+  - `initialize_host_runtime()` / `shutdown_host_runtime()` now operate on the installed host runtime root; `Mux` survives only as compat shell/internal legacy naming
+  - product path moved from default `mux_default()` hooks to `host_default()` hooks in host-runtime spawn/localpane/PTY seams
+  - desktop local spawn target now opts into `LocalSpawnHooks::host_default()` for both local and serial paths
+- Scope decisions made explicit:
+  - config sectioning / singleton replacement remains follow-up work in `plans/260403-1800-post-unification-followups`
+  - crate rename/cosmetic sweep also moved to that follow-up plan
+- Final verify gates that passed:
+  - `cargo check --workspace`
+  - `cargo test --workspace --lib --bins --tests`
+  - `cargo test -p chatminal-host-runtime --lib -- --test-threads=1`
+  - `cargo test -p chatminal-lua-bridge`
+  - `cargo test --manifest-path apps/chatminal-desktop/Cargo.toml -- --test-threads=1`

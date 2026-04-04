@@ -3,24 +3,25 @@ use config::lua::mlua::{self, Lua, MetaMethod, UserData, UserDataMethods, UserDa
 use config::lua::{
     emit_event, get_or_create_module, get_or_create_sub_module, is_event_emission, wrap_callback,
 };
-use config::ConfigSubscription;
+use config::{ConfigHandle, ConfigSubscription};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 lazy_static::lazy_static! {
     static ref CONFIG_SUBSCRIPTION: Mutex<Option<ConfigSubscription>> = Mutex::new(None);
 }
+static CURRENT_CONFIG_GENERATION: AtomicUsize = AtomicUsize::new(0);
 
 /// We contrive to call this from the main thread in response to the
 /// config being reloaded.
 /// It spawns a task for each of the timers that have been configured
 /// by the user via `chatminal.time.call_after`.
-fn schedule_all(lua: Option<Rc<mlua::Lua>>) -> mlua::Result<()> {
+fn schedule_all(lua: Option<Rc<mlua::Lua>>, generation: usize) -> mlua::Result<()> {
     if let Some(lua) = lua {
         let scheduled_events: Vec<UserDataRef<ScheduledEvent>> =
             lua.named_registry_value(SCHEDULED_EVENTS)?;
         lua.set_named_registry_value(SCHEDULED_EVENTS, Vec::<ScheduledEvent>::new())?;
-        let generation = config::configuration().generation();
         for event in scheduled_events {
             event.clone().schedule(generation);
         }
@@ -30,10 +31,10 @@ fn schedule_all(lua: Option<Rc<mlua::Lua>>) -> mlua::Result<()> {
 
 /// Helper to schedule !Send futures to run with access to the lua
 /// config on the main thread
-fn schedule_trampoline() {
+fn schedule_trampoline(generation: usize) {
     promise::spawn::spawn(async move {
         config::with_lua_config_on_main_thread(|lua| async move {
-            schedule_all(lua)?;
+            schedule_all(lua, generation)?;
             Ok(())
         })
         .await
@@ -44,10 +45,12 @@ fn schedule_trampoline() {
 /// Called by the config subsystem when the config is reloaded.
 /// We use it to schedule our setup function that will schedule
 /// the call_after functions from the main thread.
-pub fn config_was_reloaded() -> bool {
+pub fn config_was_reloaded(config: ConfigHandle) -> bool {
+    let generation = config.generation();
+    CURRENT_CONFIG_GENERATION.store(generation, Ordering::Relaxed);
     if promise::spawn::is_scheduler_configured() {
         promise::spawn::spawn_into_main_thread(async move {
-            schedule_trampoline();
+            schedule_trampoline(generation);
         })
         .detach();
     }
@@ -98,7 +101,7 @@ impl ScheduledEvent {
         smol::Timer::after(duration).await;
         // Skip doing anything of consequence if the generation has
         // changed.
-        if config::configuration().generation() == generation {
+        if CURRENT_CONFIG_GENERATION.load(Ordering::Relaxed) == generation {
             let args = lua.pack_multi(())?;
             emit_event(&lua, (self.user_event_id, args)).await?;
         }
@@ -116,7 +119,9 @@ pub fn register(lua: &Lua) -> anyhow::Result<()> {
     {
         let mut sub = CONFIG_SUBSCRIPTION.lock().unwrap();
         if sub.is_none() {
-            sub.replace(config::subscribe_to_config_reload(config_was_reloaded));
+            sub.replace(config::subscribe_to_config_reload_with_config(
+                config_was_reloaded,
+            ));
         }
     }
     lua.set_named_registry_value(SCHEDULED_EVENTS, Vec::<ScheduledEvent>::new())?;
@@ -158,7 +163,7 @@ pub fn register(lua: &Lua) -> anyhow::Result<()> {
             };
 
             if is_event_emission(lua)? {
-                let generation = config::configuration().generation();
+                let generation = CURRENT_CONFIG_GENERATION.load(Ordering::Relaxed);
                 event.schedule(generation);
             } else {
                 let scheduled_events: Vec<UserDataRef<ScheduledEvent>> =

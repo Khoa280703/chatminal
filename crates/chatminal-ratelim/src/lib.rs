@@ -1,4 +1,4 @@
-use config::{configuration, ConfigHandle};
+use config::ConfigHandle;
 use governor::clock::{Clock, DefaultClock};
 use governor::{NegativeMultiDecision, Quota, RateLimiter as Limiter};
 use std::num::NonZeroU32;
@@ -18,8 +18,10 @@ impl RateLimiter {
     /// as the config changes.
     /// This will effectively reset the counter if the limit value in
     /// the new generation of config is different to the prior value.
-    pub fn new<F: Fn(&ConfigHandle) -> u32 + 'static + Send>(get_limit_value: F) -> Self {
-        let config = configuration();
+    pub fn new<F: Fn(&ConfigHandle) -> u32 + 'static + Send>(
+        config: ConfigHandle,
+        get_limit_value: F,
+    ) -> Self {
         let generation = config.generation();
         let get_limit_value = Box::new(get_limit_value);
         let capacity_per_second = get_limit_value(&config);
@@ -33,8 +35,7 @@ impl RateLimiter {
         }
     }
 
-    fn check_config_reload(&mut self) {
-        let config = configuration();
+    pub fn update_config(&mut self, config: &ConfigHandle) {
         let generation = config.generation();
         if generation != self.generation {
             let value = (self.get_limit_value)(&config);
@@ -50,7 +51,6 @@ impl RateLimiter {
 
     #[allow(dead_code)]
     pub fn non_blocking_admittance_check(&mut self, amount: u32) -> bool {
-        self.check_config_reload();
         self.lim
             .check_n(NonZeroU32::new(amount).expect("amount to be non-zero"))
             .is_ok()
@@ -62,7 +62,6 @@ impl RateLimiter {
     /// If no items can be admitted immediately, returns a duration
     /// of time after which the caller should retry to admit.
     pub fn admit_check(&mut self, mut amount: u32) -> Result<u32, Duration> {
-        self.check_config_reload();
         loop {
             let non_zero_amount = match NonZeroU32::new(amount) {
                 Some(n) => n,

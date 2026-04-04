@@ -1,6 +1,6 @@
 //! Bridge our gui config into the terminal crate configuration
 
-use crate::{configuration, ConfigHandle, NewlineCanon};
+use crate::{ConfigHandle, NewlineCanon};
 use engine_term::color::ColorPalette;
 use engine_term::config::BidiMode;
 use std::sync::Mutex;
@@ -8,27 +8,24 @@ use termwiz::cell::UnicodeVersion;
 
 #[derive(Debug)]
 pub struct TermConfig {
-    config: Mutex<Option<ConfigHandle>>,
+    config: Mutex<ConfigHandle>,
     client_palette: Mutex<Option<ColorPalette>>,
 }
 
 impl TermConfig {
-    pub fn new() -> Self {
+    pub fn with_config(config: ConfigHandle) -> Self {
         Self {
-            config: Mutex::new(None),
+            config: Mutex::new(config),
             client_palette: Mutex::new(None),
         }
     }
 
-    pub fn with_config(config: ConfigHandle) -> Self {
-        Self {
-            config: Mutex::new(Some(config)),
-            client_palette: Mutex::new(None),
-        }
+    pub fn current_config_handle(&self) -> ConfigHandle {
+        self.config.lock().unwrap().clone()
     }
 
     pub fn set_config(&self, config: ConfigHandle) {
-        self.config.lock().unwrap().replace(config);
+        *self.config.lock().unwrap() = config;
     }
 
     pub fn set_client_palette(&self, palette: ColorPalette) {
@@ -36,10 +33,7 @@ impl TermConfig {
     }
 
     fn configuration(&self) -> ConfigHandle {
-        match self.config.lock().unwrap().as_ref() {
-            Some(h) => h.clone(),
-            None => configuration(),
-        }
+        self.current_config_handle()
     }
 }
 
@@ -71,7 +65,7 @@ impl engine_term::TerminalConfiguration for TermConfig {
     }
 
     fn enq_answerback(&self) -> String {
-        configuration().enq_answerback.clone()
+        self.configuration().enq_answerback.clone()
     }
 
     fn enable_kitty_graphics(&self) -> bool {

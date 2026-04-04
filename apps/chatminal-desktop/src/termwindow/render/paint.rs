@@ -1,7 +1,9 @@
+use crate::chatminal_runtime::{
+    record_host_focus_for_current_identity, terminal_handle_for_overlay_pane,
+};
 use crate::termwindow::{RenderFrame, TermWindowNotif};
-use crate::chatminal_runtime::record_host_focus_for_current_identity;
-use ::window::bitmaps::atlas::OutOfTextureSpace;
 use ::window::WindowOps;
+use ::window::bitmaps::atlas::OutOfTextureSpace;
 use anyhow::Context;
 use engine_font::ClearShapeCache;
 use smol::Timer;
@@ -194,9 +196,13 @@ impl crate::TermWindow {
                 let top = panes
                     .iter()
                     .find(|p| p.is_active)
-                    .map(|p| match self.get_viewport(p.pane.pane_id() as u64) {
-                        Some(top) => top,
-                        None => p.pane.get_dimensions().physical_top,
+                    .map(|p| {
+                        match self.get_viewport(
+                            crate::desktop_termwindow_types::terminal_ui_key_for_pane(&*p.pane),
+                        ) {
+                            Some(top) => top,
+                            None => p.pane.get_dimensions().physical_top,
+                        }
                     })
                     .unwrap_or(0);
 
@@ -252,7 +258,9 @@ impl crate::TermWindow {
                 self.update_text_cursor(&pos);
                 if focused {
                     pos.pane.advise_focus();
-                    record_host_focus_for_current_identity(pos.pane.pane_id());
+                    record_host_focus_for_current_identity(terminal_handle_for_overlay_pane(
+                        &*pos.pane,
+                    ));
                 }
             }
             self.paint_pane(&pos, &mut layers).context("paint_pane")?;

@@ -21,3 +21,4 @@ termwiz.workspace = true
 url-funcs.workspace = true
 engine-dynamic.workspace = true
 engine-term.workspace = true
+chatminal-runtime = { path = "../chatminal-runtime" }

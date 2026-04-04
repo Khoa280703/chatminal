@@ -17,7 +17,7 @@ impl TermWindow {
                 None => return,
             },
         };
-        let pane_id = pane.pane_id() as u64;
+        let pane_id = crate::desktop_termwindow_types::terminal_ui_key_for_pane(&*pane);
         let name = name.to_string();
 
         async fn do_event(
@@ -116,12 +116,11 @@ impl TermWindow {
     }
 
     fn check_for_dirty_lines_and_invalidate_selection(&mut self, pane: &Arc<dyn OverlayPane>) {
+        let pane_id = crate::desktop_termwindow_types::terminal_ui_key_for_pane(&**pane);
         let dims = self.renderable_dimensions_for_pane(pane);
-        let viewport = self
-            .get_viewport(pane.pane_id() as u64)
-            .unwrap_or(dims.physical_top);
+        let viewport = self.get_viewport(pane_id).unwrap_or(dims.physical_top);
         let visible_range = viewport..viewport + dims.viewport_rows as StableRowIndex;
-        let seqno = self.selection(pane.pane_id() as u64).seqno;
+        let seqno = self.selection(pane_id).seqno;
         let dirty = pane.get_changed_since(visible_range, seqno);
 
         if dirty.is_empty() {
@@ -137,19 +136,18 @@ impl TermWindow {
             // highlighting purpose but also manipulates the selection
             // and we want to allow it to retain the selection it made!
 
-            let clear_selection = if let Some(selection_range) =
-                self.selection(pane.pane_id() as u64).range.as_ref()
-            {
-                let selection_rows = selection_range.rows();
-                selection_rows.into_iter().any(|row| dirty.contains(row))
-            } else {
-                false
-            };
+            let clear_selection =
+                if let Some(selection_range) = self.selection(pane_id).range.as_ref() {
+                    let selection_rows = selection_range.rows();
+                    selection_rows.into_iter().any(|row| dirty.contains(row))
+                } else {
+                    false
+                };
 
             if clear_selection {
-                self.selection(pane.pane_id() as u64).range.take();
-                self.selection(pane.pane_id() as u64).origin.take();
-                self.selection(pane.pane_id() as u64).seqno = pane.get_current_seqno();
+                self.selection(pane_id).range.take();
+                self.selection(pane_id).origin.take();
+                self.selection(pane_id).seqno = pane.get_current_seqno();
             }
         }
     }
@@ -159,7 +157,7 @@ impl TermWindow {
     fn palette(&mut self) -> &ColorPalette {
         if self.palette.is_none() {
             self.palette
-                .replace(config::TermConfig::new().color_palette());
+                .replace(config::TermConfig::with_config(self.config.clone()).color_palette());
         }
         self.palette.as_ref().unwrap()
     }
@@ -356,19 +354,16 @@ impl TermWindow {
                 .any(|leaf| leaf.host_terminal_handle == pane_id as u64);
         }
 
-        let Some(pane_id) = crate::desktop_termwindow_types::pane_id_from_terminal_ui_key(pane_id)
+        let Some(host_pane_id) =
+            crate::desktop_termwindow_types::pane_id_from_terminal_ui_key(pane_id)
         else {
             return false;
         };
 
         self.with_host_window(|window| {
-            window.iter().any(|tab| {
-                tab.contains_pane(crate::chatminal_runtime::SessionTerminalHandle::new(
-                    pane_id as u64,
-                ))
-            })
+            window.iter().any(|tab| tab.contains_pane(host_pane_id))
         })
-            .unwrap_or(false)
+        .unwrap_or(false)
     }
 
     fn emit_user_var_event(&mut self, pane_id: TerminalUiKey, name: String, value: String) {
@@ -378,7 +373,7 @@ impl TermWindow {
 
         let window = GuiWin::new(self);
         let pane = match self.terminal_handle_arc(pane_id) {
-            Some(pane) => pane.pane_id() as u64,
+            Some(pane) => crate::desktop_termwindow_types::terminal_ui_key_for_pane(&*pane),
             None => return,
         };
 
@@ -710,7 +705,7 @@ impl TermWindow {
         let overlay_config = self.config.clone();
 
         let gui_win = GuiWin::new(self);
-        let pane_id = pane.pane_id() as u64;
+        let pane_id = crate::desktop_termwindow_types::terminal_ui_key_for_pane(&*pane);
 
         self.spawn_overlay_on_active_render_scope(move |_tab_id, term| {
             crate::overlay::selector::selector(term, overlay_config, args, gui_win, pane_id)
@@ -726,7 +721,7 @@ impl TermWindow {
         let args = args.clone();
 
         let gui_win = GuiWin::new(self);
-        let pane_id = pane.pane_id() as u64;
+        let pane_id = crate::desktop_termwindow_types::terminal_ui_key_for_pane(&*pane);
 
         self.spawn_overlay_on_active_render_scope(move |_tab_id, term| {
             crate::overlay::prompt::show_line_prompt_overlay(term, args, gui_win, pane_id)
@@ -742,7 +737,7 @@ impl TermWindow {
         let args = args.clone();
 
         let gui_win = GuiWin::new(self);
-        let pane_id = pane.pane_id() as u64;
+        let pane_id = crate::desktop_termwindow_types::terminal_ui_key_for_pane(&*pane);
 
         self.spawn_overlay_on_active_render_scope(move |_tab_id, term| {
             crate::overlay::confirm::show_confirmation_overlay(term, args, gui_win, pane_id)
@@ -795,7 +790,7 @@ impl TermWindow {
             Some(pane) => pane,
             None => return,
         };
-        let pane_id = pane.pane_id() as u64;
+        let pane_id = crate::desktop_termwindow_types::terminal_ui_key_for_pane(&*pane);
         let title = args.title.unwrap();
         let flags = args.flags;
         let help_text = args.help_text.unwrap_or(
@@ -839,7 +834,9 @@ impl TermWindow {
     fn get_semantic_prompt_zones(&mut self, pane: &Arc<dyn OverlayPane>) -> &[StableRowIndex] {
         let cache = self
             .semantic_zones
-            .entry(pane.pane_id() as u64)
+            .entry(crate::desktop_termwindow_types::terminal_ui_key_for_pane(
+                &**pane,
+            ))
             .or_insert_with(SemanticZoneCache::default);
 
         let seqno = pane.get_current_seqno();
@@ -871,10 +868,9 @@ impl TermWindow {
         amount: isize,
         pane: &Arc<dyn OverlayPane>,
     ) -> anyhow::Result<()> {
+        let pane_id = crate::desktop_termwindow_types::terminal_ui_key_for_pane(&**pane);
         let dims = self.renderable_dimensions_for_pane(pane);
-        let position = self
-            .get_viewport(pane.pane_id() as u64)
-            .unwrap_or(dims.physical_top);
+        let position = self.get_viewport(pane_id).unwrap_or(dims.physical_top);
         let zone = {
             let zones = self.get_semantic_prompt_zones(&pane);
             let idx = match zones.binary_search(&position) {
@@ -884,7 +880,7 @@ impl TermWindow {
             zones.get(idx).cloned()
         };
         if let Some(zone) = zone {
-            self.set_viewport(pane.pane_id() as u64, Some(zone), dims);
+            self.set_viewport(pane_id, Some(zone), dims);
         }
 
         if let Some(win) = self.window.as_ref() {
@@ -894,12 +890,11 @@ impl TermWindow {
     }
 
     fn scroll_by_page(&mut self, amount: f64, pane: &Arc<dyn OverlayPane>) -> anyhow::Result<()> {
+        let pane_id = crate::desktop_termwindow_types::terminal_ui_key_for_pane(&**pane);
         let dims = self.renderable_dimensions_for_pane(pane);
-        let position = self
-            .get_viewport(pane.pane_id() as u64)
-            .unwrap_or(dims.physical_top) as f64
+        let position = self.get_viewport(pane_id).unwrap_or(dims.physical_top) as f64
             + (amount * dims.viewport_rows as f64);
-        self.set_viewport(pane.pane_id() as u64, Some(position as isize), dims);
+        self.set_viewport(pane_id, Some(position as isize), dims);
         if let Some(win) = self.window.as_ref() {
             win.invalidate();
         }
@@ -921,12 +916,13 @@ impl TermWindow {
     }
 
     fn scroll_by_line(&mut self, amount: isize, pane: &Arc<dyn OverlayPane>) -> anyhow::Result<()> {
+        let pane_id = crate::desktop_termwindow_types::terminal_ui_key_for_pane(&**pane);
         let dims = self.renderable_dimensions_for_pane(pane);
         let position = self
-            .get_viewport(pane.pane_id() as u64)
+            .get_viewport(pane_id)
             .unwrap_or(dims.physical_top)
             .saturating_add(amount);
-        self.set_viewport(pane.pane_id() as u64, Some(position), dims);
+        self.set_viewport(pane_id, Some(position), dims);
         if let Some(win) = self.window.as_ref() {
             win.invalidate();
         }

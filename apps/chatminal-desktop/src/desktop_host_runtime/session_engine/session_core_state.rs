@@ -72,6 +72,12 @@ impl SessionRuntimeRecord {
             })
             .process = Some(process);
     }
+
+    pub fn clear_leaf_process(&mut self, terminal_instance_id: TerminalInstanceId) {
+        if let Some(leaf) = self.leaves.get_mut(&terminal_instance_id) {
+            leaf.process = None;
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

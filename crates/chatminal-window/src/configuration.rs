@@ -1,3 +1,6 @@
+use crate::connection::ConnectionOps;
+use crate::Connection;
+
 pub(crate) fn prefer_swrast() -> bool {
     #[cfg(windows)]
     {
@@ -8,5 +11,9 @@ pub(crate) fn prefer_swrast() -> bool {
             return true;
         }
     }
-    config::configuration().front_end == config::FrontEndSelection::Software
+    Connection::get()
+        .map(|conn| conn.config())
+        .unwrap_or_else(config::current_config_handle)
+        .front_end
+        == config::FrontEndSelection::Software
 }

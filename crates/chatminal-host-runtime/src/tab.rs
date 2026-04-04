@@ -1,6 +1,6 @@
 use crate::pane::*;
 use crate::renderable::StableCursorPosition;
-use crate::{notify_mux, remove_pane_on_main_thread, try_global_mux, MuxNotification};
+use crate::{notify_mux, remove_pane_on_main_thread, try_host_runtime_root, MuxNotification};
 use bintree::PathBranch;
 use chatminal_runtime::{RuntimeId, SessionTerminalHandle};
 use config::keyassignment::SessionDirection;
@@ -17,7 +17,7 @@ pub type Tree = bintree::Tree<Arc<dyn Pane>, SplitDirectionAndSize>;
 pub type Cursor = bintree::Cursor<Arc<dyn Pane>, SplitDirectionAndSize>;
 
 static TAB_ID: ::std::sync::atomic::AtomicUsize = ::std::sync::atomic::AtomicUsize::new(0);
-pub type TabId = usize;
+pub(crate) type TabId = usize;
 
 #[derive(Default)]
 struct Recency {
@@ -87,7 +87,7 @@ impl std::fmt::Debug for PositionedPane {
             .field("top", &self.top)
             .field("width", &self.width)
             .field("height", &self.height)
-            .field("pane_id", &self.pane.pane_id())
+            .field("terminal_handle", &self.pane.terminal_handle())
             .finish()
     }
 }
@@ -207,7 +207,7 @@ pub struct PositionedSplit {
 
 fn is_pane(pane: &Arc<dyn Pane>, other: &Option<&Arc<dyn Pane>>) -> bool {
     if let Some(other) = other {
-        other.pane_id() == pane.pane_id()
+        other.terminal_handle() == pane.terminal_handle()
     } else {
         false
     }
@@ -471,7 +471,7 @@ impl Tab {
         self.inner.lock().iter_splits()
     }
 
-    pub fn tab_id(&self) -> TabId {
+    pub(crate) fn tab_id(&self) -> TabId {
         self.tab_id
     }
 
@@ -548,6 +548,13 @@ impl Tab {
         self.inner.lock().get_pane_direction(direction, ignore_zoom)
     }
 
+    pub fn terminal_handle_in_direction(
+        &self,
+        direction: SessionDirection,
+    ) -> Option<SessionTerminalHandle> {
+        self.inner.lock().terminal_handle_in_direction(direction)
+    }
+
     pub fn prune_dead_panes(&self) -> bool {
         self.inner.lock().prune_dead_panes()
     }
@@ -578,6 +585,12 @@ impl Tab {
 
     pub fn set_active_pane(&self, pane: &Arc<dyn Pane>) {
         self.inner.lock().set_active_pane(pane)
+    }
+
+    pub fn set_active_terminal_handle(&self, terminal_handle: SessionTerminalHandle) -> bool {
+        self.inner
+            .lock()
+            .set_active_terminal_handle(terminal_handle)
     }
 
     pub fn set_active_idx(&self, pane_index: usize) {
@@ -704,7 +717,7 @@ impl TabInner {
             match tree {
                 Tree::Empty => false,
                 Tree::Node { left, right, .. } => contains(left, pane) || contains(right, pane),
-                Tree::Leaf(p) => p.pane_id() == pane,
+                Tree::Leaf(p) => pane_id_for_pane(p.as_ref()) == pane,
             }
         }
         match &self.pane {
@@ -811,7 +824,7 @@ impl TabInner {
         }
 
         let active_idx = self.active;
-        let zoomed_id = self.zoomed.as_ref().map(|p| p.pane_id());
+        let zoomed_terminal_handle = self.zoomed.as_ref().map(|p| p.terminal_handle());
         let root_size = self.size;
         let mut cursor = self.pane.take().unwrap().cursor();
 
@@ -843,7 +856,7 @@ impl TabInner {
                 panes.push(PositionedPane {
                     index,
                     is_active: index == active_idx,
-                    is_zoomed: zoomed_id == Some(pane.pane_id()),
+                    is_zoomed: zoomed_terminal_handle == Some(pane.terminal_handle()),
                     left,
                     top,
                     width: dims.cols as _,
@@ -1347,7 +1360,8 @@ impl TabInner {
     }
 
     fn prune_dead_panes(&mut self) -> bool {
-        let mux = try_global_mux().expect("host mux must exist while pruning dead panes");
+        let root =
+            try_host_runtime_root().expect("host runtime root must exist while pruning dead panes");
         !self
             .remove_pane_if(
                 |_, pane| {
@@ -1355,11 +1369,12 @@ impl TabInner {
                     // state isn't guaranteed to be monitored or updated, so let's
                     // consider the pane effectively dead if it isn't in the mux.
                     // upstream issue #4030
-                    let in_mux = mux.get_pane(pane.pane_id()).is_some();
+                    let pane_id = pane_id_for_pane(pane.as_ref());
+                    let in_mux = root.get_pane(pane_id).is_some();
                     let dead = pane.is_dead();
                     log::trace!(
                         "prune_dead_panes: pane_id={} dead={} in_mux={}",
-                        pane.pane_id(),
+                        pane_id,
                         dead,
                         in_mux
                     );
@@ -1371,7 +1386,7 @@ impl TabInner {
     }
 
     fn remove_pane(&mut self, pane_id: PaneId) -> Option<Arc<dyn Pane>> {
-        let panes = self.remove_pane_if(|_, pane| pane.pane_id() == pane_id, false);
+        let panes = self.remove_pane_if(|_, pane| pane_id_for_pane(pane.as_ref()) == pane_id, false);
         for pane in panes {
             return Some(pane);
         }
@@ -1383,7 +1398,7 @@ impl TabInner {
         F: Fn(usize, &Arc<dyn Pane>) -> bool,
     {
         let mut dead_panes = vec![];
-        let zoomed_pane = self.zoomed.as_ref().map(|p| p.pane_id());
+        let zoomed_terminal_handle = self.zoomed.as_ref().map(|p| p.terminal_handle());
 
         {
             let root_size = self.size;
@@ -1409,7 +1424,7 @@ impl TabInner {
                     let pane = Arc::clone(cursor.leaf_mut().unwrap());
                     if f(pane_index, &pane) {
                         removed_indices.push(pane_index);
-                        if Some(pane.pane_id()) == zoomed_pane {
+                        if Some(pane.terminal_handle()) == zoomed_terminal_handle {
                             // If we removed the zoomed pane, un-zoom our state!
                             self.zoomed.take();
                         }
@@ -1474,7 +1489,10 @@ impl TabInner {
         }
 
         if !dead_panes.is_empty() && kill {
-            let to_kill: Vec<_> = dead_panes.iter().map(|p| p.pane_id()).collect();
+            let to_kill: Vec<_> = dead_panes
+                .iter()
+                .map(|p| pane_id_for_pane(p.as_ref()))
+                .collect();
             for pane_id in to_kill.into_iter() {
                 remove_pane_on_main_thread(pane_id);
             }
@@ -1537,7 +1555,7 @@ impl TabInner {
         if let Some(item) = self
             .iter_panes_ignoring_zoom()
             .iter()
-            .find(|p| p.pane.pane_id() == pane.pane_id())
+            .find(|p| p.pane.terminal_handle() == pane.terminal_handle())
         {
             self.active = item.index;
             self.recency.tag(item.index);
@@ -1545,17 +1563,56 @@ impl TabInner {
         }
     }
 
+    fn set_active_terminal_handle(&mut self, terminal_handle: SessionTerminalHandle) -> bool {
+        let Some(target_pane) = self
+            .iter_panes_ignoring_zoom()
+            .into_iter()
+            .find(|pos| pos.pane.terminal_handle().as_u64() == terminal_handle.as_u64())
+            .map(|pos| pos.pane)
+        else {
+            return false;
+        };
+        self.set_active_pane(&target_pane);
+        self.get_active_pane()
+            .map(|pane| pane.terminal_handle() == terminal_handle)
+            .unwrap_or(false)
+    }
+
+    fn terminal_handle_in_direction(
+        &mut self,
+        direction: SessionDirection,
+    ) -> Option<SessionTerminalHandle> {
+        let ignore_zoom = if self.zoomed.is_some() {
+            if !self.unzoom_on_switch_pane {
+                return None;
+            }
+            true
+        } else {
+            false
+        };
+
+        let panes = if ignore_zoom {
+            self.iter_panes_ignoring_zoom()
+        } else {
+            self.iter_panes()
+        };
+        let pane_index = self.get_pane_direction(direction, ignore_zoom)?;
+        panes.get(pane_index).map(|pos| pos.pane.terminal_handle())
+    }
+
     fn advise_focus_change(&mut self, prior: Option<Arc<dyn Pane>>) {
         let current = self.get_active_pane();
         match (prior, current) {
-            (Some(prior), Some(current)) if prior.pane_id() != current.pane_id() => {
+            (Some(prior), Some(current))
+                if prior.terminal_handle() != current.terminal_handle() =>
+            {
                 prior.focus_changed(false);
                 current.focus_changed(true);
-                notify_mux(MuxNotification::PaneFocused(current.pane_id()));
+                notify_mux(MuxNotification::PaneFocused(pane_id_for_pane(current.as_ref())));
             }
             (None, Some(current)) => {
                 current.focus_changed(true);
-                notify_mux(MuxNotification::PaneFocused(current.pane_id()));
+                notify_mux(MuxNotification::PaneFocused(pane_id_for_pane(current.as_ref())));
             }
             (Some(prior), None) => {
                 prior.focus_changed(false);
@@ -1962,8 +2019,8 @@ mod test {
     }
 
     impl Pane for FakePane {
-        fn pane_id(&self) -> PaneId {
-            self.id
+        fn terminal_handle(&self) -> SessionTerminalHandle {
+            SessionTerminalHandle::new(self.id as u64)
         }
 
         fn get_cursor_position(&self) -> StableCursorPosition {
@@ -2168,7 +2225,7 @@ mod test {
         assert_eq!(24, panes[0].height);
         assert_eq!(390, panes[0].pixel_width);
         assert_eq!(600, panes[0].pixel_height);
-        assert_eq!(1, panes[0].pane.pane_id());
+        assert_eq!(SessionTerminalHandle::new(1), panes[0].pane.terminal_handle());
 
         assert_eq!(1, panes[1].index);
         assert_eq!(true, panes[1].is_active);
@@ -2178,7 +2235,7 @@ mod test {
         assert_eq!(24, panes[1].height);
         assert_eq!(400, panes[1].pixel_width);
         assert_eq!(600, panes[1].pixel_height);
-        assert_eq!(2, panes[1].pane.pane_id());
+        assert_eq!(SessionTerminalHandle::new(2), panes[1].pane.terminal_handle());
 
         let vert_size = tab
             .compute_split_size(
@@ -2214,7 +2271,7 @@ mod test {
         assert_eq!(11, panes[0].height);
         assert_eq!(390, panes[0].pixel_width);
         assert_eq!(275, panes[0].pixel_height);
-        assert_eq!(1, panes[0].pane.pane_id());
+        assert_eq!(SessionTerminalHandle::new(1), panes[0].pane.terminal_handle());
 
         assert_eq!(1, panes[1].index);
         assert_eq!(true, panes[1].is_active);
@@ -2224,7 +2281,7 @@ mod test {
         assert_eq!(12, panes[1].height);
         assert_eq!(390, panes[1].pixel_width);
         assert_eq!(300, panes[1].pixel_height);
-        assert_eq!(3, panes[1].pane.pane_id());
+        assert_eq!(SessionTerminalHandle::new(3), panes[1].pane.terminal_handle());
 
         assert_eq!(2, panes[2].index);
         assert_eq!(false, panes[2].is_active);
@@ -2234,7 +2291,7 @@ mod test {
         assert_eq!(24, panes[2].height);
         assert_eq!(400, panes[2].pixel_width);
         assert_eq!(600, panes[2].pixel_height);
-        assert_eq!(2, panes[2].pane.pane_id());
+        assert_eq!(SessionTerminalHandle::new(2), panes[2].pane.terminal_handle());
 
         tab.resize_split_by(1, 1);
         let panes = tab.iter_panes();
@@ -2261,5 +2318,54 @@ mod test {
     #[test]
     fn tab_is_send_and_sync() {
         assert!(is_send_and_sync::<Tab>());
+    }
+
+    #[test]
+    fn terminal_handle_in_direction_respects_zoom_lock() {
+        let size = TerminalSize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 800,
+            pixel_height: 600,
+            dpi: 96,
+        };
+
+        let tab = Tab::new(&size);
+        tab.assign_pane(&FakePane::new(1, size));
+
+        let split = tab
+            .compute_split_size(
+                0,
+                SplitRequest {
+                    direction: SplitDirection::Horizontal,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        tab.split_and_insert(
+            0,
+            SplitRequest {
+                direction: SplitDirection::Horizontal,
+                ..Default::default()
+            },
+            FakePane::new(2, split.second),
+        )
+        .unwrap();
+
+        {
+            let mut inner = tab.inner.lock();
+            inner.unzoom_on_switch_pane = false;
+        }
+        tab.set_zoomed(true);
+
+        assert_eq!(
+            tab.terminal_handle_in_direction(SessionDirection::Next),
+            None
+        );
+        assert!(!tab.set_active_terminal_handle(SessionTerminalHandle::new(1)));
+        assert_eq!(
+            tab.get_active_pane().map(|pane| pane.terminal_handle()),
+            Some(SessionTerminalHandle::new(2))
+        );
     }
 }

@@ -58,11 +58,12 @@ impl PaneSelector {
             .expect("to resolve pane selection font");
         let metrics = RenderMetrics::with_font_metrics(&font.metrics());
 
-        let top_bar_height = if term_window.show_session_bar && !term_window.config.session_bar_at_bottom {
-            term_window.tab_bar_pixel_height().unwrap()
-        } else {
-            0.
-        };
+        let top_bar_height =
+            if term_window.show_session_bar && !term_window.config.session_bar_at_bottom {
+                term_window.tab_bar_pixel_height().unwrap()
+            } else {
+                0.
+            };
         let (padding_left, padding_top) = term_window.padding_left_top();
         let border = term_window.get_os_border();
         let top_pixel_y = top_bar_height + padding_top + border.top.get() as f32;
@@ -75,7 +76,7 @@ impl PaneSelector {
         let modal_bg = LinearRgba::with_components(0.007, 0.007, 0.007, 1.0);
         for (pane_index, pos) in panes.into_iter().enumerate() {
             let caption = if show_session_ids {
-                format!("{}: {}", labels[pane_index], pos.pane.pane_id())
+                format!("{}: {}", labels[pane_index], pos.pane.terminal_handle().as_u64())
             } else {
                 labels[pane_index].clone()
             };
@@ -143,6 +144,7 @@ impl PaneSelector {
                     ),
                     metrics: &metrics,
                     gl_state: term_window.render_state.as_ref().unwrap(),
+                    custom_block_glyphs: term_window.config.custom_block_glyphs,
                     zindex: 100,
                 },
                 &element,
@@ -171,12 +173,14 @@ impl PaneSelector {
             match self.mode {
                 SessionSelectMode::SwapWithActiveKeepFocus | SessionSelectMode::SwapWithActive => {
                     if term_window.chatminal_sidebar.is_enabled() {
-                        log::warn!(
-                            "session-native leaf swap is no longer supported"
-                        );
+                        log::warn!("session-native leaf swap is no longer supported");
                     } else {
+                        let terminal_handle =
+                            crate::desktop_termwindow_types::terminal_ui_key_for_pane(
+                                &*target.pane,
+                            );
                         let _ = term_window.swap_active_with_terminal_handle_in_active_runtime(
-                            target.pane.pane_id() as u64,
+                            terminal_handle,
                             self.mode == SessionSelectMode::SwapWithActiveKeepFocus,
                         );
                     }
@@ -252,7 +256,8 @@ impl Modal for PaneSelector {
         term_window: &mut TermWindow,
     ) -> anyhow::Result<Ref<'_, [ComputedElement]>> {
         if self.element.borrow().is_none() {
-            let (element, labels) = Self::compute(term_window, &self.alphabet, self.show_session_ids)?;
+            let (element, labels) =
+                Self::compute(term_window, &self.alphabet, self.show_session_ids)?;
             self.element.borrow_mut().replace(element);
             *self.labels.borrow_mut() = labels;
         }

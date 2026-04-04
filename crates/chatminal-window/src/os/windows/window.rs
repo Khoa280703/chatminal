@@ -525,7 +525,9 @@ impl Window {
 
         let config = match config {
             Some(c) => c.clone(),
-            None => config::configuration(),
+            None => Connection::get()
+                .expect("Connection::init has not been called")
+                .config(),
         };
         let appearance = get_appearance();
 

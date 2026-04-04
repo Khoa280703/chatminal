@@ -54,9 +54,9 @@ cargo check --workspace 2>&1
 After removing from workspace members + Cargo.toml deps.
 
 **Candidates (0 direct imports):**
-- chatminal-engine-gui-subcommands — check if CLI uses it
-- chatminal-engine-uds — unix domain socket, check if portable-pty uses
-- chatminal-engine-toast-notification — check if desktop uses
+- chatminal-gui-subcommands — check if CLI uses it
+- chatminal-uds — unix domain socket, check if portable-pty uses
+- chatminal-toast-notification — check if desktop uses
 
 **DO NOT remove (confirmed active usage):**
 - engine-version — `config::engine_version()` used in `leaf_runtime.rs:136`

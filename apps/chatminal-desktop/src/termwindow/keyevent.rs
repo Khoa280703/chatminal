@@ -1,6 +1,7 @@
 use crate::chatminal_runtime::overlay_compat::{
     OverlayAssignmentResult as PerformAssignmentResult, OverlayPane,
 };
+use crate::desktop_termwindow_types::terminal_ui_key_for_pane;
 use crate::termwindow::InputMap;
 use ::window::{
     DeadKeyStatus, KeyCode, KeyEvent, KeyboardLedStatus, Modifiers, RawKeyEvent, WindowOps,
@@ -315,11 +316,8 @@ impl super::TermWindow {
         mods: Modifiers,
         only_key_bindings: OnlyKeyBindings,
     ) -> Option<(KeyTableEntry, Option<String>)> {
-        if let Some(overlay) = self
-            .terminal_ui_state(pane.pane_id() as u64)
-            .overlay
-            .as_mut()
-        {
+        let pane_id = terminal_ui_key_for_pane(&**pane);
+        if let Some(overlay) = self.terminal_ui_state(pane_id).overlay.as_mut() {
             if let Some((entry, table_name)) = overlay.key_table_state.lookup_key(
                 &self.input_map,
                 keycode,
@@ -519,7 +517,7 @@ impl super::TermWindow {
                         if is_down
                             && !keycode.is_modifier()
                             && self
-                                .terminal_ui_state(pane.pane_id() as u64)
+                                .terminal_ui_state(terminal_ui_key_for_pane(&**pane))
                                 .overlay
                                 .is_none()
                         {
@@ -718,7 +716,7 @@ impl super::TermWindow {
 
         if let Some(pane) = self.active_terminal_instance_or_overlay() {
             if let Some(overlay) = self
-                .terminal_ui_state(pane.pane_id() as u64)
+                .terminal_ui_state(terminal_ui_key_for_pane(&*pane))
                 .overlay
                 .as_mut()
             {
@@ -875,7 +873,7 @@ impl super::TermWindow {
                     if window_key.key_is_down
                         && !key.is_modifier()
                         && self
-                            .terminal_ui_state(pane.pane_id() as u64)
+                            .terminal_ui_state(terminal_ui_key_for_pane(&*pane))
                             .overlay
                             .is_none()
                     {

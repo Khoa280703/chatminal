@@ -1,6 +1,7 @@
 use crate::screen::Screens;
 use crate::{Appearance, Connection, GeometryOrigin, RequestedWindowGeometry, ResolvedGeometry};
 use anyhow::Result as Fallible;
+use config::ConfigHandle;
 use config::keyassignment::KeyAssignment;
 use config::DimensionContext;
 use std::cell::RefCell;
@@ -17,6 +18,14 @@ static EVENT_HANDLER: Mutex<fn(ApplicationEvent)> = Mutex::new(nop_event_handler
 
 pub fn shutdown() {
     CONN.with(|m| drop(m.borrow_mut().take()));
+}
+
+pub fn current_connection_config() -> Option<ConfigHandle> {
+    CONN.with(|m| m.borrow().as_ref().map(|conn| conn.config()))
+}
+
+pub fn connection_config_or_default() -> ConfigHandle {
+    current_connection_config().unwrap_or_else(ConfigHandle::default_config)
 }
 
 #[derive(Debug)]
@@ -39,6 +48,10 @@ pub trait ConnectionOps {
 
     fn name(&self) -> String;
 
+    fn config(&self) -> ConfigHandle;
+
+    fn update_config(&self, _config: &ConfigHandle) {}
+
     fn set_event_handler(&self, func: fn(ApplicationEvent)) {
         let mut handler = EVENT_HANDLER.lock().unwrap();
         *handler = func;
@@ -54,7 +67,11 @@ pub trait ConnectionOps {
     }
 
     fn init() -> Fallible<Rc<Connection>> {
-        let conn = Rc::new(Connection::create_new()?);
+        Self::init_with_config(config::current_config_handle())
+    }
+
+    fn init_with_config(config: ConfigHandle) -> Fallible<Rc<Connection>> {
+        let conn = Rc::new(Connection::create_new(config)?);
         CONN.with(|m| *m.borrow_mut() = Some(Rc::clone(&conn)));
         crate::spawn::SPAWN_QUEUE.register_promise_schedulers();
         Ok(conn)

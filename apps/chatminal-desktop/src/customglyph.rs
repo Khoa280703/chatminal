@@ -678,9 +678,8 @@ impl PolyStyle {
 }
 
 impl BlockKey {
-    pub fn filter_out_synthetic(glyphs: &mut Vec<char>) {
-        let config = config::configuration();
-        if config.custom_block_glyphs {
+    pub fn filter_out_synthetic(glyphs: &mut Vec<char>, custom_block_glyphs: bool) {
+        if custom_block_glyphs {
             glyphs.retain(|&c| Self::from_char(c).is_none());
         }
     }

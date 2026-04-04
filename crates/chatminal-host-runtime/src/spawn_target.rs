@@ -2,17 +2,18 @@
 //! The active desktop product path installs a single primary backend.
 
 use crate::localpane::LocalPane;
-use crate::pane::{alloc_pane_id, Pane, PaneId};
+use crate::pane::{alloc_pane_id, pane_id_for_pane, Pane, PaneId};
 use crate::tab::{SplitRequest, Tab};
 use crate::{
-    attach_tab_to_window, register_pane_with_default_side_effects_and_io_hooks, register_tab,
+    active_identity, build_runtime_entry_tab, current_host_runtime_config,
+    register_attached_runtime_entry_tab, register_pane_with_default_side_effects_and_io_hooks,
     remove_tab_by_id, resolve_pane_id, tab_by_id, LocalPaneHooks, PtyIoHooks,
 };
 use anyhow::{Context, Error};
 use async_trait::async_trait;
 use chatminal_runtime::{RuntimeId, SessionTerminalHandle};
 use config::keyassignment::SpawnCommand;
-use config::{configuration, ConfigHandle, ExecTarget, ExitBehavior, SerialTarget};
+use config::{ConfigHandle, ExecTarget, ExitBehavior, SerialTarget};
 use downcast_rs::{impl_downcast, Downcast};
 use engine_term::Alert;
 use engine_term::TerminalSize;
@@ -47,11 +48,8 @@ pub trait SpawnTarget: Downcast + Send + Sync {
             .await
             .context("spawn")?;
 
-        let tab = Arc::new(Tab::new(&size));
-        tab.assign_pane(&pane);
-
-        register_tab(&tab)?;
-        attach_tab_to_window(&tab)?;
+        let tab = build_runtime_entry_tab(&pane, size, None);
+        register_attached_runtime_entry_tab(&tab)?;
 
         Ok(tab)
     }
@@ -79,7 +77,7 @@ pub trait SpawnTarget: Downcast + Send + Sync {
         let pane_index = match tab
             .iter_panes_ignoring_zoom()
             .iter()
-            .find(|p| p.pane.pane_id() == pane_id)
+            .find(|p| pane_id_for_pane(p.pane.as_ref()) == pane_id)
         {
             Some(p) => p.index,
             None => anyhow::bail!("invalid pane id {}", pane_id),
@@ -125,7 +123,7 @@ pub trait SpawnTarget: Downcast + Send + Sync {
         let final_pane_index = match tab
             .iter_panes_ignoring_zoom()
             .iter()
-            .find(|p| p.pane.pane_id() == pane_id)
+            .find(|p| pane_id_for_pane(p.pane.as_ref()) == pane_id)
         {
             Some(p) => p.index,
             None => anyhow::bail!("invalid pane id {}", pane_id),
@@ -154,13 +152,36 @@ pub struct LocalSpawnTarget {
     hooks: LocalSpawnHooks,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct LocalSpawnHooks {
     localpane_hooks: LocalPaneHooks,
     pty_io_hooks: PtyIoHooks,
 }
 
 impl LocalSpawnHooks {
+    pub fn noop() -> Self {
+        Self {
+            localpane_hooks: LocalPaneHooks::default(),
+            pty_io_hooks: PtyIoHooks::noop(),
+        }
+    }
+
+    // Product default for host-runtime-owned spawn/localpane side effects.
+    pub fn host_default() -> Self {
+        Self {
+            localpane_hooks: LocalPaneHooks::host_default(),
+            pty_io_hooks: PtyIoHooks::host_default(),
+        }
+    }
+
+    // Explicit compat seam for callers/tests that still refer to mux behavior.
+    pub fn mux_default() -> Self {
+        Self {
+            localpane_hooks: LocalPaneHooks::mux_default(),
+            pty_io_hooks: PtyIoHooks::mux_default(),
+        }
+    }
+
     pub(crate) fn localpane_hooks(&self) -> LocalPaneHooks {
         self.localpane_hooks.clone()
     }
@@ -231,14 +252,24 @@ impl LocalSpawnHooks {
         on_child_exit_cleanup: Arc<dyn Fn() + Send + Sync>,
     ) -> Self {
         self.localpane_hooks
-            .set_child_exit_cleanup(on_child_exit_cleanup);
+            .set_child_exit_cleanup(Arc::new(move |_, _| on_child_exit_cleanup()));
         self
+    }
+}
+
+impl Default for LocalSpawnHooks {
+    fn default() -> Self {
+        Self::noop()
     }
 }
 
 impl LocalSpawnTarget {
     pub fn new(name: &str) -> Result<Self, Error> {
-        Ok(Self::with_pty_system(name, native_pty_system()))
+        Ok(Self::with_pty_system_and_hooks(
+            name,
+            native_pty_system(),
+            LocalSpawnHooks::default(),
+        ))
     }
 
     pub fn new_with_hooks(name: &str, hooks: LocalSpawnHooks) -> Result<Self, Error> {
@@ -316,7 +347,7 @@ impl LocalSpawnTarget {
         &self,
         cmd: &mut CommandBuilder,
         config: &ConfigHandle,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<RuntimeEnvironmentPolicy> {
         if let Some(ed) = self.resolve_exec_target_config(config) {
             let mut args = vec![];
             let mut set_environment_variables = HashMap::new();
@@ -432,6 +463,7 @@ impl LocalSpawnTarget {
             }
             cmd.clear_cwd();
             log::trace!("made: {cmd:#?}");
+            return Ok(RuntimeEnvironmentPolicy::PaneOnly);
         } else if let Some(dir) = cmd.get_cwd() {
             // I'm not normally a fan of existence checking, but not checking here
             // can be painful; in the case where a tab is local but has connected
@@ -449,7 +481,7 @@ impl LocalSpawnTarget {
                 cmd.clear_cwd();
             }
         }
-        Ok(())
+        Ok(RuntimeEnvironmentPolicy::Full)
     }
 
     async fn build_command(
@@ -459,6 +491,8 @@ impl LocalSpawnTarget {
         command_dir: Option<String>,
         pane_id: PaneId,
     ) -> anyhow::Result<CommandBuilder> {
+        let unix_socket = std::env::var("CHATMINAL_UNIX_SOCKET").ok();
+        let ssh_auth_sock = preferred_ssh_auth_sock();
         let mut cmd = match command {
             Some(mut cmd) => {
                 config.apply_cmd_defaults(
@@ -477,12 +511,45 @@ impl LocalSpawnTarget {
         if let Some(dir) = command_dir {
             cmd.cwd(dir);
         }
-        if let Ok(sock) = std::env::var("CHATMINAL_UNIX_SOCKET") {
-            cmd.env("CHATMINAL_UNIX_SOCKET", sock);
-        }
-        cmd.env("CHATMINAL_PANE", pane_id.to_string());
-        self.fixup_command(&mut cmd, &config).await?;
+        let runtime_environment_policy = self.fixup_command(&mut cmd, &config).await?;
+        apply_runtime_environment(
+            &mut cmd,
+            pane_id,
+            unix_socket.as_deref(),
+            ssh_auth_sock.as_deref(),
+            runtime_environment_policy,
+        );
         Ok(cmd)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RuntimeEnvironmentPolicy {
+    Full,
+    PaneOnly,
+}
+
+fn preferred_ssh_auth_sock() -> Option<String> {
+    active_identity()
+        .and_then(|identity| identity.ssh_auth_sock.clone())
+        .or_else(|| std::env::var("SSH_AUTH_SOCK").ok())
+}
+
+fn apply_runtime_environment(
+    cmd: &mut CommandBuilder,
+    pane_id: PaneId,
+    unix_socket: Option<&str>,
+    ssh_auth_sock: Option<&str>,
+    policy: RuntimeEnvironmentPolicy,
+) {
+    cmd.env("CHATMINAL_PANE", pane_id.to_string());
+    if policy == RuntimeEnvironmentPolicy::Full {
+        if let Some(unix_socket) = unix_socket {
+            cmd.env("CHATMINAL_UNIX_SOCKET", unix_socket);
+        }
+        if let Some(ssh_auth_sock) = ssh_auth_sock {
+            cmd.env("SSH_AUTH_SOCK", ssh_auth_sock);
+        }
     }
 }
 
@@ -592,7 +659,7 @@ impl SpawnTarget for LocalSpawnTarget {
         command_dir: Option<String>,
     ) -> anyhow::Result<Arc<dyn Pane>> {
         let pane_id = alloc_pane_id();
-        let config = configuration();
+        let config = current_host_runtime_config();
         let cmd = self
             .build_command(&config, command, command_dir, pane_id)
             .await
@@ -636,6 +703,7 @@ impl SpawnTarget for LocalSpawnTarget {
                 pair.master,
                 Box::new(writer),
                 command_description,
+                config.clone(),
                 self.hooks.localpane_hooks(),
             )),
             Err(err) => {
@@ -652,6 +720,7 @@ impl SpawnTarget for LocalSpawnTarget {
                     }),
                     Box::new(writer),
                     command_description,
+                    config.clone(),
                     self.hooks.localpane_hooks(),
                 ))
             }
@@ -663,5 +732,88 @@ impl SpawnTarget for LocalSpawnTarget {
     }
     fn spawn_target_name(&self) -> &str {
         &self.name
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{apply_runtime_environment, preferred_ssh_auth_sock, RuntimeEnvironmentPolicy};
+    use crate::{initialize_host_runtime, shutdown_host_runtime, ClientId};
+    use portable_pty::CommandBuilder;
+    use std::ffi::OsStr;
+    use std::sync::Arc;
+
+    #[test]
+    fn runtime_environment_is_reapplied_after_fixup_paths() {
+        let mut cmd = CommandBuilder::new("/bin/sh");
+        cmd.env_clear();
+
+        apply_runtime_environment(
+            &mut cmd,
+            42,
+            Some("/tmp/chatminal.sock"),
+            Some("/tmp/ssh-agent.sock"),
+            RuntimeEnvironmentPolicy::Full,
+        );
+
+        assert_eq!(
+            cmd.get_env("CHATMINAL_UNIX_SOCKET"),
+            Some(OsStr::new("/tmp/chatminal.sock"))
+        );
+        assert_eq!(cmd.get_env("CHATMINAL_PANE"), Some(OsStr::new("42")));
+        assert_eq!(
+            cmd.get_env("SSH_AUTH_SOCK"),
+            Some(OsStr::new("/tmp/ssh-agent.sock"))
+        );
+    }
+
+    #[test]
+    fn pane_only_runtime_environment_skips_socket_paths() {
+        let mut cmd = CommandBuilder::new("/bin/sh");
+        cmd.env_clear();
+
+        apply_runtime_environment(
+            &mut cmd,
+            42,
+            Some("/tmp/chatminal.sock"),
+            Some("/tmp/ssh-agent.sock"),
+            RuntimeEnvironmentPolicy::PaneOnly,
+        );
+
+        assert_eq!(cmd.get_env("CHATMINAL_PANE"), Some(OsStr::new("42")));
+        assert!(cmd.get_env("CHATMINAL_UNIX_SOCKET").is_none());
+        assert!(cmd.get_env("SSH_AUTH_SOCK").is_none());
+    }
+
+    #[test]
+    fn preferred_ssh_auth_sock_prefers_active_identity_snapshot() {
+        let _guard = crate::HOST_RUNTIME_TEST_LOCK.lock().unwrap();
+        shutdown_host_runtime();
+        let mux = initialize_host_runtime(None).expect("init host runtime");
+        let previous = std::env::var_os("SSH_AUTH_SOCK");
+        std::env::set_var("SSH_AUTH_SOCK", "/tmp/env-agent.sock");
+
+        let client = Arc::new(ClientId {
+            hostname: "localhost".to_string(),
+            username: "khoa".to_string(),
+            pid: 1,
+            epoch: 2,
+            id: 3,
+            ssh_auth_sock: Some("/tmp/identity-agent.sock".to_string()),
+        });
+        mux.register_client(Arc::clone(&client));
+        mux.replace_identity(Some(client));
+
+        assert_eq!(
+            preferred_ssh_auth_sock().as_deref(),
+            Some("/tmp/identity-agent.sock")
+        );
+
+        mux.replace_identity(None);
+        shutdown_host_runtime();
+        match previous {
+            Some(value) => std::env::set_var("SSH_AUTH_SOCK", value),
+            None => std::env::remove_var("SSH_AUTH_SOCK"),
+        }
     }
 }

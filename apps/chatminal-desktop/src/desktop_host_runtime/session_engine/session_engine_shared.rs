@@ -32,6 +32,7 @@ impl SessionEngineShared {
         let (leaf_runtime_events_tx, leaf_runtime_events_rx) =
             std_mpsc::sync_channel::<TerminalInstanceRuntimeEvent>(1024);
         let event_hub_for_thread: Arc<SessionEventHub> = Arc::clone(&event_hub);
+        let core_state_for_thread = Arc::clone(&core_state);
         thread::spawn(move || {
             while let Ok(event) = leaf_runtime_events_rx.recv() {
                 match event {
@@ -57,6 +58,13 @@ impl SessionEngineShared {
                         terminal_instance_id,
                         exit_code,
                     } => {
+                        if let Some(runtime) = core_state_for_thread
+                            .lock()
+                            .unwrap()
+                            .runtime_mut(runtime_id)
+                        {
+                            runtime.clear_leaf_process(terminal_instance_id);
+                        }
                         event_hub_for_thread.publish(SessionRuntimeEvent::TerminalInstanceExited {
                             session_id,
                             generation,

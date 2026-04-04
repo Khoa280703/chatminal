@@ -1,6 +1,6 @@
 use config::lua::get_or_create_sub_module;
 use config::lua::mlua::Lua;
-use config::{configuration, ConfigSubscription};
+use config::{ConfigHandle, ConfigSubscription};
 use hdrhistogram::Histogram;
 use metrics::{Counter, Gauge, Key, KeyName, Metadata, Recorder, SharedString, Unit};
 use parking_lot::Mutex;
@@ -17,12 +17,12 @@ lazy_static::lazy_static! {
     static ref INNER: Arc<Mutex<Inner>> = make_inner();
 }
 
-fn periodic_stat_logging_secs() -> usize {
-    configuration().periodic_stat_logging as usize
+fn periodic_stat_logging_secs(config: &ConfigHandle) -> usize {
+    config.periodic_stat_logging as usize
 }
 
-fn refresh_periodic_stat_logging_secs() {
-    PERIODIC_STAT_LOGGING_SECS.store(periodic_stat_logging_secs(), Ordering::Relaxed);
+fn refresh_periodic_stat_logging_secs(config: &ConfigHandle) {
+    PERIODIC_STAT_LOGGING_SECS.store(periodic_stat_logging_secs(config), Ordering::Relaxed);
 }
 
 struct ThroughputInner {
@@ -297,10 +297,10 @@ impl Stats {
         }
     }
 
-    pub fn init() -> anyhow::Result<()> {
-        refresh_periodic_stat_logging_secs();
-        let subscription = config::subscribe_to_config_reload(|| {
-            std::thread::spawn(refresh_periodic_stat_logging_secs);
+    pub fn init(initial_config: &ConfigHandle) -> anyhow::Result<()> {
+        refresh_periodic_stat_logging_secs(initial_config);
+        let subscription = config::subscribe_to_config_reload_with_config(|config| {
+            std::thread::spawn(move || refresh_periodic_stat_logging_secs(&config));
             true
         });
         CONFIG_SUBSCRIPTION
