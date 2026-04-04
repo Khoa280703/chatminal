@@ -2,6 +2,19 @@
 
 ## 2026-04-04
 
+### Changed
+- Host runtime / overlay convergence cleanup tiếp tục đóng seam active-path:
+  - `apps/chatminal-desktop/src/chatminal_runtime/mod.rs` đã xóa bridge `overlay_shell` re-export; owner canonical giờ chỉ còn ở `desktop_host_runtime::overlay_shell`
+  - overlay, termwindow, selection, scrollbar, và desktop termwindow helpers đổi sang import trực tiếp từ owner canonical này
+  - `apps/chatminal-desktop/src/desktop_host_runtime/session_host.rs` bỏ cache `LEGACY_HOST_CLIENT_ID` / `LEGACY_HOST_WORKSPACE`; active client/workspace giờ đọc trực tiếp từ `chatminal-host-runtime`
+  - bootstrap/shutdown của desktop host và test seam dùng chung `initialize_desktop_host_runtime(...)` / `shutdown_desktop_host_runtime()` nên không còn drift init logic
+  - desktop bootstrap dùng `HostRuntimeHandle` canonical để register client, replace identity, và set active workspace; product seam không còn dựa vào `MuxHandle`
+  - verify xanh:
+    - `cargo check -p chatminal-desktop`
+    - `cargo test --manifest-path apps/chatminal-desktop/Cargo.toml desktop_host_runtime::session_host -- --test-threads=1`
+    - `cargo check -p chatminal-host-runtime`
+    - `cargo test -p chatminal-host-runtime --lib -- --test-threads=1`
+
 ### Fixed
 - Join/split session layout now eagerly reapplies visible session sizes and invalidates the window in the same action, reducing stale cursor/scroll viewport state until an external resize.
 - Startup crash `make window` trên macOS đã được sửa:

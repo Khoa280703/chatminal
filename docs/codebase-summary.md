@@ -1,6 +1,17 @@
 # Codebase Summary
 
-Last updated: 2026-04-04 (terminal layer merge cutover)
+Last updated: 2026-04-04 (host runtime / overlay convergence)
+
+## Latest changes (2026-04-04 host runtime / overlay convergence)
+- `apps/chatminal-desktop/src/desktop_host_runtime/*`
+  - active desktop host path không còn giữ cache client/workspace legacy song song với host-runtime control plane
+  - bootstrap/shutdown product path và test seam dùng chung helper thay vì copy-paste logic
+- `apps/chatminal-desktop/src/chatminal_runtime/mod.rs`
+  - bridge `overlay_shell` re-export đã bị xóa khỏi active path
+- `apps/chatminal-desktop/src/overlay/*`, `termwindow/*`, `selection.rs`, `scrollbar.rs`, `desktop_termwindow_*`
+  - overlay/render/input imports đi thẳng vào `desktop_host_runtime::overlay_shell`
+- `crates/chatminal-host-runtime/src/lib.rs`
+  - canonical init handle là `HostRuntimeHandle`; desktop bootstrap dùng handle này cho identity/workspace setup
 
 ## Closeout status
 - Active terminal domain canonical: `chatminal-terminal-emulator`
@@ -28,7 +39,7 @@ Daemon `chatminald` đã hoàn toàn bị xóa; mọi session management hiện 
 
 Desktop product path là `single-flow local-first`:
 - startup không còn public legacy flags cho attach/spawn selection
-- desktop host mux luôn boot theo default local flow
+- desktop host runtime luôn boot theo default local flow
 - active keyassignment/config path không còn các action legacy kiểu spawn/attach/detach theo execution target
 - host-runtime không còn `SpawnTarget.attach/detach/state` compat flow
 - active host engine đã đổi naming sang `spawn target`; legacy vocabulary cũ không còn nằm trong active product path

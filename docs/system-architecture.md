@@ -1,6 +1,24 @@
 # System Architecture
 
-Last updated: 2026-04-04 (terminal layer merge cutover)
+Last updated: 2026-04-04 (host runtime / overlay convergence)
+
+## Latest changes (host runtime / overlay convergence, 2026-04-04)
+- Desktop host surface đã cắt nốt state cache song song ở active path:
+  - `apps/chatminal-desktop/src/desktop_host_runtime/session_host.rs` không còn giữ `LEGACY_HOST_CLIENT_ID` / `LEGACY_HOST_WORKSPACE`
+  - active client/workspace giờ đọc trực tiếp từ `chatminal-host-runtime` control plane
+- Bootstrap/shutdown của desktop host đã gom về helper chung:
+  - `initialize_desktop_host_runtime(...)`
+  - `shutdown_desktop_host_runtime()`
+  nên product path và test seam không còn copy-paste init sequence riêng.
+- Overlay shell contract đã converge ở app layer:
+  - `chatminal_runtime::overlay_shell` bridge re-export đã bị xóa
+  - overlay, termwindow, selection, scrollbar, desktop termwindow helpers import trực tiếp từ `desktop_host_runtime::overlay_shell`
+- Desktop bootstrap hiện dùng `HostRuntimeHandle` canonical để register client / replace identity / set active workspace; product seam không còn cầm `MuxHandle`.
+- Verify cho wave này:
+  - `cargo check -p chatminal-desktop`
+  - `cargo test --manifest-path apps/chatminal-desktop/Cargo.toml desktop_host_runtime::session_host -- --test-threads=1`
+  - `cargo check -p chatminal-host-runtime`
+  - `cargo test -p chatminal-host-runtime --lib -- --test-threads=1`
 
 ## Latest changes (terminal layer merge cutover, 2026-04-04)
 - Active product path đã collapse về một terminal architecture:
