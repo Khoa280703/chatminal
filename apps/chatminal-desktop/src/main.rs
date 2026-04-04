@@ -41,7 +41,6 @@ mod customglyph;
 mod desktop_commands;
 mod desktop_host_runtime;
 mod desktop_mouse_actions;
-mod desktop_overlay_actions;
 mod desktop_spawn;
 mod desktop_termwindow_types;
 mod download;

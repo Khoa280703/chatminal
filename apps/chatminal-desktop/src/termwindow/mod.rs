@@ -26,7 +26,7 @@ use crate::desktop_host_runtime::overlay_shell::{
     RenderableDimensions,
 };
 use crate::desktop_host_runtime::subscribe_runtime_notifications;
-use crate::desktop_overlay_actions::show_close_runtime_entry_overlay;
+use crate::overlay::confirm_close_tab as show_close_runtime_entry_overlay;
 use crate::desktop_termwindow_types::{
     terminal_handle_for_ui_key, terminal_ui_key_for_pane, TerminalPaneLayout, TerminalSplit,
     TerminalUiKey,

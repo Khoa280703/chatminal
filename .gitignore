@@ -21,3 +21,9 @@
 # Generated artifacts
 repomix-output.xml
 home/
+
+# Legacy directories (removed from active product path)
+frontend/
+src-tauri/
+site/
+relative-review/

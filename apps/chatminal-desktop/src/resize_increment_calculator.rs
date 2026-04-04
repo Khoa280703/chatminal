@@ -12,18 +12,18 @@ pub struct ResizeIncrementCalculator {
     pub tab_bar_height: usize,
 }
 
-impl Into<ResizeIncrement> for ResizeIncrementCalculator {
-    fn into(self) -> ResizeIncrement {
+impl From<ResizeIncrementCalculator> for ResizeIncrement {
+    fn from(calc: ResizeIncrementCalculator) -> ResizeIncrement {
         ResizeIncrement {
-            x: self.x,
-            y: self.y,
-            base_width: (self.padding_left
-                + self.padding_right
-                + (self.border.left + self.border.right).get()) as u16,
-            base_height: (self.padding_top
-                + self.padding_bottom
-                + (self.border.top + self.border.bottom).get()
-                + self.tab_bar_height) as u16,
+            x: calc.x,
+            y: calc.y,
+            base_width: (calc.padding_left
+                + calc.padding_right
+                + (calc.border.left + calc.border.right).get()) as u16,
+            base_height: (calc.padding_top
+                + calc.padding_bottom
+                + (calc.border.top + calc.border.bottom).get()
+                + calc.tab_bar_height) as u16,
         }
     }
 }
