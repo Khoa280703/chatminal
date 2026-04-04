@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex};
 
-use chatminal_terminal_core::TerminalSize;
+use engine_term::TerminalSize;
 use portable_pty::CommandBuilder;
 
 use super::leaf_runtime::{

@@ -3,8 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use chatminal_runtime::WorkspaceLayoutRegistry;
-use chatminal_terminal_core::TerminalSize;
-use engine_term::{KeyCode, KeyModifiers, MouseEvent};
+use engine_term::{KeyCode, KeyModifiers, MouseEvent, TerminalSize};
 
 use super::leaf_runtime::TerminalInstanceRuntimeEvent;
 use super::leaf_runtime_registry::TerminalInstanceRuntimeRegistry;

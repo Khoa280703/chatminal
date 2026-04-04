@@ -13,7 +13,6 @@ use super::session_engine::{
     RuntimeId, SessionEngineShared, SessionRuntimeState, StatefulSessionEngine, TerminalInstanceId,
 };
 use super::spawn_target::DesktopSpawnTarget;
-use chatminal_terminal_core::TerminalSize as CoreTerminalSize;
 use config::ConfigHandle;
 use engine_dynamic::Value;
 use engine_term::{Clipboard, ClipboardSelection, DownloadHandler, TerminalSize};
@@ -680,7 +679,6 @@ impl DesktopSessionHost {
         size: TerminalSize,
         activate: bool,
     ) -> Option<SessionRuntimeState> {
-        let core_size = core_terminal_size(size);
         let initial_scrollback =
             crate::chatminal_runtime::read_session_restore_snapshot(session_id)
                 .ok()
@@ -692,7 +690,7 @@ impl DesktopSessionHost {
                 session_id,
                 generation,
                 command,
-                core_size,
+                size,
                 initial_scrollback,
             )
             .map_err(|err| {
@@ -1572,20 +1570,6 @@ impl RuntimeHost for DesktopSessionHost {
 
     fn close_session_runtime(&self, session_id: &str, runtime_id: RuntimeId) {
         DesktopSessionHost::close_runtime(self, session_id, runtime_id);
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Size conversion helpers
-// ---------------------------------------------------------------------------
-
-fn core_terminal_size(size: TerminalSize) -> CoreTerminalSize {
-    CoreTerminalSize {
-        rows: size.rows,
-        cols: size.cols,
-        pixel_width: size.pixel_width,
-        pixel_height: size.pixel_height,
-        dpi: size.dpi,
     }
 }
 

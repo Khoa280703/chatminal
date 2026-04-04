@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use chatminal_terminal_core::TerminalSize;
+use engine_term::TerminalSize;
 use portable_pty::CommandBuilder;
 
 use super::{

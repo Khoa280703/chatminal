@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use chatminal_terminal_core::TerminalSize;
+use engine_term::TerminalSize;
 use portable_pty::CommandBuilder;
 
 use super::super::{

@@ -4,9 +4,7 @@
 //! a model for the screen cells including scrollback, sixel and iTerm2 image
 //! support, OSC 8 Hyperlinks and a wide range of terminal cell attributes.
 //!
-//! Counterpart: `chatminal-terminal-core` provides lightweight shared types
-//! used by the runtime host. Desktop code uses both; the runtime host uses
-//! `chatminal-terminal-core` for the lightweight shared layer.
+//! This crate is the canonical terminal domain for the active product path.
 //!
 //! This crate does not provide any kind of gui, nor does it directly
 //! manage a PTY; you provide a `std::io::Write` implementation that

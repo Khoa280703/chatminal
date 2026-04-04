@@ -2,8 +2,7 @@ use std::io::Read;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use chatminal_terminal_core::TerminalSize;
-use engine_term::Terminal as IoTerminal;
+use engine_term::{Terminal as IoTerminal, TerminalSize};
 use portable_pty::{Child, CommandBuilder, PtySize};
 
 use super::leaf_runtime::{

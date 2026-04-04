@@ -2,11 +2,10 @@ use std::io::Write;
 use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex};
 
-use chatminal_terminal_core::TerminalSize;
 use config::ConfigHandle;
 use engine_term::{
     KeyCode as IoKeyCode, KeyModifiers as IoKeyModifiers, MouseEvent as IoMouseEvent,
-    Terminal as IoTerminal, TerminalSize as IoTerminalSize,
+    Terminal as IoTerminal, TerminalSize,
 };
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty};
 
@@ -159,13 +158,7 @@ impl TerminalInstanceRuntime {
         let writer = Arc::new(Mutex::new(Some(writer)));
 
         let io_terminal = Arc::new(Mutex::new(IoTerminal::new(
-            IoTerminalSize {
-                rows: spawn.size.rows,
-                cols: spawn.size.cols,
-                pixel_width: spawn.size.pixel_width,
-                pixel_height: spawn.size.pixel_height,
-                dpi: spawn.size.dpi,
-            },
+            spawn.size,
             Arc::new(config::TermConfig::with_config(spawn.config.clone())),
             "Chatminal",
             config::engine_version(),
@@ -229,13 +222,7 @@ impl TerminalInstanceRuntime {
             .unwrap()
             .resize(to_pty_size(size))
             .map_err(|err| format!("resize pty failed: {err}"))?;
-        self.io_terminal.lock().unwrap().resize(IoTerminalSize {
-            rows: size.rows,
-            cols: size.cols,
-            pixel_width: size.pixel_width,
-            pixel_height: size.pixel_height,
-            dpi: size.dpi,
-        });
+        self.io_terminal.lock().unwrap().resize(size);
         Ok(())
     }
 

@@ -1,8 +1,0 @@
-[package]
-name = "chatminal-terminal-core"
-version = "0.1.0"
-edition = "2024"
-rust-version = "1.93"
-
-[dependencies]
-vt100 = "0.16.2"

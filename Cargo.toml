@@ -28,7 +28,6 @@ members = [
   "crates/chatminal-share-data",
   "crates/chatminal-spawn-funcs",
   "crates/chatminal-tabout",
-  "crates/chatminal-terminal-core",
   "crates/chatminal-termwiz",
   "crates/chatminal-termwiz-funcs",
   "crates/chatminal-time-funcs",
@@ -63,7 +62,6 @@ members = [
 default-members = [
   "apps/chatminal-desktop",
   "crates/chatminal-runtime",
-  "crates/chatminal-terminal-core",
   "crates/chatminal-store",
 ]
 resolver = "2"

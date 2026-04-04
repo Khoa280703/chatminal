@@ -10,7 +10,6 @@ use std::time::Duration;
 use super::session_engine::{
     RuntimeId, SessionEngineShared, SessionRuntimeEvent, TerminalInstanceId,
 };
-use chatminal_terminal_core::TerminalSize as CoreTerminalSize;
 use config::{ConfigHandle, TermConfig};
 use engine_dynamic::Value;
 use engine_term::color::ColorPalette;
@@ -470,16 +469,7 @@ impl HostTerminal for ChatminalSessionPane {
     }
     fn resize(&self, size: TerminalSize) -> anyhow::Result<()> {
         self.shared
-            .resize_terminal_instance(
-                self.terminal_instance_id,
-                CoreTerminalSize {
-                    rows: size.rows,
-                    cols: size.cols,
-                    pixel_width: size.pixel_width,
-                    pixel_height: size.pixel_height,
-                    dpi: size.dpi,
-                },
-            )
+            .resize_terminal_instance(self.terminal_instance_id, size)
             .map_err(anyhow::Error::msg)?;
         self.terminal.lock().resize(size);
         Ok(())
@@ -921,7 +911,7 @@ mod tests {
                 runtime_id,
                 terminal_instance_id,
                 shell_command("sleep 1"),
-                chatminal_terminal_core::TerminalSize {
+                TerminalSize {
                     rows: 12,
                     cols: 80,
                     pixel_width: 0,
@@ -992,7 +982,7 @@ mod tests {
                 runtime_id,
                 terminal_instance_id,
                 shell_command("sleep 1"),
-                chatminal_terminal_core::TerminalSize {
+                TerminalSize {
                     rows: 12,
                     cols: 80,
                     pixel_width: 0,
@@ -1057,7 +1047,7 @@ mod tests {
                 runtime_id,
                 terminal_instance_id,
                 shell_command("sleep 1"),
-                chatminal_terminal_core::TerminalSize {
+                TerminalSize {
                     rows: 12,
                     cols: 80,
                     pixel_width: 0,
@@ -1128,7 +1118,7 @@ mod tests {
                 runtime_id,
                 terminal_instance_id,
                 shell_command("stty raw -echo; dd bs=1 count=1 2>/dev/null"),
-                chatminal_terminal_core::TerminalSize {
+                TerminalSize {
                     rows: 12,
                     cols: 80,
                     pixel_width: 0,
@@ -1201,7 +1191,7 @@ mod tests {
                 runtime_id,
                 terminal_instance_id,
                 shell_command("stty raw -echo; dd bs=1 count=1 2>/dev/null"),
-                chatminal_terminal_core::TerminalSize {
+                TerminalSize {
                     rows: 12,
                     cols: 80,
                     pixel_width: 0,
@@ -1276,7 +1266,7 @@ mod tests {
                 shell_command(
                     "printf 'ready\\n'; stty raw -echo; printf 'input-ready\\n'; dd bs=1 count=1 2>/dev/null | od -An -t x1",
                 ),
-                chatminal_terminal_core::TerminalSize {
+                TerminalSize {
                     rows: 12,
                     cols: 80,
                     pixel_width: 0,

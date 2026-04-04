@@ -20,7 +20,7 @@ use chatminal_runtime::{
     InputWriteStats, RuntimeExecutionAdapter, RuntimeSessionBridgeAction,
     RuntimeSessionHandleTrait, RuntimeSessionLookup, RuntimeState, WriteInputError,
 };
-use chatminal_terminal_core::TerminalSize;
+use engine_term::TerminalSize;
 use portable_pty::CommandBuilder;
 
 use crate::chatminal_runtime::read_session_restore_snapshot;

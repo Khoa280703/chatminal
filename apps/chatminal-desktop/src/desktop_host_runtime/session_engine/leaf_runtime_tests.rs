@@ -1,8 +1,8 @@
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use chatminal_terminal_core::TerminalSize;
 use config::current_config_handle;
+use engine_term::TerminalSize;
 use portable_pty::CommandBuilder;
 
 use super::super::{RuntimeId, TerminalInstanceId};
