@@ -1,6 +1,6 @@
 # Code Standards
 
-Last updated: 2026-03-31 (single-process desktop model)
+Last updated: 2026-04-04 (single terminal architecture)
 Scope: `apps/chatminal-desktop` + `crates/*`.
 
 ## Principles
@@ -13,7 +13,7 @@ Scope: `apps/chatminal-desktop` + `crates/*`.
 - `apps/chatminal-desktop`: desktop app, session manager, PTY runtime, GUI shell, native API.
 - `crates/chatminal-runtime`: embedded orchestrator, session state, startup recipes, persist worker, store facade.
 - `crates/chatminal-store`: SQLite schema + CRUD store.
-- `crates/chatminal-terminal-core`: internal terminal parser/state core (không phụ thuộc WezTerm runtime).
+- `crates/chatminal-terminal-emulator`: terminal parser/state/input core canonical cho active product path.
 - `crates/chatminal-host-runtime`: private engine primitives (Mux/Tab/Pane, not public API).
 
 ## Naming

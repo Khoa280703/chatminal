@@ -1,6 +1,23 @@
 # System Architecture
 
-Last updated: 2026-04-04 (startup ownership crash fix)
+Last updated: 2026-04-04 (terminal layer merge cutover)
+
+## Latest changes (terminal layer merge cutover, 2026-04-04)
+- Active product path đã collapse về một terminal architecture:
+  - `chatminal-terminal-emulator` là terminal domain canonical
+  - `chatminal-terminal-core` đã bị gỡ khỏi active workspace path
+- Desktop session-native runtime không còn dual type contract:
+  - `session_engine/*`
+  - `session_host.rs`
+  - `session_pane.rs`
+  - `execution_bridge.rs`
+  đều đã dùng `engine_term::TerminalSize`
+- Active docs/README đã được sync để không còn mô tả runtime hiện tại như hai terminal layers song song.
+- Target verify gate cho wave này:
+  - `cargo check --workspace`
+  - `cargo test --workspace --lib --bins --tests`
+  - `cargo test --manifest-path apps/chatminal-desktop/Cargo.toml -- --test-threads=1`
+  - `make window`
 
 ## Latest changes (startup ownership crash fix, 2026-04-04)
 - `make window` crash startup trên macOS đã được sửa ở host-runtime ownership seam:

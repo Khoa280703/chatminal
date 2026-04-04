@@ -6,13 +6,13 @@ Chatminal hiện chạy theo mô hình `single-runtime desktop`: cửa sổ mặ
 - Desktop app: `apps/chatminal-desktop`
 - Runtime lõi: `crates/chatminal-runtime`
 - Shared persistence: `crates/chatminal-store` (SQLite)
-- Terminal core: `crates/chatminal-terminal-core`
+- Terminal domain: `crates/chatminal-terminal-emulator` (`lib.name = engine_term`)
 - Native vendored deps: `vendor/terminal-deps`
 
 ## Cấu trúc repo
 - `apps/chatminal-desktop/`: desktop app first-party, runtime chính cho window
 - `crates/chatminal-runtime/`: session/profile/history/explorer/runtime state và runtime DTO/event native
-- `crates/chatminal-terminal-core/`: terminal parser/state nội bộ
+- `crates/chatminal-terminal-emulator/`: terminal parser/state/input core nội bộ
 - `crates/chatminal-store/`: SQLite store (profiles/sessions/scrollback)
 - `docs/`: tài liệu kiến trúc, roadmap, changelog
 

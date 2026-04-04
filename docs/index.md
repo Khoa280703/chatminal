@@ -1,6 +1,6 @@
 # Docs Index
 
-Tài liệu này phản ánh runtime hiện tại: `chatminal-desktop (single-process) + chatminal-terminal-core + chatminal-store`.
+Tài liệu này phản ánh runtime hiện tại: `chatminal-desktop (single-process) + chatminal-terminal-emulator + chatminal-store`.
 
 - [Project Overview and PDR](./project-overview-pdr.md)
 - [System Architecture](./system-architecture.md)

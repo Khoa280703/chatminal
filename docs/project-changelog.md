@@ -976,3 +976,13 @@
   - `cargo test -p chatminal-host-runtime --lib -- --test-threads=1`
   - `cargo test -p chatminal-lua-bridge`
   - `cargo test --manifest-path apps/chatminal-desktop/Cargo.toml -- --test-threads=1`
+# 2026-04-04
+
+- Architecture:
+  - collapsed active product path to a single terminal architecture
+  - `chatminal-terminal-emulator` is now the canonical terminal domain
+  - removed `chatminal-terminal-core` from active workspace path and desktop dependency graph
+- Desktop runtime:
+  - `session_engine/*`, `session_host.rs`, `session_pane.rs`, and `execution_bridge.rs` now use `engine_term::TerminalSize`
+- Docs:
+  - synced README + active architecture docs so current reality no longer describes dual terminal layers

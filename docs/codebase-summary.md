@@ -1,15 +1,19 @@
 # Codebase Summary
 
-Last updated: 2026-04-03 (architecture unification final closeout verified)
+Last updated: 2026-04-04 (terminal layer merge cutover)
 
 ## Closeout status
+- Active terminal domain canonical: `chatminal-terminal-emulator`
+- `260404-1532-merge-terminal-core-and-emulator` đang là active closeout wave cho terminal domain convergence.
+- Product path đã chốt `chatminal-terminal-emulator` làm canonical terminal layer.
+- `chatminal-terminal-emulator` là terminal layer canonical; `chatminal-terminal-core` không còn là target architecture và chỉ còn được phép biến mất khỏi active workspace path.
 - `260401-0949-architecture-unification` đã closeout xong.
 - Deferred scope đã được chuyển sang:
   - `plans/260403-1800-post-unification-followups/plan.md`
 - Follow-up phase 01 config ownership completion đã xong ở product path:
   - `chatminal-window`, `chatminal-terminal-font`, `chatminal-time-funcs`, `chatminal-ratelim`
   - residual `configuration()` reads còn lại chủ yếu ở `chatminal-config` helpers và test/comment seams
-- Current closeout verify:
+- Closeout verify target:
   - `cargo check --workspace`
   - `cargo test --workspace --lib --bins --tests`
   - `cargo test --manifest-path apps/chatminal-desktop/Cargo.toml -- --test-threads=1`
@@ -234,7 +238,6 @@ Desktop product path là `single-flow local-first`:
 - **Tab split functions**: `tab.rs` split_and_insert/compute_split_size cannot be removed (lua-bridge calls Mux::split_pane → SpawnTarget::split_pane → tab). Desktop-only uses WorkspaceLayoutState; daemon/lua still need engine split support.
 - **Engine split at lower private host layer**: Mux/Tab/Pane vẫn còn trong `chatminal-host-runtime` như implementation detail; lua-bridge compat path vẫn có thể đụng phần này.
 - **Command/config compatibility**: `desktop_commands.rs` still translates upstream `KeyAssignment::*Tab*` for config backward-compat (not exercised by desktop product, only preserved for old configs).
-- **Lower parser duplication**: `chatminal-terminal-core` (vt100-based) vs `chatminal-terminal-emulator` (termwiz-based) — both in codebase; daemon uses core, desktop uses the terminal-emulator crate.
 
 ## Phase 05 Final Closeout (2026-04-03)
 - `crates/chatminal-host-runtime/src/lib.rs` no longer treats `Mux` as the runtime owner in product init/shutdown; ownership now hangs off the installed host runtime root.

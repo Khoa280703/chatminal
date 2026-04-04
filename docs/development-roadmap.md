@@ -58,7 +58,7 @@ Last updated: 2026-04-01
    - re-run full gate suite (`check/test/smoke/fidelity/bench/soak/release-dry-run`) PASS
    - toàn bộ checklist plan `260305-1458` đã đóng; phần manual host-specific giữ ở external release preflight checklist
 17. Hard-cut WezTerm direct runtime dependency (2026-03-06):
-   - refactored terminal core boundary to use internal `chatminal-terminal-core` (vt100 parser)
+   - tại thời điểm đó refactored terminal core boundary sang `chatminal-terminal-core` (vt100 parser); layer này đã bị retire ở wave merge terminal 2026-04-04
    - removed direct wezterm-window linkage from client
    - established internal terminal state as single source of truth
 18. Non-blocking session creation in native UI (2026-03-06):
@@ -134,7 +134,7 @@ Last updated: 2026-04-01
    - `cargo test -p chatminal-wezterm-ssh` PASS (11 unit + 39 integration/e2e trên host hiện tại)
    - `cargo check -p chatminal-wezterm-gui` compile đi qua `chatminal-wezterm-ssh` và vẫn chỉ dừng ở blocker native host Linux `xcb-util.pc`
    - `apps/chatminal-app` và `apps/chatminald` tiếp tục PASS full tests
-33. Continue extraction of terminal core crate (2026-03-06):
+33. Continue extraction of terminal core crate (historical step, crate later retired on 2026-04-04):
    - bóc thêm `wezterm-term` sang `crates/chatminal-wezterm-term`
    - giữ tương thích import crate cũ bằng `lib.name = "wezterm_term"`
    - remap root workspace và `third_party/wezterm/Cargo.toml` sang package first-party
