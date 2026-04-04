@@ -37,10 +37,10 @@ use super::{
     HostStableCursorPosition as StableCursorPosition, HostTerminal, HostTerminalHandle,
     RuntimeNotification,
 };
-use crate::chatminal_runtime::overlay_compat::{
+use crate::chatminal_runtime::SessionTerminalHandle;
+use crate::desktop_host_runtime::overlay_shell::{
     OverlayForEachLogicalLine as ForEachPaneLogicalLine, OverlayWithPaneLines as WithPaneLines,
 };
-use crate::chatminal_runtime::SessionTerminalHandle;
 
 const EVENT_POLL_TIMEOUT: Duration = Duration::from_millis(50);
 const DISPLAY_RESET_FLASH_DURATION: Duration = Duration::from_millis(75);
@@ -796,29 +796,29 @@ mod tests {
         TerminalInstanceId,
     };
     use super::super::{
-        acquire_legacy_host_mux_test_lock, build_initial_host_mux, shutdown_host_mux,
+        acquire_legacy_host_runtime_test_lock, build_initial_host_runtime, shutdown_host_runtime,
     };
     use super::{
         decode_input_payload_chunks, looks_like_chatminal_internal_title, Action,
         ChatminalSessionPane, HostTerminal, TerminalSize,
     };
 
-    struct HostMuxTestGuard {
+    struct HostRuntimeTestGuard {
         _guard: MutexGuard<'static, ()>,
     }
 
-    impl Drop for HostMuxTestGuard {
+    impl Drop for HostRuntimeTestGuard {
         fn drop(&mut self) {
-            shutdown_host_mux();
+            shutdown_host_runtime();
         }
     }
 
-    fn init_host_mux_test() -> HostMuxTestGuard {
-        let guard = acquire_legacy_host_mux_test_lock();
-        shutdown_host_mux();
+    fn init_host_runtime_test() -> HostRuntimeTestGuard {
+        let guard = acquire_legacy_host_runtime_test_lock();
+        shutdown_host_runtime();
         let config = config::current_config_handle();
-        build_initial_host_mux(&config, None).expect("init host mux");
-        HostMuxTestGuard { _guard: guard }
+        build_initial_host_runtime(&config, None).expect("init host runtime");
+        HostRuntimeTestGuard { _guard: guard }
     }
 
     fn shell_command(script: &str) -> CommandBuilder {
@@ -886,7 +886,7 @@ mod tests {
 
     #[test]
     fn reset_display_state_replays_existing_output_immediately() {
-        let _guard = init_host_mux_test();
+        let _guard = init_host_runtime_test();
         let runtime_id = RuntimeId::new(7);
         let terminal_instance_id = TerminalInstanceId::new(11);
         let core_state = Arc::new(Mutex::new(SessionCoreState::default()));
@@ -957,7 +957,7 @@ mod tests {
 
     #[test]
     fn replay_seed_stays_at_top_of_viewport_for_short_history() {
-        let _guard = init_host_mux_test();
+        let _guard = init_host_runtime_test();
         let runtime_id = RuntimeId::new(17);
         let terminal_instance_id = TerminalInstanceId::new(18);
         let core_state = Arc::new(Mutex::new(SessionCoreState::default()));
@@ -1022,7 +1022,7 @@ mod tests {
 
     #[test]
     fn search_finds_matches_in_replayed_runtime_output() {
-        let _guard = init_host_mux_test();
+        let _guard = init_host_runtime_test();
         let runtime_id = RuntimeId::new(1);
         let terminal_instance_id = TerminalInstanceId::new(2);
         let core_state = Arc::new(Mutex::new(SessionCoreState::default()));
@@ -1093,7 +1093,7 @@ mod tests {
 
     #[test]
     fn pane_key_input_is_forwarded_to_runtime() {
-        let _guard = init_host_mux_test();
+        let _guard = init_host_runtime_test();
         let runtime_id = RuntimeId::new(21);
         let terminal_instance_id = TerminalInstanceId::new(22);
         let core_state = Arc::new(Mutex::new(SessionCoreState::default()));
@@ -1166,7 +1166,7 @@ mod tests {
 
     #[test]
     fn pane_direct_writer_input_is_forwarded_to_runtime() {
-        let _guard = init_host_mux_test();
+        let _guard = init_host_runtime_test();
         let runtime_id = RuntimeId::new(31);
         let terminal_instance_id = TerminalInstanceId::new(32);
         let core_state = Arc::new(Mutex::new(SessionCoreState::default()));
@@ -1239,7 +1239,7 @@ mod tests {
     }
 
     fn assert_key_input_hex(key: KeyCode, expected_hex: &str) {
-        let _guard = init_host_mux_test();
+        let _guard = init_host_runtime_test();
         let runtime_id = RuntimeId::new(41);
         let terminal_instance_id = TerminalInstanceId::new(42);
         let core_state = Arc::new(Mutex::new(SessionCoreState::default()));

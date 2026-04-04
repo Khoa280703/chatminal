@@ -1,8 +1,8 @@
 use crate::pane::{pane_id_for_pane, PaneId};
 use crate::{
-    dispatch_default_output_for_terminal_handle, dispatch_inline_output_for_pane, notify_mux,
+    dispatch_default_output_for_terminal_handle, dispatch_inline_output_for_pane, notify_runtime,
     prune_dead_windows_on_main_thread, resolve_pane_id, tab_by_id, with_root_window_mut,
-    MuxNotification,
+    HostRuntimeEvent,
 };
 use config::ExitBehavior;
 use engine_term::Alert;
@@ -65,7 +65,7 @@ impl LocalPaneHooks {
                         _ => {}
                     }
 
-                    notify_mux(MuxNotification::Alert { pane_id, alert });
+                    notify_runtime(HostRuntimeEvent::Alert { pane_id, alert });
                 })
                 .detach();
             }),
@@ -88,9 +88,8 @@ impl LocalPaneHooks {
         }
     }
 
-    // Explicit compat seam kept for legacy callers/tests that still refer to
-    // mux semantics. Product code should use `host_default()`.
-    pub(crate) fn mux_default() -> Self {
+    // Explicit compat seam kept for legacy callers/tests.
+    pub(crate) fn compat_default() -> Self {
         Self::host_default()
     }
 

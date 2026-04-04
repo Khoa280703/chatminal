@@ -4,11 +4,6 @@ use super::utilsprites::RenderMetrics;
 use crate::chatminal_layout::workspace_store::{
     DesktopWorkspaceLayoutStore, DEFAULT_LAYOUT_WORKSPACE_ID,
 };
-use crate::chatminal_runtime::overlay_compat::{
-    OverlayAssignmentResult as PerformAssignmentResult, OverlayCachePolicy as CachePolicy,
-    OverlayCloseReason as CloseReason, OverlayPane, OverlayPattern, OverlayTerminal,
-    RenderableDimensions,
-};
 use crate::chatminal_runtime::{
     active_host_runtime_entry_size, desktop_activate_session, desktop_can_close_view_only,
     desktop_detach_session_runtime_and_notify, desktop_focus_session_view_with_previous,
@@ -23,6 +18,11 @@ use crate::chatminal_runtime::{
 };
 use crate::chatminal_sidebar::{ChatminalSidebar, SidebarSessionDropTarget};
 use crate::colorease::ColorEase;
+use crate::desktop_host_runtime::overlay_shell::{
+    OverlayAssignmentResult as PerformAssignmentResult, OverlayCachePolicy as CachePolicy,
+    OverlayCloseReason as CloseReason, OverlayPane, OverlayPattern, OverlayTerminal,
+    RenderableDimensions,
+};
 use crate::desktop_overlay_actions::show_close_runtime_entry_overlay;
 use crate::desktop_termwindow_types::{
     terminal_handle_for_ui_key, terminal_ui_key_for_pane, TerminalPaneLayout, TerminalSplit,

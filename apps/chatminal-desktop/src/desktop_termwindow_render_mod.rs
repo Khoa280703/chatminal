@@ -1,8 +1,8 @@
-use crate::chatminal_runtime::overlay_compat::{
-    OverlayPane, RenderableDimensions, StableCursorPosition,
-};
 use crate::colorease::ColorEase;
 use crate::customglyph::{BlockKey, *};
+use crate::desktop_host_runtime::overlay_shell::{
+    OverlayPane, RenderableDimensions, StableCursorPosition,
+};
 use crate::desktop_termwindow_types::{terminal_ui_key_for_pane, TerminalUiKey};
 use crate::glyphcache::{CachedGlyph, GlyphCache};
 use crate::quad::{

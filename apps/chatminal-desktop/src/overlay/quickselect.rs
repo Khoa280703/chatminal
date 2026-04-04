@@ -1,9 +1,8 @@
-use crate::chatminal_runtime::overlay_compat::{
-    OverlayCachePolicy, OverlayForEachLogicalLine, OverlayLogicalLine, OverlayPane, OverlayPattern,
-    OverlaySearchResult, OverlayWithPaneLines,
-    RenderableDimensions, StableCursorPosition,
-};
 use crate::chatminal_runtime::SessionTerminalHandle;
+use crate::desktop_host_runtime::overlay_shell::{
+    OverlayCachePolicy, OverlayForEachLogicalLine, OverlayLogicalLine, OverlayPane, OverlayPattern,
+    OverlaySearchResult, OverlayWithPaneLines, RenderableDimensions, StableCursorPosition,
+};
 use crate::desktop_termwindow_types::terminal_ui_key_for_pane;
 use crate::selection::{SelectionCoordinate, SelectionRange};
 use crate::termwindow::{TermWindow, TermWindowNotif};

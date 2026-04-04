@@ -1,4 +1,4 @@
-use crate::chatminal_runtime::overlay_compat::{
+use crate::desktop_host_runtime::overlay_shell::{
     OverlayWithPaneLines as WithPaneLines, RenderableDimensions, StableCursorPosition,
 };
 use crate::desktop_termwindow_types::terminal_ui_key_for_pane;
@@ -11,8 +11,6 @@ use crate::termwindow::render::{
     RenderScreenLineParams,
 };
 use crate::termwindow::{ScrollHit, UIItem, UIItemType};
-use ::window::bitmaps::TextureRect;
-use ::window::DeadKeyStatus;
 use anyhow::Context;
 use config::VisualBellTarget;
 use engine_dynamic::Value;
@@ -20,7 +18,9 @@ use engine_term::color::{ColorAttribute, ColorPalette};
 use engine_term::{Line, StableRowIndex};
 use ordered_float::NotNan;
 use std::time::Instant;
+use window::bitmaps::TextureRect;
 use window::color::LinearRgba;
+use window::DeadKeyStatus;
 use window::PointF;
 use window::RectF;
 

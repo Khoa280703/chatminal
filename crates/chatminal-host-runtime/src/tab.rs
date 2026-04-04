@@ -1,6 +1,6 @@
 use crate::pane::*;
 use crate::renderable::StableCursorPosition;
-use crate::{notify_mux, remove_pane_on_main_thread, try_host_runtime_root, MuxNotification};
+use crate::{notify_runtime, remove_pane_on_main_thread, try_host_runtime_root, HostRuntimeEvent};
 use bintree::PathBranch;
 use chatminal_runtime::{RuntimeId, SessionTerminalHandle};
 use config::keyassignment::SessionDirection;
@@ -423,7 +423,7 @@ impl Tab {
         let mut inner = self.inner.lock();
         if inner.title != title {
             inner.title = title.to_string();
-            notify_mux(MuxNotification::TabTitleChanged {
+            notify_runtime(HostRuntimeEvent::TabTitleChanged {
                 tab_id: inner.id,
                 title: title.to_string(),
             });
@@ -709,7 +709,7 @@ impl TabInner {
                 self.zoomed.replace(pane);
             }
         }
-        notify_mux(MuxNotification::TabResized(self.id));
+        notify_runtime(HostRuntimeEvent::TabResized(self.id));
     }
 
     fn contains_pane(&self, pane: PaneId) -> bool {
@@ -798,7 +798,7 @@ impl TabInner {
                 }
             }
         }
-        notify_mux(MuxNotification::TabResized(self.id));
+        notify_runtime(HostRuntimeEvent::TabResized(self.id));
     }
 
     fn iter_panes_impl(&mut self, respect_zoom_state: bool) -> Vec<PositionedPane> {
@@ -980,7 +980,7 @@ impl TabInner {
             apply_sizes_from_splits(self.pane.as_mut().unwrap(), &size);
         }
 
-        notify_mux(MuxNotification::TabResized(self.id));
+        notify_runtime(HostRuntimeEvent::TabResized(self.id));
     }
 
     fn apply_pane_size(&mut self, pane_size: TerminalSize, cursor: &mut Cursor) {
@@ -1056,7 +1056,7 @@ impl TabInner {
                 self.size = size;
             }
         }
-        notify_mux(MuxNotification::TabResized(self.id));
+        notify_runtime(HostRuntimeEvent::TabResized(self.id));
     }
 
     fn resize_split_by(&mut self, split_index: usize, delta: isize) {
@@ -1089,7 +1089,7 @@ impl TabInner {
         // Now cursor is looking at the split
         self.adjust_node_at_cursor(&mut cursor, delta);
         self.cascade_size_from_cursor(cursor);
-        notify_mux(MuxNotification::TabResized(self.id));
+        notify_runtime(HostRuntimeEvent::TabResized(self.id));
     }
 
     fn adjust_node_at_cursor(&mut self, cursor: &mut Cursor, delta: isize) {
@@ -1172,7 +1172,7 @@ impl TabInner {
                 }
             }
         }
-        notify_mux(MuxNotification::TabResized(self.id));
+        notify_runtime(HostRuntimeEvent::TabResized(self.id));
     }
 
     fn adjust_pane_size(&mut self, direction: SessionDirection, amount: usize) {
@@ -1247,7 +1247,7 @@ impl TabInner {
         if let Some(panel_idx) = self.get_pane_direction(direction, false) {
             self.set_active_idx(panel_idx);
         }
-        notify_mux(MuxNotification::WindowInvalidated);
+        notify_runtime(HostRuntimeEvent::WindowInvalidated);
     }
 
     fn get_pane_direction(
@@ -1386,7 +1386,8 @@ impl TabInner {
     }
 
     fn remove_pane(&mut self, pane_id: PaneId) -> Option<Arc<dyn Pane>> {
-        let panes = self.remove_pane_if(|_, pane| pane_id_for_pane(pane.as_ref()) == pane_id, false);
+        let panes =
+            self.remove_pane_if(|_, pane| pane_id_for_pane(pane.as_ref()) == pane_id, false);
         for pane in panes {
             return Some(pane);
         }
@@ -1608,11 +1609,15 @@ impl TabInner {
             {
                 prior.focus_changed(false);
                 current.focus_changed(true);
-                notify_mux(MuxNotification::PaneFocused(pane_id_for_pane(current.as_ref())));
+                notify_runtime(HostRuntimeEvent::PaneFocused(pane_id_for_pane(
+                    current.as_ref(),
+                )));
             }
             (None, Some(current)) => {
                 current.focus_changed(true);
-                notify_mux(MuxNotification::PaneFocused(pane_id_for_pane(current.as_ref())));
+                notify_runtime(HostRuntimeEvent::PaneFocused(pane_id_for_pane(
+                    current.as_ref(),
+                )));
             }
             (Some(prior), None) => {
                 prior.focus_changed(false);
@@ -2225,7 +2230,10 @@ mod test {
         assert_eq!(24, panes[0].height);
         assert_eq!(390, panes[0].pixel_width);
         assert_eq!(600, panes[0].pixel_height);
-        assert_eq!(SessionTerminalHandle::new(1), panes[0].pane.terminal_handle());
+        assert_eq!(
+            SessionTerminalHandle::new(1),
+            panes[0].pane.terminal_handle()
+        );
 
         assert_eq!(1, panes[1].index);
         assert_eq!(true, panes[1].is_active);
@@ -2235,7 +2243,10 @@ mod test {
         assert_eq!(24, panes[1].height);
         assert_eq!(400, panes[1].pixel_width);
         assert_eq!(600, panes[1].pixel_height);
-        assert_eq!(SessionTerminalHandle::new(2), panes[1].pane.terminal_handle());
+        assert_eq!(
+            SessionTerminalHandle::new(2),
+            panes[1].pane.terminal_handle()
+        );
 
         let vert_size = tab
             .compute_split_size(
@@ -2271,7 +2282,10 @@ mod test {
         assert_eq!(11, panes[0].height);
         assert_eq!(390, panes[0].pixel_width);
         assert_eq!(275, panes[0].pixel_height);
-        assert_eq!(SessionTerminalHandle::new(1), panes[0].pane.terminal_handle());
+        assert_eq!(
+            SessionTerminalHandle::new(1),
+            panes[0].pane.terminal_handle()
+        );
 
         assert_eq!(1, panes[1].index);
         assert_eq!(true, panes[1].is_active);
@@ -2281,7 +2295,10 @@ mod test {
         assert_eq!(12, panes[1].height);
         assert_eq!(390, panes[1].pixel_width);
         assert_eq!(300, panes[1].pixel_height);
-        assert_eq!(SessionTerminalHandle::new(3), panes[1].pane.terminal_handle());
+        assert_eq!(
+            SessionTerminalHandle::new(3),
+            panes[1].pane.terminal_handle()
+        );
 
         assert_eq!(2, panes[2].index);
         assert_eq!(false, panes[2].is_active);
@@ -2291,7 +2308,10 @@ mod test {
         assert_eq!(24, panes[2].height);
         assert_eq!(400, panes[2].pixel_width);
         assert_eq!(600, panes[2].pixel_height);
-        assert_eq!(SessionTerminalHandle::new(2), panes[2].pane.terminal_handle());
+        assert_eq!(
+            SessionTerminalHandle::new(2),
+            panes[2].pane.terminal_handle()
+        );
 
         tab.resize_split_by(1, 1);
         let panes = tab.iter_panes();

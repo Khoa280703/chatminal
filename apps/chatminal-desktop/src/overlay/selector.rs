@@ -1,4 +1,4 @@
-use crate::chatminal_runtime::overlay_compat::OverlayTerminal;
+use crate::desktop_host_runtime::overlay_shell::OverlayTerminal;
 use crate::overlay::quickselect;
 use crate::scripting::guiwin::GuiWin;
 use config::keyassignment::{InputSelector, InputSelectorEntry, KeyAssignment};

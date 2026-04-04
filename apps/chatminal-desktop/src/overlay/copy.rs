@@ -1,10 +1,10 @@
-use crate::chatminal_runtime::overlay_compat::{
-    OverlayAssignmentResult, OverlayCachePolicy, OverlayForEachLogicalLine, OverlayLogicalLine,
-    OverlayPane, OverlayPattern, OverlayPatternType, OverlayRuntimeEntryHandle, OverlaySearchResult,
-    OverlayWithPaneLines, RenderableDimensions, StableCursorPosition,
-};
 use crate::chatminal_runtime::{
     frontend_resolve_pane, terminal_handle_for_overlay_pane, SessionTerminalHandle,
+};
+use crate::desktop_host_runtime::overlay_shell::{
+    OverlayAssignmentResult, OverlayCachePolicy, OverlayForEachLogicalLine, OverlayLogicalLine,
+    OverlayPane, OverlayPattern, OverlayPatternType, OverlayRuntimeEntryHandle,
+    OverlaySearchResult, OverlayWithPaneLines, RenderableDimensions, StableCursorPosition,
 };
 use crate::desktop_termwindow_types::terminal_ui_key_for_pane;
 use crate::selection::{SelectionCoordinate, SelectionRange, SelectionX};

@@ -14,20 +14,19 @@ use super::session_engine::{
 };
 use super::spawn_target::DesktopSpawnTarget;
 use config::ConfigHandle;
-use engine_dynamic::Value;
 use engine_term::{Clipboard, ClipboardSelection, DownloadHandler, TerminalSize};
 use host_runtime::client::ClientId;
 use host_runtime::tab::Tab as HostRenderScope;
 use portable_pty::CommandBuilder;
 
-use super::session_pane::{ChatminalSessionPane, pane_id_for_terminal_instance};
+use super::session_pane::{pane_id_for_terminal_instance, ChatminalSessionPane};
 use super::{
+    configured_default_workspace_name, host_window_exists,
+    publish_runtime_notification_from_any_thread, subscribe_desktop_runtime_notifications,
     FrontendClientHandle, FrontendFocusedPane, FrontendResolvedPane, HostFocusedPaneBinding,
-    HostRenderableDimensions as RenderableDimensions, HostRuntimeHandle, HostSpawnTargetHandle,
-    HostTerminal, LauncherSessionEntry, PRIMARY_HOST_WINDOW_ID,
-    ROOT_HOST_WINDOW_ID, RuntimeNotification, RuntimeWindow, configured_default_workspace_name,
-    host_window_exists, publish_runtime_notification_from_any_thread,
-    subscribe_desktop_runtime_notifications,
+    HostRenderableDimensions as RenderableDimensions, HostSpawnTargetHandle, HostTerminal,
+    LauncherSessionEntry, RuntimeNotification, RuntimeWindow, PRIMARY_HOST_WINDOW_ID,
+    ROOT_HOST_WINDOW_ID,
 };
 use crate::chatminal_render::{ChatminalRenderPane, ChatminalRenderState};
 use crate::chatminal_runtime::{
@@ -44,16 +43,6 @@ use chatminal_runtime::{
 
 static HOST_REGISTRY: OnceLock<Arc<DesktopSessionHost>> = OnceLock::new();
 static LEGACY_HOST_NOTIFICATIONS_BRIDGED: AtomicBool = AtomicBool::new(false);
-static LEGACY_HOST_CLIENT_ID: OnceLock<Mutex<Option<FrontendClientHandle>>> = OnceLock::new();
-static LEGACY_HOST_WORKSPACE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
-
-fn legacy_host_client_slot() -> &'static Mutex<Option<FrontendClientHandle>> {
-    LEGACY_HOST_CLIENT_ID.get_or_init(|| Mutex::new(None))
-}
-
-fn legacy_host_workspace_slot() -> &'static Mutex<Option<String>> {
-    LEGACY_HOST_WORKSPACE.get_or_init(|| Mutex::new(None))
-}
 
 pub(crate) fn get_or_init_session_host(
     shared: Arc<SessionEngineShared>,
@@ -94,8 +83,8 @@ fn host_add_session_pane_with_output_callback(pane: &Arc<dyn HostTerminal>) -> a
         .map_err(anyhow::Error::from)
 }
 
-fn bridge_legacy_host_notifications(mux_handle: &Arc<HostRuntimeHandle>) {
-    mux_handle.subscribe(|notification| {
+fn bridge_legacy_host_notifications() {
+    let _ = host_runtime::subscribe_runtime_notifications(|notification| {
         publish_runtime_notification_from_any_thread(notification.into());
         true
     });
@@ -178,7 +167,6 @@ fn host_has_tab(runtime_id: RuntimeId) -> bool {
 fn host_workspace_name_value() -> String {
     host_runtime::root_window_workspace_name()
         .or_else(|| host_runtime::active_workspace_name())
-        .or_else(|| legacy_host_workspace_slot().lock().unwrap().clone())
         .unwrap_or_default()
 }
 
@@ -203,16 +191,7 @@ fn host_active_identity() -> Option<FrontendClientHandle> {
 }
 
 fn host_workspace_for_client(client_id: &FrontendClientHandle) -> String {
-    host_runtime::active_workspace_for_client(client_id)
-        .or_else(|| {
-            legacy_host_client_slot()
-                .lock()
-                .unwrap()
-                .as_ref()
-                .filter(|active_client| *active_client == client_id)
-                .and_then(|_| legacy_host_workspace_slot().lock().unwrap().clone())
-        })
-        .unwrap_or_default()
+    host_runtime::active_workspace_for_client(client_id).unwrap_or_default()
 }
 
 fn host_set_workspace_for_client(client_id: &FrontendClientHandle, workspace: &str) {
@@ -261,7 +240,7 @@ async fn host_spawn_tab(
 fn host_initialize_runtime(
     spawn_target: Option<HostSpawnTargetHandle>,
     config: ConfigHandle,
-) -> anyhow::Result<Arc<HostRuntimeHandle>> {
+) -> anyhow::Result<Arc<host_runtime::HostRuntimeHandle>> {
     host_runtime::initialize_host_runtime_with_config(spawn_target, config)
 }
 
@@ -297,6 +276,43 @@ fn host_shutdown_runtime() {
     host_runtime::shutdown_host_runtime();
 }
 
+fn ensure_legacy_notification_bridge() {
+    if !LEGACY_HOST_NOTIFICATIONS_BRIDGED.swap(true, Ordering::AcqRel) {
+        bridge_legacy_host_notifications();
+    }
+}
+
+fn initialize_desktop_host_runtime(
+    config: &ConfigHandle,
+    default_workspace_name: Option<&str>,
+) -> anyhow::Result<FrontendClientHandle> {
+    let desktop_spawn_target: HostSpawnTargetHandle = Arc::new(DesktopSpawnTarget::new_local()?);
+    let runtime = host_initialize_runtime(Some(Arc::clone(&desktop_spawn_target)), config.clone())?;
+    host_set_primary_spawn_target_value(&desktop_spawn_target);
+    ensure_legacy_notification_bridge();
+
+    let client_id = host_active_identity().unwrap_or_else(|| {
+        let client_id = Arc::new(ClientId::new());
+        runtime.register_client(client_id.clone());
+        client_id
+    });
+    runtime.replace_identity(Some(client_id.clone()));
+
+    let workspace = default_workspace_name
+        .map(str::to_string)
+        .unwrap_or_else(|| configured_default_workspace_name(config));
+    runtime.set_active_workspace(&workspace);
+    let _ = host_runtime::set_root_window_workspace_name(&workspace);
+    host_set_workspace_for_client(&client_id, &workspace);
+    let _ = PRIMARY_HOST_WINDOW_ID.set(ROOT_HOST_WINDOW_ID);
+    Ok(client_id)
+}
+
+fn shutdown_desktop_host_runtime() {
+    LEGACY_HOST_NOTIFICATIONS_BRIDGED.store(false, Ordering::Release);
+    host_shutdown_runtime();
+}
+
 fn pane_dims_need_resize(dims: RenderableDimensions, size: TerminalSize) -> bool {
     dims.cols != size.cols
         || dims.viewport_rows != size.rows
@@ -305,82 +321,15 @@ fn pane_dims_need_resize(dims: RenderableDimensions, size: TerminalSize) -> bool
         || dims.dpi != size.dpi
 }
 
-pub(crate) fn legacy_active_render_scope_id() -> Option<u64> {
-    host_root_active_tab_id().map(|runtime_id| runtime_id.as_u64())
-}
-
-pub(crate) fn legacy_remove_terminal_handle(terminal_handle: SessionTerminalHandle) {
-    host_remove_pane(terminal_handle);
-}
-
-pub(crate) fn legacy_with_window<R, F>(func: F) -> Option<R>
-where
-    F: FnOnce(&RuntimeWindow) -> R,
-{
-    Some(with_host_window_ref(func))
-}
-
-pub(crate) fn legacy_with_window_mut<R, F>(func: F) -> Option<R>
-where
-    F: FnOnce(&mut RuntimeWindow) -> R,
-{
-    Some(with_host_window_mut_ref(func))
-}
-
-pub(crate) fn legacy_remove_runtime_entry_scope(render_scope_id: u64) {
-    host_remove_tab(RuntimeId::new(render_scope_id));
-}
-
-pub(crate) fn legacy_host_window_contains_render_scope(render_scope_id: u64) -> bool {
-    host_has_tab(RuntimeId::new(render_scope_id))
-}
-
-pub(crate) fn legacy_host_workspace_name() -> String {
-    let workspace = host_workspace_name_value();
-    if !workspace.is_empty() {
-        return workspace;
-    }
-    legacy_host_workspace_slot()
-        .lock()
-        .unwrap()
-        .clone()
-        .unwrap_or_default()
-}
-
-pub(crate) fn legacy_set_host_workspace(name: &str) {
-    host_set_workspace_name(name);
-    *legacy_host_workspace_slot().lock().unwrap() = Some(name.to_string());
-}
-
-pub(crate) fn legacy_record_focus_for_current_identity(terminal_handle: SessionTerminalHandle) {
-    host_record_focus(terminal_handle);
-}
-
-pub(crate) fn legacy_record_input_for_current_identity() {
-    let _ = host_runtime::record_input_for_current_identity();
-}
-
-pub(crate) fn legacy_subscribe_notifications<F>(subscriber: F)
-where
-    F: Fn(RuntimeNotification) -> bool + 'static + Send + Sync,
-{
-    host_subscribe(subscriber);
-}
-
+#[cfg(test)]
 pub(crate) fn legacy_active_frontend_client() -> Option<FrontendClientHandle> {
-    legacy_host_client_slot()
-        .lock()
-        .unwrap()
-        .clone()
-        .or_else(host_active_identity)
+    host_active_identity()
 }
 
+#[cfg(test)]
 pub(crate) fn legacy_active_workspace_for_client(client_id: &FrontendClientHandle) -> String {
     let workspace = host_workspace_for_client(client_id);
     if !workspace.is_empty() {
-        return workspace;
-    }
-    if let Some(workspace) = legacy_host_workspace_slot().lock().unwrap().clone() {
         return workspace;
     }
     host_runtime::root_window_workspace_name()
@@ -388,173 +337,18 @@ pub(crate) fn legacy_active_workspace_for_client(client_id: &FrontendClientHandl
         .unwrap_or_default()
 }
 
-pub(crate) fn legacy_set_active_workspace_for_client(
-    client_id: &FrontendClientHandle,
-    workspace: &str,
-) {
-    host_set_workspace_for_client(client_id, workspace);
-    *legacy_host_workspace_slot().lock().unwrap() = Some(workspace.to_string());
-}
-
-pub(crate) fn legacy_workspace_is_empty(workspace: &str) -> bool {
-    host_workspace_is_empty_value(workspace)
-}
-
-pub(crate) fn legacy_workspace_names() -> Vec<String> {
-    host_workspace_names_value()
-}
-
-pub(crate) fn legacy_focus_terminal_handle_by_id(
-    pane_id: SessionTerminalHandle,
-) -> anyhow::Result<()> {
-    host_runtime::focus_terminal_handle(pane_id).map_err(anyhow::Error::from)
-}
-
-pub(crate) fn legacy_frontend_resolve_pane(
-    pane_id: SessionTerminalHandle,
-) -> Option<FrontendResolvedPane> {
-    let runtime_id = host_resolve_pane_id_value(pane_id)?;
-    Some(FrontendResolvedPane { runtime_id })
-}
-
-pub(crate) fn legacy_frontend_resolve_focused_pane(
-    client_id: &FrontendClientHandle,
-) -> Option<FrontendFocusedPane> {
-    let binding = host_resolve_focused_pane_value(client_id)?;
-    Some(FrontendFocusedPane {
-        runtime_id: binding.runtime_id(),
-        terminal_handle: binding.terminal_handle(),
-    })
-}
-
-pub(crate) fn legacy_resolve_public_pane_fallback(
-    host_terminal_handle: u64,
-    terminal_instance_id: u64,
-) -> Option<Arc<dyn HostTerminal>> {
-    Some(SessionTerminalHandle::new(host_terminal_handle))
-        .and_then(host_get_pane)
-        .or_else(|| {
-            Some(SessionTerminalHandle::new(terminal_instance_id)).and_then(host_get_pane)
-        })
-        .or_else(|| {
-            host_iter_panes()
-                .into_iter()
-                .find(|pane| terminal_handle_matches_public_id(&**pane, terminal_instance_id))
-        })
-}
-
-pub(crate) async fn legacy_spawn_local_shell_runner() -> anyhow::Result<Arc<dyn HostTerminal>> {
-    let (_runtime_entry, pane) = host_spawn_tab(None, None, TerminalSize::default(), None).await?;
-    Ok(pane)
-}
-
-pub(crate) async fn legacy_spawn_host_runtime_entry(
-    command: Option<CommandBuilder>,
-    command_dir: Option<String>,
-    size: TerminalSize,
-    current_pane_id: Option<u64>,
-    workspace: String,
-) -> anyhow::Result<Arc<dyn HostTerminal>> {
-    legacy_set_host_workspace(&workspace);
-    let (_runtime_entry, pane) = host_spawn_tab(
-        command,
-        command_dir,
-        size,
-        current_pane_id.map(SessionTerminalHandle::new),
-    )
-    .await?;
-    Ok(pane)
-}
-
-pub(crate) fn legacy_set_primary_spawn_target(spawn_target: &HostSpawnTargetHandle) {
-    host_set_primary_spawn_target_value(spawn_target);
-}
-
-pub(crate) fn legacy_primary_spawn_target() -> HostSpawnTargetHandle {
-    host_primary_spawn_target_value()
-}
-
-pub(crate) fn legacy_build_initial_host_mux(
+#[cfg(test)]
+pub(crate) fn build_legacy_host_runtime_for_test(
     config: &ConfigHandle,
     default_workspace_name: Option<&str>,
 ) -> anyhow::Result<()> {
-    let desktop_spawn_target: HostSpawnTargetHandle = Arc::new(DesktopSpawnTarget::new_local()?);
-    let mux_handle =
-        host_initialize_runtime(Some(Arc::clone(&desktop_spawn_target)), config.clone())?;
-    host_set_primary_spawn_target_value(&desktop_spawn_target);
-    if !LEGACY_HOST_NOTIFICATIONS_BRIDGED.swap(true, Ordering::AcqRel) {
-        bridge_legacy_host_notifications(&mux_handle);
-    }
-    let client_id = {
-        let mut slot = legacy_host_client_slot().lock().unwrap();
-        if let Some(client_id) = slot.clone() {
-            client_id
-        } else {
-            let client_id = Arc::new(ClientId::new());
-            mux_handle.register_client(client_id.clone());
-            *slot = Some(client_id.clone());
-            client_id
-        }
-    };
-    mux_handle.replace_identity(Some(client_id.clone()));
-    *legacy_host_client_slot().lock().unwrap() = Some(client_id.clone());
-
-    let workspace = default_workspace_name
-        .map(str::to_string)
-        .unwrap_or_else(|| configured_default_workspace_name(config));
-    mux_handle.set_active_workspace(&workspace);
-    host_set_workspace_name(&workspace);
-    host_set_workspace_for_client(&client_id, &workspace);
-    *legacy_host_workspace_slot().lock().unwrap() = Some(workspace);
-    let _ = PRIMARY_HOST_WINDOW_ID.set(ROOT_HOST_WINDOW_ID);
+    let _ = initialize_desktop_host_runtime(config, default_workspace_name)?;
     Ok(())
 }
 
-pub(crate) fn legacy_create_serial_spawn_target(
-    serial_target: config::SerialTarget,
-) -> anyhow::Result<HostSpawnTargetHandle> {
-    Ok(Arc::new(DesktopSpawnTarget::new_serial(serial_target)?))
-}
-
-pub(crate) fn legacy_shutdown_host_mux() {
-    LEGACY_HOST_NOTIFICATIONS_BRIDGED.store(false, Ordering::Release);
-    *legacy_host_client_slot().lock().unwrap() = None;
-    *legacy_host_workspace_slot().lock().unwrap() = None;
-    host_shutdown_runtime();
-}
-
-pub(crate) fn legacy_activate_runtime_entry(render_scope_id: u64) -> anyhow::Result<()> {
-    let runtime_id = RuntimeId::new(render_scope_id);
-    host_tab_id(runtime_id)
-        .ok_or_else(|| anyhow::anyhow!("invalid runtime entry id {render_scope_id}"))?;
-    host_focus_root_window_tab(runtime_id)
-        .then_some(())
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "runtime entry {} not attached to root window",
-                runtime_id.as_u64()
-            )
-        })
-}
-
-pub(crate) fn legacy_has_panes_in_workspace(workspace: Option<&str>) -> bool {
-    if host_iter_panes().is_empty() {
-        return false;
-    }
-    let Some(workspace) = workspace else {
-        return true;
-    };
-    if !legacy_workspace_has_windows(workspace) {
-        return false;
-    }
-    host_root_has_runtime_entries_with_panes()
-}
-
-pub(crate) fn legacy_workspace_has_windows(name: &str) -> bool {
-    host_root_window_workspace_name_value()
-        .as_deref()
-        .map(|workspace| workspace == name)
-        .unwrap_or(false)
+#[cfg(test)]
+pub(crate) fn shutdown_legacy_host_runtime_for_test() {
+    shutdown_desktop_host_runtime();
 }
 
 // ---------------------------------------------------------------------------
@@ -603,31 +397,6 @@ fn host_terminal_binding(pane: &ChatminalSessionPane) -> RuntimeHostTerminalBind
         terminal_instance_id: pane.terminal_instance_id_value(),
         terminal_handle: pane.pane_id_value(),
     }
-}
-
-fn terminal_handle_metadata_u64(pane: &dyn HostTerminal, key: &str) -> Option<u64> {
-    match pane.get_metadata() {
-        Value::Object(map) => {
-            map.get(&Value::String(key.to_string()))
-                .and_then(|value| match value {
-                    Value::U64(value) => Some(*value),
-                    _ => None,
-                })
-        }
-        _ => None,
-    }
-}
-
-fn terminal_handle_terminal_instance_id(pane: &dyn HostTerminal) -> Option<TerminalInstanceId> {
-    terminal_handle_metadata_u64(pane, "chatminal_terminal_instance_id")
-        .map(TerminalInstanceId::new)
-}
-
-fn terminal_handle_matches_public_id(pane: &dyn HostTerminal, public_id: u64) -> bool {
-    host_terminal_handle(pane).as_u64() == public_id
-        || terminal_handle_terminal_instance_id(pane)
-            .map(|terminal_instance_id| terminal_instance_id.as_u64() == public_id)
-            .unwrap_or(false)
 }
 
 impl DesktopSessionHost {
@@ -1248,22 +1017,28 @@ impl DesktopSessionHost {
     }
 
     pub(crate) fn host_workspace_name(&self) -> String {
-        legacy_host_workspace_name()
+        host_workspace_name_value()
     }
 
     pub(crate) fn active_frontend_client(&self) -> Option<FrontendClientHandle> {
-        legacy_active_frontend_client()
+        host_active_identity()
     }
 
     pub(crate) fn subscribe_notifications<F>(&self, subscriber: F)
     where
         F: Fn(RuntimeNotification) -> bool + 'static + Send + Sync,
     {
-        legacy_subscribe_notifications(subscriber);
+        host_subscribe(subscriber);
     }
 
     pub(crate) fn active_workspace_for_client(&self, client_id: &FrontendClientHandle) -> String {
-        legacy_active_workspace_for_client(client_id)
+        let workspace = host_workspace_for_client(client_id);
+        if !workspace.is_empty() {
+            return workspace;
+        }
+        host_runtime::root_window_workspace_name()
+            .or_else(host_runtime::active_workspace_name)
+            .unwrap_or_default()
     }
 
     pub(crate) fn set_active_workspace_for_client(
@@ -1271,29 +1046,29 @@ impl DesktopSessionHost {
         client_id: &FrontendClientHandle,
         workspace: &str,
     ) {
-        legacy_set_active_workspace_for_client(client_id, workspace);
+        host_set_workspace_for_client(client_id, workspace);
     }
 
     pub(crate) fn workspace_is_empty(&self, workspace: &str) -> bool {
-        legacy_workspace_is_empty(workspace)
+        host_workspace_is_empty_value(workspace)
     }
 
     pub(crate) fn workspace_names(&self) -> Vec<String> {
-        legacy_workspace_names()
+        host_workspace_names_value()
     }
 
     pub(crate) fn with_window<R, F>(&self, func: F) -> Option<R>
     where
         F: FnOnce(&RuntimeWindow) -> R,
     {
-        legacy_with_window(func)
+        Some(with_host_window_ref(func))
     }
 
     pub(crate) fn with_window_mut<R, F>(&self, func: F) -> Option<R>
     where
         F: FnOnce(&mut RuntimeWindow) -> R,
     {
-        legacy_with_window_mut(func)
+        Some(with_host_window_mut_ref(func))
     }
 
     pub(crate) fn window_exists(&self) -> bool {
@@ -1301,7 +1076,10 @@ impl DesktopSessionHost {
     }
 
     pub(crate) fn workspace_has_windows(&self, name: &str) -> bool {
-        legacy_workspace_has_windows(name)
+        host_root_window_workspace_name_value()
+            .as_deref()
+            .map(|workspace| workspace == name)
+            .unwrap_or(false)
     }
 
     pub(crate) fn resize_window_tabs(&self, size: TerminalSize) {
@@ -1309,34 +1087,40 @@ impl DesktopSessionHost {
     }
 
     pub(crate) fn has_panes_in_workspace(&self, workspace: Option<&str>) -> bool {
-        legacy_has_panes_in_workspace(workspace)
+        if host_iter_panes().is_empty() {
+            return false;
+        }
+        let Some(workspace) = workspace else {
+            return true;
+        };
+        self.workspace_has_windows(workspace) && host_root_has_runtime_entries_with_panes()
     }
 
     pub(crate) fn active_render_scope_id(&self) -> Option<u64> {
-        legacy_active_render_scope_id()
+        host_root_active_tab_id().map(|runtime_id| runtime_id.as_u64())
     }
 
     pub(crate) fn host_window_contains_render_scope(&self, render_scope_id: u64) -> bool {
-        legacy_host_window_contains_render_scope(render_scope_id)
+        host_has_tab(RuntimeId::new(render_scope_id))
     }
 
     pub(crate) fn remove_terminal_handle(&self, terminal_handle: SessionTerminalHandle) {
         if self.remove_registered_pane(terminal_handle) {
             return;
         }
-        legacy_remove_terminal_handle(terminal_handle);
+        host_remove_pane(terminal_handle);
     }
 
     pub(crate) fn remove_runtime_entry_scope(&self, render_scope_id: u64) {
-        legacy_remove_runtime_entry_scope(render_scope_id);
+        host_remove_tab(RuntimeId::new(render_scope_id));
     }
 
     pub(crate) fn record_focus_for_current_identity(&self, terminal_handle: SessionTerminalHandle) {
-        legacy_record_focus_for_current_identity(terminal_handle);
+        host_record_focus(terminal_handle);
     }
 
     pub(crate) fn record_input_for_current_identity(&self) {
-        legacy_record_input_for_current_identity();
+        let _ = host_runtime::record_input_for_current_identity();
     }
 
     pub(crate) fn host_window_initial_position(&self) -> Option<config::GuiPosition> {
@@ -1396,7 +1180,17 @@ impl DesktopSessionHost {
     }
 
     pub(crate) fn activate_runtime_entry(&self, render_scope_id: u64) -> anyhow::Result<()> {
-        legacy_activate_runtime_entry(render_scope_id)
+        let runtime_id = RuntimeId::new(render_scope_id);
+        host_tab_id(runtime_id)
+            .ok_or_else(|| anyhow::anyhow!("invalid runtime entry id {render_scope_id}"))?;
+        host_focus_root_window_tab(runtime_id)
+            .then_some(())
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "runtime entry {} not attached to root window",
+                    runtime_id.as_u64()
+                )
+            })
     }
 
     pub(crate) fn resolve_public_pane_fallback(
@@ -1406,9 +1200,8 @@ impl DesktopSessionHost {
     ) -> Option<Arc<dyn HostTerminal>> {
         self.pane_for_public_id(host_terminal_handle)
             .or_else(|| self.pane_for_public_id(terminal_instance_id))
-            .or_else(|| {
-                legacy_resolve_public_pane_fallback(host_terminal_handle, terminal_instance_id)
-            })
+            .or_else(|| host_runtime::terminal_by_public_id(host_terminal_handle))
+            .or_else(|| host_runtime::terminal_by_public_id(terminal_instance_id))
     }
 
     pub(crate) fn frontend_resolve_pane_fallback(
@@ -1420,14 +1213,20 @@ impl DesktopSessionHost {
                 runtime_id: binding.runtime_id,
             });
         }
-        legacy_frontend_resolve_pane(pane_id)
+        Some(FrontendResolvedPane {
+            runtime_id: host_resolve_pane_id_value(pane_id)?,
+        })
     }
 
     pub(crate) fn frontend_resolve_focused_pane_fallback(
         &self,
         client_id: &FrontendClientHandle,
     ) -> Option<FrontendFocusedPane> {
-        let resolved = legacy_frontend_resolve_focused_pane(client_id)?;
+        let resolved =
+            host_resolve_focused_pane_value(client_id).map(|binding| FrontendFocusedPane {
+                runtime_id: binding.runtime_id(),
+                terminal_handle: binding.terminal_handle(),
+            })?;
         if let Some(binding) =
             self.terminal_binding_for_public_id(resolved.terminal_handle.as_u64())
         {
@@ -1440,7 +1239,9 @@ impl DesktopSessionHost {
     }
 
     pub(crate) async fn spawn_local_shell_runner(&self) -> anyhow::Result<Arc<dyn HostTerminal>> {
-        legacy_spawn_local_shell_runner().await
+        let (_runtime_entry, pane) =
+            host_spawn_tab(None, None, TerminalSize::default(), None).await?;
+        Ok(pane)
     }
 
     pub(crate) async fn spawn_host_runtime_entry(
@@ -1451,35 +1252,43 @@ impl DesktopSessionHost {
         current_pane_id: Option<u64>,
         workspace: String,
     ) -> anyhow::Result<Arc<dyn HostTerminal>> {
-        legacy_spawn_host_runtime_entry(command, command_dir, size, current_pane_id, workspace)
-            .await
+        host_set_workspace_name(&workspace);
+        let (_runtime_entry, pane) = host_spawn_tab(
+            command,
+            command_dir,
+            size,
+            current_pane_id.map(SessionTerminalHandle::new),
+        )
+        .await?;
+        Ok(pane)
     }
 
     pub(crate) fn set_primary_spawn_target(&self, spawn_target: &HostSpawnTargetHandle) {
-        legacy_set_primary_spawn_target(spawn_target);
+        host_set_primary_spawn_target_value(spawn_target);
     }
 
     pub(crate) fn primary_spawn_target(&self) -> HostSpawnTargetHandle {
-        legacy_primary_spawn_target()
+        host_primary_spawn_target_value()
     }
 
-    pub(crate) fn build_initial_host_mux(
+    pub(crate) fn build_initial_host_runtime(
         &self,
         config: &ConfigHandle,
         default_workspace_name: Option<&str>,
     ) -> anyhow::Result<()> {
-        legacy_build_initial_host_mux(config, default_workspace_name)
+        let _ = initialize_desktop_host_runtime(config, default_workspace_name)?;
+        Ok(())
     }
 
-    pub(crate) fn shutdown_host_mux(&self) {
-        legacy_shutdown_host_mux();
+    pub(crate) fn shutdown_host_runtime(&self) {
+        shutdown_desktop_host_runtime();
     }
 
     pub(crate) fn create_serial_spawn_target(
         &self,
         serial_target: config::SerialTarget,
     ) -> anyhow::Result<HostSpawnTargetHandle> {
-        legacy_create_serial_spawn_target(serial_target)
+        Ok(Arc::new(DesktopSpawnTarget::new_serial(serial_target)?))
     }
 }
 
@@ -1598,11 +1407,11 @@ mod tests {
     use std::collections::HashSet;
     use std::sync::{Arc, Mutex};
 
-    use super::super::acquire_legacy_host_mux_test_lock;
+    use super::super::acquire_legacy_host_runtime_test_lock;
     use super::{
-        ChatminalSessionPane, DesktopSessionHost, legacy_active_frontend_client,
-        legacy_active_workspace_for_client, legacy_build_initial_host_mux,
-        legacy_shutdown_host_mux,
+        build_legacy_host_runtime_for_test, legacy_active_frontend_client,
+        legacy_active_workspace_for_client, shutdown_legacy_host_runtime_for_test,
+        ChatminalSessionPane, DesktopSessionHost,
     };
     use crate::chatminal_render::ChatminalRenderState;
     use crate::chatminal_runtime::{
@@ -1664,10 +1473,9 @@ mod tests {
         let (host, pane) =
             host_with_registered_session_pane("session-a", runtime_id, terminal_instance_id);
         assert_eq!(pane.pane_id_value().as_u64(), terminal_instance_id.as_u64());
-        assert!(
-            host.pane_for_terminal_handle(pane.pane_id_value())
-                .is_some()
-        );
+        assert!(host
+            .pane_for_terminal_handle(pane.pane_id_value())
+            .is_some());
 
         let from_handle = host
             .terminal_binding_for_public_id(pane.pane_id_value().as_u64())
@@ -1692,10 +1500,9 @@ mod tests {
         let terminal_instance_id = TerminalInstanceId::new(52);
         let (host, pane) =
             host_with_registered_session_pane("session-b", runtime_id, terminal_instance_id);
-        assert!(
-            host.pane_for_public_id(pane.pane_id_value().as_u64())
-                .is_some()
-        );
+        assert!(host
+            .pane_for_public_id(pane.pane_id_value().as_u64())
+            .is_some());
 
         let resolved_from_handle = host
             .frontend_resolve_pane_fallback(pane.pane_id_value())
@@ -1724,21 +1531,18 @@ mod tests {
         host.remove_terminal_handle(pane.pane_id_value());
 
         assert!(host.pane_for_session("session-c").is_none());
-        assert!(
-            host.pane_for_terminal_handle(pane.pane_id_value())
-                .is_none()
-        );
-        assert!(
-            host.pane_for_public_id(terminal_instance_id.as_u64())
-                .is_none()
-        );
-        assert!(
-            host.runtime_terminal_instances
-                .lock()
-                .unwrap()
-                .get(&runtime_id)
-                .is_none()
-        );
+        assert!(host
+            .pane_for_terminal_handle(pane.pane_id_value())
+            .is_none());
+        assert!(host
+            .pane_for_public_id(terminal_instance_id.as_u64())
+            .is_none());
+        assert!(host
+            .runtime_terminal_instances
+            .lock()
+            .unwrap()
+            .get(&runtime_id)
+            .is_none());
     }
 
     #[test]
@@ -1808,21 +1612,21 @@ mod tests {
     }
 
     #[test]
-    fn legacy_build_initial_host_mux_reuses_existing_client_identity() {
-        let _guard = acquire_legacy_host_mux_test_lock();
-        legacy_shutdown_host_mux();
+    fn build_legacy_host_runtime_for_test_reuses_existing_client_identity() {
+        let _guard = acquire_legacy_host_runtime_test_lock();
+        shutdown_legacy_host_runtime_for_test();
 
         let config = ConfigHandle::default_config();
-        legacy_build_initial_host_mux(&config, Some("workspace-a"))
-            .expect("build initial host mux first time");
+        build_legacy_host_runtime_for_test(&config, Some("workspace-a"))
+            .expect("build initial host runtime first time");
         let first_client = legacy_active_frontend_client().expect("first client");
         assert_eq!(
             legacy_active_workspace_for_client(&first_client),
             "workspace-a".to_string()
         );
 
-        legacy_build_initial_host_mux(&config, Some("workspace-b"))
-            .expect("build initial host mux second time");
+        build_legacy_host_runtime_for_test(&config, Some("workspace-b"))
+            .expect("build initial host runtime second time");
         let second_client = legacy_active_frontend_client().expect("second client");
         assert_eq!(first_client, second_client);
         assert_eq!(
@@ -1830,6 +1634,6 @@ mod tests {
             "workspace-b".to_string()
         );
 
-        legacy_shutdown_host_mux();
+        shutdown_legacy_host_runtime_for_test();
     }
 }

@@ -1,6 +1,6 @@
+use crate::desktop_host_runtime::overlay_shell::OverlayPane;
 use crate::termwindow::TermWindowNotif;
 use crate::TermWindow;
-use crate::chatminal_runtime::overlay_compat::OverlayPane;
 use config::keyassignment::{ClipboardCopyDestination, ClipboardPasteSource};
 use std::sync::Arc;
 use window::{Clipboard, WindowOps};
@@ -28,11 +28,7 @@ impl TermWindow {
         clipboard: ClipboardPasteSource,
     ) {
         let pane_id = pane.terminal_handle().as_u64();
-        log::trace!(
-            "paste_from_clipboard in pane {} {:?}",
-            pane_id,
-            clipboard
-        );
+        log::trace!("paste_from_clipboard in pane {} {:?}", pane_id, clipboard);
         let window = self.window.as_ref().unwrap().clone();
         let clipboard = match clipboard {
             ClipboardPasteSource::Clipboard => Clipboard::Clipboard,

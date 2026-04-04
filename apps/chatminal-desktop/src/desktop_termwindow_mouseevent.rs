@@ -1,23 +1,22 @@
-use crate::chatminal_runtime::{
-    desktop_focus_session_view,
-    overlay_compat::{OverlayPane, OverlayWithPaneLines as WithPaneLines},
-    terminal_handle_for_overlay_pane,
-};
+use crate::chatminal_runtime::{desktop_focus_session_view, terminal_handle_for_overlay_pane};
 use crate::chatminal_sidebar::SidebarSessionDropTarget;
+use crate::desktop_host_runtime::overlay_shell::{
+    OverlayPane, OverlayWithPaneLines as WithPaneLines,
+};
 use crate::desktop_termwindow_types::{
-    TerminalSplit, TerminalSplitDirection, terminal_ui_key_for_pane,
+    terminal_ui_key_for_pane, TerminalSplit, TerminalSplitDirection,
 };
 use crate::tabbar::SessionBarItem;
 use crate::termwindow::{
-    GuiWin, MouseCapture, ScrollHit, TMB, TermWindowNotif, UIItem, UIItemType,
+    GuiWin, MouseCapture, ScrollHit, TermWindowNotif, UIItem, UIItemType, TMB,
 };
 use ::window::{
     MouseButtons as WMB, MouseCursor, MouseEvent, MouseEventKind as WMEK, MousePress,
     WindowDecorations, WindowOps, WindowState,
 };
 use chatminal_lua_bridge::TerminalRef;
-use config::MouseEventAltScreen;
 use config::keyassignment::{KeyAssignment, MouseEventTrigger};
+use config::MouseEventAltScreen;
 use engine_dynamic::ToDynamic;
 use engine_term::input::{MouseButton, MouseEventKind as TMEK};
 use engine_term::{ClickPosition, LastMouseClick, StableRowIndex};

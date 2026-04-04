@@ -1,5 +1,5 @@
-use crate::chatminal_runtime::overlay_compat::OverlayPane;
-use crate::chatminal_runtime::overlay_compat::{allocate_overlay_terminal, OverlayTerminal};
+use crate::desktop_host_runtime::overlay_shell::OverlayPane;
+use crate::desktop_host_runtime::overlay_shell::{allocate_overlay_terminal, OverlayTerminal};
 use crate::termwindow::TermWindow;
 use engine_term::{TerminalConfiguration, TerminalSize};
 use std::pin::Pin;
@@ -44,11 +44,7 @@ where
 
     let future = promise::spawn::spawn_into_new_thread(move || {
         let res = func(tab_id, tw_term);
-        TermWindow::schedule_cancel_overlay_for_render_scope(
-            window,
-            tab_id,
-            Some(overlay_pane_id),
-        );
+        TermWindow::schedule_cancel_overlay_for_render_scope(window, tab_id, Some(overlay_pane_id));
         res
     });
 

@@ -1,4 +1,4 @@
-use crate::chatminal_runtime::overlay_compat::OverlayPane;
+use crate::desktop_host_runtime::overlay_shell::OverlayPane;
 use crate::desktop_termwindow_types::{TerminalSplit, TerminalSplitDirection};
 use crate::termwindow::render::TripleLayerQuadAllocator;
 use crate::termwindow::{UIItem, UIItemType};

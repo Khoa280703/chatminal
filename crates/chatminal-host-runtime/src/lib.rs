@@ -1,5 +1,7 @@
 use crate::client::{ClientId, ClientInfo};
-use crate::pane::{pane_id_for_pane, pane_id_from_terminal_handle, CachePolicy, CloseReason, Pane, PaneId};
+use crate::pane::{
+    pane_id_for_pane, pane_id_from_terminal_handle, CachePolicy, CloseReason, Pane, PaneId,
+};
 use crate::tab::{SplitDirection, SplitRequest, Tab, TabId};
 use crate::window::Window;
 use anyhow::{anyhow, Context, Error};
@@ -60,11 +62,11 @@ fn with_control_plane<R>(func: impl FnOnce(&HostRuntimeControlPlane) -> R) -> Op
     with_host_runtime_root(|root| func(&root.control))
 }
 
-pub(crate) fn notify_mux(notification: MuxNotification) {
+pub(crate) fn notify_runtime(notification: HostRuntimeEvent) {
     let _ = with_host_runtime_root(|root| root.notify(notification));
 }
 
-pub(crate) fn notify_mux_any_thread(notification: MuxNotification) {
+pub(crate) fn notify_runtime_any_thread(notification: HostRuntimeEvent) {
     if let Some(root) = try_host_runtime_root() {
         if root.is_main_thread() {
             root.notify(notification);
@@ -144,24 +146,24 @@ fn clear_host_runtime_root() {
 /// Initialize the host runtime by creating and installing a global host runtime root.
 pub fn initialize_host_runtime(
     primary_spawn_target: Option<Arc<dyn SpawnTarget>>,
-) -> anyhow::Result<Arc<MuxHandle>> {
+) -> anyhow::Result<Arc<HostRuntimeHandle>> {
     initialize_host_runtime_with_config(primary_spawn_target, current_config_handle())
 }
 
 pub fn initialize_host_runtime_with_config(
     primary_spawn_target: Option<Arc<dyn SpawnTarget>>,
     config: ConfigHandle,
-) -> anyhow::Result<Arc<MuxHandle>> {
+) -> anyhow::Result<Arc<HostRuntimeHandle>> {
     if let Some(root) = try_host_runtime_root() {
         if let Some(spawn_target) = primary_spawn_target.as_ref() {
             root.control.set_primary_spawn_target(spawn_target);
         }
         root.set_config(config);
-        return Ok(Arc::new(MuxHandle(root)));
+        return Ok(Arc::new(HostRuntimeHandle(root)));
     }
     let root = new_host_runtime_root(primary_spawn_target, config);
     install_host_runtime_root(&root);
-    Ok(Arc::new(MuxHandle(root)))
+    Ok(Arc::new(HostRuntimeHandle(root)))
 }
 
 /// Shut down the host runtime by clearing the installed root.
@@ -178,12 +180,10 @@ pub fn is_host_runtime_available() -> bool {
     with_control_plane(|_| ()).is_some()
 }
 
-/// Opaque handle to a freshly-initialized host runtime root. This remains named
-/// `MuxHandle` as a narrow compatibility surface for existing callers while the
-/// product path no longer treats `Mux` as the runtime owner.
-pub struct MuxHandle(Arc<HostRuntimeRoot>);
+/// Opaque handle to a freshly-initialized host runtime root.
+pub struct HostRuntimeHandle(Arc<HostRuntimeRoot>);
 
-impl MuxHandle {
+impl HostRuntimeHandle {
     pub fn register_client(&self, client_id: Arc<ClientId>) {
         self.0.register_client(client_id);
     }
@@ -203,6 +203,24 @@ impl MuxHandle {
         self.0
             .subscribe(move |notification| subscriber(notification.into()));
     }
+}
+
+pub fn register_runtime_client(client_id: Arc<ClientId>) -> bool {
+    with_host_runtime_root(|root| root.register_client(client_id)).is_some()
+}
+
+pub fn replace_active_identity(id: Option<Arc<ClientId>>) -> Option<Arc<ClientId>> {
+    with_host_runtime_root(|root| root.replace_identity(id)).flatten()
+}
+
+pub fn subscribe_runtime_notifications<F>(subscriber: F) -> bool
+where
+    F: Fn(HostRuntimeNotification) -> bool + 'static + Send + Sync,
+{
+    with_host_runtime_root(|root| {
+        root.subscribe(move |notification| subscriber(notification.into()));
+    })
+    .is_some()
 }
 
 pub fn root_active_runtime_id() -> Option<RuntimeId> {
@@ -559,7 +577,7 @@ pub fn set_active_workspace_name(workspace: &str) -> bool {
     };
     if let Some(ident) = root.control.active_identity() {
         if root.control.set_workspace_for_client(&ident, workspace) {
-            root.notify(MuxNotification::ActiveWorkspaceChanged(ident));
+            root.notify(HostRuntimeEvent::ActiveWorkspaceChanged(ident));
         }
     }
     root.window.write().set_workspace(workspace);
@@ -574,7 +592,7 @@ pub fn rename_workspace(old_workspace: &str, new_workspace: &str) -> bool {
         return true;
     }
 
-    root.notify(MuxNotification::WorkspaceRenamed {
+    root.notify(HostRuntimeEvent::WorkspaceRenamed {
         old_workspace: old_workspace.to_string(),
         new_workspace: new_workspace.to_string(),
     });
@@ -587,7 +605,7 @@ pub fn rename_workspace(old_workspace: &str, new_workspace: &str) -> bool {
     }
     root.recompute_pane_count();
     for client_id in root.control.rename_workspace(old_workspace, new_workspace) {
-        root.notify(MuxNotification::ActiveWorkspaceChanged(client_id));
+        root.notify(HostRuntimeEvent::ActiveWorkspaceChanged(client_id));
     }
     true
 }
@@ -642,7 +660,7 @@ pub fn set_active_workspace_for_client(ident: &Arc<ClientId>, workspace: &str) -
         return false;
     };
     if root.control.set_workspace_for_client(ident, workspace) {
-        root.notify(MuxNotification::ActiveWorkspaceChanged(ident.clone()));
+        root.notify(HostRuntimeEvent::ActiveWorkspaceChanged(ident.clone()));
     }
     true
 }
@@ -1340,29 +1358,29 @@ pub enum HostRuntimeNotification {
     },
 }
 
-impl From<MuxNotification> for HostRuntimeNotification {
-    fn from(notification: MuxNotification) -> Self {
+impl From<HostRuntimeEvent> for HostRuntimeNotification {
+    fn from(notification: HostRuntimeEvent) -> Self {
         match notification {
-            MuxNotification::PaneOutput(pane_id) => {
+            HostRuntimeEvent::PaneOutput(pane_id) => {
                 Self::PaneOutput(SessionTerminalHandle::new(pane_id as u64))
             }
-            MuxNotification::PaneAdded(pane_id) => {
+            HostRuntimeEvent::PaneAdded(pane_id) => {
                 Self::PaneAdded(SessionTerminalHandle::new(pane_id as u64))
             }
-            MuxNotification::PaneRemoved(pane_id) => {
+            HostRuntimeEvent::PaneRemoved(pane_id) => {
                 Self::PaneRemoved(SessionTerminalHandle::new(pane_id as u64))
             }
-            MuxNotification::WindowInvalidated => Self::WindowInvalidated,
-            MuxNotification::WindowWorkspaceChanged => Self::WindowWorkspaceChanged,
-            MuxNotification::ActiveWorkspaceChanged(client_id) => {
+            HostRuntimeEvent::WindowInvalidated => Self::WindowInvalidated,
+            HostRuntimeEvent::WindowWorkspaceChanged => Self::WindowWorkspaceChanged,
+            HostRuntimeEvent::ActiveWorkspaceChanged(client_id) => {
                 Self::ActiveWorkspaceChanged(client_id)
             }
-            MuxNotification::Alert { pane_id, alert } => Self::Alert {
+            HostRuntimeEvent::Alert { pane_id, alert } => Self::Alert {
                 pane_id: SessionTerminalHandle::new(pane_id as u64),
                 alert,
             },
-            MuxNotification::Empty => Self::Empty,
-            MuxNotification::AssignClipboard {
+            HostRuntimeEvent::Empty => Self::Empty,
+            HostRuntimeEvent::AssignClipboard {
                 pane_id,
                 selection,
                 clipboard,
@@ -1371,20 +1389,22 @@ impl From<MuxNotification> for HostRuntimeNotification {
                 selection,
                 clipboard,
             },
-            MuxNotification::SaveToDownloads { name, data } => Self::SaveToDownloads { name, data },
-            MuxNotification::TabAddedToWindow { tab_id } => Self::TabAddedToWindow {
+            HostRuntimeEvent::SaveToDownloads { name, data } => {
+                Self::SaveToDownloads { name, data }
+            }
+            HostRuntimeEvent::TabAddedToWindow { tab_id } => Self::TabAddedToWindow {
                 runtime_id: RuntimeId::new(tab_id as u64),
             },
-            MuxNotification::PaneFocused(pane_id) => {
+            HostRuntimeEvent::PaneFocused(pane_id) => {
                 Self::PaneFocused(SessionTerminalHandle::new(pane_id as u64))
             }
-            MuxNotification::TabResized(tab_id) => Self::TabResized(RuntimeId::new(tab_id as u64)),
-            MuxNotification::TabTitleChanged { tab_id, title } => Self::TabTitleChanged {
+            HostRuntimeEvent::TabResized(tab_id) => Self::TabResized(RuntimeId::new(tab_id as u64)),
+            HostRuntimeEvent::TabTitleChanged { tab_id, title } => Self::TabTitleChanged {
                 runtime_id: RuntimeId::new(tab_id as u64),
                 title,
             },
-            MuxNotification::WindowTitleChanged { title } => Self::WindowTitleChanged { title },
-            MuxNotification::WorkspaceRenamed {
+            HostRuntimeEvent::WindowTitleChanged { title } => Self::WindowTitleChanged { title },
+            HostRuntimeEvent::WorkspaceRenamed {
                 old_workspace,
                 new_workspace,
             } => Self::WorkspaceRenamed {
@@ -1396,7 +1416,7 @@ impl From<MuxNotification> for HostRuntimeNotification {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) enum MuxNotification {
+pub(crate) enum HostRuntimeEvent {
     PaneOutput(PaneId),
     PaneAdded(PaneId),
     PaneRemoved(PaneId),
@@ -1437,7 +1457,7 @@ pub(crate) enum MuxNotification {
 
 static SUB_ID: AtomicUsize = AtomicUsize::new(0);
 
-type HostRuntimeSubscriber = Box<dyn Fn(MuxNotification) -> bool + Send + Sync>;
+type HostRuntimeSubscriber = Box<dyn Fn(HostRuntimeEvent) -> bool + Send + Sync>;
 
 struct HostRuntimeControlPlane {
     primary_spawn_target: RwLock<Option<Arc<dyn SpawnTarget>>>,
@@ -1532,7 +1552,7 @@ impl HostRuntimeControlPlane {
 
     fn subscribe<F>(&self, subscriber: F)
     where
-        F: Fn(MuxNotification) -> bool + 'static + Send + Sync,
+        F: Fn(HostRuntimeEvent) -> bool + 'static + Send + Sync,
     {
         let sub_id = SUB_ID.fetch_add(1, Ordering::Relaxed);
         self.subscribers
@@ -1540,7 +1560,7 @@ impl HostRuntimeControlPlane {
             .insert(sub_id, Box::new(subscriber));
     }
 
-    fn notify(&self, notification: MuxNotification) {
+    fn notify(&self, notification: HostRuntimeEvent) {
         let mut subscribers = self.subscribers.write();
         subscribers.retain(|_, notify| notify(notification.clone()));
     }
@@ -1667,7 +1687,7 @@ impl HostRuntimeRoot {
 
     pub(crate) fn set_active_workspace_for_client(&self, ident: &Arc<ClientId>, workspace: &str) {
         if self.control.set_workspace_for_client(ident, workspace) {
-            self.notify(MuxNotification::ActiveWorkspaceChanged(ident.clone()));
+            self.notify(HostRuntimeEvent::ActiveWorkspaceChanged(ident.clone()));
         }
     }
 
@@ -1684,12 +1704,12 @@ impl HostRuntimeRoot {
 
     pub(crate) fn subscribe<F>(&self, subscriber: F)
     where
-        F: Fn(MuxNotification) -> bool + 'static + Send + Sync,
+        F: Fn(HostRuntimeEvent) -> bool + 'static + Send + Sync,
     {
         self.control.subscribe(subscriber);
     }
 
-    pub(crate) fn notify(&self, notification: MuxNotification) {
+    pub(crate) fn notify(&self, notification: HostRuntimeEvent) {
         self.control.notify(notification);
     }
 
@@ -1800,9 +1820,7 @@ impl HostRuntimeRoot {
         }
 
         if install_default_side_effects {
-            let clipboard: Arc<dyn Clipboard> = Arc::new(HostRuntimeClipboard {
-                pane_id,
-            });
+            let clipboard: Arc<dyn Clipboard> = Arc::new(HostRuntimeClipboard { pane_id });
             pane.set_clipboard(&clipboard);
 
             let downloader: Arc<dyn DownloadHandler> = Arc::new(HostRuntimeDownloader {});
@@ -1826,7 +1844,7 @@ impl HostRuntimeRoot {
         let pane_id = pane_id_for_pane(pane.as_ref());
         start_pane_pty_reader(pane, hooks)?;
         self.recompute_pane_count();
-        self.notify(MuxNotification::PaneAdded(pane_id));
+        self.notify(HostRuntimeEvent::PaneAdded(pane_id));
         Ok(())
     }
 
@@ -1871,7 +1889,7 @@ impl HostRuntimeRoot {
         if let Some(pane) = self.panes.write().remove(&pane_id).clone() {
             log::debug!("killing pane {}", pane_id);
             pane.kill();
-            self.notify(MuxNotification::PaneRemoved(pane_id));
+            self.notify(HostRuntimeEvent::PaneRemoved(pane_id));
             changed = true;
         }
 
@@ -1964,8 +1982,8 @@ impl HostRuntimeRoot {
         }
 
         if self.is_empty() {
-            log::trace!("prune_dead_windows: is_empty, send MuxNotification::Empty");
-            self.notify(MuxNotification::Empty);
+            log::trace!("prune_dead_windows: is_empty, send HostRuntimeEvent::Empty");
+            self.notify(HostRuntimeEvent::Empty);
         } else {
             log::trace!("prune_dead_windows: not empty");
         }
@@ -1978,7 +1996,7 @@ impl HostRuntimeRoot {
             window.push(tab);
         }
         self.recompute_pane_count();
-        self.notify(MuxNotification::TabAddedToWindow { tab_id });
+        self.notify(HostRuntimeEvent::TabAddedToWindow { tab_id });
         Ok(())
     }
 
@@ -2155,7 +2173,7 @@ impl Clipboard for HostRuntimeClipboard {
         let root = try_host_runtime_root().ok_or_else(|| {
             anyhow::anyhow!("HostRuntimeClipboard::set_contents: no host runtime root?")
         })?;
-        root.notify(MuxNotification::AssignClipboard {
+        root.notify(HostRuntimeEvent::AssignClipboard {
             pane_id: self.pane_id,
             selection,
             clipboard,
@@ -2169,7 +2187,7 @@ struct HostRuntimeDownloader {}
 impl engine_term::DownloadHandler for HostRuntimeDownloader {
     fn save_to_downloads(&self, name: Option<String>, data: Vec<u8>) {
         if let Some(root) = try_host_runtime_root() {
-            root.notify(MuxNotification::SaveToDownloads {
+            root.notify(HostRuntimeEvent::SaveToDownloads {
                 name,
                 data: Arc::new(data),
             });

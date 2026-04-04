@@ -1,9 +1,6 @@
-use crate::chatminal_runtime::{
-    overlay_compat::{
-        OverlayPane, OverlayPaneHandle, OverlayPaneLayout, OverlaySplitDirection,
-        OverlaySplitLayout,
-    },
-    terminal_handle_for_overlay_pane, SessionTerminalHandle,
+use crate::chatminal_runtime::{terminal_handle_for_overlay_pane, SessionTerminalHandle};
+use crate::desktop_host_runtime::overlay_shell::{
+    OverlayPane, OverlayPaneHandle, OverlayPaneLayout, OverlaySplitDirection, OverlaySplitLayout,
 };
 
 pub type TerminalUiKey = u64;

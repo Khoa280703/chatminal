@@ -174,11 +174,11 @@ impl LocalSpawnHooks {
         }
     }
 
-    // Explicit compat seam for callers/tests that still refer to mux behavior.
-    pub fn mux_default() -> Self {
+    // Explicit compat seam for callers/tests.
+    pub fn compat_default() -> Self {
         Self {
-            localpane_hooks: LocalPaneHooks::mux_default(),
-            pty_io_hooks: PtyIoHooks::mux_default(),
+            localpane_hooks: LocalPaneHooks::compat_default(),
+            pty_io_hooks: PtyIoHooks::compat_default(),
         }
     }
 

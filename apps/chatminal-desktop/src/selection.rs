@@ -1,7 +1,7 @@
 // The range_plus_one lint can't see when the LHS is not compatible with
 // and inclusive range
 #![allow(clippy::range_plus_one)]
-use crate::chatminal_runtime::overlay_compat::OverlayPane;
+use crate::desktop_host_runtime::overlay_shell::OverlayPane;
 use engine_term::{SemanticZone, StableRowIndex};
 use std::cmp::Ordering;
 use std::ops::Range;

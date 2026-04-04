@@ -1,7 +1,7 @@
 //! Single root window container for the desktop mux.
 
 use crate::pane::CloseReason;
-use crate::{notify_mux, MuxNotification, Tab, TabId};
+use crate::{notify_runtime, HostRuntimeEvent, Tab, TabId};
 use config::GuiPosition;
 use std::sync::Arc;
 
@@ -43,7 +43,7 @@ impl Window {
     pub fn set_title(&mut self, title: &str) {
         if self.title != title {
             self.title = title.to_string();
-            notify_mux(MuxNotification::WindowTitleChanged {
+            notify_runtime(HostRuntimeEvent::WindowTitleChanged {
                 title: title.to_string(),
             });
         }
@@ -58,7 +58,7 @@ impl Window {
             return;
         }
         self.workspace = workspace.to_string();
-        notify_mux(MuxNotification::WindowWorkspaceChanged);
+        notify_runtime(HostRuntimeEvent::WindowWorkspaceChanged);
     }
 
     fn check_that_tab_isnt_already_in_window(&self, tab: &Arc<Tab>) {
@@ -68,7 +68,7 @@ impl Window {
     }
 
     fn invalidate(&self) {
-        notify_mux(MuxNotification::WindowInvalidated);
+        notify_runtime(HostRuntimeEvent::WindowInvalidated);
     }
 
     pub fn insert(&mut self, index: usize, tab: &Arc<Tab>) {

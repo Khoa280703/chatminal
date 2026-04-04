@@ -38,19 +38,6 @@ pub(crate) use chatminal_runtime::{
 pub(crate) use client::resolve_target_session_id;
 pub(crate) use client::ChatminalRuntimeClient;
 
-pub(crate) mod overlay_compat {
-    pub(crate) use crate::desktop_host_runtime::overlay_compat::{
-        allocate_overlay_terminal, OverlayAssignmentResult, OverlayCachePolicy, OverlayCloseReason,
-        OverlayForEachLogicalLine, OverlayLogicalLine, OverlayPane, OverlayPaneHandle,
-        OverlayPaneLayout, OverlayPattern, OverlayPatternType, OverlayRuntimeEntryHandle,
-        OverlaySearchResult, OverlaySplitDirection, OverlaySplitLayout, OverlayTerminal,
-        OverlayWithPaneLines,
-    };
-    pub(crate) use crate::desktop_host_runtime::overlay_compat::{
-        RenderableDimensions, StableCursorPosition,
-    };
-}
-
 pub const DESKTOP_LAYOUT_WORKSPACE_ID: &str = DEFAULT_LAYOUT_WORKSPACE_ID;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -463,7 +450,7 @@ pub(crate) fn initialize_desktop_host_runtime(
     config: &config::ConfigHandle,
     default_workspace_name: Option<&str>,
 ) -> anyhow::Result<()> {
-    crate::desktop_host_runtime::build_initial_host_mux(config, default_workspace_name)
+    crate::desktop_host_runtime::build_initial_host_runtime(config, default_workspace_name)
 }
 
 pub(crate) fn runtime_client() -> Result<ChatminalRuntimeClient, String> {
@@ -471,7 +458,7 @@ pub(crate) fn runtime_client() -> Result<ChatminalRuntimeClient, String> {
 }
 
 pub(crate) fn shutdown_desktop_host_runtime() {
-    crate::desktop_host_runtime::shutdown_host_mux();
+    crate::desktop_host_runtime::shutdown_host_runtime();
 }
 
 pub(crate) fn create_desktop_serial_spawn_target(
@@ -600,7 +587,7 @@ pub(crate) fn terminal_handle_arc(
 }
 
 pub(crate) fn terminal_handle_for_overlay_pane(
-    pane: &dyn overlay_compat::OverlayPane,
+    pane: &dyn crate::desktop_host_runtime::overlay_shell::OverlayPane,
 ) -> SessionTerminalHandle {
     crate::desktop_host_runtime::terminal_handle_for_pane(pane)
 }

@@ -1,9 +1,9 @@
 use crate::localpane::LocalPane;
 use crate::pane::{pane_id_for_pane, Pane, PaneId};
 use crate::{
-    current_host_exit_behavior, current_host_output_parser_config, notify_mux_any_thread,
+    current_host_exit_behavior, current_host_output_parser_config, notify_runtime_any_thread,
     prune_dead_windows_on_main_thread, remove_pane_on_main_thread, terminal_by_id,
-    MuxNotification,
+    HostRuntimeEvent,
 };
 use anyhow::Context;
 use chatminal_runtime::SessionTerminalHandle;
@@ -76,9 +76,8 @@ impl PtyIoHooks {
         }
     }
 
-    // Explicit compat seam kept for legacy callers/tests that still speak in
-    // terms of "mux" semantics. Product code should use `host_default()`.
-    pub(crate) fn mux_default() -> Self {
+    // Explicit compat seam kept for legacy callers/tests.
+    pub(crate) fn compat_default() -> Self {
         Self::host_default()
     }
 
@@ -175,7 +174,7 @@ pub(crate) fn dispatch_default_output_for_terminal_handle(terminal_handle: Sessi
     let Some(pane_id) = usize::try_from(terminal_handle.as_u64()).ok() else {
         return;
     };
-    notify_mux_any_thread(MuxNotification::PaneOutput(pane_id));
+    notify_runtime_any_thread(HostRuntimeEvent::PaneOutput(pane_id));
 }
 
 pub(crate) fn dispatch_default_exit_cleanup_for_pane(
@@ -200,11 +199,7 @@ fn default_pty_io_dispatcher(hooks: PtyIoHooks, _config: PtyIoConfigSnapshot) ->
     let inline_error_output_hook = hooks.on_inline_error_output;
     let on_cleanup = Arc::new(
         move |pane_id: PaneId, exit_behavior: Option<ExitBehavior>| {
-            cleanup_hook(
-                pane_id,
-                exit_behavior,
-                current_host_exit_behavior(),
-            );
+            cleanup_hook(pane_id, exit_behavior, current_host_exit_behavior());
         },
     );
     let on_output_for_inline_error = Arc::clone(&on_output);
@@ -504,7 +499,7 @@ mod tests {
     fn set_cleanup_wraps_custom_cleanup_owner() {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let seen_clone = Arc::clone(&seen);
-        let mut hooks = PtyIoHooks::mux_default();
+        let mut hooks = PtyIoHooks::compat_default();
         hooks.set_cleanup(Some(Arc::new(move |pane_id, exit_behavior| {
             seen_clone.lock().unwrap().push((pane_id, exit_behavior));
         })));
@@ -521,7 +516,7 @@ mod tests {
     fn set_inline_error_output_wraps_custom_inline_owner() {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let seen_clone = Arc::clone(&seen);
-        let mut hooks = PtyIoHooks::mux_default();
+        let mut hooks = PtyIoHooks::compat_default();
         hooks.set_inline_error_output(Some(Arc::new(move |pane_id, message| {
             seen_clone.lock().unwrap().push((pane_id, message));
         })));

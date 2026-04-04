@@ -1,4 +1,4 @@
-use crate::chatminal_runtime::overlay_compat::RenderableDimensions;
+use crate::desktop_host_runtime::overlay_shell::RenderableDimensions;
 use crate::quad::TripleLayerQuadAllocator;
 use crate::termwindow::render::RenderScreenLineParams;
 use crate::utilsprites::RenderMetrics;

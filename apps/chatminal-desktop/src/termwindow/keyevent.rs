@@ -1,4 +1,4 @@
-use crate::chatminal_runtime::overlay_compat::{
+use crate::desktop_host_runtime::overlay_shell::{
     OverlayAssignmentResult as PerformAssignmentResult, OverlayPane,
 };
 use crate::desktop_termwindow_types::terminal_ui_key_for_pane;

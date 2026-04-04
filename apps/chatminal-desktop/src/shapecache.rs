@@ -114,7 +114,7 @@ impl<'a> std::hash::Hash for dyn ShapeCacheKeyTrait + 'a {
 
 #[cfg(test)]
 mod test {
-    use crate::desktop_host_runtime::acquire_legacy_host_mux_test_lock;
+    use crate::desktop_host_runtime::acquire_legacy_host_runtime_test_lock;
     use crate::glyphcache::GlyphCache;
     use crate::shapecache::{GlyphPosition, ShapedInfo};
     use crate::utilsprites::RenderMetrics;
@@ -199,7 +199,7 @@ mod test {
 
     #[test]
     fn ligatures_fira() {
-        let _guard = acquire_legacy_host_mux_test_lock();
+        let _guard = acquire_legacy_host_runtime_test_lock();
         config::use_test_configuration();
         let _ = env_logger::Builder::new()
             .is_test(true)
@@ -263,7 +263,7 @@ mod test {
 
     #[test]
     fn bench_shaping() {
-        let _guard = acquire_legacy_host_mux_test_lock();
+        let _guard = acquire_legacy_host_runtime_test_lock();
         config::use_test_configuration();
 
         // let mut glyph_cache = GlyphCache::new_in_memory(&fonts, 128, &render_metrics).unwrap();
@@ -307,7 +307,7 @@ mod test {
 
     #[test]
     fn ligatures_jetbrains() {
-        let _guard = acquire_legacy_host_mux_test_lock();
+        let _guard = acquire_legacy_host_runtime_test_lock();
         config::use_test_configuration();
         let _ = env_logger::Builder::new()
             .is_test(true)
