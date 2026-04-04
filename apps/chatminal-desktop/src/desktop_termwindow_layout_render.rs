@@ -4,9 +4,10 @@ use crate::chatminal_layout::workspace_store::{
 use crate::chatminal_render::ChatminalRenderPane;
 use crate::chatminal_runtime::{
     desktop_render_state_for_session, desktop_resize_layout_split, desktop_resize_visible_sessions,
-    terminal_handle_arc_by_public_id, SessionViewId, WorkspaceLayoutNodeKind, WorkspaceLayoutState,
-    WorkspaceNodeId, WorkspaceSplitAxis,
+    SessionViewId, WorkspaceLayoutNodeKind, WorkspaceLayoutState, WorkspaceNodeId,
+    WorkspaceSplitAxis,
 };
+use crate::desktop_host_runtime::terminal_handle_arc_by_public_id;
 use crate::desktop_termwindow_types::{TerminalPaneLayout, TerminalSplit, TerminalSplitDirection};
 const WORKSPACE_SPLIT_INDEX_BASE: usize = 1_000_000;
 

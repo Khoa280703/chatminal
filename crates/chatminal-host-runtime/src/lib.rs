@@ -205,24 +205,6 @@ impl HostRuntimeHandle {
     }
 }
 
-pub fn register_runtime_client(client_id: Arc<ClientId>) -> bool {
-    with_host_runtime_root(|root| root.register_client(client_id)).is_some()
-}
-
-pub fn replace_active_identity(id: Option<Arc<ClientId>>) -> Option<Arc<ClientId>> {
-    with_host_runtime_root(|root| root.replace_identity(id)).flatten()
-}
-
-pub fn subscribe_runtime_notifications<F>(subscriber: F) -> bool
-where
-    F: Fn(HostRuntimeNotification) -> bool + 'static + Send + Sync,
-{
-    with_host_runtime_root(|root| {
-        root.subscribe(move |notification| subscriber(notification.into()));
-    })
-    .is_some()
-}
-
 pub fn root_active_runtime_id() -> Option<RuntimeId> {
     root_window_info().and_then(|info| info.active_runtime_id)
 }

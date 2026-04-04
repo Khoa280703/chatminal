@@ -1,5 +1,5 @@
-use crate::chatminal_runtime::{
-    record_host_focus_for_current_identity, terminal_handle_for_overlay_pane,
+use crate::desktop_host_runtime::{
+    record_host_focus_for_current_identity, terminal_handle_for_pane as terminal_handle_for_overlay_pane,
 };
 use crate::termwindow::{RenderFrame, TermWindowNotif};
 use ::window::WindowOps;

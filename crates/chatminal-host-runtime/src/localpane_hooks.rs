@@ -88,11 +88,6 @@ impl LocalPaneHooks {
         }
     }
 
-    // Explicit compat seam kept for legacy callers/tests.
-    pub(crate) fn compat_default() -> Self {
-        Self::host_default()
-    }
-
     pub(crate) fn record_input(&self) {
         (self.on_input)();
     }

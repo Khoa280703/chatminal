@@ -76,11 +76,6 @@ impl PtyIoHooks {
         }
     }
 
-    // Explicit compat seam kept for legacy callers/tests.
-    pub(crate) fn compat_default() -> Self {
-        Self::host_default()
-    }
-
     pub(crate) fn with_output(
         on_output: Option<Arc<dyn Fn(SessionTerminalHandle) + Send + Sync>>,
     ) -> Self {
@@ -499,7 +494,7 @@ mod tests {
     fn set_cleanup_wraps_custom_cleanup_owner() {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let seen_clone = Arc::clone(&seen);
-        let mut hooks = PtyIoHooks::compat_default();
+        let mut hooks = PtyIoHooks::host_default();
         hooks.set_cleanup(Some(Arc::new(move |pane_id, exit_behavior| {
             seen_clone.lock().unwrap().push((pane_id, exit_behavior));
         })));
@@ -516,7 +511,7 @@ mod tests {
     fn set_inline_error_output_wraps_custom_inline_owner() {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let seen_clone = Arc::clone(&seen);
-        let mut hooks = PtyIoHooks::compat_default();
+        let mut hooks = PtyIoHooks::host_default();
         hooks.set_inline_error_output(Some(Arc::new(move |pane_id, message| {
             seen_clone.lock().unwrap().push((pane_id, message));
         })));

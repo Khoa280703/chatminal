@@ -1,14 +1,27 @@
 # System Architecture
 
-Last updated: 2026-04-04 (host runtime / overlay convergence)
+Last updated: 2026-04-04 (repo deadcode / duplicate architecture closeout)
+
+## Latest changes (repo deadcode / duplicate architecture closeout, 2026-04-04)
+- Desktop product path đã cắt thêm facade duplicate:
+  - `main.rs` không còn bootstrap/shutdown/error-path qua one-hop wrappers trong `apps/chatminal-desktop/src/chatminal_runtime/mod.rs`
+  - `chatminal_runtime/mod.rs` đã bỏ thêm một dải host-runtime wrappers không còn caller product path
+- `chatminal-host-runtime` control-plane giờ chốt hơn quanh `HostRuntimeHandle`:
+  - desktop notification bridge subscribe qua handle canonical thay vì free-function global wrapper
+  - public wrappers vô chủ `register_runtime_client(...)`, `replace_active_identity(...)`, `subscribe_runtime_notifications(...)` đã bị cắt
+  - `compat_default()` host-runtime hooks đã bị retire; product path chỉ còn `host_default()`
+- History/scrollback steady-state đã chuyển sang canonical read model:
+  - `build_logical_snapshot(...)` không còn dual-read legacy chunks trên mỗi snapshot rebuild
+  - nếu DB cũ còn `scrollback_chunks`, runtime sẽ backfill một lần sang canonical records rồi xóa legacy chunks của session đó
+- Active docs sections bên dưới đã được sync để phản ánh current reality; các block lịch sử cũ chỉ nên đọc như timeline, không phải current contract.
 
 ## Latest changes (host runtime / overlay convergence, 2026-04-04)
 - Desktop host surface đã cắt nốt state cache song song ở active path:
   - `apps/chatminal-desktop/src/desktop_host_runtime/session_host.rs` không còn giữ `LEGACY_HOST_CLIENT_ID` / `LEGACY_HOST_WORKSPACE`
   - active client/workspace giờ đọc trực tiếp từ `chatminal-host-runtime` control plane
 - Bootstrap/shutdown của desktop host đã gom về helper chung:
-  - `initialize_desktop_host_runtime(...)`
-  - `shutdown_desktop_host_runtime()`
+  - `build_initial_host_runtime(...)`
+  - `shutdown_host_runtime()`
   nên product path và test seam không còn copy-paste init sequence riêng.
 - Overlay shell contract đã converge ở app layer:
   - `chatminal_runtime::overlay_shell` bridge re-export đã bị xóa
@@ -63,7 +76,7 @@ Last updated: 2026-04-04 (host runtime / overlay convergence)
 - Done-gate conclusion:
   - `HostRuntimeRoot` là ownership root của active product path; `Mux` chỉ còn là explicit compat facade
   - `with_mux(` / `with_mux_strict(` đã sạch trong code `crates/` + `apps/`
-  - product path dùng `host_default()`; `mux_default(` chỉ còn là explicit compat alias/tests
+  - product path dùng `host_default()`; compat defaults cũ ở host-runtime hooks đã bị retire
   - public cross-crate boundary mục tiêu đã typed hóa bằng `RuntimeId` / `SessionTerminalHandle`; residual `PaneId` / `TabId` chỉ còn ở crate-local internals hoặc wire compatibility shapes
   - `configuration(` trong closeout scope chỉ còn ở `chatminal-config` foundation helpers và desktop test/comment paths
 - Follow-up phase 01 config ownership completion:
@@ -566,7 +579,7 @@ chatminal-desktop
 ```text
 chatminal-runtime
   -> chatminal-store (SQLite)
-  -> profiles / sessions / canonical scrollback / legacy compat scrollback / workspace layout state
+  -> profiles / sessions / canonical scrollback / workspace layout state
   -> native_api + runtime_bridge
 ```
 
@@ -585,7 +598,7 @@ chatminal-runtime
 - `chatminal-runtime` giữ profile/session persistence, workspace snapshot, native API và desktop-facing runtime bridge.
 - `chatminal-runtime::state::canonical_scrollback` là source of truth cho logical scrollback semantics:
   - reducer shell-level tối thiểu: `\r`, `\n`, backspace, erase-in-line
-  - mixed-source merge theo `(seq, ord)`
+  - steady-state read path dùng canonical records; legacy chunks chỉ còn migration-once seam cho DB cũ
   - restore/preview materialize từ logical snapshot, không từ wrapped text cũ
 - live execution model hiện nằm trong desktop private host/session-engine path; không còn crate `chatminal-session-runtime` riêng trong active repo.
 - `workspace_layout` là public execution/layout model cho app layer; không expose host split tree ra desktop product path.
@@ -649,9 +662,9 @@ chatminal-runtime
 - `OverlayRenderScope` dùng cho launcher/confirm/prompt overlays nhưng không còn coupled với render scope; boundary fully isolated.
 - `SessionExecutionStatus` enum thêm vào `chatminal-runtime/state.rs` để track running status.
 - History compatibility hiện còn một vùng intentional:
-  - `scrollback_chunks` chỉ read-only compat cho session DB cũ
+  - `scrollback_chunks` có thể còn tồn tại trong DB cũ như migration residue
   - active writer path không còn ghi mới vào legacy table
-  - cleanup reader legacy sẽ là phase riêng sau khi đủ confidence rollout
+  - runtime active reader không còn dual-read legacy; nếu phát hiện legacy-only session thì backfill một lần sang canonical records
 - Các phần trên là intentional private/compatibility zones, không còn là product-facing architecture.
 
 ## Phase 05 Final Closeout (2026-04-03)

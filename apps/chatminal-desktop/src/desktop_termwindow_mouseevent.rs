@@ -1,8 +1,9 @@
-use crate::chatminal_runtime::{desktop_focus_session_view, terminal_handle_for_overlay_pane};
+use crate::chatminal_runtime::desktop_focus_session_view;
 use crate::chatminal_sidebar::SidebarSessionDropTarget;
 use crate::desktop_host_runtime::overlay_shell::{
     OverlayPane, OverlayWithPaneLines as WithPaneLines,
 };
+use crate::desktop_host_runtime::terminal_handle_for_pane as terminal_handle_for_overlay_pane;
 use crate::desktop_termwindow_types::{
     terminal_ui_key_for_pane, TerminalSplit, TerminalSplitDirection,
 };

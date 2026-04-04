@@ -1,7 +1,9 @@
 use crate::chatminal_runtime::{
     desktop_create_split_session_view, desktop_current_active_session_id,
-    desktop_current_active_terminal_handle, host_workspace_name, spawn_host_runtime_entry,
-    start_host_activity, DesktopSplitRequest,
+    desktop_current_active_terminal_handle, DesktopSplitRequest,
+};
+use crate::desktop_host_runtime::{
+    host_workspace_name, spawn_host_runtime_entry, start_host_activity,
 };
 use anyhow::{anyhow, Context};
 use config::keyassignment::SpawnCommand;

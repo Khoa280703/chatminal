@@ -1,6 +1,17 @@
 # Codebase Summary
 
-Last updated: 2026-04-04 (host runtime / overlay convergence)
+Last updated: 2026-04-04 (repo deadcode / duplicate architecture closeout)
+
+## Latest changes (2026-04-04 repo deadcode / duplicate architecture closeout)
+- `apps/chatminal-desktop/src/main.rs`, `apps/chatminal-desktop/src/chatminal_runtime/mod.rs`
+  - startup/shutdown/error callback product path không còn đi qua one-hop host-runtime wrappers trong `chatminal_runtime`
+  - `chatminal_runtime/mod.rs` đã bỏ thêm dead host-runtime facade surface không còn caller active
+- `crates/chatminal-host-runtime/src/lib.rs`, `apps/chatminal-desktop/src/desktop_host_runtime/session_host.rs`
+  - desktop notification bridge subscribe qua `HostRuntimeHandle` canonical
+  - wrappers public vô chủ cho register/replace/subscribe đã bị cắt
+- `crates/chatminal-runtime/src/state/canonical_scrollback.rs`
+  - logical snapshot steady-state không còn dual-read `scrollback_chunks`
+  - legacy chunks nếu còn sẽ được backfill một lần sang canonical records rồi xóa ở session đó
 
 ## Latest changes (2026-04-04 host runtime / overlay convergence)
 - `apps/chatminal-desktop/src/desktop_host_runtime/*`
@@ -52,7 +63,7 @@ Desktop product path là `single-flow local-first`:
   - `customglyph.rs` snap AA policy 1 lần từ glyph cache config snapshot cho block draw path
   - `chatminal-host-runtime` đã thêm guard cho re-init split-brain và cleanup after shutdown
   - `chatminal-host-runtime/src/lib.rs` đã tách control plane khỏi `Mux` bằng `HostRuntimeControlPlane` cho spawn target / subscribers / clients / identity / workspace / focus metadata
-  - `HostRuntimeRoot` giờ là owner thật của `tabs/panes/window/control`; global slot chỉ giữ `Weak<HostRuntimeRoot>`, còn `Mux` chỉ là facade compat mỏng
+  - `HostRuntimeRoot` giờ là owner thật của `tabs/panes/window/control`; global slot giữ `Arc<HostRuntimeRoot>` mạnh, còn `Mux` chỉ là facade compat mỏng
   - helper layer ở host-runtime giờ ưu tiên `HostRuntimeRoot` / `with_control_plane(...)` cho root-window/workspace/query/control paths thay vì route qua facade dày hơn
   - `HostRuntimeControlPlane` giờ cũng giữ focus metadata theo `SessionTerminalHandle`; `ClientInfo` vẫn serialize field cũ `focused_pane_id` để boundary mixed-version không gãy
   - desktop facade cũng đang siết dần raw numeric ids:
@@ -252,6 +263,6 @@ Desktop product path là `single-flow local-first`:
 
 ## Phase 05 Final Closeout (2026-04-03)
 - `crates/chatminal-host-runtime/src/lib.rs` no longer treats `Mux` as the runtime owner in product init/shutdown; ownership now hangs off the installed host runtime root.
-- Default PTY/local spawn product path moved from `mux_default()` to `host_default()` hooks in host-runtime and desktop spawn seams.
+- Default PTY/local spawn product path uses `host_default()` hooks in host-runtime and desktop spawn seams; old compat defaults are retired.
 - Remaining config sectioning / singleton replacement work and crate rename work are explicitly moved to `plans/260403-1800-post-unification-followups/plan.md`.
 - Current closeout check: when asked whether `260401-0949-architecture-unification` is done, use the phase-05 checklist plus source grep, not stale phase status.

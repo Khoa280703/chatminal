@@ -1981,7 +1981,7 @@ fn canonical_materializer_preserves_prompt_from_real_zsh_trace() {
 }
 
 #[test]
-fn logical_snapshot_prefers_canonical_seq_and_interleaves_with_legacy_chunks() {
+fn logical_snapshot_backfills_missing_legacy_sequences_into_canonical_records() {
     let (state, session_id, _db) = create_state_with_session();
     let store = {
         let inner = state.inner.lock().expect("lock state");
@@ -2023,6 +2023,34 @@ fn logical_snapshot_prefers_canonical_seq_and_interleaves_with_legacy_chunks() {
     );
     assert_eq!(snapshot.seq, 3);
     assert_eq!(snapshot.content, "line-1\ncanon-2\nprompt % cmd\n");
+    let canonical = store
+        .list_scrollback_records(&session_id)
+        .expect("list canonical records after backfill");
+    let migrated_seq1 = canonical.iter().any(|record| {
+        record.seq == 1
+            && record.kind == StoredScrollbackRecordKind::Line
+            && record.text == "line-1"
+    });
+    let migrated_seq3 = canonical.iter().any(|record| {
+        record.seq == 3
+            && record.kind == StoredScrollbackRecordKind::Line
+            && record.text == "prompt % cmd"
+    });
+    assert!(
+        migrated_seq1,
+        "seq1 should be backfilled into canonical records"
+    );
+    assert!(
+        migrated_seq3,
+        "seq3 should be backfilled into canonical records"
+    );
+    assert!(
+        store
+            .list_legacy_scrollback_chunks(&session_id)
+            .expect("legacy chunks after backfill")
+            .is_empty(),
+        "legacy chunks should be cleared after migration"
+    );
 }
 
 #[test]

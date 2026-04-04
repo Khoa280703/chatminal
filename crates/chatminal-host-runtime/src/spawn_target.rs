@@ -174,14 +174,6 @@ impl LocalSpawnHooks {
         }
     }
 
-    // Explicit compat seam for callers/tests.
-    pub fn compat_default() -> Self {
-        Self {
-            localpane_hooks: LocalPaneHooks::compat_default(),
-            pty_io_hooks: PtyIoHooks::compat_default(),
-        }
-    }
-
     pub(crate) fn localpane_hooks(&self) -> LocalPaneHooks {
         self.localpane_hooks.clone()
     }

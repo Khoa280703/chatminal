@@ -1,4 +1,5 @@
-use crate::chatminal_runtime::{desktop_resize_visible_sessions, resize_host_window_tabs};
+use crate::chatminal_runtime::desktop_resize_visible_sessions;
+use crate::desktop_host_runtime::resize_host_window_tabs;
 use crate::resize_increment_calculator::ResizeIncrementCalculator;
 use crate::utilsprites::RenderMetrics;
 use ::window::{Dimensions, ResizeIncrement, Window, WindowOps, WindowState};

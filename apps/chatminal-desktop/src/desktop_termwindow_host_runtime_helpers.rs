@@ -2,10 +2,13 @@ use crate::chatminal_runtime::{
     DESKTOP_LAYOUT_WORKSPACE_ID, SessionRenderTargetId, desktop_focus_session_terminal_handle,
     desktop_pane_for_session, desktop_render_state_for_session,
     desktop_session_entry_binding_for_render_target, desktop_session_id_for_terminal_handle,
-    desktop_session_terminal_binding, focus_terminal_handle_by_id,
-    host_window_contains_render_scope, host_window_exists, host_workspace_name,
-    remove_runtime_entry_scope, remove_terminal_handle, terminal_handle_arc,
-    terminal_handle_for_overlay_pane, with_host_window, with_host_window_mut,
+    desktop_session_terminal_binding,
+};
+use crate::desktop_host_runtime::{
+    focus_terminal_handle_by_id, host_window_contains_render_scope, host_window_exists,
+    host_workspace_name, remove_runtime_entry_scope, remove_terminal_handle, terminal_handle_arc,
+    terminal_handle_for_pane as terminal_handle_for_overlay_pane, with_host_window,
+    with_host_window_mut,
 };
 
 impl TermWindow {

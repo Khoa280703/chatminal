@@ -56,13 +56,8 @@ pub(super) fn build_logical_snapshot(
     store: &Store,
     session_id: &str,
 ) -> Result<LogicalSnapshot, String> {
-    let legacy = store.list_legacy_scrollback_chunks(session_id)?;
+    migrate_legacy_scrollback_if_needed(store, session_id)?;
     let canonical = store.list_scrollback_records(session_id)?;
-
-    let mut legacy_by_seq = BTreeMap::<u64, StoredLegacyScrollbackChunk>::new();
-    for chunk in legacy {
-        legacy_by_seq.insert(chunk.seq, chunk);
-    }
 
     let mut canonical_by_seq = BTreeMap::<u64, Vec<StoredScrollbackRecord>>::new();
     for record in canonical {
@@ -72,56 +67,33 @@ pub(super) fn build_logical_snapshot(
         records.sort_by_key(|record| (record.seq, record.ord));
     }
 
-    let mut all_seqs = BTreeSet::new();
-    all_seqs.extend(legacy_by_seq.keys().copied());
-    all_seqs.extend(canonical_by_seq.keys().copied());
-
     let mut lines = Vec::new();
     let mut open_fragment = String::new();
     let mut pending_prompt_line: Option<String> = None;
     let mut prompt_prefix_override: Option<String> = None;
     let mut max_seq = 0u64;
 
-    for seq in all_seqs {
-        if let Some(records) = canonical_by_seq.get(&seq) {
-            for record in records {
-                max_seq = max_seq.max(record.seq);
-                match record.kind {
-                    StoredScrollbackRecordKind::Line => {
-                        apply_canonical_line_record(
-                            &mut lines,
-                            &mut open_fragment,
-                            &mut pending_prompt_line,
-                            &mut prompt_prefix_override,
-                            &record.text,
-                        );
-                    }
-                    StoredScrollbackRecordKind::Fragment => {
-                        apply_canonical_fragment_record(
-                            &mut lines,
-                            &mut open_fragment,
-                            &mut pending_prompt_line,
-                            &mut prompt_prefix_override,
-                            &record.text,
-                        );
-                    }
+    for records in canonical_by_seq.into_values() {
+        for record in records {
+            max_seq = max_seq.max(record.seq);
+            match record.kind {
+                StoredScrollbackRecordKind::Line => {
+                    apply_canonical_line_record(
+                        &mut lines,
+                        &mut open_fragment,
+                        &mut pending_prompt_line,
+                        &mut prompt_prefix_override,
+                        &record.text,
+                    );
                 }
-            }
-            continue;
-        }
-
-        if let Some(chunk) = legacy_by_seq.get(&seq) {
-            max_seq = max_seq.max(chunk.seq);
-            let materialized = materialize_output_chunk(
-                &open_fragment,
-                open_fragment.chars().count(),
-                false,
-                &chunk.chunk_text,
-            );
-            for record in materialized.records {
-                match record.kind {
-                    StoredScrollbackRecordKind::Line => lines.push(record.text),
-                    StoredScrollbackRecordKind::Fragment => open_fragment = record.text,
+                StoredScrollbackRecordKind::Fragment => {
+                    apply_canonical_fragment_record(
+                        &mut lines,
+                        &mut open_fragment,
+                        &mut pending_prompt_line,
+                        &mut prompt_prefix_override,
+                        &record.text,
+                    );
                 }
             }
         }
@@ -144,6 +116,118 @@ pub(super) fn build_logical_snapshot(
         open_fragment,
         seq: max_seq,
     })
+}
+
+fn migrate_legacy_scrollback_if_needed(store: &Store, session_id: &str) -> Result<(), String> {
+    let legacy = store.list_legacy_scrollback_chunks(session_id)?;
+    if legacy.is_empty() {
+        return Ok(());
+    }
+
+    let canonical = store.list_scrollback_records(session_id)?;
+    let mut legacy_by_seq = BTreeMap::<u64, StoredLegacyScrollbackChunk>::new();
+    for chunk in legacy {
+        legacy_by_seq.insert(chunk.seq, chunk);
+    }
+
+    let mut canonical_by_seq = BTreeMap::<u64, Vec<StoredScrollbackRecord>>::new();
+    for record in canonical {
+        canonical_by_seq.entry(record.seq).or_default().push(record);
+    }
+    for records in canonical_by_seq.values_mut() {
+        records.sort_by_key(|record| (record.seq, record.ord));
+    }
+
+    let mut all_seqs = BTreeSet::new();
+    all_seqs.extend(legacy_by_seq.keys().copied());
+    all_seqs.extend(canonical_by_seq.keys().copied());
+
+    let mut lines = Vec::new();
+    let mut open_fragment = String::new();
+    let mut pending_prompt_line: Option<String> = None;
+    let mut prompt_prefix_override: Option<String> = None;
+    let mut migrated_records = Vec::<(u64, Vec<StoredScrollbackRecordInput>, u64)>::new();
+
+    for seq in all_seqs {
+        if let Some(records) = canonical_by_seq.get(&seq) {
+            apply_canonical_records(
+                records.iter().cloned(),
+                &mut lines,
+                &mut open_fragment,
+                &mut pending_prompt_line,
+                &mut prompt_prefix_override,
+            );
+            continue;
+        }
+
+        let Some(chunk) = legacy_by_seq.get(&seq) else {
+            continue;
+        };
+        let materialized = materialize_output_chunk(
+            &open_fragment,
+            open_fragment.chars().count(),
+            false,
+            &chunk.chunk_text,
+        );
+        apply_canonical_records(
+            materialized
+                .records
+                .iter()
+                .cloned()
+                .map(|record| StoredScrollbackRecord {
+                    session_id: session_id.to_string(),
+                    seq,
+                    ord: record.ord,
+                    kind: record.kind,
+                    text: record.text,
+                    ts: chunk.ts,
+                }),
+            &mut lines,
+            &mut open_fragment,
+            &mut pending_prompt_line,
+            &mut prompt_prefix_override,
+        );
+        migrated_records.push((seq, materialized.records, chunk.ts));
+    }
+
+    for (seq, records, ts) in migrated_records {
+        store.append_scrollback_records(session_id, seq, &records, ts)?;
+    }
+    store.clear_legacy_scrollback_chunks(session_id)?;
+    Ok(())
+}
+
+fn apply_canonical_records<I>(
+    records: I,
+    lines: &mut Vec<String>,
+    open_fragment: &mut String,
+    pending_prompt_line: &mut Option<String>,
+    prompt_prefix_override: &mut Option<String>,
+) where
+    I: IntoIterator<Item = StoredScrollbackRecord>,
+{
+    for record in records {
+        match record.kind {
+            StoredScrollbackRecordKind::Line => {
+                apply_canonical_line_record(
+                    lines,
+                    open_fragment,
+                    pending_prompt_line,
+                    prompt_prefix_override,
+                    &record.text,
+                );
+            }
+            StoredScrollbackRecordKind::Fragment => {
+                apply_canonical_fragment_record(
+                    lines,
+                    open_fragment,
+                    pending_prompt_line,
+                    prompt_prefix_override,
+                    &record.text,
+                );
+            }
+        }
+    }
 }
 
 fn apply_canonical_line_record(

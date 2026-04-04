@@ -26,6 +26,11 @@ use termwiz::cell::CellAttributes;
 use termwiz::surface::{Line, SEQ_ZERO};
 use unicode_normalization::UnicodeNormalization;
 
+use crate::desktop_host_runtime::{
+    activate_host_runtime_entry, create_serial_spawn_target, host_has_panes_in_workspace,
+    primary_host_spawn_target, set_host_spawn_target, HostSpawnTargetHandle,
+};
+
 mod chatminal_layout;
 mod chatminal_render;
 mod chatminal_runtime;
@@ -149,8 +154,8 @@ async fn async_run_serial(config: ConfigHandle, opts: SerialCommand) -> anyhow::
 
     let cmd = None;
 
-    let spawn_target = chatminal_runtime::create_desktop_serial_spawn_target(serial_target)?;
-    chatminal_runtime::set_host_spawn_target(&spawn_target);
+    let spawn_target = create_serial_spawn_target(serial_target)?;
+    set_host_spawn_target(&spawn_target);
 
     let should_publish = false;
     async_run_terminal_gui(
@@ -171,7 +176,7 @@ fn run_serial(config: config::ConfigHandle, opts: SerialCommand) -> anyhow::Resu
         set_window_position(pos.clone());
     }
 
-    chatminal_runtime::initialize_desktop_host_runtime(&config, None)?;
+    crate::desktop_host_runtime::build_initial_host_runtime(&config, None)?;
 
     let gui = crate::frontend::try_new(config.clone())?;
 
@@ -187,20 +192,20 @@ fn run_serial(config: config::ConfigHandle, opts: SerialCommand) -> anyhow::Resu
 }
 
 fn have_panes_in_spawn_target_and_ws(
-    spawn_target: &chatminal_runtime::HostSpawnTargetHandle,
+    spawn_target: &HostSpawnTargetHandle,
     workspace: &Option<String>,
 ) -> bool {
     let _ = spawn_target;
-    chatminal_runtime::host_has_panes_in_workspace(workspace.as_deref())
+    host_has_panes_in_workspace(workspace.as_deref())
 }
 
 async fn spawn_tab_in_spawn_target_if_mux_is_empty(
     config: ConfigHandle,
     cmd: Option<CommandBuilder>,
-    spawn_target: Option<chatminal_runtime::HostSpawnTargetHandle>,
+    spawn_target: Option<HostSpawnTargetHandle>,
     workspace: Option<String>,
 ) -> anyhow::Result<()> {
-    let spawn_target = spawn_target.unwrap_or_else(chatminal_runtime::primary_host_spawn_target);
+    let spawn_target = spawn_target.unwrap_or_else(primary_host_spawn_target);
 
     if have_panes_in_spawn_target_and_ws(&spawn_target, &workspace) {
         return Ok(());
@@ -286,7 +291,7 @@ async fn async_run_terminal_gui(
     cmd: Option<CommandBuilder>,
     opts: StartCommand,
     should_publish: bool,
-    startup_spawn_target: Option<chatminal_runtime::HostSpawnTargetHandle>,
+    startup_spawn_target: Option<HostSpawnTargetHandle>,
 ) -> anyhow::Result<()> {
     let unix_socket_path =
         config::RUNTIME_DIR.join(format!("gui-sock-{}", unsafe { libc::getpid() }));
@@ -303,7 +308,7 @@ async fn async_run_terminal_gui(
 
     let spawn_target = startup_spawn_target.or_else(|| {
         cmd.as_ref()
-            .map(|_| chatminal_runtime::primary_host_spawn_target())
+            .map(|_| primary_host_spawn_target())
     });
 
     trigger_and_log_gui_startup(spawn_command).await;
@@ -317,7 +322,7 @@ async fn async_run_terminal_gui(
                 None,
             )
             .await?;
-        chatminal_runtime::activate_host_runtime_entry(tab.runtime_id().as_u64())?;
+        activate_host_runtime_entry(tab.runtime_id().as_u64())?;
         request_frontend_workspace_reconcile();
         trigger_and_log_gui_attached().await;
     }
@@ -357,10 +362,10 @@ fn run_terminal_gui(opts: StartCommand) -> anyhow::Result<()> {
         None
     };
 
-    chatminal_runtime::initialize_desktop_host_runtime(&config, opts.workspace.as_deref())?;
+    crate::desktop_host_runtime::build_initial_host_runtime(&config, opts.workspace.as_deref())?;
 
     let gui = crate::frontend::try_new(config.clone())?;
-    let activity = chatminal_runtime::start_host_activity();
+    let activity = crate::desktop_host_runtime::start_host_activity();
 
     promise::spawn::spawn(async move {
         if let Err(err) = async_run_terminal_gui(config.clone(), cmd, opts, false, None).await {
@@ -429,12 +434,14 @@ fn main() {
     let _profiler = dhat::Profiler::new_heap();
 
     config::designate_this_as_the_main_thread();
-    config::assign_error_callback(chatminal_runtime::show_host_configuration_error_message);
+    config::assign_error_callback(
+        crate::desktop_host_runtime::show_host_configuration_error_message,
+    );
     notify_on_panic();
     if let Err(e) = run() {
         terminate_with_error(e);
     }
-    chatminal_runtime::shutdown_desktop_host_runtime();
+    crate::desktop_host_runtime::shutdown_host_runtime();
     frontend::shutdown();
 }
 
@@ -442,7 +449,7 @@ fn maybe_show_configuration_error_window() {
     let warnings = config::configuration_warnings_and_errors();
     if !warnings.is_empty() {
         let err = warnings.join("\n");
-        chatminal_runtime::show_host_configuration_error_message(&err);
+        crate::desktop_host_runtime::show_host_configuration_error_message(&err);
     }
 }
 

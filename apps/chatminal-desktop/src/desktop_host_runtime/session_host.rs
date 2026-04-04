@@ -83,8 +83,8 @@ fn host_add_session_pane_with_output_callback(pane: &Arc<dyn HostTerminal>) -> a
         .map_err(anyhow::Error::from)
 }
 
-fn bridge_legacy_host_notifications() {
-    let _ = host_runtime::subscribe_runtime_notifications(|notification| {
+fn bridge_runtime_notifications(runtime: &host_runtime::HostRuntimeHandle) {
+    runtime.subscribe(|notification| {
         publish_runtime_notification_from_any_thread(notification.into());
         true
     });
@@ -276,9 +276,9 @@ fn host_shutdown_runtime() {
     host_runtime::shutdown_host_runtime();
 }
 
-fn ensure_legacy_notification_bridge() {
+fn ensure_runtime_notification_bridge(runtime: &host_runtime::HostRuntimeHandle) {
     if !LEGACY_HOST_NOTIFICATIONS_BRIDGED.swap(true, Ordering::AcqRel) {
-        bridge_legacy_host_notifications();
+        bridge_runtime_notifications(runtime);
     }
 }
 
@@ -289,7 +289,7 @@ fn initialize_desktop_host_runtime(
     let desktop_spawn_target: HostSpawnTargetHandle = Arc::new(DesktopSpawnTarget::new_local()?);
     let runtime = host_initialize_runtime(Some(Arc::clone(&desktop_spawn_target)), config.clone())?;
     host_set_primary_spawn_target_value(&desktop_spawn_target);
-    ensure_legacy_notification_bridge();
+    ensure_runtime_notification_bridge(runtime.as_ref());
 
     let client_id = host_active_identity().unwrap_or_else(|| {
         let client_id = Arc::new(ClientId::new());

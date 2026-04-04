@@ -1,5 +1,5 @@
-use crate::chatminal_runtime::terminal_handle_for_overlay_pane;
 use crate::commands::{CommandDef, ExpandedCommand};
+use crate::desktop_host_runtime::terminal_handle_for_pane as terminal_handle_for_overlay_pane;
 use crate::overlay::selector::{matcher_pattern, matcher_score};
 use crate::termwindow::box_model::*;
 use crate::termwindow::modal::Modal;

@@ -1076,6 +1076,16 @@ impl Store {
         Ok(chunks)
     }
 
+    pub fn clear_legacy_scrollback_chunks(&self, session_id: &str) -> Result<(), String> {
+        let conn = self.conn()?;
+        conn.execute(
+            "DELETE FROM scrollback_chunks WHERE session_id = ?1",
+            params![session_id],
+        )
+        .map_err(|err| format!("clear legacy scrollback chunks failed: {err}"))?;
+        Ok(())
+    }
+
     pub fn list_terminal_replay_chunks(
         &self,
         session_id: &str,

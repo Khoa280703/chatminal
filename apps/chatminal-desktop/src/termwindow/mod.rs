@@ -5,24 +5,27 @@ use crate::chatminal_layout::workspace_store::{
     DesktopWorkspaceLayoutStore, DEFAULT_LAYOUT_WORKSPACE_ID,
 };
 use crate::chatminal_runtime::{
-    active_host_runtime_entry_size, desktop_activate_session, desktop_can_close_view_only,
+    desktop_activate_session, desktop_can_close_view_only,
     desktop_detach_session_runtime_and_notify, desktop_focus_session_view_with_previous,
     desktop_last_active_session_id, desktop_prepare_workspace_layout,
-    desktop_resize_visible_sessions, desktop_session_entry_bindings,
-    desktop_session_window_snapshot, host_active_render_scope_id, host_window_initial_position,
-    notify_runtime_session_activated, reconcile_runtime_session_lookup, resize_host_window_tabs,
-    resolve_public_pane, resolved_window_title, run_runtime_session_startup_command,
-    subscribe_runtime_notifications, DesktopSessionBridgeAction, DesktopSessionRuntimeSummary,
-    PrimaryHostWindowId, RuntimeId, RuntimeNotification, RuntimeWindow, SessionViewId,
-    TerminalInstanceId, WorkspaceLayoutState,
+    desktop_resize_visible_sessions, desktop_session_entry_bindings, desktop_session_window_snapshot,
+    notify_runtime_session_activated, reconcile_runtime_session_lookup,
+    run_runtime_session_startup_command, DesktopSessionBridgeAction,
+    DesktopSessionRuntimeSummary, PrimaryHostWindowId, RuntimeId, RuntimeNotification,
+    RuntimeWindow, SessionViewId, TerminalInstanceId, WorkspaceLayoutState,
 };
 use crate::chatminal_sidebar::{ChatminalSidebar, SidebarSessionDropTarget};
 use crate::colorease::ColorEase;
+use crate::desktop_host_runtime::{
+    active_host_runtime_entry_size, host_active_render_scope_id, host_window_initial_position,
+    resize_host_window_tabs, resolve_public_pane, resolved_window_title,
+};
 use crate::desktop_host_runtime::overlay_shell::{
     OverlayAssignmentResult as PerformAssignmentResult, OverlayCachePolicy as CachePolicy,
     OverlayCloseReason as CloseReason, OverlayPane, OverlayPattern, OverlayTerminal,
     RenderableDimensions,
 };
+use crate::desktop_host_runtime::subscribe_runtime_notifications;
 use crate::desktop_overlay_actions::show_close_runtime_entry_overlay;
 use crate::desktop_termwindow_types::{
     terminal_handle_for_ui_key, terminal_ui_key_for_pane, TerminalPaneLayout, TerminalSplit,

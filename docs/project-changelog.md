@@ -3,11 +3,21 @@
 ## 2026-04-04
 
 ### Changed
+- Repo deadcode / duplicate architecture closeout completed:
+  - `apps/chatminal-desktop/src/chatminal_runtime/mod.rs` facade one-hop product path đã bị cắt bớt wrappers dư
+  - `chatminal-host-runtime` control-plane public surface đã chốt hơn quanh `HostRuntimeHandle`; wrappers public vô chủ và `compat_default()` rỗng nghĩa đã bị retire
+  - `build_logical_snapshot(...)` đã chuyển sang canonical-only steady-state read path; legacy `scrollback_chunks` chỉ còn migration-once backfill
+  - `docs/system-architecture.md` và `docs/codebase-summary.md` đã được sync lại để phản ánh reality mới
+  - verify xanh:
+    - `cargo check -p chatminal-desktop`
+    - `cargo test -p chatminal-host-runtime --lib -- --test-threads=1`
+    - `cargo test -p chatminal-runtime -- --test-threads=1`
+    - `cargo check --workspace`
 - Host runtime / overlay convergence cleanup tiếp tục đóng seam active-path:
   - `apps/chatminal-desktop/src/chatminal_runtime/mod.rs` đã xóa bridge `overlay_shell` re-export; owner canonical giờ chỉ còn ở `desktop_host_runtime::overlay_shell`
   - overlay, termwindow, selection, scrollbar, và desktop termwindow helpers đổi sang import trực tiếp từ owner canonical này
   - `apps/chatminal-desktop/src/desktop_host_runtime/session_host.rs` bỏ cache `LEGACY_HOST_CLIENT_ID` / `LEGACY_HOST_WORKSPACE`; active client/workspace giờ đọc trực tiếp từ `chatminal-host-runtime`
-  - bootstrap/shutdown của desktop host và test seam dùng chung `initialize_desktop_host_runtime(...)` / `shutdown_desktop_host_runtime()` nên không còn drift init logic
+  - bootstrap/shutdown của desktop host và test seam dùng chung `build_initial_host_runtime(...)` / `shutdown_host_runtime()` nên không còn drift init logic
   - desktop bootstrap dùng `HostRuntimeHandle` canonical để register client, replace identity, và set active workspace; product seam không còn dựa vào `MuxHandle`
   - verify xanh:
     - `cargo check -p chatminal-desktop`

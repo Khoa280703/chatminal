@@ -4,10 +4,9 @@
 //! be rendered as a popup/context menu if the system supports it; at the
 //! time of writing our window layer doesn't provide an API for context
 //! menus.
-use crate::chatminal_runtime::{
-    desktop_current_active_session_id, launcher_sessions, LauncherSessionEntry,
-};
 use crate::commands::derive_command_from_key_assignment;
+use crate::chatminal_runtime::desktop_current_active_session_id;
+use crate::desktop_host_runtime::{launcher_sessions, LauncherSessionEntry};
 use crate::desktop_host_runtime::overlay_shell::OverlayTerminal;
 use crate::inputmap::InputMap;
 use crate::overlay::quickselect;
