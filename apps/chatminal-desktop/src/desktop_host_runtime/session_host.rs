@@ -5,44 +5,38 @@
 // from the session_pane map.
 
 use std::collections::{HashMap, HashSet};
-use std::convert::TryFrom;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use super::session_engine::{
     RuntimeId, SessionEngineShared, SessionRuntimeState, StatefulSessionEngine, TerminalInstanceId,
 };
 use super::spawn_target::DesktopSpawnTarget;
+use chatminal_runtime::{ClientId, RuntimeEntryInfo, RuntimeEntryTerminalInfo};
 use config::ConfigHandle;
+use config::keyassignment::SessionDirection;
 use engine_term::{Clipboard, ClipboardSelection, DownloadHandler, TerminalSize};
-use host_runtime::client::ClientId;
-use host_runtime::tab::Tab as HostRenderScope;
 use portable_pty::CommandBuilder;
 
-use super::session_pane::{pane_id_for_terminal_instance, ChatminalSessionPane};
+use super::session_pane::ChatminalSessionPane;
 use super::{
-    configured_default_workspace_name, host_window_exists,
-    publish_runtime_notification_from_any_thread, subscribe_desktop_runtime_notifications,
     FrontendClientHandle, FrontendFocusedPane, FrontendResolvedPane, HostFocusedPaneBinding,
-    HostRenderableDimensions as RenderableDimensions, HostSpawnTargetHandle, HostTerminal,
-    LauncherSessionEntry, RuntimeNotification, RuntimeWindow, PRIMARY_HOST_WINDOW_ID,
-    ROOT_HOST_WINDOW_ID,
+    HostRenderableDimensions as RenderableDimensions, HostSpawnTargetHandle,
+    HostTerminal, LauncherSessionEntry, PRIMARY_HOST_WINDOW_ID,
+    ROOT_HOST_WINDOW_ID, RuntimeNotification, RuntimeWindow, configured_default_workspace_name,
+    host_window_exists, overlay_shell, publish_runtime_notification_from_any_thread,
+    subscribe_desktop_runtime_notifications,
 };
 use crate::chatminal_render::{ChatminalRenderPane, ChatminalRenderState};
 use crate::chatminal_runtime::{
     SessionRenderTargetId, SessionRenderTargetSnapshot, SessionTerminalHandle,
 };
-use chatminal_runtime::{
-    RuntimeHost, RuntimeHostSessionState, RuntimeHostTerminalBinding, RuntimeSessionLaunchSpec,
-    RuntimeTerminalSize,
-};
+use chatminal_runtime::RuntimeSessionLaunchSpec;
 
 // ---------------------------------------------------------------------------
 // Singleton host registry
 // ---------------------------------------------------------------------------
 
 static HOST_REGISTRY: OnceLock<Arc<DesktopSessionHost>> = OnceLock::new();
-static LEGACY_HOST_NOTIFICATIONS_BRIDGED: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn get_or_init_session_host(
     shared: Arc<SessionEngineShared>,
@@ -53,42 +47,14 @@ pub(crate) fn get_or_init_session_host(
         .clone()
 }
 
-fn host_tab_id(runtime_id: RuntimeId) -> Option<usize> {
-    usize::try_from(runtime_id.as_u64()).ok()
-}
-
-fn host_root_active_tab_id() -> Option<RuntimeId> {
-    host_runtime::root_active_runtime_id()
+pub(crate) fn terminal_handle_for_host_terminal(pane: &dyn HostTerminal) -> SessionTerminalHandle {
+    pane.terminal_handle()
 }
 
 fn host_terminal_handle(pane: &dyn HostTerminal) -> SessionTerminalHandle {
-    host_runtime::terminal_handle_for_pane(pane)
+    pane.terminal_handle()
 }
 
-fn host_remove_pane(terminal_handle: SessionTerminalHandle) {
-    let _ = host_runtime::remove_terminal_handle(terminal_handle);
-}
-
-/// Register a session pane with the host runtime, using a callback that
-/// publishes PTY output events through the desktop notification hub
-/// instead of the default host-runtime output notifier.
-fn host_add_session_pane_with_output_callback(pane: &Arc<dyn HostTerminal>) -> anyhow::Result<()> {
-    let on_pane_output: Arc<dyn Fn(SessionTerminalHandle) + Send + Sync> =
-        Arc::new(|terminal_handle| {
-            publish_runtime_notification_from_any_thread(RuntimeNotification::PaneOutput(
-                terminal_handle,
-            ));
-        });
-    host_runtime::register_pane_with_output_callback(pane, Some(on_pane_output))
-        .map_err(anyhow::Error::from)
-}
-
-fn bridge_runtime_notifications(runtime: &host_runtime::HostRuntimeHandle) {
-    runtime.subscribe(|notification| {
-        publish_runtime_notification_from_any_thread(notification.into());
-        true
-    });
-}
 
 struct DesktopClipboardBridge {
     terminal_handle: SessionTerminalHandle,
@@ -130,53 +96,18 @@ fn install_desktop_pane_side_effects(pane: &Arc<dyn HostTerminal>) {
     pane.set_download_handler(&downloader);
 }
 
-fn host_get_pane(terminal_handle: SessionTerminalHandle) -> Option<Arc<dyn HostTerminal>> {
-    host_runtime::terminal_by_handle(terminal_handle)
-}
-
 fn host_remove_tab(runtime_id: RuntimeId) {
-    let _ = host_runtime::remove_runtime_entry_by_runtime_id(runtime_id);
-}
-
-fn host_add_tab_and_active_pane(tab: &Arc<HostRenderScope>) -> anyhow::Result<()> {
-    host_runtime::register_tab(tab).map_err(anyhow::Error::from)
-}
-
-fn host_attach_tab(tab: &Arc<HostRenderScope>) -> anyhow::Result<()> {
-    host_runtime::attach_tab_to_window(tab)
-}
-
-fn with_host_window_ref<R, F>(func: F) -> R
-where
-    F: FnOnce(&RuntimeWindow) -> R,
-{
-    host_runtime::with_root_window(func).expect("host runtime root window to exist")
-}
-
-fn with_host_window_mut_ref<R, F>(func: F) -> R
-where
-    F: FnOnce(&mut RuntimeWindow) -> R,
-{
-    host_runtime::with_root_window_mut(func).expect("host runtime root window to exist")
-}
-
-fn host_has_tab(runtime_id: RuntimeId) -> bool {
-    host_runtime::runtime_entry_exists(runtime_id)
-}
-
-fn host_workspace_name_value() -> String {
-    host_runtime::root_window_workspace_name()
-        .or_else(|| host_runtime::active_workspace_name())
-        .unwrap_or_default()
+    if let Some(host) = HOST_REGISTRY.get() {
+        if host.window_contains_runtime(runtime_id) {
+            host.remove_tab_from_window(runtime_id);
+        }
+    }
 }
 
 fn host_set_workspace_name(name: &str) {
-    let _ = host_runtime::set_active_workspace_name(name);
-    let _ = host_runtime::set_root_window_workspace_name(name);
-}
-
-fn host_record_focus(terminal_handle: SessionTerminalHandle) {
-    let _ = host_runtime::record_focus_for_terminal_handle(terminal_handle);
+    if let Some(host) = HOST_REGISTRY.get() {
+        host.set_workspace_name_value(name);
+    }
 }
 
 fn host_subscribe<F>(subscriber: F)
@@ -187,131 +118,68 @@ where
 }
 
 fn host_active_identity() -> Option<FrontendClientHandle> {
-    host_runtime::active_identity()
-}
-
-fn host_workspace_for_client(client_id: &FrontendClientHandle) -> String {
-    host_runtime::active_workspace_for_client(client_id).unwrap_or_default()
-}
-
-fn host_set_workspace_for_client(client_id: &FrontendClientHandle, workspace: &str) {
-    let _ = host_runtime::set_active_workspace_for_client(client_id, workspace);
-}
-
-fn host_workspace_is_empty_value(workspace: &str) -> bool {
-    host_runtime::is_workspace_empty(workspace).unwrap_or(true)
-}
-
-fn host_workspace_names_value() -> Vec<String> {
-    host_runtime::iter_workspaces()
-}
-
-fn host_root_has_runtime_entries_with_panes() -> bool {
-    host_runtime::root_has_runtime_entries_with_panes()
-}
-
-fn host_root_window_workspace_name_value() -> Option<String> {
-    host_runtime::root_window_workspace_name()
+    HOST_REGISTRY
+        .get()
+        .and_then(|host| host.active_client_value())
 }
 
 fn host_resolve_pane_id_value(terminal_handle: SessionTerminalHandle) -> Option<RuntimeId> {
-    host_runtime::resolve_runtime_id_for_terminal_handle(terminal_handle)
+    HOST_REGISTRY
+        .get()
+        .and_then(|host| host.runtime_id_for_terminal_handle_value(terminal_handle))
 }
 
 fn host_resolve_focused_pane_value(
     client_id: &FrontendClientHandle,
 ) -> Option<HostFocusedPaneBinding> {
-    host_runtime::resolve_focused_pane(client_id)
-}
-
-fn host_iter_panes() -> Vec<Arc<dyn HostTerminal>> {
-    host_runtime::iter_panes()
-}
-
-async fn host_spawn_tab(
-    command: Option<CommandBuilder>,
-    command_dir: Option<String>,
-    size: TerminalSize,
-    current_terminal_handle: Option<SessionTerminalHandle>,
-) -> anyhow::Result<(Arc<HostRenderScope>, Arc<dyn HostTerminal>)> {
-    host_runtime::spawn_tab(command, command_dir, size, current_terminal_handle).await
-}
-
-fn host_initialize_runtime(
-    spawn_target: Option<HostSpawnTargetHandle>,
-    config: ConfigHandle,
-) -> anyhow::Result<Arc<host_runtime::HostRuntimeHandle>> {
-    host_runtime::initialize_host_runtime_with_config(spawn_target, config)
-}
-
-fn host_set_primary_spawn_target_value(spawn_target: &HostSpawnTargetHandle) {
-    let _ = host_runtime::set_primary_spawn_target(spawn_target);
-}
-
-fn host_primary_spawn_target_value() -> HostSpawnTargetHandle {
-    host_runtime::primary_spawn_target().expect("host runtime primary spawn target")
+    HOST_REGISTRY
+        .get()
+        .and_then(|host| host.focused_pane_for_client_value(client_id))
 }
 
 fn host_focus_root_window_tab(runtime_id: RuntimeId) -> bool {
-    host_runtime::focus_root_runtime_entry(runtime_id)
-}
-
-fn host_active_terminal_handle(runtime_id: RuntimeId) -> Option<SessionTerminalHandle> {
-    host_runtime::runtime_entry_active_terminal_handle(runtime_id)
+    HOST_REGISTRY
+        .get()
+        .is_some_and(|host| host.focus_runtime_in_window(runtime_id))
 }
 
 fn host_set_tab_title(runtime_id: RuntimeId, title: &str) {
-    let _ = host_runtime::set_runtime_entry_title(runtime_id, title);
-}
-
-fn host_is_runtime_available() -> bool {
-    host_runtime::is_host_runtime_available()
-}
-
-fn host_resize_all_tabs(size: TerminalSize) {
-    host_runtime::resize_all_root_runtime_entries(size);
-}
-
-fn host_shutdown_runtime() {
-    host_runtime::shutdown_host_runtime();
-}
-
-fn ensure_runtime_notification_bridge(runtime: &host_runtime::HostRuntimeHandle) {
-    if !LEGACY_HOST_NOTIFICATIONS_BRIDGED.swap(true, Ordering::AcqRel) {
-        bridge_runtime_notifications(runtime);
+    if let Some(host) = HOST_REGISTRY.get() {
+        host.set_runtime_title_value(runtime_id, title);
     }
 }
+
 
 fn initialize_desktop_host_runtime(
     config: &ConfigHandle,
     default_workspace_name: Option<&str>,
 ) -> anyhow::Result<FrontendClientHandle> {
-    let desktop_spawn_target: HostSpawnTargetHandle = Arc::new(DesktopSpawnTarget::new_local()?);
-    let runtime = host_initialize_runtime(Some(Arc::clone(&desktop_spawn_target)), config.clone())?;
-    host_set_primary_spawn_target_value(&desktop_spawn_target);
-    ensure_runtime_notification_bridge(runtime.as_ref());
+    let desktop_spawn_target =
+        HostSpawnTargetHandle::new(Arc::new(DesktopSpawnTarget::new_local()?));
+    if let Some(host) = HOST_REGISTRY.get() {
+        host.primary_spawn_target
+            .lock()
+            .unwrap()
+            .replace(desktop_spawn_target.clone());
+    }
 
-    let client_id = host_active_identity().unwrap_or_else(|| {
-        let client_id = Arc::new(ClientId::new());
-        runtime.register_client(client_id.clone());
-        client_id
-    });
-    runtime.replace_identity(Some(client_id.clone()));
+    let client_id = host_active_identity().unwrap_or_else(|| Arc::new(ClientId::new()));
+    if let Some(host) = HOST_REGISTRY.get() {
+        host.active_client
+            .lock()
+            .unwrap()
+            .replace(client_id.clone());
+    }
 
     let workspace = default_workspace_name
         .map(str::to_string)
         .unwrap_or_else(|| configured_default_workspace_name(config));
-    runtime.set_active_workspace(&workspace);
-    let _ = host_runtime::set_root_window_workspace_name(&workspace);
-    host_set_workspace_for_client(&client_id, &workspace);
+    host_set_workspace_name(&workspace);
     let _ = PRIMARY_HOST_WINDOW_ID.set(ROOT_HOST_WINDOW_ID);
     Ok(client_id)
 }
 
-fn shutdown_desktop_host_runtime() {
-    LEGACY_HOST_NOTIFICATIONS_BRIDGED.store(false, Ordering::Release);
-    host_shutdown_runtime();
-}
+fn shutdown_desktop_host_runtime() {}
 
 fn pane_dims_need_resize(dims: RenderableDimensions, size: TerminalSize) -> bool {
     dims.cols != size.cols
@@ -321,6 +189,80 @@ fn pane_dims_need_resize(dims: RenderableDimensions, size: TerminalSize) -> bool
         || dims.dpi != size.dpi
 }
 
+fn runtime_entry_terminal_handle_in_direction(
+    infos: &[RuntimeEntryTerminalInfo],
+    direction: SessionDirection,
+) -> Option<SessionTerminalHandle> {
+    let active = infos
+        .iter()
+        .find(|info| info.is_active)
+        .or_else(|| infos.first())?;
+
+    if matches!(direction, SessionDirection::Next | SessionDirection::Prev) {
+        let max_index = infos
+            .iter()
+            .map(|info| info.index)
+            .max()
+            .unwrap_or(active.index);
+        let target_index = match direction {
+            SessionDirection::Next => {
+                if active.index == max_index {
+                    0
+                } else {
+                    active.index + 1
+                }
+            }
+            SessionDirection::Prev => {
+                if active.index == 0 {
+                    max_index
+                } else {
+                    active.index - 1
+                }
+            }
+            SessionDirection::Up
+            | SessionDirection::Down
+            | SessionDirection::Left
+            | SessionDirection::Right => unreachable!(),
+        };
+        return infos
+            .iter()
+            .find(|info| info.index == target_index)
+            .map(|info| info.terminal_handle);
+    }
+
+    let edge_intersects =
+        |active_start: usize, active_size: usize, current_start: usize, current_size: usize| {
+            let active_end = active_start + active_size;
+            let current_end = current_start + current_size;
+            active_start < current_end && current_start < active_end
+        };
+
+    infos
+        .iter()
+        .filter(|info| info.terminal_handle != active.terminal_handle)
+        .filter(|info| match direction {
+            SessionDirection::Right => {
+                info.left == active.left + active.width + 1
+                    && edge_intersects(active.top, active.height, info.top, info.height)
+            }
+            SessionDirection::Left => {
+                info.left + info.width + 1 == active.left
+                    && edge_intersects(active.top, active.height, info.top, info.height)
+            }
+            SessionDirection::Up => {
+                info.top + info.height + 1 == active.top
+                    && edge_intersects(active.left, active.width, info.left, info.width)
+            }
+            SessionDirection::Down => {
+                active.top + active.height + 1 == info.top
+                    && edge_intersects(active.left, active.width, info.left, info.width)
+            }
+            SessionDirection::Next | SessionDirection::Prev => unreachable!(),
+        })
+        .map(|info| info.terminal_handle)
+        .next()
+}
+
 #[cfg(test)]
 pub(crate) fn test_active_frontend_client() -> Option<FrontendClientHandle> {
     host_active_identity()
@@ -328,12 +270,9 @@ pub(crate) fn test_active_frontend_client() -> Option<FrontendClientHandle> {
 
 #[cfg(test)]
 pub(crate) fn test_active_workspace_for_client(client_id: &FrontendClientHandle) -> String {
-    let workspace = host_workspace_for_client(client_id);
-    if !workspace.is_empty() {
-        return workspace;
-    }
-    host_runtime::root_window_workspace_name()
-        .or_else(host_runtime::active_workspace_name)
+    HOST_REGISTRY
+        .get()
+        .map(|host| host.workspace_for_client_value(client_id))
         .unwrap_or_default()
 }
 
@@ -342,6 +281,8 @@ pub(crate) fn build_host_runtime_for_test(
     config: &ConfigHandle,
     default_workspace_name: Option<&str>,
 ) -> anyhow::Result<()> {
+    let runtime = super::EmbeddedRuntime::global().map_err(anyhow::Error::msg)?;
+    let _ = get_or_init_session_host(runtime.session_engine_shared(), config.clone());
     let _ = initialize_desktop_host_runtime(config, default_workspace_name)?;
     Ok(())
 }
@@ -358,12 +299,15 @@ pub(crate) fn shutdown_host_runtime_for_test() {
 pub(crate) struct DesktopSessionHost {
     shared: Arc<SessionEngineShared>,
     config: Mutex<ConfigHandle>,
+    window: Mutex<RuntimeWindow>,
+    primary_spawn_target: Mutex<Option<HostSpawnTargetHandle>>,
+    active_client: Mutex<Option<FrontendClientHandle>>,
+    workspace_by_client: Mutex<HashMap<FrontendClientHandle, String>>,
+    focused_pane_by_client: Mutex<HashMap<FrontendClientHandle, HostFocusedPaneBinding>>,
     // terminal_instance_id → pane (for output/input routing)
     panes: Mutex<HashMap<TerminalInstanceId, Arc<ChatminalSessionPane>>>,
     // session_id → pane (1 session = 1 pane invariant)
     session_pane: Mutex<HashMap<String, Arc<ChatminalSessionPane>>>,
-    // session_id → shim runtime id for the host render-scope wrapper (desktop-local)
-    session_tab_shim: Mutex<HashMap<String, RuntimeId>>,
     // runtime_id → first-party render snapshot for termwindow compatibility
     runtime_render_state: Mutex<HashMap<RuntimeId, ChatminalRenderState>>,
     // runtime_id → terminal instances owned by that runtime
@@ -372,26 +316,16 @@ pub(crate) struct DesktopSessionHost {
     runtime_terminal_size: Mutex<HashMap<RuntimeId, TerminalSize>>,
 }
 
-fn host_session_state(state: SessionRuntimeState) -> RuntimeHostSessionState {
-    RuntimeHostSessionState {
-        session_id: state.snapshot.session_id.clone(),
-        runtime_id: state.snapshot.runtime_id,
-        active_terminal_instance_id: state.snapshot.active_terminal_instance_id,
-    }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SessionHostTerminalBinding {
+    pub(crate) session_id: String,
+    pub(crate) runtime_id: RuntimeId,
+    pub(crate) terminal_instance_id: TerminalInstanceId,
+    pub(crate) terminal_handle: SessionTerminalHandle,
 }
 
-fn engine_terminal_size(size: RuntimeTerminalSize) -> TerminalSize {
-    TerminalSize {
-        rows: size.rows,
-        cols: size.cols,
-        pixel_width: size.pixel_width,
-        pixel_height: size.pixel_height,
-        dpi: size.dpi,
-    }
-}
-
-fn host_terminal_binding(pane: &ChatminalSessionPane) -> RuntimeHostTerminalBinding {
-    RuntimeHostTerminalBinding {
+fn host_terminal_binding(pane: &ChatminalSessionPane) -> SessionHostTerminalBinding {
+    SessionHostTerminalBinding {
         session_id: pane.session_id_value().to_string(),
         runtime_id: pane.runtime_id_value(),
         terminal_instance_id: pane.terminal_instance_id_value(),
@@ -401,12 +335,17 @@ fn host_terminal_binding(pane: &ChatminalSessionPane) -> RuntimeHostTerminalBind
 
 impl DesktopSessionHost {
     fn new(shared: Arc<SessionEngineShared>, config: ConfigHandle) -> Self {
+        let workspace = configured_default_workspace_name(&config);
         Self {
             shared,
             config: Mutex::new(config),
+            window: Mutex::new(RuntimeWindow::new(workspace, None)),
+            primary_spawn_target: Mutex::new(None),
+            active_client: Mutex::new(None),
+            workspace_by_client: Mutex::new(HashMap::new()),
+            focused_pane_by_client: Mutex::new(HashMap::new()),
             panes: Mutex::new(HashMap::new()),
             session_pane: Mutex::new(HashMap::new()),
-            session_tab_shim: Mutex::new(HashMap::new()),
             runtime_render_state: Mutex::new(HashMap::new()),
             runtime_terminal_instances: Mutex::new(HashMap::new()),
             runtime_terminal_size: Mutex::new(HashMap::new()),
@@ -417,8 +356,191 @@ impl DesktopSessionHost {
         self.config.lock().unwrap().clone_from(config);
     }
 
+    fn active_client_value(&self) -> Option<FrontendClientHandle> {
+        self.active_client.lock().unwrap().clone()
+    }
+
+    fn workspace_name_value(&self) -> String {
+        self.window.lock().unwrap().get_workspace().to_string()
+    }
+
+    fn set_workspace_name_value(&self, workspace: &str) {
+        self.window.lock().unwrap().set_workspace(workspace);
+        if let Some(client_id) = self.active_client_value() {
+            self.set_workspace_for_client_value(&client_id, workspace);
+        }
+    }
+
+    fn workspace_for_client_value(&self, client_id: &FrontendClientHandle) -> String {
+        self.workspace_by_client
+            .lock()
+            .unwrap()
+            .get(client_id)
+            .cloned()
+            .unwrap_or_else(|| self.workspace_name_value())
+    }
+
+    fn set_workspace_for_client_value(&self, client_id: &FrontendClientHandle, workspace: &str) {
+        self.workspace_by_client
+            .lock()
+            .unwrap()
+            .insert(client_id.clone(), workspace.to_string());
+        publish_runtime_notification_from_any_thread(RuntimeNotification::ActiveWorkspaceChanged(
+            client_id.clone(),
+        ));
+    }
+
+    fn workspace_is_empty_value(&self, workspace: &str) -> bool {
+        self.workspace_name_value() != workspace || self.window.lock().unwrap().is_empty()
+    }
+
+    fn workspace_names_value(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .workspace_by_client
+            .lock()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect();
+        let current = self.workspace_name_value();
+        if !names.iter().any(|name| name == &current) {
+            names.push(current);
+        }
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    fn focused_pane_for_client_value(
+        &self,
+        client_id: &FrontendClientHandle,
+    ) -> Option<HostFocusedPaneBinding> {
+        self.focused_pane_by_client
+            .lock()
+            .unwrap()
+            .get(client_id)
+            .copied()
+    }
+
+    fn runtime_id_for_terminal_handle_value(
+        &self,
+        terminal_handle: SessionTerminalHandle,
+    ) -> Option<RuntimeId> {
+        self.terminal_binding_for_handle_inner(terminal_handle)
+            .map(|binding| binding.runtime_id)
+    }
+
+    fn attach_runtime_to_window(&self, runtime_id: RuntimeId) {
+        let mut window = self.window.lock().unwrap();
+        if window
+            .iter()
+            .any(|existing| existing.runtime_id() == runtime_id)
+        {
+            return;
+        }
+        window.push_runtime(runtime_id);
+        let last_index = window.len().saturating_sub(1);
+        window.save_and_then_set_active(last_index);
+        publish_runtime_notification_from_any_thread(RuntimeNotification::TabAddedToWindow {
+            runtime_id,
+        });
+    }
+
+    fn remove_tab_from_window(&self, runtime_id: RuntimeId) {
+        self.window.lock().unwrap().remove_by_id(runtime_id);
+    }
+
+    fn focus_runtime_in_window(&self, runtime_id: RuntimeId) -> bool {
+        let mut window = self.window.lock().unwrap();
+        let Some(index) = window.iter().position(|tab| tab.runtime_id() == runtime_id) else {
+            return false;
+        };
+        window.save_and_then_set_active(index);
+        true
+    }
+
+    fn active_terminal_handle_value(&self, runtime_id: RuntimeId) -> Option<SessionTerminalHandle> {
+        self.runtime_render_state
+            .lock()
+            .unwrap()
+            .get(&runtime_id)
+            .and_then(|state| {
+                state
+                    .panes
+                    .iter()
+                    .find(|pane| pane.is_active)
+                    .map(|pane| pane.terminal_handle)
+            })
+    }
+
+    fn set_runtime_title_value(&self, runtime_id: RuntimeId, title: &str) {
+        let mut window = self.window.lock().unwrap();
+        if let Some(entry) = window.entry_by_runtime_id_mut(runtime_id) {
+            entry.set_title(title);
+        }
+        if window
+            .get_active()
+            .is_some_and(|entry| entry.runtime_id() == runtime_id)
+        {
+            window.set_title(title);
+        }
+    }
+
     fn engine(&self) -> StatefulSessionEngine {
         StatefulSessionEngine::with_shared(Arc::clone(&self.shared))
+    }
+
+    pub(crate) fn root_runtime_entry_infos(&self) -> Vec<RuntimeEntryInfo> {
+        let window = self.window.lock().unwrap();
+        window
+            .iter()
+            .filter_map(|entry| self.runtime_entry_info_by_runtime_id(entry.runtime_id()))
+            .collect()
+    }
+
+    pub(crate) fn runtime_entry_info_by_session_id(
+        &self,
+        session_id: &str,
+    ) -> Option<RuntimeEntryInfo> {
+        let runtime_id = self.runtime_id_for_session(session_id)?;
+        self.runtime_entry_info_by_runtime_id(runtime_id)
+    }
+
+    pub(crate) fn runtime_entry_info_by_runtime_id(
+        &self,
+        runtime_id: RuntimeId,
+    ) -> Option<RuntimeEntryInfo> {
+        let render_state = self
+            .runtime_render_state
+            .lock()
+            .unwrap()
+            .get(&runtime_id)
+            .cloned()?;
+        Some(RuntimeEntryInfo {
+            runtime_id,
+            title: render_state
+                .panes
+                .first()
+                .and_then(|pane| self.pane_for_terminal_handle(pane.terminal_handle))
+                .map(|pane| pane.get_title())
+                .unwrap_or_default(),
+            session_id: self
+                .shared
+                .core_state()
+                .lock()
+                .ok()?
+                .runtime(runtime_id)
+                .map(|record| record.session_id.clone()),
+            size: render_state.terminal_size,
+            active_terminal_handle: render_state
+                .panes
+                .iter()
+                .find(|pane| pane.is_active)
+                .map(|pane| pane.terminal_handle),
+            active_terminal_instance_id: render_state
+                .active_terminal_instance_id
+                .map(|id| id.as_u64()),
+        })
     }
 
     // -----------------------------------------------------------------
@@ -426,7 +548,7 @@ impl DesktopSessionHost {
     // -----------------------------------------------------------------
 
     /// Ensure a session runtime attachment exists: focus it if it already exists, or
-    /// spawn a new one. Creates/updates the host render-scope wrapper for termwindow.
+    /// spawn a new one. Refreshes desktop-local render state for termwindow.
     ///
     /// Returns the session runtime state (contains layout snapshot), or `None`
     /// on failure.
@@ -594,15 +716,14 @@ impl DesktopSessionHost {
 
         let mut panes = self.panes.lock().unwrap();
         let mut session_pane = self.session_pane.lock().unwrap();
-        let mut session_tab_shim = self.session_tab_shim.lock().unwrap();
         let mut runtime_render_state = self.runtime_render_state.lock().unwrap();
 
         for session_id in stale_session_ids {
             let stale_terminal_instance_id = session_pane
                 .get(&session_id)
                 .map(|pane| pane.terminal_instance_id_value());
-            if let Some(tab_id) = session_tab_shim.remove(&session_id) {
-                host_remove_tab(tab_id);
+            if let Some(runtime_id) = self.runtime_id_for_session(&session_id) {
+                host_remove_tab(runtime_id);
             }
             if let Some(pane) = session_pane.remove(&session_id) {
                 runtime_render_state.remove(&pane.runtime_id_value());
@@ -617,8 +738,8 @@ impl DesktopSessionHost {
     // Internal helpers
     // -----------------------------------------------------------------
 
-    /// Create or update panes for each leaf in the state, then ensure a render tab
-    /// shim exists with the current active pane.
+    /// Create or update panes for each leaf in the state, then sync local window/runtime
+    /// bookkeeping for the current active pane.
     fn sync_render_state_for_runtime(&self, state: &SessionRuntimeState) {
         let Some(layout) = &state.layout else {
             return;
@@ -656,16 +777,6 @@ impl DesktopSessionHost {
                 ) {
                     Ok(pane) => {
                         install_desktop_pane_side_effects(&(pane.clone() as Arc<dyn HostTerminal>));
-                        // Register with the host runtime for render compat,
-                        // routing PTY output through the desktop notification
-                        // hub instead of the default host-runtime notifier.
-                        if let Err(err) = host_add_session_pane_with_output_callback(
-                            &(pane.clone() as Arc<dyn HostTerminal>),
-                        ) {
-                            log::warn!(
-                                "session host: could not register pane {terminal_instance_id}: {err}"
-                            );
-                        }
                         panes_guard.insert(terminal_instance_id, pane);
                     }
                     Err(err) => {
@@ -682,10 +793,9 @@ impl DesktopSessionHost {
             .get(&layout.active_terminal_instance_id)
             .cloned();
 
-        // Defer stale-pane cleanup until after we have attached a live tab shim
-        // to the host window. Otherwise the bootstrap pane can be removed first,
-        // making the mux window empty and causing it to be pruned before the
-        // session-native tab is attached.
+        // Defer stale-pane cleanup until after we have refreshed the local
+        // window/runtime binding. Otherwise bootstrap cleanup can race the
+        // window registry and leave the runtime detached for one frame.
         let live_terminal_instance_ids: HashSet<TerminalInstanceId> = layout
             .leaves
             .iter()
@@ -713,12 +823,8 @@ impl DesktopSessionHost {
                 log::debug!("session host: replacing stale pane mapping for session {session_id}");
             }
             session_pane_guard.insert(session_id.to_string(), active_pane.clone());
-            self.ensure_mux_tab_shim(session_id, &active_pane);
+            self.sync_runtime_window_entry(session_id, runtime_id, &active_pane);
 
-            // Build ChatminalRenderState directly from session_pane — no HostRenderScope needed.
-            // 1 session = 1 pane invariant: panes has exactly one element; splits = [] (splits are
-            // at workspace layout level, not session level).
-            let terminal_handle = host_terminal_handle(active_pane.as_ref());
             let terminal_size = self
                 .runtime_terminal_size
                 .lock()
@@ -726,29 +832,12 @@ impl DesktopSessionHost {
                 .get(&runtime_id)
                 .copied()
                 .unwrap_or_else(|| terminal_size_from_dims(active_pane.get_dimensions()));
-            let render_state = ChatminalRenderState {
-                render_target: SessionRenderTargetSnapshot {
-                    render_target_id: SessionRenderTargetId::new(runtime_id.as_u64()),
-                    runtime_id,
-                    active_terminal_instance_id: Some(layout.active_terminal_instance_id),
-                },
+            let render_state = self.build_render_state(
+                runtime_id,
+                layout,
+                active_pane.as_ref(),
                 terminal_size,
-                active_terminal_instance_id: Some(layout.active_terminal_instance_id),
-                panes: vec![ChatminalRenderPane {
-                    terminal_handle,
-                    terminal_instance_id: layout.active_terminal_instance_id,
-                    index: 0,
-                    is_active: true,
-                    is_zoomed: false,
-                    left: 0,
-                    top: 0,
-                    width: terminal_size.cols as usize,
-                    pixel_width: 0,
-                    height: terminal_size.rows as usize,
-                    pixel_height: 0,
-                }],
-                splits: vec![],
-            };
+            );
             self.runtime_render_state
                 .lock()
                 .unwrap()
@@ -758,9 +847,7 @@ impl DesktopSessionHost {
         if !stale.is_empty() {
             let mut panes_guard = self.panes.lock().unwrap();
             for stale_terminal_instance_id in stale {
-                if let Some(stale_pane) = panes_guard.remove(&stale_terminal_instance_id) {
-                    host_remove_pane(host_terminal_handle(stale_pane.as_ref()));
-                }
+                panes_guard.remove(&stale_terminal_instance_id);
             }
         }
     }
@@ -771,9 +858,10 @@ impl DesktopSessionHost {
         runtime_id: RuntimeId,
         terminal_instance_id: TerminalInstanceId,
     ) -> Option<Arc<ChatminalSessionPane>> {
-        let pane_id = pane_id_for_terminal_instance(terminal_instance_id);
-        let pane = host_get_pane(pane_id)?;
-        let pane = pane.downcast_arc::<ChatminalSessionPane>().ok()?;
+        let pane = {
+            let panes = self.panes.lock().unwrap();
+            panes.get(&terminal_instance_id).cloned()?
+        };
         if pane.runtime_id_value() != runtime_id
             || pane.terminal_instance_id_value() != terminal_instance_id
             || pane.session_id_value() != session_id
@@ -790,81 +878,55 @@ impl DesktopSessionHost {
         Some(pane)
     }
 
-    fn ensure_mux_tab_shim(&self, session_id: &str, active_pane: &Arc<ChatminalSessionPane>) {
+    fn build_render_state(
+        &self,
+        runtime_id: RuntimeId,
+        layout: &chatminal_runtime::execution::SessionLayoutSnapshot,
+        active_pane: &ChatminalSessionPane,
+        terminal_size: TerminalSize,
+    ) -> ChatminalRenderState {
+        let render_target = SessionRenderTargetSnapshot {
+            render_target_id: SessionRenderTargetId::new(runtime_id.as_u64()),
+            runtime_id,
+            active_terminal_instance_id: Some(layout.active_terminal_instance_id),
+        };
+
+        ChatminalRenderState {
+            render_target,
+            terminal_size,
+            active_terminal_instance_id: Some(layout.active_terminal_instance_id),
+            panes: vec![ChatminalRenderPane {
+                terminal_handle: host_terminal_handle(active_pane),
+                terminal_instance_id: layout.active_terminal_instance_id,
+                index: 0,
+                is_active: true,
+                is_zoomed: false,
+                left: 0,
+                top: 0,
+                width: terminal_size.cols as usize,
+                pixel_width: 0,
+                height: terminal_size.rows as usize,
+                pixel_height: 0,
+            }],
+            splits: vec![],
+        }
+    }
+
+    fn sync_runtime_window_entry(
+        &self,
+        session_id: &str,
+        runtime_id: RuntimeId,
+        active_pane: &Arc<ChatminalSessionPane>,
+    ) {
         if !host_window_exists() {
             log::debug!(
-                "session host: deferring tab shim attach for session {session_id}; root window not ready yet",
+                "session host: deferring runtime window sync for session {session_id}; root window not ready yet",
             );
             return;
         }
 
-        let active_terminal_handle = host_terminal_handle(active_pane.as_ref());
         let title = active_pane.get_title();
-
-        // Desktop-local lookup: use session_tab_shim instead of Mux global index.
-        let existing_tab_id = self
-            .session_tab_shim
-            .lock()
-            .unwrap()
-            .get(session_id)
-            .copied();
-        let runtime_id = match existing_tab_id {
-            Some(runtime_id)
-                if host_active_terminal_handle(runtime_id) == Some(active_terminal_handle) =>
-            {
-                runtime_id
-            }
-            Some(runtime_id) => {
-                let replacement = Arc::new(HostRenderScope::new(&engine_terminal_size_default()));
-                replacement.assign_pane(&(active_pane.clone() as Arc<dyn HostTerminal>));
-                replacement.set_title(&title);
-                if let Err(err) = host_add_tab_and_active_pane(&replacement) {
-                    log::warn!(
-                        "session host: failed to register replacement tab shim for session {session_id}: {err}"
-                    );
-                    return;
-                }
-                if let Err(err) = host_attach_tab(&replacement) {
-                    log::warn!(
-                        "session host: failed to attach replacement tab shim for session {session_id} to root window: {err}"
-                    );
-                    host_remove_tab(replacement.runtime_id());
-                    return;
-                }
-                let replacement_tab_id = replacement.runtime_id();
-                host_remove_tab(runtime_id);
-                self.session_tab_shim
-                    .lock()
-                    .unwrap()
-                    .insert(session_id.to_string(), replacement_tab_id);
-                replacement_tab_id
-            }
-            None => {
-                let tab = Arc::new(HostRenderScope::new(&engine_terminal_size_default()));
-                tab.assign_pane(&(active_pane.clone() as Arc<dyn HostTerminal>));
-                tab.set_title(&title);
-                if let Err(err) = host_add_tab_and_active_pane(&tab) {
-                    log::warn!(
-                        "session host: failed to register tab shim for session {session_id}: {err}"
-                    );
-                    return;
-                }
-                if let Err(err) = host_attach_tab(&tab) {
-                    log::warn!(
-                        "session host: failed to attach tab shim for session {session_id} to root window: {err}"
-                    );
-                    host_remove_tab(tab.runtime_id());
-                    return;
-                }
-                let new_tab_id = tab.runtime_id();
-                self.session_tab_shim
-                    .lock()
-                    .unwrap()
-                    .insert(session_id.to_string(), new_tab_id);
-                new_tab_id
-            }
-        };
-
+        self.attach_runtime_to_window(runtime_id);
         host_set_tab_title(runtime_id, &title);
         let _ = host_focus_root_window_tab(runtime_id);
     }
@@ -890,11 +952,9 @@ impl DesktopSessionHost {
         let mut panes = self.panes.lock().unwrap();
         for terminal_instance_id in stale_terminal_instance_ids {
             if let Some(pane) = panes.remove(&terminal_instance_id) {
-                // Also remove from session_pane and session_tab_shim indexes
+                // Also remove from session_pane index
                 let session_id = pane.session_id_value().to_string();
                 self.session_pane.lock().unwrap().remove(&session_id);
-                self.session_tab_shim.lock().unwrap().remove(&session_id);
-                host_remove_pane(host_terminal_handle(pane.as_ref()));
             }
         }
     }
@@ -907,7 +967,7 @@ impl DesktopSessionHost {
     fn terminal_binding_for_handle_inner(
         &self,
         terminal_handle: SessionTerminalHandle,
-    ) -> Option<RuntimeHostTerminalBinding> {
+    ) -> Option<SessionHostTerminalBinding> {
         let public_id = terminal_handle.as_u64();
         let pane = self.find_registered_pane(|pane| {
             pane.pane_id_value().as_u64() == public_id
@@ -947,7 +1007,7 @@ impl DesktopSessionHost {
     pub(crate) fn terminal_binding_for_public_id(
         &self,
         public_id: u64,
-    ) -> Option<RuntimeHostTerminalBinding> {
+    ) -> Option<SessionHostTerminalBinding> {
         self.find_registered_pane(|pane| {
             pane.pane_id_value().as_u64() == public_id
                 || pane.terminal_instance_id_value().as_u64() == public_id
@@ -1006,22 +1066,38 @@ impl DesktopSessionHost {
         }
 
         if removed_session_mapping {
-            if let Some(tab_id) = self.session_tab_shim.lock().unwrap().remove(&session_id) {
-                host_remove_tab(tab_id);
-                return true;
-            }
+            host_remove_tab(runtime_id);
+            return true;
         }
 
-        host_remove_pane(terminal_handle);
         true
     }
 
     pub(crate) fn host_workspace_name(&self) -> String {
-        host_workspace_name_value()
+        self.workspace_name_value()
     }
 
     pub(crate) fn active_frontend_client(&self) -> Option<FrontendClientHandle> {
-        host_active_identity()
+        self.active_client_value()
+    }
+
+    pub(crate) fn root_active_runtime_id(&self) -> Option<RuntimeId> {
+        self.with_window(|window| window.get_active().map(|entry| entry.runtime_id()))
+            .flatten()
+    }
+
+    pub(crate) fn runtime_available(&self) -> bool {
+        true // session host only exists when runtime is initialized
+    }
+
+    pub(crate) fn iter_all_panes(&self) -> Vec<Arc<dyn HostTerminal>> {
+        self.panes
+            .lock()
+            .unwrap()
+            .values()
+            .cloned()
+            .map(|pane| pane as Arc<dyn HostTerminal>)
+            .collect()
     }
 
     pub(crate) fn subscribe_notifications<F>(&self, subscriber: F)
@@ -1032,13 +1108,7 @@ impl DesktopSessionHost {
     }
 
     pub(crate) fn active_workspace_for_client(&self, client_id: &FrontendClientHandle) -> String {
-        let workspace = host_workspace_for_client(client_id);
-        if !workspace.is_empty() {
-            return workspace;
-        }
-        host_runtime::root_window_workspace_name()
-            .or_else(host_runtime::active_workspace_name)
-            .unwrap_or_default()
+        self.workspace_for_client_value(client_id)
     }
 
     pub(crate) fn set_active_workspace_for_client(
@@ -1046,132 +1116,347 @@ impl DesktopSessionHost {
         client_id: &FrontendClientHandle,
         workspace: &str,
     ) {
-        host_set_workspace_for_client(client_id, workspace);
+        if self.active_client_value().as_ref() == Some(client_id) {
+            self.set_workspace_name_value(workspace);
+            return;
+        }
+        self.set_workspace_for_client_value(client_id, workspace);
     }
 
     pub(crate) fn workspace_is_empty(&self, workspace: &str) -> bool {
-        host_workspace_is_empty_value(workspace)
+        self.workspace_is_empty_value(workspace)
     }
 
     pub(crate) fn workspace_names(&self) -> Vec<String> {
-        host_workspace_names_value()
+        self.workspace_names_value()
+    }
+
+    pub(crate) fn root_window_workspace_name(&self) -> Option<String> {
+        Some(self.workspace_name_value())
+    }
+
+    pub(crate) fn set_root_window_workspace_name(&self, workspace: &str) -> bool {
+        self.set_workspace_name_value(workspace);
+        true
+    }
+
+    pub(crate) fn set_active_workspace_name(&self, workspace: &str) -> bool {
+        self.set_workspace_name_value(workspace);
+        true
+    }
+
+    pub(crate) fn rename_workspace(&self, old_workspace: &str, new_workspace: &str) -> bool {
+        let mut changed = false;
+        if self.workspace_name_value() == old_workspace {
+            self.set_workspace_name_value(new_workspace);
+            changed = true;
+        }
+        {
+            let mut workspace_by_client = self.workspace_by_client.lock().unwrap();
+            for workspace in workspace_by_client.values_mut() {
+                if workspace == old_workspace {
+                    *workspace = new_workspace.to_string();
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            publish_runtime_notification_from_any_thread(RuntimeNotification::WorkspaceRenamed {
+                old_workspace: old_workspace.to_string(),
+                new_workspace: new_workspace.to_string(),
+            });
+        }
+        changed
+    }
+
+    pub(crate) fn root_window_title(&self) -> Option<String> {
+        Some(self.window.lock().unwrap().get_title().to_string())
+    }
+
+    pub(crate) fn set_root_window_title(&self, title: &str) -> bool {
+        self.window.lock().unwrap().set_title(title);
+        true
+    }
+
+    pub(crate) fn root_window_spawn_context(
+        &self,
+    ) -> (TerminalSize, Option<SessionTerminalHandle>) {
+        let runtime_id = self.root_active_runtime_id();
+        let size = runtime_id
+            .and_then(|runtime_id| {
+                self.runtime_entry_info_by_runtime_id(runtime_id)
+                    .map(|info| info.size)
+            })
+            .unwrap_or_else(engine_terminal_size_default);
+        let sibling =
+            runtime_id.and_then(|runtime_id| self.active_terminal_handle_value(runtime_id));
+        (size, sibling)
+    }
+
+    pub(crate) fn set_runtime_entry_title_by_session_id(
+        &self,
+        session_id: &str,
+        title: &str,
+    ) -> bool {
+        let Some(runtime_id) = self.runtime_id_for_session(session_id) else {
+            return false;
+        };
+        self.set_runtime_title_value(runtime_id, title);
+        true
+    }
+
+    pub(crate) fn runtime_entry_exists_for_session(&self, session_id: &str) -> bool {
+        self.runtime_id_for_session(session_id).is_some()
+    }
+
+    pub(crate) fn runtime_entry_terminal_handles_by_session_id(
+        &self,
+        session_id: &str,
+    ) -> Vec<SessionTerminalHandle> {
+        let Some(runtime_id) = self.runtime_id_for_session(session_id) else {
+            return Vec::new();
+        };
+        self.runtime_entry_terminal_infos(runtime_id)
+            .into_iter()
+            .map(|info| info.terminal_handle)
+            .collect()
+    }
+
+    pub(crate) fn runtime_entry_terminal_handle_in_direction_by_session_id(
+        &self,
+        session_id: &str,
+        direction: SessionDirection,
+    ) -> Option<SessionTerminalHandle> {
+        let infos = self.runtime_entry_terminal_infos_by_session_id(session_id);
+        runtime_entry_terminal_handle_in_direction(&infos, direction)
+    }
+
+    pub(crate) fn set_runtime_entry_zoomed_by_session_id(
+        &self,
+        session_id: &str,
+        zoomed: bool,
+    ) -> Option<bool> {
+        let runtime_id = self.runtime_id_for_session(session_id)?;
+        self.set_runtime_entry_zoomed(runtime_id, zoomed)
+    }
+
+    pub(crate) fn runtime_entry_terminal_infos_by_session_id(
+        &self,
+        session_id: &str,
+    ) -> Vec<RuntimeEntryTerminalInfo> {
+        let Some(runtime_id) = self.runtime_id_for_session(session_id) else {
+            return Vec::new();
+        };
+        self.runtime_entry_terminal_infos(runtime_id)
+    }
+
+    pub(crate) fn rotate_runtime_entry_counter_clockwise_by_session_id(
+        &self,
+        session_id: &str,
+    ) -> bool {
+        let Some(runtime_id) = self.runtime_id_for_session(session_id) else {
+            return false;
+        };
+        self.rotate_runtime_entry_counter_clockwise(runtime_id)
+    }
+
+    pub(crate) fn rotate_runtime_entry_clockwise_by_session_id(&self, session_id: &str) -> bool {
+        let Some(runtime_id) = self.runtime_id_for_session(session_id) else {
+            return false;
+        };
+        self.rotate_runtime_entry_clockwise(runtime_id)
+    }
+
+    pub(crate) fn resolve_runtime_id_for_terminal_handle(
+        &self,
+        terminal_handle: SessionTerminalHandle,
+    ) -> Option<RuntimeId> {
+        self.runtime_id_for_terminal_handle_value(terminal_handle)
+    }
+
+    pub(crate) fn focus_root_runtime_entry(&self, runtime_id: RuntimeId) -> bool {
+        host_focus_root_window_tab(runtime_id)
+    }
+
+    pub(crate) fn set_runtime_entry_active_terminal(
+        &self,
+        runtime_id: RuntimeId,
+        terminal_handle: SessionTerminalHandle,
+    ) -> bool {
+        if let Some(binding) = self.terminal_binding_for_handle_inner(terminal_handle) {
+            if binding.runtime_id == runtime_id {
+                let _ = self.focus_root_runtime_entry(runtime_id);
+                if self
+                    .focus_terminal_instance(
+                        &binding.session_id,
+                        runtime_id,
+                        binding.terminal_instance_id,
+                    )
+                    .is_some()
+                {
+                    self.record_focus_for_current_identity(terminal_handle);
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub(crate) fn runtime_entry_terminal_infos(
+        &self,
+        runtime_id: RuntimeId,
+    ) -> Vec<RuntimeEntryTerminalInfo> {
+        let session_id = self.shared.core_state().lock().ok().and_then(|state| {
+            state
+                .runtime(runtime_id)
+                .map(|record| record.session_id.clone())
+        });
+        self.runtime_render_state
+            .lock()
+            .unwrap()
+            .get(&runtime_id)
+            .map(|render_state| {
+                render_state
+                    .panes
+                    .iter()
+                    .map(|pane| RuntimeEntryTerminalInfo {
+                        index: pane.index,
+                        is_active: pane.is_active,
+                        is_zoomed: pane.is_zoomed,
+                        left: pane.left,
+                        top: pane.top,
+                        width: pane.width,
+                        pixel_width: pane.pixel_width,
+                        height: pane.height,
+                        pixel_height: pane.pixel_height,
+                        terminal_handle: pane.terminal_handle,
+                        session_id: session_id.clone(),
+                        terminal_instance_id: Some(pane.terminal_instance_id.as_u64()),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn resize_runtime_entry(&self, _runtime_id: RuntimeId, _size: TerminalSize) -> bool {
+        false // session-native splits removed; multi-pane resize is a no-op
+    }
+
+    pub(crate) fn resize_runtime_entry_split(
+        &self,
+        _runtime_id: RuntimeId,
+        _split_index: usize,
+        _delta: isize,
+    ) -> Option<chatminal_runtime::RuntimeEntrySplitInfo> {
+        None // session-native splits removed
+    }
+
+    pub(crate) fn set_runtime_entry_zoomed(
+        &self,
+        _runtime_id: RuntimeId,
+        _zoomed: bool,
+    ) -> Option<bool> {
+        None // session-native splits removed
+    }
+
+    pub(crate) fn rotate_runtime_entry_clockwise(&self, _runtime_id: RuntimeId) -> bool {
+        false // session-native splits removed
+    }
+
+    pub(crate) fn rotate_runtime_entry_counter_clockwise(&self, _runtime_id: RuntimeId) -> bool {
+        false // session-native splits removed
     }
 
     pub(crate) fn with_window<R, F>(&self, func: F) -> Option<R>
     where
         F: FnOnce(&RuntimeWindow) -> R,
     {
-        Some(with_host_window_ref(func))
-    }
-
-    pub(crate) fn with_window_mut<R, F>(&self, func: F) -> Option<R>
-    where
-        F: FnOnce(&mut RuntimeWindow) -> R,
-    {
-        Some(with_host_window_mut_ref(func))
+        let window = self.window.lock().unwrap();
+        Some(func(&window))
     }
 
     pub(crate) fn window_exists(&self) -> bool {
-        host_is_runtime_available()
+        true
     }
 
     pub(crate) fn workspace_has_windows(&self, name: &str) -> bool {
-        host_root_window_workspace_name_value()
-            .as_deref()
-            .map(|workspace| workspace == name)
-            .unwrap_or(false)
-    }
-
-    pub(crate) fn resize_window_tabs(&self, size: TerminalSize) {
-        host_resize_all_tabs(size);
+        self.workspace_name_value() == name && !self.window.lock().unwrap().is_empty()
     }
 
     pub(crate) fn has_panes_in_workspace(&self, workspace: Option<&str>) -> bool {
-        if host_iter_panes().is_empty() {
+        if self.panes.lock().unwrap().is_empty() {
             return false;
         }
         let Some(workspace) = workspace else {
             return true;
         };
-        self.workspace_has_windows(workspace) && host_root_has_runtime_entries_with_panes()
+        self.workspace_has_windows(workspace)
     }
 
-    pub(crate) fn active_render_scope_id(&self) -> Option<u64> {
-        host_root_active_tab_id().map(|runtime_id| runtime_id.as_u64())
+    pub(crate) fn window_contains_runtime(&self, runtime_id: RuntimeId) -> bool {
+        self.window
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|entry| entry.runtime_id() == runtime_id)
     }
 
     pub(crate) fn host_window_contains_render_scope(&self, render_scope_id: u64) -> bool {
-        host_has_tab(RuntimeId::new(render_scope_id))
+        self.window_contains_runtime(RuntimeId::new(render_scope_id))
     }
 
     pub(crate) fn remove_terminal_handle(&self, terminal_handle: SessionTerminalHandle) {
-        if self.remove_registered_pane(terminal_handle) {
-            return;
-        }
-        host_remove_pane(terminal_handle);
+        self.remove_registered_pane(terminal_handle);
     }
 
     pub(crate) fn remove_runtime_entry_scope(&self, render_scope_id: u64) {
-        host_remove_tab(RuntimeId::new(render_scope_id));
+        let runtime_id = RuntimeId::new(render_scope_id);
+        self.remove_tab_from_window(runtime_id);
     }
 
     pub(crate) fn record_focus_for_current_identity(&self, terminal_handle: SessionTerminalHandle) {
-        host_record_focus(terminal_handle);
+        if let Some(client_id) = self.active_client_value() {
+            if let Some(runtime_id) = self.resolve_runtime_id_for_terminal_handle(terminal_handle) {
+                self.focused_pane_by_client.lock().unwrap().insert(
+                    client_id,
+                    HostFocusedPaneBinding::new(runtime_id, terminal_handle),
+                );
+            }
+        }
     }
 
     pub(crate) fn record_input_for_current_identity(&self) {
-        let _ = host_runtime::record_input_for_current_identity();
+        let _ = self.active_client_value();
     }
 
     pub(crate) fn host_window_initial_position(&self) -> Option<config::GuiPosition> {
-        if !self.window_exists() {
-            return None;
-        }
         self.with_window(|window| window.get_initial_position().clone())
             .flatten()
     }
 
-    pub(crate) fn active_runtime_entry_size(&self) -> Option<TerminalSize> {
-        if !self.window_exists() {
-            return None;
-        }
-        self.with_window(|window| {
-            window
-                .get_by_idx(window.get_active_idx())
-                .cloned()
-                .map(|tab| tab.get_size())
-        })
-        .flatten()
-    }
-
     pub(crate) fn resolved_window_title(&self) -> Option<String> {
-        if !self.window_exists() {
-            return None;
-        }
-        self.with_window(|window| window.get_title().to_string())
+        self.root_window_title()
     }
 
     pub(crate) fn launcher_sessions(&self) -> Vec<LauncherSessionEntry> {
-        if !self.window_exists() {
-            return Vec::new();
-        }
         self.with_window(|window| {
             window
                 .iter()
                 .enumerate()
-                .map(|(tab_idx, tab)| {
-                    let tab_title = tab.get_title();
-                    let title = if tab_title.is_empty() {
-                        tab.get_active_pane()
-                            .expect("tab to have a pane")
-                            .get_title()
+                .map(|(tab_idx, entry)| {
+                    let title = if entry.title().is_empty() {
+                        self.runtime_entry_info_by_runtime_id(entry.runtime_id())
+                            .map(|info| info.title)
+                            .unwrap_or_default()
                     } else {
-                        tab_title
+                        entry.title().to_string()
                     };
                     LauncherSessionEntry {
                         title,
                         tab_idx,
-                        pane_count: tab.count_panes(),
+                        pane_count: self
+                            .render_state_for_runtime(entry.runtime_id())
+                            .map(|state| state.panes.len()),
                     }
                 })
                 .collect()
@@ -1179,11 +1464,52 @@ impl DesktopSessionHost {
         .unwrap_or_default()
     }
 
+    pub(crate) fn overlay_pane_layouts_by_id(
+        &self,
+        render_scope_id: u64,
+    ) -> Vec<overlay_shell::OverlayPaneLayout> {
+        self.runtime_entry_terminal_infos(RuntimeId::new(render_scope_id))
+            .into_iter()
+            .filter_map(|layout| {
+                Some(overlay_shell::OverlayPaneLayout {
+                    index: layout.index,
+                    is_active: layout.is_active,
+                    is_zoomed: layout.is_zoomed,
+                    left: layout.left,
+                    top: layout.top,
+                    width: layout.width,
+                    pixel_width: layout.pixel_width,
+                    height: layout.height,
+                    pixel_height: layout.pixel_height,
+                    pane: self.pane_for_terminal_handle(layout.terminal_handle)?,
+                })
+            })
+            .collect()
+    }
+
+    pub(crate) fn resize_render_scope(&self, render_scope_id: u64, size: TerminalSize) -> bool {
+        self.resize_runtime_entry(RuntimeId::new(render_scope_id), size)
+    }
+
+    pub(crate) fn resize_render_scope_split(
+        &self,
+        render_scope_id: u64,
+        split_index: usize,
+        delta: isize,
+    ) -> Option<overlay_shell::OverlaySplitLayout> {
+        self.resize_runtime_entry_split(RuntimeId::new(render_scope_id), split_index, delta)
+            .map(|split| overlay_shell::OverlaySplitLayout {
+                index: split.index,
+                direction: split.direction,
+                left: split.left,
+                top: split.top,
+                size: split.size,
+            })
+    }
+
     pub(crate) fn activate_runtime_entry(&self, render_scope_id: u64) -> anyhow::Result<()> {
         let runtime_id = RuntimeId::new(render_scope_id);
-        host_tab_id(runtime_id)
-            .ok_or_else(|| anyhow::anyhow!("invalid runtime entry id {render_scope_id}"))?;
-        host_focus_root_window_tab(runtime_id)
+        self.focus_root_runtime_entry(runtime_id)
             .then_some(())
             .ok_or_else(|| {
                 anyhow::anyhow!(
@@ -1200,8 +1526,6 @@ impl DesktopSessionHost {
     ) -> Option<Arc<dyn HostTerminal>> {
         self.pane_for_public_id(host_terminal_handle)
             .or_else(|| self.pane_for_public_id(terminal_instance_id))
-            .or_else(|| host_runtime::terminal_by_public_id(host_terminal_handle))
-            .or_else(|| host_runtime::terminal_by_public_id(terminal_instance_id))
     }
 
     pub(crate) fn frontend_resolve_pane_fallback(
@@ -1222,10 +1546,17 @@ impl DesktopSessionHost {
         &self,
         client_id: &FrontendClientHandle,
     ) -> Option<FrontendFocusedPane> {
-        let resolved =
-            host_resolve_focused_pane_value(client_id).map(|binding| FrontendFocusedPane {
+        let resolved = self
+            .focused_pane_for_client_value(client_id)
+            .map(|binding| FrontendFocusedPane {
                 runtime_id: binding.runtime_id(),
                 terminal_handle: binding.terminal_handle(),
+            })
+            .or_else(|| {
+                host_resolve_focused_pane_value(client_id).map(|binding| FrontendFocusedPane {
+                    runtime_id: binding.runtime_id(),
+                    terminal_handle: binding.terminal_handle(),
+                })
             })?;
         if let Some(binding) =
             self.terminal_binding_for_public_id(resolved.terminal_handle.as_u64())
@@ -1239,36 +1570,40 @@ impl DesktopSessionHost {
     }
 
     pub(crate) async fn spawn_local_shell_runner(&self) -> anyhow::Result<Arc<dyn HostTerminal>> {
-        let (_runtime_entry, pane) =
-            host_spawn_tab(None, None, TerminalSize::default(), None).await?;
-        Ok(pane)
+        self.primary_spawn_target()
+            .spawn(TerminalSize::default(), None, None)
+            .await
+            .map(|spawned| spawned.pane)
     }
 
-    pub(crate) async fn spawn_host_runtime_entry(
+    pub(crate) async fn spawn_desktop_terminal(
         &self,
         command: Option<CommandBuilder>,
         command_dir: Option<String>,
         size: TerminalSize,
-        current_pane_id: Option<u64>,
+        _current_terminal_handle: Option<SessionTerminalHandle>,
         workspace: String,
     ) -> anyhow::Result<Arc<dyn HostTerminal>> {
         host_set_workspace_name(&workspace);
-        let (_runtime_entry, pane) = host_spawn_tab(
-            command,
-            command_dir,
-            size,
-            current_pane_id.map(SessionTerminalHandle::new),
-        )
-        .await?;
-        Ok(pane)
+        self.primary_spawn_target()
+            .spawn(size, command, command_dir)
+            .await
+            .map(|spawned| spawned.pane)
     }
 
     pub(crate) fn set_primary_spawn_target(&self, spawn_target: &HostSpawnTargetHandle) {
-        host_set_primary_spawn_target_value(spawn_target);
+        self.primary_spawn_target
+            .lock()
+            .unwrap()
+            .replace(spawn_target.clone());
     }
 
     pub(crate) fn primary_spawn_target(&self) -> HostSpawnTargetHandle {
-        host_primary_spawn_target_value()
+        self.primary_spawn_target
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("desktop primary spawn target")
     }
 
     pub(crate) fn build_initial_host_runtime(
@@ -1288,7 +1623,9 @@ impl DesktopSessionHost {
         &self,
         serial_target: config::SerialTarget,
     ) -> anyhow::Result<HostSpawnTargetHandle> {
-        Ok(Arc::new(DesktopSpawnTarget::new_serial(serial_target)?))
+        Ok(HostSpawnTargetHandle::new(Arc::new(
+            DesktopSpawnTarget::new_serial(serial_target)?,
+        )))
     }
 }
 
@@ -1298,8 +1635,8 @@ impl std::fmt::Debug for DesktopSessionHost {
     }
 }
 
-impl RuntimeHost for DesktopSessionHost {
-    fn runtime_id_for_session(&self, session_id: &str) -> Option<RuntimeId> {
+impl DesktopSessionHost {
+    pub(crate) fn runtime_id_for_session(&self, session_id: &str) -> Option<RuntimeId> {
         self.shared
             .core_state()
             .lock()
@@ -1307,78 +1644,34 @@ impl RuntimeHost for DesktopSessionHost {
             .runtime_id_for_session(session_id)
     }
 
-    fn ensure_session_runtime(
+    pub(crate) fn ensure_session_runtime(
         &self,
         launch: &RuntimeSessionLaunchSpec,
         generation: u64,
-        size: RuntimeTerminalSize,
-    ) -> Option<RuntimeHostSessionState> {
+        size: TerminalSize,
+    ) -> Option<SessionRuntimeState> {
         let mut command = CommandBuilder::new(&launch.shell);
         command.cwd(&launch.cwd);
-        DesktopSessionHost::ensure_runtime(
-            self,
-            &launch.session_id,
-            generation,
-            command,
-            engine_terminal_size(size),
-        )
-        .map(host_session_state)
+        self.ensure_runtime(&launch.session_id, generation, command, size)
     }
 
-    fn focus_session_runtime(
-        &self,
-        session_id: &str,
-        runtime_id: RuntimeId,
-    ) -> Option<RuntimeHostSessionState> {
-        DesktopSessionHost::focus_runtime(self, session_id, runtime_id).map(host_session_state)
-    }
-
-    fn hydrate_session_runtime(&self, runtime_id: RuntimeId) -> Option<RuntimeHostSessionState> {
-        DesktopSessionHost::hydrate_runtime(self, runtime_id).map(host_session_state)
-    }
-
-    fn remember_runtime_terminal_size(&self, runtime_id: RuntimeId, size: RuntimeTerminalSize) {
-        DesktopSessionHost::remember_runtime_terminal_size(
-            self,
-            runtime_id,
-            engine_terminal_size(size),
-        );
-    }
-
-    fn terminal_binding_for_handle(
+    pub(crate) fn terminal_binding_for_handle(
         &self,
         terminal_handle: SessionTerminalHandle,
-    ) -> Option<RuntimeHostTerminalBinding> {
+    ) -> Option<SessionHostTerminalBinding> {
         self.terminal_binding_for_handle_inner(terminal_handle)
     }
 
-    fn focus_terminal_instance(
+    pub(crate) fn focus_terminal_handle(
         &self,
-        session_id: &str,
-        runtime_id: RuntimeId,
-        terminal_instance_id: TerminalInstanceId,
-    ) -> Option<RuntimeHostSessionState> {
-        DesktopSessionHost::focus_terminal_instance(
-            self,
-            session_id,
-            runtime_id,
-            terminal_instance_id,
+        terminal_handle: SessionTerminalHandle,
+    ) -> Option<SessionRuntimeState> {
+        let binding = self.terminal_binding_for_handle_inner(terminal_handle)?;
+        self.focus_terminal_instance(
+            &binding.session_id,
+            binding.runtime_id,
+            binding.terminal_instance_id,
         )
-        .map(host_session_state)
-    }
-
-    fn resize_session_runtime(
-        &self,
-        session_id: &str,
-        runtime_id: RuntimeId,
-        size: RuntimeTerminalSize,
-    ) -> Option<RuntimeHostSessionState> {
-        DesktopSessionHost::resize_runtime(self, session_id, runtime_id, engine_terminal_size(size))
-            .map(host_session_state)
-    }
-
-    fn close_session_runtime(&self, session_id: &str, runtime_id: RuntimeId) {
-        DesktopSessionHost::close_runtime(self, session_id, runtime_id);
     }
 }
 
@@ -1409,9 +1702,9 @@ mod tests {
 
     use super::super::acquire_host_runtime_test_lock;
     use super::{
-        build_host_runtime_for_test, test_active_frontend_client,
-        test_active_workspace_for_client, shutdown_host_runtime_for_test,
-        ChatminalSessionPane, DesktopSessionHost,
+        ChatminalSessionPane, DesktopSessionHost, RenderableDimensions,
+        build_host_runtime_for_test, shutdown_host_runtime_for_test, test_active_frontend_client,
+        test_active_workspace_for_client,
     };
     use crate::chatminal_render::ChatminalRenderState;
     use crate::chatminal_runtime::{
@@ -1420,7 +1713,9 @@ mod tests {
     use crate::desktop_host_runtime::session_engine::{
         RuntimeId, SessionCoreState, SessionEngineShared, TerminalInstanceId,
     };
+    use chatminal_runtime::RuntimeEntryTerminalInfo;
     use config::ConfigHandle;
+    use config::keyassignment::SessionDirection;
     use engine_term::TerminalSize;
 
     fn host_with_registered_session_pane(
@@ -1473,9 +1768,10 @@ mod tests {
         let (host, pane) =
             host_with_registered_session_pane("session-a", runtime_id, terminal_instance_id);
         assert_eq!(pane.pane_id_value().as_u64(), terminal_instance_id.as_u64());
-        assert!(host
-            .pane_for_terminal_handle(pane.pane_id_value())
-            .is_some());
+        assert!(
+            host.pane_for_terminal_handle(pane.pane_id_value())
+                .is_some()
+        );
 
         let from_handle = host
             .terminal_binding_for_public_id(pane.pane_id_value().as_u64())
@@ -1500,9 +1796,10 @@ mod tests {
         let terminal_instance_id = TerminalInstanceId::new(52);
         let (host, pane) =
             host_with_registered_session_pane("session-b", runtime_id, terminal_instance_id);
-        assert!(host
-            .pane_for_public_id(pane.pane_id_value().as_u64())
-            .is_some());
+        assert!(
+            host.pane_for_public_id(pane.pane_id_value().as_u64())
+                .is_some()
+        );
 
         let resolved_from_handle = host
             .frontend_resolve_pane_fallback(pane.pane_id_value())
@@ -1531,18 +1828,111 @@ mod tests {
         host.remove_terminal_handle(pane.pane_id_value());
 
         assert!(host.pane_for_session("session-c").is_none());
-        assert!(host
-            .pane_for_terminal_handle(pane.pane_id_value())
-            .is_none());
-        assert!(host
-            .pane_for_public_id(terminal_instance_id.as_u64())
-            .is_none());
-        assert!(host
-            .runtime_terminal_instances
-            .lock()
-            .unwrap()
-            .get(&runtime_id)
-            .is_none());
+        assert!(
+            host.pane_for_terminal_handle(pane.pane_id_value())
+                .is_none()
+        );
+        assert!(
+            host.pane_for_public_id(terminal_instance_id.as_u64())
+                .is_none()
+        );
+        assert!(
+            host.runtime_terminal_instances
+                .lock()
+                .unwrap()
+                .get(&runtime_id)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn runtime_entry_terminal_handle_in_direction_prefers_adjacent_local_layout() {
+        let left = SessionTerminalHandle::new(71);
+        let right = SessionTerminalHandle::new(72);
+        let infos = vec![
+            RuntimeEntryTerminalInfo {
+                index: 0,
+                is_active: true,
+                is_zoomed: false,
+                left: 0,
+                top: 0,
+                width: 40,
+                pixel_width: 400,
+                height: 24,
+                pixel_height: 240,
+                terminal_handle: left,
+                session_id: Some("session-d".to_string()),
+                terminal_instance_id: Some(71),
+            },
+            RuntimeEntryTerminalInfo {
+                index: 1,
+                is_active: false,
+                is_zoomed: false,
+                left: 41,
+                top: 0,
+                width: 40,
+                pixel_width: 400,
+                height: 24,
+                pixel_height: 240,
+                terminal_handle: right,
+                session_id: Some("session-d".to_string()),
+                terminal_instance_id: Some(72),
+            },
+        ];
+
+        assert_eq!(
+            super::runtime_entry_terminal_handle_in_direction(&infos, SessionDirection::Right),
+            Some(right)
+        );
+        assert_eq!(
+            super::runtime_entry_terminal_handle_in_direction(&infos, SessionDirection::Left),
+            None
+        );
+    }
+
+    #[test]
+    fn runtime_entry_terminal_handle_in_direction_cycles_next_prev_locally() {
+        let first = SessionTerminalHandle::new(81);
+        let second = SessionTerminalHandle::new(82);
+        let infos = vec![
+            RuntimeEntryTerminalInfo {
+                index: 0,
+                is_active: true,
+                is_zoomed: false,
+                left: 0,
+                top: 0,
+                width: 40,
+                pixel_width: 400,
+                height: 24,
+                pixel_height: 240,
+                terminal_handle: first,
+                session_id: Some("session-e".to_string()),
+                terminal_instance_id: Some(81),
+            },
+            RuntimeEntryTerminalInfo {
+                index: 1,
+                is_active: false,
+                is_zoomed: false,
+                left: 41,
+                top: 0,
+                width: 40,
+                pixel_width: 400,
+                height: 24,
+                pixel_height: 240,
+                terminal_handle: second,
+                session_id: Some("session-e".to_string()),
+                terminal_instance_id: Some(82),
+            },
+        ];
+
+        assert_eq!(
+            super::runtime_entry_terminal_handle_in_direction(&infos, SessionDirection::Next),
+            Some(second)
+        );
+        assert_eq!(
+            super::runtime_entry_terminal_handle_in_direction(&infos, SessionDirection::Prev),
+            Some(second)
+        );
     }
 
     #[test]
@@ -1575,7 +1965,7 @@ mod tests {
 
     #[test]
     fn pane_dims_need_resize_uses_live_dimensions_not_desired_size_cache() {
-        let live_dims = host_runtime::renderable::RenderableDimensions {
+        let live_dims = RenderableDimensions {
             cols: 80,
             viewport_rows: 24,
             scrollback_rows: 24,
@@ -1596,7 +1986,7 @@ mod tests {
 
         assert!(super::pane_dims_need_resize(live_dims, desired_size));
         assert!(!super::pane_dims_need_resize(
-            host_runtime::renderable::RenderableDimensions {
+            RenderableDimensions {
                 cols: desired_size.cols,
                 viewport_rows: desired_size.rows,
                 scrollback_rows: desired_size.rows,

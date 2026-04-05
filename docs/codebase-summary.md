@@ -1,5 +1,22 @@
 # Codebase Summary
 
+Last updated: 2026-04-05 (phase-04: chatminal-host-runtime retired from active product path)
+
+## Latest changes (2026-04-05 phase-04 single-runtime convergence)
+- `chatminal-desktop` không còn depend `chatminal-host-runtime`:
+  - `apps/chatminal-desktop/Cargo.toml` đã bỏ `host_runtime = { workspace = true }`
+  - runtime crate duy nhất còn lại trong active product path: `chatminal-runtime`
+- `LocalPane`, `LocalPaneHooks`, `LocalSpawnHooks`, `LocalSpawnTarget` đã migrate sang `crates/chatminal-runtime`:
+  - `crates/chatminal-runtime/src/localpane.rs`
+  - `crates/chatminal-runtime/src/localpane_hooks.rs`
+  - `crates/chatminal-runtime/src/local_spawn_target.rs`
+- Dead code trong `desktop_host_runtime/session_host.rs` và `mod.rs` đã bị xóa:
+  - multi-pane render, resize/zoom/rotate shadow host_runtime calls
+  - register_pane/remove_pane/remove_tab shadow sync
+  - spawn paths rewired về `primary_spawn_target()` trực tiếp
+- `chatminal-lua-bridge` và `chatminal-codec` đã sạch host-runtime từ trước phase-04.
+- Verification: `cargo check --workspace` pass, `cargo tree -p chatminal-desktop | grep host-runtime` empty.
+
 Last updated: 2026-04-04 (repo deadcode / duplicate architecture closeout)
 
 ## Latest changes (2026-04-04 repo deadcode / duplicate architecture closeout)
@@ -236,10 +253,11 @@ Desktop product path là `single-flow local-first`:
   - active `SpawnSession` đã thành single-flow action không còn payload target.
 
 ## Architectural ownership
-- Product source of truth: `chatminal-runtime`.
+- Product source of truth: `chatminal-runtime` (duy nhất runtime crate trong active product path).
 - Desktop source of truth trong app layer: `apps/chatminal-desktop/src/chatminal_runtime/*`.
 - Render/input shell: `termwindow/*`.
-- Engine/private host zone: `desktop_host_runtime/*` + `crates/chatminal-host-runtime/*`.
+- Engine/private host zone: `desktop_host_runtime/*` (không còn phụ thuộc `crates/chatminal-host-runtime`).
+- `LocalPane` / `LocalSpawnTarget` / `LocalSpawnHooks`: `crates/chatminal-runtime/src/localpane*.rs` + `local_spawn_target.rs`.
 
 ## Verification snapshot
 - `cargo check --workspace`: pass

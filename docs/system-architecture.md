@@ -1,5 +1,30 @@
 # System Architecture
 
+Last updated: 2026-04-05 (phase-04: chatminal-host-runtime retired from active product path)
+
+## Latest changes (phase-04 retire host-runtime crate, 2026-04-05)
+- `chatminal-host-runtime` đã bị loại khỏi active dependency graph của `chatminal-desktop`:
+  - `apps/chatminal-desktop/Cargo.toml` không còn `host_runtime = { workspace = true }`
+  - `cargo tree -p chatminal-desktop -e normal` không còn node `chatminal-host-runtime`
+- `LocalPane`, `LocalPaneHooks`, `LocalSpawnHooks`, `LocalSpawnTarget` đã migrate sang `crates/chatminal-runtime`:
+  - canonical owner hiện là `chatminal-runtime`; host-runtime không còn là vocabulary source cho spawn/PTY primitives này
+- Dead code bị xóa khỏi `session_host.rs` và `mod.rs`:
+  - multi-pane render path
+  - resize/zoom/rotate host_runtime calls
+  - shadow sync: `register_pane`, `remove_pane`, `remove_tab` host_runtime calls
+  - spawn paths đã được thay bằng `primary_spawn_target()` trực tiếp
+- Active graph sau phase-04:
+  - `chatminal-desktop` → `chatminal-runtime` (duy nhất runtime crate)
+  - `chatminal-lua-bridge` → `chatminal-runtime`
+  - `chatminal-codec` → `chatminal-runtime`
+  - `chatminal-host-runtime` không còn là active product dependency
+- Topology section bên dưới đã được cập nhật để phản ánh single-runtime reality.
+- Verification:
+  - `cargo check --workspace` = 0 errors
+  - `cargo tree -p chatminal-desktop -e normal | grep host.runtime` = empty
+  - `grep host_runtime apps/chatminal-desktop/Cargo.toml` = empty
+  - all tests pass
+
 Last updated: 2026-04-04 (repo deadcode / duplicate architecture closeout)
 
 ## Latest changes (repo deadcode / duplicate architecture closeout, 2026-04-04)
@@ -566,13 +591,15 @@ Last updated: 2026-04-04 (repo deadcode / duplicate architecture closeout)
 ```text
 chatminal-desktop
   -> chatminal_runtime facade
-    -> chatminal-runtime (embedded, single-process)
+    -> chatminal-runtime (embedded, single-process, ONLY runtime crate)
       -> session engine + terminal runtime registry
       -> persist worker (background thread)
-    -> desktop_host_runtime (private engine adapter)
-      -> chatminal-host-runtime (Mux/Tab/Pane private engine primitives)
+      -> LocalPane / LocalSpawnTarget / LocalSpawnHooks (migrated from host-runtime)
+    -> desktop_host_runtime (private engine adapter — no longer depends on chatminal-host-runtime)
   -> termwindow render/input shell
   -> chatminal_sidebar + session bar UI
+
+NOTE: chatminal-host-runtime is NO LONGER in the active product dependency graph as of phase-04 (2026-04-05).
 ```
 
 ### Persistence and compatibility
@@ -588,8 +615,8 @@ chatminal-runtime
 - Desktop startup/public command path là single-flow local-first; không expose public legacy target-selection/attach semantics nữa.
 - `apps/chatminal-desktop/src/chatminal_runtime/*` là desktop facade duy nhất cho product state/query/action.
 - `apps/chatminal-desktop/src/termwindow/*` và `desktop_termwindow_*` chỉ là render/input shell; không phải source of truth cho business routing.
-- `apps/chatminal-desktop/src/desktop_host_runtime/*` là private adapter duy nhất còn chạm host primitives.
-- `crates/chatminal-host-runtime/*` được phép giữ `Mux/Tab/Pane`, nhưng chỉ như engine implementation detail.
+- `apps/chatminal-desktop/src/desktop_host_runtime/*` là private adapter; không còn phụ thuộc `chatminal-host-runtime` crate.
+- `crates/chatminal-host-runtime/*` không còn là active product dependency; chỉ còn là workspace crate nếu chưa bị xóa khỏi Cargo workspace.
 - `apps/chatminal-desktop/src/desktop_commands.rs` là compatibility translation layer cho `KeyAssignment::*Tab*`; product-facing code không route trực tiếp các symbol đó.
 
 ## Runtime flow

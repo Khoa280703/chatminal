@@ -5,10 +5,37 @@ edition = "2024"
 rust-version = "1.93"
 
 [dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+fancy-regex.workspace = true
+metrics.workspace = true
+mlua.workspace = true
+nix = { workspace = true, features = ["term"] }
+smol = "2.0"
 chatminal-store = { path = "../chatminal-store" }
+config = { workspace = true }
+downcast-rs.workspace = true
+engine-term = { workspace = true, features = ["use_serde"] }
+chrono = { workspace = true, features = ["clock"] }
+crossbeam.workspace = true
+engine-dynamic.workspace = true
+filedescriptor.workspace = true
+hostname.workspace = true
+lazy_static.workspace = true
+libc.workspace = true
+luahelper.workspace = true
 portable-pty.workspace = true
-serde = { version = "1.0.228", features = ["derive"] }
+serde = { version = "1.0.228", features = ["derive", "rc"] }
 serde_json = "1.0.145"
 log = "0.4.29"
 dirs.workspace = true
+parking_lot.workspace = true
+procinfo.workspace = true
+rangeset.workspace = true
+termwiz-funcs.workspace = true
+termwiz.workspace = true
+url.workspace = true
 whoami = "1.6.1"
+
+[dev-dependencies]
+k9.workspace = true

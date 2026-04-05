@@ -62,12 +62,12 @@ luahelper = { workspace = true }
 metrics = { version = "0.23" }
 mlua = { version = "0.9", features = ["send", "serialize"] }
 chatminal-lua-bridge = { workspace = true }
-host_runtime = { workspace = true }
 nucleo-matcher = { version = "0.3" }
 ordered-float = { version = "4.1", default-features = false }
 parking_lot = { version = "0.12" }
 portable-pty = { workspace = true, features = ["serde_support"] }
 promise = { workspace = true }
+procinfo = { workspace = true }
 rangeset = { workspace = true }
 ratelim = { workspace = true }
 rayon = { version = "1.10" }
