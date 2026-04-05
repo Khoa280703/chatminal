@@ -20,19 +20,19 @@ use crate::chatminal_runtime::{
 use activity::Activity;
 use anyhow::anyhow;
 use chatminal_runtime::{
-    ClientId, FocusedPaneBinding, HostRuntimeNotification, RenderableDimensions, RuntimeEntryInfo,
-    RuntimeEntryTerminalInfo, RuntimeId, RuntimeState, SessionTerminalHandle, StableCursorPosition,
+    ClientId, HostRuntimeNotification, RuntimeEntryInfo, RuntimeEntryTerminalInfo, RuntimeId,
+    RuntimeState, SessionTerminalHandle,
 };
 use config::ConfigHandle;
 use config::keyassignment::SessionDirection;
 use engine_dynamic::Value;
-use engine_term::{ClipboardSelection, TerminalSize};
+use engine_term::TerminalSize;
 use portable_pty::CommandBuilder;
 use window::{Window as HostWindow, WindowId as HostWindowId};
 
 use lua_bridge_backend::DesktopLuaBridgeBackend;
-pub(crate) use session_host::{DesktopSessionHost, get_or_init_session_host};
 use session_host::terminal_handle_for_host_terminal;
+pub(crate) use session_host::{DesktopSessionHost, get_or_init_session_host};
 pub(crate) use session_pane::ChatminalSessionPane;
 
 pub(crate) const CHATMINAL_RUNTIME_SPAWN_TARGET_NAME: &str = "chatminal-runtime";
@@ -119,24 +119,12 @@ impl HostSpawnTargetHandle {
     ) -> anyhow::Result<HostSpawnedRuntimeEntry> {
         self.0.spawn(size, command, command_dir).await
     }
-
 }
-
-
 
 pub(crate) type FrontendClientHandle = Arc<ClientId>;
 pub(crate) type RuntimeWindow = HostWindow;
 pub(crate) type PrimaryHostWindowId = HostWindowId;
-pub(crate) type HostFocusedPaneBinding = FocusedPaneBinding;
 pub(crate) use chatminal_runtime::pane::Pane as HostTerminal;
-pub(crate) type HostTerminalHandle = SessionTerminalHandle;
-pub(crate) type HostCachePolicy = chatminal_runtime::pane::CachePolicy;
-pub(crate) type HostCloseReason = chatminal_runtime::pane::CloseReason;
-pub(crate) type HostLogicalLine = chatminal_runtime::pane::LogicalLine;
-pub(crate) type HostSearchResult = chatminal_runtime::SearchResult;
-pub(crate) type HostPattern = chatminal_runtime::Pattern;
-pub(crate) type HostRenderableDimensions = RenderableDimensions;
-pub(crate) type HostStableCursorPosition = StableCursorPosition;
 pub(crate) const ROOT_HOST_WINDOW_ID: PrimaryHostWindowId = window::ROOT_WINDOW_ID;
 
 pub(crate) use chatminal_runtime::pane::alloc_pane_id as alloc_host_terminal_handle;
@@ -168,95 +156,7 @@ pub(crate) struct LauncherSessionEntry {
     pub pane_count: Option<usize>,
 }
 
-#[derive(Clone, Debug)]
-#[allow(dead_code)]
-pub(crate) enum RuntimeNotification {
-    PaneOutput(SessionTerminalHandle),
-    PaneAdded(SessionTerminalHandle),
-    PaneRemoved(SessionTerminalHandle),
-    WindowInvalidated,
-    WindowWorkspaceChanged,
-    ActiveWorkspaceChanged(FrontendClientHandle),
-    Alert {
-        pane_id: SessionTerminalHandle,
-        alert: engine_term::Alert,
-    },
-    Empty,
-    AssignClipboard {
-        pane_id: SessionTerminalHandle,
-        selection: ClipboardSelection,
-        clipboard: Option<String>,
-    },
-    SaveToDownloads {
-        name: Option<String>,
-        data: Arc<Vec<u8>>,
-    },
-    TabAddedToWindow {
-        runtime_id: RuntimeId,
-    },
-    PaneFocused(SessionTerminalHandle),
-    TabResized(RuntimeId),
-    TabTitleChanged {
-        runtime_id: RuntimeId,
-        title: String,
-    },
-    WindowTitleChanged {
-        title: String,
-    },
-    WorkspaceRenamed {
-        old_workspace: String,
-        new_workspace: String,
-    },
-}
-
-impl From<HostRuntimeNotification> for RuntimeNotification {
-    fn from(notification: HostRuntimeNotification) -> Self {
-        match notification {
-            HostRuntimeNotification::PaneOutput(pane_id) => Self::PaneOutput(pane_id),
-            HostRuntimeNotification::PaneAdded(pane_id) => Self::PaneAdded(pane_id),
-            HostRuntimeNotification::PaneRemoved(pane_id) => Self::PaneRemoved(pane_id),
-            HostRuntimeNotification::WindowInvalidated => Self::WindowInvalidated,
-            HostRuntimeNotification::WindowWorkspaceChanged => Self::WindowWorkspaceChanged,
-            HostRuntimeNotification::ActiveWorkspaceChanged(client_id) => {
-                Self::ActiveWorkspaceChanged(client_id)
-            }
-            HostRuntimeNotification::Alert { pane_id, alert } => Self::Alert { pane_id, alert },
-            HostRuntimeNotification::Empty => Self::Empty,
-            HostRuntimeNotification::AssignClipboard {
-                pane_id,
-                selection,
-                clipboard,
-            } => Self::AssignClipboard {
-                pane_id,
-                selection,
-                clipboard,
-            },
-            HostRuntimeNotification::SaveToDownloads { name, data } => {
-                Self::SaveToDownloads { name, data }
-            }
-            HostRuntimeNotification::TabAddedToWindow { runtime_id } => {
-                Self::TabAddedToWindow { runtime_id }
-            }
-            HostRuntimeNotification::PaneFocused(pane_id) => Self::PaneFocused(pane_id),
-            HostRuntimeNotification::TabResized(runtime_id) => Self::TabResized(runtime_id),
-            HostRuntimeNotification::TabTitleChanged { runtime_id, title } => {
-                Self::TabTitleChanged { runtime_id, title }
-            }
-            HostRuntimeNotification::WindowTitleChanged { title } => {
-                Self::WindowTitleChanged { title }
-            }
-            HostRuntimeNotification::WorkspaceRenamed {
-                old_workspace,
-                new_workspace,
-            } => Self::WorkspaceRenamed {
-                old_workspace,
-                new_workspace,
-            },
-        }
-    }
-}
-
-type RuntimeNotificationSubscriber = Box<dyn Fn(RuntimeNotification) -> bool + Send + Sync>;
+type RuntimeNotificationSubscriber = Box<dyn Fn(HostRuntimeNotification) -> bool + Send + Sync>;
 
 struct RuntimeNotificationHub {
     subscribers: Mutex<HashMap<usize, RuntimeNotificationSubscriber>>,
@@ -265,7 +165,7 @@ struct RuntimeNotificationHub {
 impl RuntimeNotificationHub {
     fn subscribe<F>(&self, subscriber: F)
     where
-        F: Fn(RuntimeNotification) -> bool + 'static + Send + Sync,
+        F: Fn(HostRuntimeNotification) -> bool + 'static + Send + Sync,
     {
         let subscriber_id = RUNTIME_NOTIFICATION_SUBSCRIBER_ID.fetch_add(1, Ordering::Relaxed);
         self.subscribers
@@ -274,7 +174,7 @@ impl RuntimeNotificationHub {
             .insert(subscriber_id, Box::new(subscriber));
     }
 
-    fn publish(&self, notification: RuntimeNotification) {
+    fn publish(&self, notification: HostRuntimeNotification) {
         self.subscribers
             .lock()
             .unwrap()
@@ -296,16 +196,16 @@ fn runtime_notification_hub() -> &'static RuntimeNotificationHub {
 
 pub(crate) fn subscribe_desktop_runtime_notifications<F>(subscriber: F)
 where
-    F: Fn(RuntimeNotification) -> bool + 'static + Send + Sync,
+    F: Fn(HostRuntimeNotification) -> bool + 'static + Send + Sync,
 {
     runtime_notification_hub().subscribe(subscriber);
 }
 
-pub(crate) fn publish_runtime_notification(notification: RuntimeNotification) {
+pub(crate) fn publish_runtime_notification(notification: HostRuntimeNotification) {
     runtime_notification_hub().publish(notification);
 }
 
-pub(crate) fn publish_runtime_notification_from_any_thread(notification: RuntimeNotification) {
+pub(crate) fn publish_runtime_notification_from_any_thread(notification: HostRuntimeNotification) {
     if !promise::spawn::is_scheduler_configured() {
         publish_runtime_notification(notification);
         return;
@@ -420,7 +320,6 @@ pub(crate) async fn host_spawn_tab_raw(
 ) -> anyhow::Result<HostSpawnedRuntimeEntry> {
     spawn_in_primary_target(size, command, command_dir).await
 }
-
 
 pub(crate) fn host_root_window_workspace_name_value() -> Option<String> {
     desktop_session_host().and_then(|host| host.root_window_workspace_name())
@@ -633,7 +532,7 @@ pub(crate) fn host_window_initial_position() -> Option<config::GuiPosition> {
 
 pub(crate) fn subscribe_runtime_notifications<F>(subscriber: F)
 where
-    F: Fn(RuntimeNotification) -> bool + 'static + Send + Sync,
+    F: Fn(HostRuntimeNotification) -> bool + 'static + Send + Sync,
 {
     if let Some(host) = desktop_session_host() {
         host.subscribe_notifications(subscriber);
@@ -666,7 +565,7 @@ pub(crate) fn active_frontend_client() -> Option<FrontendClientHandle> {
 
 pub(crate) fn subscribe_frontend_notifications<F>(subscriber: F)
 where
-    F: Fn(RuntimeNotification) -> bool + 'static + Send + Sync,
+    F: Fn(HostRuntimeNotification) -> bool + 'static + Send + Sync,
 {
     if let Some(host) = desktop_session_host() {
         host.subscribe_notifications(subscriber);

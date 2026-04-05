@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
-use tabout::{Alignment, Column, tabulate_output};
+use tabout::{tabulate_output, Alignment, Column};
 
 static ENABLE_STAT_PRINT: AtomicBool = AtomicBool::new(true);
 static PERIODIC_STAT_LOGGING_SECS: AtomicUsize = AtomicUsize::new(0);

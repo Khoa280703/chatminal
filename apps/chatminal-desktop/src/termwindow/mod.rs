@@ -6,13 +6,13 @@ use crate::chatminal_layout::workspace_store::{
 };
 use crate::chatminal_runtime::{
     DesktopSessionBridgeAction, DesktopSessionRuntimeSummary, RuntimeId, SessionViewId,
-    TerminalInstanceId, WorkspaceLayoutState,
-    desktop_activate_session, desktop_can_close_view_only,
-    desktop_detach_session_runtime_and_notify, desktop_focus_session_view_with_previous,
-    desktop_last_active_session_id, desktop_prepare_workspace_layout,
-    desktop_resize_visible_sessions, desktop_session_entry_bindings,
-    desktop_session_window_snapshot, notify_runtime_session_activated,
-    reconcile_runtime_session_lookup, run_runtime_session_startup_command,
+    TerminalInstanceId, WorkspaceLayoutState, desktop_activate_session,
+    desktop_can_close_view_only, desktop_detach_session_runtime_and_notify,
+    desktop_focus_session_view_with_previous, desktop_last_active_session_id,
+    desktop_prepare_workspace_layout, desktop_resize_visible_sessions,
+    desktop_session_entry_bindings, desktop_session_window_snapshot,
+    notify_runtime_session_activated, reconcile_runtime_session_lookup,
+    run_runtime_session_startup_command,
 };
 use crate::chatminal_sidebar::{ChatminalSidebar, SidebarSessionDropTarget};
 use crate::colorease::ColorEase;
@@ -23,8 +23,7 @@ use crate::desktop_session_host::overlay_shell::{
 };
 use crate::desktop_session_host::subscribe_runtime_notifications;
 use crate::desktop_session_host::{
-    PrimaryHostWindowId, RuntimeNotification, host_window_initial_position, resolve_public_pane,
-    resolved_window_title,
+    PrimaryHostWindowId, host_window_initial_position, resolve_public_pane, resolved_window_title,
 };
 use crate::desktop_termwindow_types::{
     TerminalPaneLayout, TerminalSplit, TerminalUiKey, terminal_handle_for_ui_key,
@@ -59,7 +58,7 @@ use crate::termwindow::webgpu::WebGpuState;
 use ::engine_term::input::{ClickPosition, MouseButton as TMB};
 use ::window::*;
 use anyhow::{Context, anyhow, ensure};
-use chatminal_runtime::RuntimeWorkspace;
+use chatminal_runtime::{HostRuntimeNotification, RuntimeWorkspace};
 use config::keyassignment::{
     Confirmation, KeyAssignment, LauncherActionArgs, Pattern, PromptInputLine,
     QuickSelectArguments, SessionDirection, SpawnCommand, SplitSize,
@@ -184,7 +183,7 @@ pub enum TermWindowNotif {
         render_target_id: u64,
         pane_id: Option<u64>,
     },
-    RuntimeNotification(RuntimeNotification),
+    RuntimeNotification(HostRuntimeNotification),
     EmitStatusUpdate,
     Apply(Box<dyn FnOnce(&mut TermWindow) + Send + Sync>),
     SetInnerSize {
@@ -1270,7 +1269,7 @@ impl TermWindow {
         DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID).snapshot()
     }
 
-    fn sync_active_chatminal_session_from_mux(&mut self) {
+    fn sync_active_chatminal_session_from_runtime(&mut self) {
         if !self.chatminal_sidebar.is_enabled() {
             return;
         }
@@ -1325,7 +1324,7 @@ impl TermWindow {
         if let Some(window) = self.window.as_ref() {
             window.invalidate();
         }
-        self.sync_active_chatminal_session_from_mux();
+        self.sync_active_chatminal_session_from_runtime();
         true
     }
 
@@ -1339,7 +1338,7 @@ impl TermWindow {
         if let Some(window) = self.window.as_ref() {
             window.invalidate();
         }
-        self.sync_active_chatminal_session_from_mux();
+        self.sync_active_chatminal_session_from_runtime();
         true
     }
 
@@ -2293,14 +2292,14 @@ impl TermWindow {
                 self.cancel_overlay_for_render_scope(render_target_id, pane_id);
             }
             TermWindowNotif::RuntimeNotification(n) => match n {
-                RuntimeNotification::Alert {
+                HostRuntimeNotification::Alert {
                     alert: Alert::SetUserVar { name, value },
                     pane_id,
                 } => {
                     self.emit_user_var_event(pane_id.as_u64(), name, value);
                 }
-                RuntimeNotification::WindowTitleChanged { .. }
-                | RuntimeNotification::Alert {
+                HostRuntimeNotification::WindowTitleChanged { .. }
+                | HostRuntimeNotification::Alert {
                     alert:
                         Alert::OutputSinceFocusLost
                         | Alert::CurrentWorkingDirectoryChanged
@@ -2312,7 +2311,7 @@ impl TermWindow {
                 } => {
                     self.update_title();
                 }
-                RuntimeNotification::Alert {
+                HostRuntimeNotification::Alert {
                     alert: Alert::PaletteChanged,
                     pane_id,
                 } => {
@@ -2322,7 +2321,7 @@ impl TermWindow {
                     self.dispatch_notif(TermWindowNotif::InvalidateShapeCache, window)?;
                     self.handle_pane_output_event(pane_id.as_u64());
                 }
-                RuntimeNotification::Alert {
+                HostRuntimeNotification::Alert {
                     alert: Alert::Bell,
                     pane_id,
                 } => {
@@ -2345,11 +2344,11 @@ impl TermWindow {
                     per_pane.bell_start.replace(Instant::now());
                     window.invalidate();
                 }
-                RuntimeNotification::Alert {
+                HostRuntimeNotification::Alert {
                     alert: Alert::ToastNotification { .. },
                     ..
                 } => {}
-                RuntimeNotification::TabAddedToWindow { runtime_id } => {
+                HostRuntimeNotification::TabAddedToWindow { runtime_id } => {
                     let mut size = self.terminal_size;
                     if let Some(tab_size) = self.render_scope_size(runtime_id.as_u64()) {
                         // If we attached to a remote target and loaded in
@@ -2376,36 +2375,36 @@ impl TermWindow {
                         }
                     }
                 }
-                RuntimeNotification::PaneOutput(pane_id) => {
+                HostRuntimeNotification::PaneOutput(pane_id) => {
                     self.handle_pane_output_event(pane_id.as_u64());
                 }
-                RuntimeNotification::WindowInvalidated => {
+                HostRuntimeNotification::WindowInvalidated => {
                     window.invalidate();
                     self.update_title_post_status();
                 }
-                RuntimeNotification::AssignClipboard { .. } => {
+                HostRuntimeNotification::AssignClipboard { .. } => {
                     // Handled by frontend
                 }
-                RuntimeNotification::SaveToDownloads { .. } => {
+                HostRuntimeNotification::SaveToDownloads { .. } => {
                     // Handled by frontend
                 }
-                RuntimeNotification::PaneFocused(_) => {
+                HostRuntimeNotification::PaneFocused(_) => {
                     // Also handled by clientpane
                     self.update_title_post_status();
                 }
-                RuntimeNotification::TabResized(_) => {
+                HostRuntimeNotification::TabResized(_) => {
                     // Also handled by engine-client
                     self.update_title_post_status();
                 }
-                RuntimeNotification::TabTitleChanged { .. } => {
+                HostRuntimeNotification::TabTitleChanged { .. } => {
                     self.update_title_post_status();
                 }
-                RuntimeNotification::PaneAdded(_)
-                | RuntimeNotification::WorkspaceRenamed { .. }
-                | RuntimeNotification::PaneRemoved(_)
-                | RuntimeNotification::WindowWorkspaceChanged
-                | RuntimeNotification::ActiveWorkspaceChanged(_)
-                | RuntimeNotification::Empty => {}
+                HostRuntimeNotification::PaneAdded(_)
+                | HostRuntimeNotification::WorkspaceRenamed { .. }
+                | HostRuntimeNotification::PaneRemoved(_)
+                | HostRuntimeNotification::WindowWorkspaceChanged
+                | HostRuntimeNotification::ActiveWorkspaceChanged(_)
+                | HostRuntimeNotification::Empty => {}
             },
             TermWindowNotif::EmitStatusUpdate => {
                 self.emit_status_event();
@@ -2495,7 +2494,7 @@ impl TermWindow {
     }
 
     fn handle_runtime_notification_callback(
-        n: RuntimeNotification,
+        n: HostRuntimeNotification,
         window: &Window,
         primary_host_window_id: PrimaryHostWindowId,
         dead: &Arc<AtomicBool>,
@@ -2506,7 +2505,7 @@ impl TermWindow {
         }
 
         match n {
-            RuntimeNotification::Alert {
+            HostRuntimeNotification::Alert {
                 pane_id,
                 alert:
                     Alert::OutputSinceFocusLost
@@ -2518,9 +2517,9 @@ impl TermWindow {
                     | Alert::SetUserVar { .. }
                     | Alert::Bell,
             }
-            | RuntimeNotification::PaneFocused(pane_id)
-            | RuntimeNotification::PaneRemoved(pane_id)
-            | RuntimeNotification::PaneOutput(pane_id) => {
+            | HostRuntimeNotification::PaneFocused(pane_id)
+            | HostRuntimeNotification::PaneRemoved(pane_id)
+            | HostRuntimeNotification::PaneOutput(pane_id) => {
                 // Ideally we'd check to see if pane_id is part of this window,
                 // but overlays may not be 100% associated with the window
                 // in the mux and we don't want to lose the invalidation
@@ -2538,33 +2537,33 @@ impl TermWindow {
                 }
                 let _ = pane_id;
             }
-            RuntimeNotification::PaneAdded(_pane_id) => {
+            HostRuntimeNotification::PaneAdded(_pane_id) => {
                 // If some other client spawns a pane inside this window, this
                 // gives us an opportunity to attach it to the clipboard.
                 return Self::host_window_exists();
             }
-            RuntimeNotification::TabAddedToWindow { .. }
-            | RuntimeNotification::WindowTitleChanged { .. }
-            | RuntimeNotification::WindowInvalidated => {}
-            RuntimeNotification::TabResized(runtime_id)
-            | RuntimeNotification::TabTitleChanged { runtime_id, .. } => {
+            HostRuntimeNotification::TabAddedToWindow { .. }
+            | HostRuntimeNotification::WindowTitleChanged { .. }
+            | HostRuntimeNotification::WindowInvalidated => {}
+            HostRuntimeNotification::TabResized(runtime_id)
+            | HostRuntimeNotification::TabTitleChanged { runtime_id, .. } => {
                 if Self::host_window_contains_render_scope(runtime_id.as_u64()) {
                     // fall through
                 } else {
                     return true;
                 }
             }
-            RuntimeNotification::Alert {
+            HostRuntimeNotification::Alert {
                 alert: Alert::ToastNotification { .. },
                 ..
             }
-            | RuntimeNotification::AssignClipboard { .. }
-            | RuntimeNotification::SaveToDownloads { .. }
-            | RuntimeNotification::ActiveWorkspaceChanged(_)
-            | RuntimeNotification::WorkspaceRenamed { .. }
-            | RuntimeNotification::Empty
-            | RuntimeNotification::WindowWorkspaceChanged => return true,
-            RuntimeNotification::Alert {
+            | HostRuntimeNotification::AssignClipboard { .. }
+            | HostRuntimeNotification::SaveToDownloads { .. }
+            | HostRuntimeNotification::ActiveWorkspaceChanged(_)
+            | HostRuntimeNotification::WorkspaceRenamed { .. }
+            | HostRuntimeNotification::Empty
+            | HostRuntimeNotification::WindowWorkspaceChanged => return true,
+            HostRuntimeNotification::Alert {
                 alert: Alert::PaletteChanged { .. },
                 ..
             } => {
@@ -2720,7 +2719,7 @@ impl TermWindow {
             }
             panes
                 .into_iter()
-                .map(TerminalPaneLayout::from_mux)
+                .map(TerminalPaneLayout::from_overlay_layout)
                 .collect()
         }
     }

@@ -1,13 +1,13 @@
 use crate::chatminal_runtime::{
-    DesktopSplitRequest, desktop_create_split_session_view, desktop_current_active_session_id,
-    desktop_current_active_terminal_handle,
+    desktop_create_split_session_view, desktop_current_active_session_id,
+    desktop_current_active_terminal_handle, DesktopSplitRequest,
 };
 use crate::desktop_session_host::{
     host_workspace_name, spawn_desktop_terminal, start_host_activity,
 };
-use anyhow::{Context, anyhow};
-use config::TermConfig;
+use anyhow::{anyhow, Context};
 use config::keyassignment::SpawnCommand;
+use config::TermConfig;
 use engine_term::TerminalSize;
 use portable_pty::CommandBuilder;
 use std::sync::Arc;

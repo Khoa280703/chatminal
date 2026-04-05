@@ -7,15 +7,15 @@ use std::time::Duration;
 use chatminal_runtime::{RuntimeCreatedSession, RuntimeProfile, RuntimeWorkspace};
 
 use crate::chatminal_runtime::DESKTOP_LAYOUT_WORKSPACE_ID;
-pub use crate::chatminal_runtime::{
-    DesktopSidebarProfile as SidebarProfile, DesktopSidebarSession as SidebarSession,
-    DesktopSidebarSnapshot as SidebarSnapshot,
-};
 use crate::chatminal_runtime::{
     build_desktop_sidebar_sessions, close_runtime_session, create_runtime_profile,
     create_runtime_session, desktop_workspace_subscribe, move_runtime_session_to_profile,
     move_runtime_sessions_to_profile, rename_runtime_session, set_runtime_session_startup_command,
     switch_runtime_profile,
+};
+pub use crate::chatminal_runtime::{
+    DesktopSidebarProfile as SidebarProfile, DesktopSidebarSession as SidebarSession,
+    DesktopSidebarSnapshot as SidebarSnapshot,
 };
 
 const SIDEBAR_DEFAULT_WIDTH_PX: f32 = 304.0;

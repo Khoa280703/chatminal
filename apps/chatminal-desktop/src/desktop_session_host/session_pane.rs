@@ -27,11 +27,7 @@ use termwiz::surface::{Line, SequenceNo};
 use url::Url;
 
 use super::{
-    HostCachePolicy as CachePolicy, HostCloseReason as CloseReason, HostLogicalLine as LogicalLine,
-    HostPattern as Pattern, HostRenderableDimensions as RenderableDimensions,
-    HostSearchResult as SearchResult, HostStableCursorPosition as StableCursorPosition,
-    HostTerminal, HostTerminalHandle, RuntimeNotification, alloc_host_terminal_handle,
-    host_impl_get_logical_lines_via_get_lines,
+    HostTerminal, alloc_host_terminal_handle, host_impl_get_logical_lines_via_get_lines,
     host_terminal_for_each_logical_line_in_stable_range_mut, host_terminal_get_cursor_position,
     host_terminal_get_dimensions, host_terminal_get_dirty_lines, host_terminal_get_lines,
     host_terminal_with_lines_mut, publish_runtime_notification_from_any_thread,
@@ -41,12 +37,16 @@ use crate::chatminal_runtime::SessionTerminalHandle;
 use crate::desktop_session_host::overlay_shell::{
     OverlayForEachLogicalLine as ForEachPaneLogicalLine, OverlayWithPaneLines as WithPaneLines,
 };
+use chatminal_runtime::pane::{CachePolicy, CloseReason, LogicalLine};
+use chatminal_runtime::{
+    HostRuntimeNotification, Pattern, RenderableDimensions, SearchResult, StableCursorPosition,
+};
 
 const EVENT_POLL_TIMEOUT: Duration = Duration::from_millis(50);
 const DISPLAY_RESET_FLASH_DURATION: Duration = Duration::from_millis(75);
 
-fn notify_pane_output(pane_id: HostTerminalHandle) {
-    publish_runtime_notification_from_any_thread(RuntimeNotification::PaneOutput(pane_id));
+fn notify_pane_output(pane_id: SessionTerminalHandle) {
+    publish_runtime_notification_from_any_thread(HostRuntimeNotification::PaneOutput(pane_id));
 }
 
 fn record_input_for_current_identity() {
@@ -99,7 +99,7 @@ impl Write for SessionPaneWriter {
 }
 
 pub(crate) struct ChatminalSessionPane {
-    pane_id: HostTerminalHandle,
+    pane_id: SessionTerminalHandle,
     session_id: String,
     runtime_id: RuntimeId,
     terminal_instance_id: TerminalInstanceId,
@@ -289,7 +289,7 @@ impl ChatminalSessionPane {
         }
     }
 
-    pub(crate) fn pane_id_value(&self) -> HostTerminalHandle {
+    pub(crate) fn pane_id_value(&self) -> SessionTerminalHandle {
         self.pane_id
     }
 
@@ -344,7 +344,7 @@ mod parser_tests {
 
 pub(crate) fn pane_id_for_terminal_instance(
     terminal_instance_id: TerminalInstanceId,
-) -> HostTerminalHandle {
+) -> SessionTerminalHandle {
     SessionTerminalHandle::new(
         u64::try_from(alloc_host_terminal_handle())
             .ok()

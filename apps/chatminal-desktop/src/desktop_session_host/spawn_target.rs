@@ -4,15 +4,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static LOCAL_PANE_RUNTIME_ID_COUNTER: AtomicU64 = AtomicU64::new(0x_ffff_0000_0000_0001);
 
 use anyhow::Context;
+use chatminal_runtime::local_spawn_target::{LocalSpawnHooks, LocalSpawnTarget};
 use config::SerialTarget;
 use engine_term::TerminalSize;
-use chatminal_runtime::local_spawn_target::{LocalSpawnHooks, LocalSpawnTarget};
 use portable_pty::CommandBuilder;
 
 use super::session_pane::ChatminalSessionPane;
 use super::{
-    DesktopSpawnTargetBackend, EmbeddedRuntime,
-    HostSpawnedRuntimeEntry, HostTerminal, parse_proxy_session_id,
+    DesktopSpawnTargetBackend, EmbeddedRuntime, HostSpawnedRuntimeEntry, HostTerminal,
+    parse_proxy_session_id,
 };
 use crate::chatminal_runtime::{
     ChatminalRuntimeClient, activate_runtime_session, resolve_target_session_id,
@@ -96,5 +96,4 @@ impl DesktopSpawnTargetBackend for DesktopSpawnTarget {
             pane,
         })
     }
-
 }

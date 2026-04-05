@@ -3,16 +3,13 @@
 
 use crate::localpane::LocalPane;
 use crate::localpane_hooks::LocalPaneHooks;
-use crate::pane::{alloc_pane_id, Pane, PaneId};
+use crate::pane::{Pane, PaneId, alloc_pane_id};
 use crate::pty_io::{PtyIoHooks, start_pane_pty_reader};
 use anyhow::Context;
 use config::{ConfigHandle, SerialTarget};
 use engine_term::TerminalSize;
 use parking_lot::Mutex;
-use portable_pty::{
-    native_pty_system, CommandBuilder, ExitStatus, MasterPty, PtySize,
-    PtySystem,
-};
+use portable_pty::{CommandBuilder, ExitStatus, MasterPty, PtySize, PtySystem, native_pty_system};
 use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
@@ -205,7 +202,12 @@ impl LocalSpawnTarget {
                 cmd.cwd(dir);
             }
         }
-        apply_runtime_environment(&mut cmd, pane_id, unix_socket.as_deref(), ssh_auth_sock.as_deref());
+        apply_runtime_environment(
+            &mut cmd,
+            pane_id,
+            unix_socket.as_deref(),
+            ssh_auth_sock.as_deref(),
+        );
         Ok(cmd)
     }
 }

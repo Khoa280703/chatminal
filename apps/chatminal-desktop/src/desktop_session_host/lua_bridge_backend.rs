@@ -11,11 +11,11 @@ use super::{
     host_runtime_entry_terminal_handle_in_direction_by_session_id,
     host_runtime_entry_terminal_handles_by_session_id,
     host_runtime_entry_terminal_infos_by_session_id, host_spawn_tab_raw, primary_host_window_id,
-    rename_host_workspace,
-    resolve_host_runtime_id_for_terminal_handle, session_id_from_pane_metadata,
-    set_active_workspace_for_client, set_host_active_workspace_name, set_host_root_window_title,
-    set_host_root_window_workspace_name, set_host_runtime_entry_active_terminal,
-    set_host_runtime_entry_title_by_session_id, terminal_handle_arc, workspace_names,
+    rename_host_workspace, resolve_host_runtime_id_for_terminal_handle,
+    session_id_from_pane_metadata, set_active_workspace_for_client, set_host_active_workspace_name,
+    set_host_root_window_title, set_host_root_window_workspace_name,
+    set_host_runtime_entry_active_terminal, set_host_runtime_entry_title_by_session_id,
+    terminal_handle_arc, workspace_names,
 };
 use chatminal_lua_bridge::backend::{
     BackendFuture, LuaBridgeBackend, LuaPane, LuaSessionRecord, LuaSessionTerminalRecord,
@@ -170,9 +170,7 @@ impl LuaBridgeBackend for DesktopLuaBridgeBackend {
         _request: SplitRequest,
         _source: LuaSplitSource,
     ) -> BackendFuture<anyhow::Result<SessionTerminalHandle>> {
-        Box::pin(async move {
-            anyhow::bail!("terminal splitting is not supported in this build")
-        })
+        Box::pin(async move { anyhow::bail!("terminal splitting is not supported in this build") })
     }
     fn active_workspace(&self) -> anyhow::Result<String> {
         active_frontend_client()

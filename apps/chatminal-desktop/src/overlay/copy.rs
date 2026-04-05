@@ -11,15 +11,15 @@ use crate::desktop_termwindow_types::terminal_ui_key_for_pane;
 use crate::selection::{SelectionCoordinate, SelectionRange, SelectionX};
 use crate::termwindow::keyevent::KeyTableArgs;
 use crate::termwindow::{TermWindow, TermWindowNotif};
-use config::ConfigHandle;
 use config::keyassignment::{
     ClipboardCopyDestination, CopyModeAssignment, KeyAssignment, KeyTable, KeyTableEntry,
     SelectionMode,
 };
+use config::ConfigHandle;
 use engine_term::color::ColorPalette;
 use engine_term::{
-    Clipboard, KeyCode, KeyModifiers, Line, MouseEvent, SemanticType, StableRowIndex, TerminalSize,
-    unicode_column_width,
+    unicode_column_width, Clipboard, KeyCode, KeyModifiers, Line, MouseEvent, SemanticType,
+    StableRowIndex, TerminalSize,
 };
 use ordered_float::NotNan;
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
@@ -31,7 +31,7 @@ use std::time::Duration;
 use termwiz::cell::{Cell, CellAttributes};
 use termwiz::color::AnsiColor;
 use termwiz::lineedit::{LineEditBuffer, Movement};
-use termwiz::surface::{CursorVisibility, SEQ_ZERO, SequenceNo};
+use termwiz::surface::{CursorVisibility, SequenceNo, SEQ_ZERO};
 use unicode_segmentation::*;
 use url::Url;
 use window::{DeadKeyStatus, KeyCode as WKeyCode, Modifiers, WindowOps};

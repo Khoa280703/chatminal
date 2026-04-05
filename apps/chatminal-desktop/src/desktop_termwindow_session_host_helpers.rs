@@ -302,7 +302,7 @@ impl TermWindow {
             split.index,
             delta,
         )
-        .map(TerminalSplit::from_mux)
+        .map(TerminalSplit::from_overlay_split)
     }
 
     pub(crate) fn swap_active_with_terminal_handle_in_active_runtime(
@@ -320,7 +320,10 @@ impl TermWindow {
     }
 
     fn activate_terminal_index_in_active_render_target(&self, index: usize) -> bool {
-        index == 0 && self.active_terminal_instance_from_active_render_target().is_some()
+        index == 0
+            && self
+                .active_terminal_instance_from_active_render_target()
+                .is_some()
     }
 
     fn activate_terminal_direction_in_active_render_target(

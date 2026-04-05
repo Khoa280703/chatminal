@@ -1,9 +1,9 @@
-use config::ExitBehavior;
-use async_trait::async_trait;
 pub use crate::{CachePolicy, LogicalLine, Pattern, PatternType, SearchResult};
 use crate::{RenderableDimensions, SessionTerminalHandle, StableCursorPosition};
+use async_trait::async_trait;
+use config::ExitBehavior;
 use config::keyassignment::KeyAssignment;
-use downcast_rs::{impl_downcast, DowncastSync};
+use downcast_rs::{DowncastSync, impl_downcast};
 use engine_dynamic::Value;
 use engine_term::color::ColorPalette;
 use engine_term::{
@@ -28,9 +28,7 @@ pub fn alloc_pane_id() -> PaneId {
     PANE_ID.fetch_add(1, ::std::sync::atomic::Ordering::Relaxed)
 }
 
-pub fn pane_id_from_terminal_handle(
-    terminal_handle: SessionTerminalHandle,
-) -> Option<PaneId> {
+pub fn pane_id_from_terminal_handle(terminal_handle: SessionTerminalHandle) -> Option<PaneId> {
     usize::try_from(terminal_handle.as_u64()).ok()
 }
 

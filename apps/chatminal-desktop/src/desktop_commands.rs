@@ -1,6 +1,5 @@
 use crate::chatminal_runtime::desktop_current_active_session_id;
 use crate::inputmap::InputMap;
-use KeyAssignment::*;
 use config::keyassignment::*;
 use config::window::WindowLevel;
 use config::{ConfigHandle, DeferredKeyCode};
@@ -9,6 +8,7 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::convert::TryFrom;
 use window::{KeyCode, Modifiers};
+use KeyAssignment::*;
 
 // Compatibility translation layer for upstream-style command/config names.
 // Product-facing desktop code should consume SessionBarAssignment and other

@@ -2,13 +2,13 @@
 //! The idea is to use these when Chatminal needs to request
 //! input from the user as part of setup flows.
 
+use crate::SessionTerminalHandle;
 use crate::pane::{
-    alloc_pane_id, CachePolicy, CloseReason, ForEachPaneLogicalLine, LogicalLine, Pane, PaneId,
-    WithPaneLines,
+    CachePolicy, CloseReason, ForEachPaneLogicalLine, LogicalLine, Pane, PaneId, WithPaneLines,
+    alloc_pane_id,
 };
 use crate::renderable::*;
-use crate::SessionTerminalHandle;
-use crossbeam::channel::{unbounded as channel, Receiver, Sender};
+use crossbeam::channel::{Receiver, Sender, unbounded as channel};
 use engine_term::color::ColorPalette;
 use engine_term::{
     KeyCode, KeyModifiers, MouseEvent, StableRowIndex, TerminalConfiguration, TerminalSize,
@@ -20,11 +20,11 @@ use std::io::{BufWriter, Write};
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
+use termwiz::Context;
 use termwiz::input::{InputEvent, KeyEvent, Modifiers, MouseEvent as TermWizMouseEvent};
 use termwiz::render::terminfo::TerminfoRenderer;
 use termwiz::surface::{Change, Line, SequenceNo};
 use termwiz::terminal::{ScreenSize, TerminalWaker};
-use termwiz::Context;
 use url::Url;
 
 pub struct TermWizTerminalPane {
@@ -289,7 +289,7 @@ impl TermWizTerminal {
 
 impl termwiz::terminal::Terminal for TermWizTerminal {
     fn set_raw_mode(&mut self) -> termwiz::Result<()> {
-        use termwiz::escape::csi::{DecPrivateMode, DecPrivateModeCode, Mode, CSI};
+        use termwiz::escape::csi::{CSI, DecPrivateMode, DecPrivateModeCode, Mode};
 
         macro_rules! decset {
             ($variant:ident) => {

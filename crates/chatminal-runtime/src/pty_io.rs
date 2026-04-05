@@ -1,10 +1,10 @@
-use crate::pane::{pane_id_for_pane, Pane, PaneId};
+use crate::pane::{Pane, PaneId, pane_id_for_pane};
 use crate::workspace_ids::SessionTerminalHandle;
 use anyhow::Context;
 use config::ExitBehavior;
-use filedescriptor::{poll, pollfd, socketpair, AsRawSocketDescriptor, FileDescriptor, POLLIN};
+use filedescriptor::{AsRawSocketDescriptor, FileDescriptor, POLLIN, poll, pollfd, socketpair};
 #[cfg(unix)]
-use libc::{c_int, SOL_SOCKET, SO_RCVBUF, SO_SNDBUF};
+use libc::{SO_RCVBUF, SO_SNDBUF, SOL_SOCKET, c_int};
 use metrics::histogram;
 use std::io::{Read, Write};
 #[cfg(windows)]
@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use termwiz::escape::csi::{DecPrivateMode, DecPrivateModeCode, Device, Mode};
 use termwiz::escape::{Action, CSI};
 #[cfg(windows)]
-use winapi::um::winsock2::{SOL_SOCKET, SO_RCVBUF, SO_SNDBUF};
+use winapi::um::winsock2::{SO_RCVBUF, SO_SNDBUF, SOL_SOCKET};
 
 const BUFSIZE: usize = 256 * 1024;
 
@@ -57,7 +57,6 @@ impl PtyIoHooks {
             on_inline_error_output: Arc::new(|_, _, _| {}),
         }
     }
-
 }
 
 impl Default for PtyIoHooks {

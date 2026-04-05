@@ -1,7 +1,7 @@
 //! GuiWin represents a Gui TermWindow (as opposed to a Mux window) in lua code
 use super::luaerr;
-use crate::TermWindow;
 use crate::termwindow::TermWindowNotif;
+use crate::TermWindow;
 use config::keyassignment::{ClipboardCopyDestination, KeyAssignment};
 use engine_dynamic::{FromDynamic, ToDynamic};
 use engine_toast_notification::ToastNotification;

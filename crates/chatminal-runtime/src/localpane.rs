@@ -4,9 +4,9 @@ use crate::pane::{
     SearchResult, WithPaneLines,
 };
 use crate::renderable::*;
+use crate::{RenderableDimensions, SessionTerminalHandle, StableCursorPosition};
 use anyhow::Error;
 use async_trait::async_trait;
-use crate::{RenderableDimensions, SessionTerminalHandle, StableCursorPosition};
 use config::{ConfigHandle, ExitBehavior, ExitBehaviorMessaging};
 use engine_dynamic::Value;
 use engine_term::color::ColorPalette;
@@ -19,7 +19,7 @@ use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
 use portable_pty::{Child, ChildKiller, ExitStatus, MasterPty, PtySize};
 use procinfo::LocalProcessInfo;
 use rangeset::RangeSet;
-use smol::channel::{bounded, Receiver, TryRecvError};
+use smol::channel::{Receiver, TryRecvError, bounded};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::TryInto;
@@ -906,7 +906,8 @@ impl LocalPane {
         hooks: LocalPaneHooks,
     ) -> Self {
         let config_snapshot = Arc::new(Mutex::new(LocalPaneConfigSnapshot::from_handle(&config)));
-        let initial_exit_cleanup_behavior = if pty.is::<crate::local_spawn_target::FailedSpawnPty>() {
+        let initial_exit_cleanup_behavior = if pty.is::<crate::local_spawn_target::FailedSpawnPty>()
+        {
             ExitBehavior::CloseOnCleanExit
         } else {
             config_snapshot.lock().exit_behavior

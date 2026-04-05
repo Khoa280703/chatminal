@@ -5,14 +5,14 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use crate::chatminal_layout::workspace_store::{
-    DEFAULT_LAYOUT_WORKSPACE_ID, DesktopWorkspaceLayoutStore,
+    DesktopWorkspaceLayoutStore, DEFAULT_LAYOUT_WORKSPACE_ID,
 };
 use crate::chatminal_render::ChatminalRenderState;
+use chatminal_runtime::execution::SessionEngineShared;
 use chatminal_runtime::{
     RuntimeCreatedSession, RuntimeEvent, RuntimeProfile, RuntimeSessionLaunchSpec,
     RuntimeSessionSnapshot, RuntimeWorkspace,
 };
-use chatminal_runtime::execution::SessionEngineShared;
 
 pub(crate) type ChatminalSessionPane = crate::desktop_session_host::ChatminalSessionPane;
 pub(crate) type DesktopSessionHost = crate::desktop_session_host::DesktopSessionHost;
@@ -24,8 +24,8 @@ pub(crate) use chatminal_runtime::{
     SessionTerminalHandle, SessionViewBinding, SessionViewId, TerminalInstanceId,
     WorkspaceLayoutNodeKind, WorkspaceLayoutState, WorkspaceNodeId, WorkspaceSplitAxis,
 };
-pub(crate) use client::ChatminalRuntimeClient;
 pub(crate) use client::resolve_target_session_id;
+pub(crate) use client::ChatminalRuntimeClient;
 
 pub const DESKTOP_LAYOUT_WORKSPACE_ID: &str = DEFAULT_LAYOUT_WORKSPACE_ID;
 
@@ -1350,8 +1350,9 @@ mod tests {
     use chatminal_runtime::execution::SessionEngineShared;
 
     use super::{
-        DesktopWorkspaceLayoutStore, SessionViewId, WorkspaceLayoutState, WorkspaceSplitAxis,
-        collect_session_resize_targets, focus_layout_session_in_store, terminal_size_for_layout_session,
+        collect_session_resize_targets, focus_layout_session_in_store,
+        terminal_size_for_layout_session, DesktopWorkspaceLayoutStore, SessionViewId,
+        WorkspaceLayoutState, WorkspaceSplitAxis,
     };
     use engine_term::TerminalSize;
 

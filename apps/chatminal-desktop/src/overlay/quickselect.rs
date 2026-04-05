@@ -6,8 +6,8 @@ use crate::desktop_session_host::overlay_shell::{
 use crate::desktop_termwindow_types::terminal_ui_key_for_pane;
 use crate::selection::{SelectionCoordinate, SelectionRange};
 use crate::termwindow::{TermWindow, TermWindowNotif};
-use config::ConfigHandle;
 use config::keyassignment::{ClipboardCopyDestination, QuickSelectArguments};
+use config::ConfigHandle;
 use engine_term::color::ColorPalette;
 use engine_term::{
     Clipboard, Intensity, KeyCode, KeyModifiers, Line, MouseEvent, StableRowIndex, TerminalSize,
@@ -19,7 +19,7 @@ use std::ops::Range;
 use std::sync::Arc;
 use termwiz::cell::{Cell, CellAttributes};
 use termwiz::color::AnsiColor;
-use termwiz::surface::{SEQ_ZERO, SequenceNo};
+use termwiz::surface::{SequenceNo, SEQ_ZERO};
 use url::Url;
 use window::WindowOps;
 

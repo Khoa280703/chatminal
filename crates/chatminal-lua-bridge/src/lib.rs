@@ -15,8 +15,7 @@ mod window;
 
 pub use backend::install_backend;
 use backend::{
-    LuaBridgeBackend, LuaPane, LuaSessionRecord, LuaSplitSource, LuaSpawnContext,
-    installed_backend,
+    installed_backend, LuaBridgeBackend, LuaPane, LuaSessionRecord, LuaSpawnContext, LuaSplitSource,
 };
 pub use leaf::TerminalRef;
 pub use session::SessionRef;
@@ -60,7 +59,10 @@ impl LuaBridgeHost {
         }
     }
 
-    fn terminal_by_handle(&self, terminal_handle: SessionTerminalHandle) -> Option<Arc<dyn LuaPane>> {
+    fn terminal_by_handle(
+        &self,
+        terminal_handle: SessionTerminalHandle,
+    ) -> Option<Arc<dyn LuaPane>> {
         self.0.pane(terminal_handle)
     }
 
@@ -71,7 +73,10 @@ impl LuaBridgeHost {
         size: engine_term::TerminalSize,
         pane: Option<SessionTerminalHandle>,
     ) -> anyhow::Result<SpawnedSessionHandle> {
-        let spawned = self.0.spawn_root_session(cmd_builder, cwd, size, pane).await?;
+        let spawned = self
+            .0
+            .spawn_root_session(cmd_builder, cwd, size, pane)
+            .await?;
         let terminal = TerminalRef::from_terminal_handle(spawned.terminal);
         let session = SessionRef::new(spawned.session_id);
         Ok(SpawnedSessionHandle { session, terminal })
@@ -99,7 +104,9 @@ impl LuaBridgeHost {
     }
 
     pub(crate) fn set_root_workspace(&self, workspace: &str) -> mlua::Result<()> {
-        self.0.set_root_workspace(workspace).map_err(mlua::Error::external)
+        self.0
+            .set_root_workspace(workspace)
+            .map_err(mlua::Error::external)
     }
 
     pub(crate) fn workspace_names(&self) -> mlua::Result<Vec<String>> {
@@ -212,11 +219,9 @@ impl LuaBridgeHost {
     }
 
     fn session_record(&self, session_id: &str) -> mlua::Result<LuaSessionRecord> {
-        self.0
-            .session(session_id)
-            .ok_or_else(|| {
-                mlua::Error::external(format!("session '{}' not found in runtime", session_id))
-            })
+        self.0.session(session_id).ok_or_else(|| {
+            mlua::Error::external(format!("session '{}' not found in runtime", session_id))
+        })
     }
 
     pub(crate) fn session_active_terminal_instance_id(
@@ -249,8 +254,11 @@ impl LuaBridgeHost {
         &self,
         session_id: &str,
     ) -> mlua::Result<Option<TerminalRef>> {
-        self.session_record(session_id)
-            .map(|session| session.active_terminal.map(TerminalRef::from_terminal_handle))
+        self.session_record(session_id).map(|session| {
+            session
+                .active_terminal
+                .map(TerminalRef::from_terminal_handle)
+        })
     }
 
     pub(crate) fn terminals_for_session(&self, session_id: &str) -> mlua::Result<Vec<TerminalRef>> {
@@ -625,36 +633,78 @@ mod tests {
     struct MockPane;
 
     impl LuaPane for MockPane {
-        fn terminal_handle(&self) -> SessionTerminalHandle { SessionTerminalHandle::new(1) }
-        fn get_metadata(&self) -> Value { Value::Null }
-        fn send_paste(&self, _text: &str) -> anyhow::Result<()> { Ok(()) }
-        fn send_text(&self, _text: &str) -> anyhow::Result<()> { Ok(()) }
-        fn get_title(&self) -> String { String::new() }
-        fn get_progress(&self) -> Progress { Progress::None }
-        fn get_current_working_dir(&self, _policy: CachePolicy) -> Option<Url> { None }
-        fn get_foreground_process_name(&self, _policy: CachePolicy) -> Option<String> { None }
-        fn get_foreground_process_info(&self, _policy: CachePolicy) -> Option<LocalProcessInfo> { None }
-        fn get_cursor_position(&self) -> chatminal_runtime::StableCursorPosition { Default::default() }
-        fn get_dimensions(&self) -> chatminal_runtime::RenderableDimensions { Default::default() }
-        fn copy_user_vars(&self) -> HashMap<String, String> { HashMap::new() }
-        fn has_unseen_output(&self) -> bool { false }
-        fn is_alt_screen_active(&self) -> bool { false }
-        fn get_lines(&self, _lines: Range<StableRowIndex>) -> (StableRowIndex, Vec<Line>) { (0, vec![]) }
-        fn get_logical_lines(&self, _lines: Range<StableRowIndex>) -> Vec<LogicalLine> { vec![] }
+        fn terminal_handle(&self) -> SessionTerminalHandle {
+            SessionTerminalHandle::new(1)
+        }
+        fn get_metadata(&self) -> Value {
+            Value::Null
+        }
+        fn send_paste(&self, _text: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn send_text(&self, _text: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn get_title(&self) -> String {
+            String::new()
+        }
+        fn get_progress(&self) -> Progress {
+            Progress::None
+        }
+        fn get_current_working_dir(&self, _policy: CachePolicy) -> Option<Url> {
+            None
+        }
+        fn get_foreground_process_name(&self, _policy: CachePolicy) -> Option<String> {
+            None
+        }
+        fn get_foreground_process_info(&self, _policy: CachePolicy) -> Option<LocalProcessInfo> {
+            None
+        }
+        fn get_cursor_position(&self) -> chatminal_runtime::StableCursorPosition {
+            Default::default()
+        }
+        fn get_dimensions(&self) -> chatminal_runtime::RenderableDimensions {
+            Default::default()
+        }
+        fn copy_user_vars(&self) -> HashMap<String, String> {
+            HashMap::new()
+        }
+        fn has_unseen_output(&self) -> bool {
+            false
+        }
+        fn is_alt_screen_active(&self) -> bool {
+            false
+        }
+        fn get_lines(&self, _lines: Range<StableRowIndex>) -> (StableRowIndex, Vec<Line>) {
+            (0, vec![])
+        }
+        fn get_logical_lines(&self, _lines: Range<StableRowIndex>) -> Vec<LogicalLine> {
+            vec![]
+        }
         fn perform_actions(&self, _actions: Vec<termwiz::escape::Action>) {}
-        fn get_semantic_zones(&self) -> anyhow::Result<Vec<SemanticZone>> { Ok(vec![]) }
-        fn tty_name(&self) -> Option<String> { None }
+        fn get_semantic_zones(&self) -> anyhow::Result<Vec<SemanticZone>> {
+            Ok(vec![])
+        }
+        fn tty_name(&self) -> Option<String> {
+            None
+        }
     }
 
     struct MockBackend;
 
     impl LuaBridgeBackend for MockBackend {
-        fn is_runtime_available(&self) -> bool { true }
-        fn root_window_id(&self) -> u64 { 1 }
+        fn is_runtime_available(&self) -> bool {
+            true
+        }
+        fn root_window_id(&self) -> u64 {
+            1
+        }
         fn pane(&self, _terminal_handle: SessionTerminalHandle) -> Option<Arc<dyn LuaPane>> {
             Some(Arc::new(MockPane))
         }
-        fn all_panes(&self) -> Vec<Arc<dyn LuaPane>> { vec![Arc::new(MockPane)] }
+        fn all_panes(&self) -> Vec<Arc<dyn LuaPane>> {
+            vec![Arc::new(MockPane)]
+        }
         fn root_sessions(&self) -> Vec<LuaSessionRecord> {
             vec![LuaSessionRecord {
                 session_id: Some("session-1".to_string()),
@@ -697,22 +747,47 @@ mod tests {
         ) -> BackendFuture<anyhow::Result<SessionTerminalHandle>> {
             Box::pin(async { Ok(SessionTerminalHandle::new(2)) })
         }
-        fn active_workspace(&self) -> anyhow::Result<String> { Ok("default".to_string()) }
-        fn root_workspace(&self) -> anyhow::Result<String> { Ok("default".to_string()) }
-        fn set_root_workspace(&self, _workspace: &str) -> anyhow::Result<()> { Ok(()) }
-        fn workspace_names(&self) -> anyhow::Result<Vec<String>> { Ok(vec!["default".to_string()]) }
-        fn set_active_workspace(&self, _workspace: &str) -> anyhow::Result<()> { Ok(()) }
-        fn rename_workspace(&self, _old_workspace: &str, _new_workspace: &str) -> anyhow::Result<()> { Ok(()) }
-        fn root_title(&self) -> anyhow::Result<String> { Ok("Chatminal".to_string()) }
-        fn set_root_title(&self, _title: &str) -> anyhow::Result<()> { Ok(()) }
+        fn active_workspace(&self) -> anyhow::Result<String> {
+            Ok("default".to_string())
+        }
+        fn root_workspace(&self) -> anyhow::Result<String> {
+            Ok("default".to_string())
+        }
+        fn set_root_workspace(&self, _workspace: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn workspace_names(&self) -> anyhow::Result<Vec<String>> {
+            Ok(vec!["default".to_string()])
+        }
+        fn set_active_workspace(&self, _workspace: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn rename_workspace(
+            &self,
+            _old_workspace: &str,
+            _new_workspace: &str,
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn root_title(&self) -> anyhow::Result<String> {
+            Ok("Chatminal".to_string())
+        }
+        fn set_root_title(&self, _title: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
         fn root_spawn_context(&self) -> anyhow::Result<LuaSpawnContext> {
             Ok(LuaSpawnContext {
                 size: TerminalSize::default(),
                 sibling: None,
             })
         }
-        fn set_session_title(&self, _session_id: &str, _title: &str) -> anyhow::Result<()> { Ok(()) }
-        fn session_terminals(&self, session_id: &str) -> anyhow::Result<Vec<SessionTerminalHandle>> {
+        fn set_session_title(&self, _session_id: &str, _title: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn session_terminals(
+            &self,
+            session_id: &str,
+        ) -> anyhow::Result<Vec<SessionTerminalHandle>> {
             if session_id == "session-1" {
                 Ok(vec![SessionTerminalHandle::new(1)])
             } else {
@@ -751,10 +826,18 @@ mod tests {
                 terminal_instance_id: Some(11),
             }])
         }
-        fn rotate_session_counter_clockwise(&self, _session_id: &str) -> anyhow::Result<()> { Ok(()) }
-        fn rotate_session_clockwise(&self, _session_id: &str) -> anyhow::Result<()> { Ok(()) }
-        fn activate_terminal(&self, _terminal_handle: SessionTerminalHandle) -> anyhow::Result<()> { Ok(()) }
-        fn activate_session(&self, _session_id: &str) -> anyhow::Result<()> { Ok(()) }
+        fn rotate_session_counter_clockwise(&self, _session_id: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn rotate_session_clockwise(&self, _session_id: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn activate_terminal(&self, _terminal_handle: SessionTerminalHandle) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn activate_session(&self, _session_id: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
     }
 
     fn install_test_backend() {

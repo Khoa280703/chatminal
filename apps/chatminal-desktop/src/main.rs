@@ -6,14 +6,14 @@ use crate::customglyph::BlockKey;
 use crate::glyphcache::GlyphCache;
 use crate::utilsprites::RenderMetrics;
 use ::window::*;
-use anyhow::{Context, anyhow};
+use anyhow::{anyhow, Context};
 use clap::builder::ValueParser;
 use clap::{Parser, ValueHint};
 use config::keyassignment::SpawnCommand;
 use config::{ConfigHandle, SerialTarget};
 use engine_bidi::Direction;
-use engine_font::FontConfiguration;
 use engine_font::shaper::PresentationWidth;
+use engine_font::FontConfiguration;
 use engine_gui_subcommands::*;
 use engine_toast_notification::*;
 use portable_pty::cmdbuilder::CommandBuilder;
@@ -39,8 +39,8 @@ mod colorease;
 mod commands;
 mod customglyph;
 mod desktop_commands;
-mod desktop_session_host;
 mod desktop_mouse_actions;
+mod desktop_session_host;
 mod desktop_spawn;
 mod desktop_termwindow_types;
 mod download;
@@ -70,7 +70,7 @@ mod utilsprites;
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
 pub use selection::SelectionMode;
-pub use termwindow::{ICON_DATA, TermWindow, set_window_class, set_window_position};
+pub use termwindow::{set_window_class, set_window_position, TermWindow, ICON_DATA};
 
 #[derive(Debug, Parser)]
 #[command(

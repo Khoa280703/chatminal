@@ -3,9 +3,9 @@
 #![allow(clippy::unneeded_field_pattern)]
 
 use crate::renderstate::BorrowedLayers;
-use ::window::RectF;
 use ::window::bitmaps::TextureRect;
 use ::window::color::LinearRgba;
+use ::window::RectF;
 use config::HsbTransform;
 
 /// Each cell is composed of two triangles built from 4 vertices.

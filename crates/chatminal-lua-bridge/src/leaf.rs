@@ -295,8 +295,8 @@ impl UserData for TerminalRef {
             let host = get_host_for_lua(lua)?;
             let of_type: Option<SemanticType> = from_lua(of_type)?;
             let mut zones = host.with_pane_result(*this, |pane| {
-                    pane.get_semantic_zones()
-                        .map_err(|e| mlua::Error::external(format!("{:#}", e)))
+                pane.get_semantic_zones()
+                    .map_err(|e| mlua::Error::external(format!("{:#}", e)))
             })?;
 
             if let Some(of_type) = of_type {

@@ -2,7 +2,8 @@ use crate::chatminal_runtime::desktop_active_session_entry_binding;
 
 impl TermWindow {
     fn close_runtime_entry_at_index(&mut self, entry_idx: usize, confirm: bool) {
-        let Some(runtime_entry) = self.get_session_entry_information().get(entry_idx).cloned() else {
+        let Some(runtime_entry) = self.get_session_entry_information().get(entry_idx).cloned()
+        else {
             return;
         };
 
@@ -11,12 +12,12 @@ impl TermWindow {
             return;
         }
         if confirm
-            && !self.render_scope_can_close_without_prompting(
-                render_scope_id,
-                CloseReason::Tab,
-            )
+            && !self.render_scope_can_close_without_prompting(render_scope_id, CloseReason::Tab)
         {
-            if self.activate_runtime_entry_index(entry_idx as isize).is_err() {
+            if self
+                .activate_runtime_entry_index(entry_idx as isize)
+                .is_err()
+            {
                 return;
             }
 
@@ -25,7 +26,7 @@ impl TermWindow {
             });
         } else {
             self.remove_runtime_entry_scope(render_scope_id);
-            self.sync_active_chatminal_session_from_mux();
+            self.sync_active_chatminal_session_from_runtime();
         }
     }
 

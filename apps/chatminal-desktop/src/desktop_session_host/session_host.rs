@@ -19,18 +19,18 @@ use portable_pty::CommandBuilder;
 
 use super::session_pane::ChatminalSessionPane;
 use super::{
-    FrontendClientHandle, FrontendFocusedPane, FrontendResolvedPane, HostFocusedPaneBinding,
-    HostRenderableDimensions as RenderableDimensions, HostSpawnTargetHandle,
-    HostTerminal, LauncherSessionEntry, PRIMARY_HOST_WINDOW_ID,
-    ROOT_HOST_WINDOW_ID, RuntimeNotification, RuntimeWindow, configured_default_workspace_name,
-    host_window_exists, overlay_shell, publish_runtime_notification_from_any_thread,
-    subscribe_desktop_runtime_notifications,
+    FrontendClientHandle, FrontendFocusedPane, FrontendResolvedPane, HostSpawnTargetHandle,
+    HostTerminal, LauncherSessionEntry, PRIMARY_HOST_WINDOW_ID, ROOT_HOST_WINDOW_ID, RuntimeWindow,
+    configured_default_workspace_name, host_window_exists, overlay_shell,
+    publish_runtime_notification_from_any_thread, subscribe_desktop_runtime_notifications,
 };
 use crate::chatminal_render::{ChatminalRenderPane, ChatminalRenderState};
 use crate::chatminal_runtime::{
     SessionRenderTargetId, SessionRenderTargetSnapshot, SessionTerminalHandle,
 };
-use chatminal_runtime::RuntimeSessionLaunchSpec;
+use chatminal_runtime::{
+    FocusedPaneBinding, HostRuntimeNotification, RenderableDimensions, RuntimeSessionLaunchSpec,
+};
 
 // ---------------------------------------------------------------------------
 // Singleton host registry
@@ -55,7 +55,6 @@ fn host_terminal_handle(pane: &dyn HostTerminal) -> SessionTerminalHandle {
     pane.terminal_handle()
 }
 
-
 struct DesktopClipboardBridge {
     terminal_handle: SessionTerminalHandle,
 }
@@ -66,7 +65,7 @@ impl Clipboard for DesktopClipboardBridge {
         selection: ClipboardSelection,
         clipboard: Option<String>,
     ) -> anyhow::Result<()> {
-        publish_runtime_notification_from_any_thread(RuntimeNotification::AssignClipboard {
+        publish_runtime_notification_from_any_thread(HostRuntimeNotification::AssignClipboard {
             pane_id: self.terminal_handle,
             selection,
             clipboard,
@@ -79,7 +78,7 @@ struct DesktopDownloadBridge;
 
 impl DownloadHandler for DesktopDownloadBridge {
     fn save_to_downloads(&self, name: Option<String>, data: Vec<u8>) {
-        publish_runtime_notification_from_any_thread(RuntimeNotification::SaveToDownloads {
+        publish_runtime_notification_from_any_thread(HostRuntimeNotification::SaveToDownloads {
             name,
             data: Arc::new(data),
         });
@@ -112,7 +111,7 @@ fn host_set_workspace_name(name: &str) {
 
 fn host_subscribe<F>(subscriber: F)
 where
-    F: Fn(RuntimeNotification) -> bool + 'static + Send + Sync,
+    F: Fn(HostRuntimeNotification) -> bool + 'static + Send + Sync,
 {
     subscribe_desktop_runtime_notifications(subscriber);
 }
@@ -129,9 +128,7 @@ fn host_resolve_pane_id_value(terminal_handle: SessionTerminalHandle) -> Option<
         .and_then(|host| host.runtime_id_for_terminal_handle_value(terminal_handle))
 }
 
-fn host_resolve_focused_pane_value(
-    client_id: &FrontendClientHandle,
-) -> Option<HostFocusedPaneBinding> {
+fn host_resolve_focused_pane_value(client_id: &FrontendClientHandle) -> Option<FocusedPaneBinding> {
     HOST_REGISTRY
         .get()
         .and_then(|host| host.focused_pane_for_client_value(client_id))
@@ -148,7 +145,6 @@ fn host_set_tab_title(runtime_id: RuntimeId, title: &str) {
         host.set_runtime_title_value(runtime_id, title);
     }
 }
-
 
 fn initialize_desktop_session_host(
     config: &ConfigHandle,
@@ -303,7 +299,7 @@ pub(crate) struct DesktopSessionHost {
     primary_spawn_target: Mutex<Option<HostSpawnTargetHandle>>,
     active_client: Mutex<Option<FrontendClientHandle>>,
     workspace_by_client: Mutex<HashMap<FrontendClientHandle, String>>,
-    focused_pane_by_client: Mutex<HashMap<FrontendClientHandle, HostFocusedPaneBinding>>,
+    focused_pane_by_client: Mutex<HashMap<FrontendClientHandle, FocusedPaneBinding>>,
     // terminal_instance_id → pane (for output/input routing)
     panes: Mutex<HashMap<TerminalInstanceId, Arc<ChatminalSessionPane>>>,
     // session_id → pane (1 session = 1 pane invariant)
@@ -385,9 +381,9 @@ impl DesktopSessionHost {
             .lock()
             .unwrap()
             .insert(client_id.clone(), workspace.to_string());
-        publish_runtime_notification_from_any_thread(RuntimeNotification::ActiveWorkspaceChanged(
-            client_id.clone(),
-        ));
+        publish_runtime_notification_from_any_thread(
+            HostRuntimeNotification::ActiveWorkspaceChanged(client_id.clone()),
+        );
     }
 
     fn workspace_is_empty_value(&self, workspace: &str) -> bool {
@@ -414,7 +410,7 @@ impl DesktopSessionHost {
     fn focused_pane_for_client_value(
         &self,
         client_id: &FrontendClientHandle,
-    ) -> Option<HostFocusedPaneBinding> {
+    ) -> Option<FocusedPaneBinding> {
         self.focused_pane_by_client
             .lock()
             .unwrap()
@@ -441,7 +437,7 @@ impl DesktopSessionHost {
         window.push_runtime(runtime_id);
         let last_index = window.len().saturating_sub(1);
         window.save_and_then_set_active(last_index);
-        publish_runtime_notification_from_any_thread(RuntimeNotification::TabAddedToWindow {
+        publish_runtime_notification_from_any_thread(HostRuntimeNotification::TabAddedToWindow {
             runtime_id,
         });
     }
@@ -827,12 +823,8 @@ impl DesktopSessionHost {
                 .get(&runtime_id)
                 .copied()
                 .unwrap_or_else(|| terminal_size_from_dims(active_pane.get_dimensions()));
-            let render_state = self.build_render_state(
-                runtime_id,
-                layout,
-                active_pane.as_ref(),
-                terminal_size,
-            );
+            let render_state =
+                self.build_render_state(runtime_id, layout, active_pane.as_ref(), terminal_size);
             self.runtime_render_state
                 .lock()
                 .unwrap()
@@ -1071,7 +1063,7 @@ impl DesktopSessionHost {
 
     pub(crate) fn subscribe_notifications<F>(&self, subscriber: F)
     where
-        F: Fn(RuntimeNotification) -> bool + 'static + Send + Sync,
+        F: Fn(HostRuntimeNotification) -> bool + 'static + Send + Sync,
     {
         host_subscribe(subscriber);
     }
@@ -1130,10 +1122,12 @@ impl DesktopSessionHost {
             }
         }
         if changed {
-            publish_runtime_notification_from_any_thread(RuntimeNotification::WorkspaceRenamed {
-                old_workspace: old_workspace.to_string(),
-                new_workspace: new_workspace.to_string(),
-            });
+            publish_runtime_notification_from_any_thread(
+                HostRuntimeNotification::WorkspaceRenamed {
+                    old_workspace: old_workspace.to_string(),
+                    new_workspace: new_workspace.to_string(),
+                },
+            );
         }
         changed
     }
@@ -1346,7 +1340,7 @@ impl DesktopSessionHost {
             if let Some(runtime_id) = self.resolve_runtime_id_for_terminal_handle(terminal_handle) {
                 self.focused_pane_by_client.lock().unwrap().insert(
                     client_id,
-                    HostFocusedPaneBinding::new(runtime_id, terminal_handle),
+                    FocusedPaneBinding::new(runtime_id, terminal_handle),
                 );
             }
         }

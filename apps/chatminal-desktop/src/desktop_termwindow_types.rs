@@ -29,7 +29,7 @@ pub struct TerminalPaneLayout {
 }
 
 impl TerminalPaneLayout {
-    pub fn from_mux(layout: OverlayPaneLayout) -> Self {
+    pub fn from_overlay_layout(layout: OverlayPaneLayout) -> Self {
         Self {
             index: layout.index,
             is_active: layout.is_active,
@@ -61,10 +61,10 @@ pub struct TerminalSplit {
 }
 
 impl TerminalSplit {
-    pub fn from_mux(split: OverlaySplitLayout) -> Self {
+    pub fn from_overlay_split(split: OverlaySplitLayout) -> Self {
         Self {
             index: split.index,
-            direction: TerminalSplitDirection::from_mux(split.direction),
+            direction: TerminalSplitDirection::from_overlay_direction(split.direction),
             left: split.left,
             top: split.top,
             size: split.size,
@@ -73,7 +73,7 @@ impl TerminalSplit {
 }
 
 impl TerminalSplitDirection {
-    pub fn from_mux(direction: OverlaySplitDirection) -> Self {
+    pub fn from_overlay_direction(direction: OverlaySplitDirection) -> Self {
         match direction {
             OverlaySplitDirection::Horizontal => Self::Horizontal,
             OverlaySplitDirection::Vertical => Self::Vertical,

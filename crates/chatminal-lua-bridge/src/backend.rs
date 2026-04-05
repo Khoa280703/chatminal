@@ -136,7 +136,9 @@ pub trait LuaBridgeBackend: Send + Sync {
 
 static BACKEND: OnceLock<Arc<dyn LuaBridgeBackend>> = OnceLock::new();
 
-pub fn install_backend(backend: Arc<dyn LuaBridgeBackend>) -> Result<(), Arc<dyn LuaBridgeBackend>> {
+pub fn install_backend(
+    backend: Arc<dyn LuaBridgeBackend>,
+) -> Result<(), Arc<dyn LuaBridgeBackend>> {
     BACKEND.set(backend)
 }
 

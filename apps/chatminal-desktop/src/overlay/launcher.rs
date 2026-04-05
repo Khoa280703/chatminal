@@ -7,13 +7,13 @@
 use crate::chatminal_runtime::desktop_current_active_session_id;
 use crate::commands::derive_command_from_key_assignment;
 use crate::desktop_session_host::overlay_shell::OverlayTerminal;
-use crate::desktop_session_host::{LauncherSessionEntry, launcher_sessions};
+use crate::desktop_session_host::{launcher_sessions, LauncherSessionEntry};
 use crate::inputmap::InputMap;
 use crate::overlay::quickselect;
 use crate::overlay::selector::{matcher_pattern, matcher_score};
 use crate::termwindow::TermWindowNotif;
-use config::ConfigHandle;
 use config::keyassignment::KeyAssignment;
+use config::ConfigHandle;
 use rayon::prelude::*;
 use std::collections::BTreeMap;
 use termwiz::cell::{AttributeChange, CellAttributes};

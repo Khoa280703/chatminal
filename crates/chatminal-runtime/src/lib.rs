@@ -20,8 +20,8 @@ pub(crate) mod pty_io;
 pub mod renderable;
 pub mod runtime_entry;
 pub mod session;
-pub mod surface;
 pub mod state;
+pub mod surface;
 pub mod terminal_search;
 pub mod terminal_text_utils;
 pub mod termwiztermtab;
@@ -40,16 +40,18 @@ pub use api::{
 pub use client::{ClientId, ClientInfo};
 pub use config::{RuntimeConfig, resolve_session_cwd};
 pub use host_notification::HostRuntimeNotification;
+pub use local_spawn_target::{LocalSpawnHooks, LocalSpawnTarget};
+pub use localpane_hooks::LocalPaneHooks;
 pub use metrics::{RuntimeMetrics, RuntimeMetricsSnapshot};
 pub use runtime_entry::{
     FocusedPaneBinding, RuntimeEntryInfo, RuntimeEntrySplitInfo, RuntimeEntryTerminalInfo,
 };
 pub use session::{InputWriteStats, SessionEvent, WriteInputError};
-pub use surface::{
-    CachePolicy, LogicalLine, PaneEntry, PaneNode, RenderableDimensions, SerdeUrl,
-    SplitDirection, SplitDirectionAndSize, SplitRequest, SplitSize, StableCursorPosition,
-};
 pub use state::{RuntimeState, RuntimeSubscription};
+pub use surface::{
+    CachePolicy, LogicalLine, PaneEntry, PaneNode, RenderableDimensions, SerdeUrl, SplitDirection,
+    SplitDirectionAndSize, SplitRequest, SplitSize, StableCursorPosition,
+};
 pub use terminal_search::{Pattern, PatternType, SearchResult};
 pub use workspace_ids::{
     RuntimeId, SessionGroupId, SessionRenderTargetId, SessionTerminalHandle, SessionViewId,
@@ -59,5 +61,3 @@ pub use workspace_layout::{
     SessionViewSnapshot, WorkspaceLayoutNodeKind, WorkspaceLayoutNodeSnapshot,
     WorkspaceLayoutRegistry, WorkspaceLayoutState, WorkspaceSplitAxis,
 };
-pub use local_spawn_target::{LocalSpawnHooks, LocalSpawnTarget};
-pub use localpane_hooks::LocalPaneHooks;

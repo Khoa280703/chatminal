@@ -1,17 +1,18 @@
 use crate::TermWindow;
 use crate::desktop_session_host::{
-    FrontendClientHandle, HostActivityGuard, RuntimeNotification, active_frontend_client,
-    active_workspace_for_client, focus_terminal_handle_by_id, frontend_resolve_focused_pane,
-    frontend_resolve_pane, host_activity_count, host_window_exists, host_workspace_has_windows,
-    host_workspace_name, primary_host_window_exists, primary_host_window_id,
-    set_active_workspace_for_client, spawn_local_shell_runner, start_host_activity,
-    subscribe_frontend_notifications, workspace_is_empty, workspace_names,
+    FrontendClientHandle, HostActivityGuard, active_frontend_client, active_workspace_for_client,
+    focus_terminal_handle_by_id, frontend_resolve_focused_pane, frontend_resolve_pane,
+    host_activity_count, host_window_exists, host_workspace_has_windows, host_workspace_name,
+    primary_host_window_exists, primary_host_window_id, set_active_workspace_for_client,
+    spawn_local_shell_runner, start_host_activity, subscribe_frontend_notifications,
+    workspace_is_empty, workspace_names,
 };
 use crate::scripting::guiwin::GuiWin;
 use crate::scripting::guiwin::PrimaryGuiWindowId;
 use crate::spawn::SpawnWhere;
 use ::window::*;
 use anyhow::{Context, Error};
+use chatminal_runtime::HostRuntimeNotification;
 use config::keyassignment::{KeyAssignment, SpawnCommand};
 use config::{ConfigHandle, ConfigSubscription, NotificationHandling};
 use engine_term::{Alert, ClipboardSelection};
@@ -75,7 +76,7 @@ impl GuiFrontEnd {
 
         subscribe_frontend_notifications(move |n| {
             match n {
-                RuntimeNotification::WorkspaceRenamed {
+                HostRuntimeNotification::WorkspaceRenamed {
                     old_workspace,
                     new_workspace,
                 } => {
@@ -88,8 +89,8 @@ impl GuiFrontEnd {
                         .detach();
                     }
                 }
-                RuntimeNotification::WindowWorkspaceChanged
-                | RuntimeNotification::ActiveWorkspaceChanged(_) => {
+                HostRuntimeNotification::WindowWorkspaceChanged
+                | HostRuntimeNotification::ActiveWorkspaceChanged(_) => {
                     promise::spawn::spawn_into_main_thread(async move {
                         let fe = crate::frontend::front_end();
                         if !fe.is_switching_workspace() {
@@ -98,7 +99,7 @@ impl GuiFrontEnd {
                     })
                     .detach();
                 }
-                RuntimeNotification::PaneFocused(pane_id) => {
+                HostRuntimeNotification::PaneFocused(pane_id) => {
                     promise::spawn::spawn_into_main_thread(async move {
                         if let Err(err) = focus_terminal_handle_by_id(pane_id) {
                             log::error!("Error reconciling PaneFocused notification: {err:#}");
@@ -106,15 +107,15 @@ impl GuiFrontEnd {
                     })
                     .detach();
                 }
-                RuntimeNotification::TabTitleChanged { .. } => {}
-                RuntimeNotification::WindowTitleChanged { .. } => {}
-                RuntimeNotification::TabResized(_) => {}
-                RuntimeNotification::TabAddedToWindow { .. } => {}
-                RuntimeNotification::PaneRemoved(_) => {}
-                RuntimeNotification::WindowInvalidated => {}
-                RuntimeNotification::PaneOutput(_) => {}
-                RuntimeNotification::PaneAdded(_) => {}
-                RuntimeNotification::Alert {
+                HostRuntimeNotification::TabTitleChanged { .. } => {}
+                HostRuntimeNotification::WindowTitleChanged { .. } => {}
+                HostRuntimeNotification::TabResized(_) => {}
+                HostRuntimeNotification::TabAddedToWindow { .. } => {}
+                HostRuntimeNotification::PaneRemoved(_) => {}
+                HostRuntimeNotification::WindowInvalidated => {}
+                HostRuntimeNotification::PaneOutput(_) => {}
+                HostRuntimeNotification::PaneAdded(_) => {}
+                HostRuntimeNotification::Alert {
                     pane_id,
                     alert:
                         Alert::ToastNotification {
@@ -150,13 +151,13 @@ impl GuiFrontEnd {
                         }
                     }
                 }
-                RuntimeNotification::Alert {
+                HostRuntimeNotification::Alert {
                     pane_id: _,
                     alert: Alert::Bell | Alert::Progress(_),
                 } => {
                     // Handled via TermWindowNotif; NOP it here.
                 }
-                RuntimeNotification::Alert {
+                HostRuntimeNotification::Alert {
                     pane_id: _,
                     alert:
                         Alert::OutputSinceFocusLost
@@ -167,7 +168,7 @@ impl GuiFrontEnd {
                         | Alert::IconTitleChanged(_)
                         | Alert::SetUserVar { .. },
                 } => {}
-                RuntimeNotification::Empty => {
+                HostRuntimeNotification::Empty => {
                     if current_frontend_config().quit_when_all_windows_are_closed {
                         promise::spawn::spawn_into_main_thread(async move {
                             let activity_count = host_activity_count();
@@ -187,7 +188,7 @@ impl GuiFrontEnd {
                         .detach();
                     }
                 }
-                RuntimeNotification::SaveToDownloads { name, data } => {
+                HostRuntimeNotification::SaveToDownloads { name, data } => {
                     if !current_frontend_config().allow_download_protocols {
                         log::error!(
                             "Ignoring download request for {:?}, \
@@ -198,7 +199,7 @@ impl GuiFrontEnd {
                         log::error!("save_to_downloads: {:#}", err);
                     }
                 }
-                RuntimeNotification::AssignClipboard {
+                HostRuntimeNotification::AssignClipboard {
                     pane_id,
                     selection,
                     clipboard,

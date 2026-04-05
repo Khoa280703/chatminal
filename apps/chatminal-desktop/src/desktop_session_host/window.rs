@@ -1,7 +1,7 @@
-use chatminal_runtime::RuntimeId;
+use chatminal_runtime::{HostRuntimeNotification, RuntimeId};
 use config::GuiPosition;
 
-use super::{RuntimeNotification, publish_runtime_notification};
+use super::publish_runtime_notification;
 
 pub(crate) type WindowId = usize;
 pub(crate) const ROOT_WINDOW_ID: WindowId = 0;
@@ -68,7 +68,7 @@ impl Window {
             return;
         }
         self.title = title.to_string();
-        publish_runtime_notification(RuntimeNotification::WindowTitleChanged {
+        publish_runtime_notification(HostRuntimeNotification::WindowTitleChanged {
             title: self.title.clone(),
         });
     }
@@ -82,11 +82,11 @@ impl Window {
             return;
         }
         self.workspace = workspace.to_string();
-        publish_runtime_notification(RuntimeNotification::WindowWorkspaceChanged);
+        publish_runtime_notification(HostRuntimeNotification::WindowWorkspaceChanged);
     }
 
     fn invalidate(&self) {
-        publish_runtime_notification(RuntimeNotification::WindowInvalidated);
+        publish_runtime_notification(HostRuntimeNotification::WindowInvalidated);
     }
 
     fn idx_by_id(&self, id: RuntimeId) -> Option<usize> {
