@@ -882,9 +882,9 @@ pub(crate) fn primary_host_spawn_target() -> HostSpawnTargetHandle {
 }
 
 #[cfg(test)]
-pub(crate) fn acquire_legacy_host_runtime_test_lock() -> std::sync::MutexGuard<'static, ()> {
-    static LEGACY_HOST_RUNTIME_TEST_GUARD: OnceLock<Mutex<()>> = OnceLock::new();
-    LEGACY_HOST_RUNTIME_TEST_GUARD
+pub(crate) fn acquire_host_runtime_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static HOST_RUNTIME_TEST_GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+    HOST_RUNTIME_TEST_GUARD
         .get_or_init(|| Mutex::new(()))
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())

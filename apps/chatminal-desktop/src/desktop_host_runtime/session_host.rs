@@ -322,12 +322,12 @@ fn pane_dims_need_resize(dims: RenderableDimensions, size: TerminalSize) -> bool
 }
 
 #[cfg(test)]
-pub(crate) fn legacy_active_frontend_client() -> Option<FrontendClientHandle> {
+pub(crate) fn test_active_frontend_client() -> Option<FrontendClientHandle> {
     host_active_identity()
 }
 
 #[cfg(test)]
-pub(crate) fn legacy_active_workspace_for_client(client_id: &FrontendClientHandle) -> String {
+pub(crate) fn test_active_workspace_for_client(client_id: &FrontendClientHandle) -> String {
     let workspace = host_workspace_for_client(client_id);
     if !workspace.is_empty() {
         return workspace;
@@ -338,7 +338,7 @@ pub(crate) fn legacy_active_workspace_for_client(client_id: &FrontendClientHandl
 }
 
 #[cfg(test)]
-pub(crate) fn build_legacy_host_runtime_for_test(
+pub(crate) fn build_host_runtime_for_test(
     config: &ConfigHandle,
     default_workspace_name: Option<&str>,
 ) -> anyhow::Result<()> {
@@ -347,7 +347,7 @@ pub(crate) fn build_legacy_host_runtime_for_test(
 }
 
 #[cfg(test)]
-pub(crate) fn shutdown_legacy_host_runtime_for_test() {
+pub(crate) fn shutdown_host_runtime_for_test() {
     shutdown_desktop_host_runtime();
 }
 
@@ -1407,10 +1407,10 @@ mod tests {
     use std::collections::HashSet;
     use std::sync::{Arc, Mutex};
 
-    use super::super::acquire_legacy_host_runtime_test_lock;
+    use super::super::acquire_host_runtime_test_lock;
     use super::{
-        build_legacy_host_runtime_for_test, legacy_active_frontend_client,
-        legacy_active_workspace_for_client, shutdown_legacy_host_runtime_for_test,
+        build_host_runtime_for_test, test_active_frontend_client,
+        test_active_workspace_for_client, shutdown_host_runtime_for_test,
         ChatminalSessionPane, DesktopSessionHost,
     };
     use crate::chatminal_render::ChatminalRenderState;
@@ -1518,7 +1518,7 @@ mod tests {
     }
 
     #[test]
-    fn remove_terminal_handle_prunes_local_registry_before_legacy_fallback() {
+    fn remove_terminal_handle_prunes_local_registry_before_host_fallback() {
         let runtime_id = RuntimeId::new(61);
         let terminal_instance_id = TerminalInstanceId::new(62);
         let (host, pane) =
@@ -1612,28 +1612,28 @@ mod tests {
     }
 
     #[test]
-    fn build_legacy_host_runtime_for_test_reuses_existing_client_identity() {
-        let _guard = acquire_legacy_host_runtime_test_lock();
-        shutdown_legacy_host_runtime_for_test();
+    fn build_host_runtime_for_test_reuses_existing_client_identity() {
+        let _guard = acquire_host_runtime_test_lock();
+        shutdown_host_runtime_for_test();
 
         let config = ConfigHandle::default_config();
-        build_legacy_host_runtime_for_test(&config, Some("workspace-a"))
+        build_host_runtime_for_test(&config, Some("workspace-a"))
             .expect("build initial host runtime first time");
-        let first_client = legacy_active_frontend_client().expect("first client");
+        let first_client = test_active_frontend_client().expect("first client");
         assert_eq!(
-            legacy_active_workspace_for_client(&first_client),
+            test_active_workspace_for_client(&first_client),
             "workspace-a".to_string()
         );
 
-        build_legacy_host_runtime_for_test(&config, Some("workspace-b"))
+        build_host_runtime_for_test(&config, Some("workspace-b"))
             .expect("build initial host runtime second time");
-        let second_client = legacy_active_frontend_client().expect("second client");
+        let second_client = test_active_frontend_client().expect("second client");
         assert_eq!(first_client, second_client);
         assert_eq!(
-            legacy_active_workspace_for_client(&second_client),
+            test_active_workspace_for_client(&second_client),
             "workspace-b".to_string()
         );
 
-        shutdown_legacy_host_runtime_for_test();
+        shutdown_host_runtime_for_test();
     }
 }

@@ -796,7 +796,7 @@ mod tests {
         TerminalInstanceId,
     };
     use super::super::{
-        acquire_legacy_host_runtime_test_lock, build_initial_host_runtime, shutdown_host_runtime,
+        acquire_host_runtime_test_lock, build_initial_host_runtime, shutdown_host_runtime,
     };
     use super::{
         decode_input_payload_chunks, looks_like_chatminal_internal_title, Action,
@@ -814,7 +814,7 @@ mod tests {
     }
 
     fn init_host_runtime_test() -> HostRuntimeTestGuard {
-        let guard = acquire_legacy_host_runtime_test_lock();
+        let guard = acquire_host_runtime_test_lock();
         shutdown_host_runtime();
         let config = config::current_config_handle();
         build_initial_host_runtime(&config, None).expect("init host runtime");

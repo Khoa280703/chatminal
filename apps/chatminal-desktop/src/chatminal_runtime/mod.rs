@@ -678,15 +678,6 @@ pub fn workspace_layout_split_view(
     )
 }
 
-pub fn workspace_layout_attach_session(
-    workspace_id: &str,
-    view_id: SessionViewId,
-    session_id: &str,
-) -> Result<Option<WorkspaceLayoutState>, String> {
-    embedded_runtime_arc()?
-        .state
-        .workspace_layout_attach_session(workspace_id, view_id, session_id)
-}
 
 pub fn workspace_layout_focus_view(
     workspace_id: &str,

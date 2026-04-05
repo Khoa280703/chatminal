@@ -315,36 +315,6 @@ impl DesktopWorkspaceLayoutStore {
         }
     }
 
-    pub fn attach_session(
-        &self,
-        view_id: SessionViewId,
-        session_id: &str,
-    ) -> Option<WorkspaceLayoutState> {
-        #[cfg(test)]
-        if let Some(shared) = &self.shared {
-            let layout = shared.workspace_layouts().lock().unwrap().attach_session(
-                &self.workspace_id,
-                view_id,
-                session_id.to_string(),
-            );
-            if let Some(layout) = layout.as_ref() {
-                persist_layout_for_test(layout);
-            }
-            return layout;
-        }
-
-        match crate::chatminal_runtime::workspace_layout_attach_session(
-            &self.workspace_id,
-            view_id,
-            session_id,
-        ) {
-            Ok(layout) => layout,
-            Err(err) => {
-                log::error!("failed to attach session into workspace layout: {err}");
-                None
-            }
-        }
-    }
 
     pub fn focus_view(&self, view_id: SessionViewId) -> Option<WorkspaceLayoutState> {
         #[cfg(test)]
