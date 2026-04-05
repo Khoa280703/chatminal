@@ -1,5 +1,6 @@
 use crate::chatminal_runtime::desktop_current_active_session_id;
 use crate::inputmap::InputMap;
+use KeyAssignment::*;
 use config::keyassignment::*;
 use config::window::WindowLevel;
 use config::{ConfigHandle, DeferredKeyCode};
@@ -8,7 +9,6 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::convert::TryFrom;
 use window::{KeyCode, Modifiers};
-use KeyAssignment::*;
 
 // Compatibility translation layer for upstream-style command/config names.
 // Product-facing desktop code should consume SessionBarAssignment and other
@@ -87,6 +87,8 @@ pub fn is_supported_in_session_ui(assignment: &KeyAssignment) -> bool {
                 | SessionSelectMode::MoveToNewSession,
             ..
         }) | KeyAssignment::ActivateSessionDirection(_)
+            | KeyAssignment::ToggleTerminalZoomState
+            | KeyAssignment::SetTerminalZoomState(_)
             | KeyAssignment::AdjustSplitSize(_, _)
             | KeyAssignment::RotatePanes(_)
     )
@@ -1760,6 +1762,12 @@ mod tests {
         assert!(!is_supported_in_session_ui(&KeyAssignment::RotatePanes(
             RotationDirection::Clockwise,
         )));
+        assert!(!is_supported_in_session_ui(
+            &KeyAssignment::ToggleTerminalZoomState
+        ));
+        assert!(!is_supported_in_session_ui(
+            &KeyAssignment::SetTerminalZoomState(true)
+        ));
     }
 
     #[test]
@@ -1785,6 +1793,14 @@ mod tests {
                 brief: "Drop".into(),
                 doc: "".into(),
                 action: KeyAssignment::AdjustSplitSize(SessionDirection::Left, 1),
+                keys: vec![],
+                menubar: &["Window"],
+                icon: None,
+            },
+            ExpandedCommand {
+                brief: "Drop zoom".into(),
+                doc: "".into(),
+                action: KeyAssignment::ToggleTerminalZoomState,
                 keys: vec![],
                 menubar: &["Window"],
                 icon: None,

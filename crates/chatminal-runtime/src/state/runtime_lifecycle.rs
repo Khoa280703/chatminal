@@ -216,6 +216,7 @@ impl StateInner {
                 restored_trailing_fragment: None,
                 restored_prompt_redraw_buffer: String::new(),
                 recent_output_tail: String::new(),
+                active_startup_recipe_generation: None,
             },
         );
         self.set_active_session_and_publish(&session.profile_id, &session.session_id)
@@ -380,6 +381,7 @@ fn disconnect_session_entry(
     entry.restored_trailing_fragment = None;
     entry.restored_prompt_redraw_buffer.clear();
     entry.recent_output_tail.clear();
+    entry.active_startup_recipe_generation = None;
     entry.session.status = StoredSessionStatus::Disconnected;
     entry.runtime.take()
 }

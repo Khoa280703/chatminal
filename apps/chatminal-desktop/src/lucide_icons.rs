@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LucideIcon {

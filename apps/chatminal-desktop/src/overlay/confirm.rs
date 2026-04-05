@@ -1,4 +1,4 @@
-use crate::desktop_host_runtime::overlay_shell::OverlayTerminal;
+use crate::desktop_session_host::overlay_shell::OverlayTerminal;
 use crate::scripting::guiwin::GuiWin;
 use config::keyassignment::{Confirmation, KeyAssignment};
 use std::rc::Rc;

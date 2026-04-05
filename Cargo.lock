@@ -954,55 +954,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "chatminal-host-runtime"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "base64 0.22.1",
- "bitflags 1.3.2",
- "chatminal-bintree",
- "chatminal-config",
- "chatminal-dynamic",
- "chatminal-filedescriptor",
- "chatminal-luahelper",
- "chatminal-portable-pty",
- "chatminal-procinfo",
- "chatminal-promise",
- "chatminal-rangeset",
- "chatminal-runtime",
- "chatminal-terminal-emulator",
- "chatminal-termwiz",
- "chatminal-termwiz-funcs",
- "chrono",
- "crossbeam",
- "downcast-rs",
- "fancy-regex",
- "finl_unicode",
- "hostname",
- "k9",
- "lazy_static",
- "libc",
- "log",
- "metrics",
- "mlua",
- "nix",
- "ntapi",
- "parking_lot",
- "percent-encoding",
- "serde",
- "serde_json",
- "serial2",
- "shell-words",
- "smol",
- "terminfo",
- "textwrap",
- "thiserror 1.0.69",
- "url",
- "winapi",
-]
-
-[[package]]
 name = "chatminal-lfucache"
 version = "0.1.0"
 dependencies = [

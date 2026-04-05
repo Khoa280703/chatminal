@@ -1,13 +1,13 @@
 use crate::chatminal_runtime::{
-    desktop_create_split_session_view, desktop_current_active_session_id,
-    desktop_current_active_terminal_handle, DesktopSplitRequest,
+    DesktopSplitRequest, desktop_create_split_session_view, desktop_current_active_session_id,
+    desktop_current_active_terminal_handle,
 };
-use crate::desktop_host_runtime::{
-    host_workspace_name, spawn_host_runtime_entry, start_host_activity,
+use crate::desktop_session_host::{
+    host_workspace_name, spawn_desktop_terminal, start_host_activity,
 };
-use anyhow::{anyhow, Context};
-use config::keyassignment::SpawnCommand;
+use anyhow::{Context, anyhow};
 use config::TermConfig;
+use config::keyassignment::SpawnCommand;
 use engine_term::TerminalSize;
 use portable_pty::CommandBuilder;
 use std::sync::Arc;
@@ -96,16 +96,9 @@ pub async fn spawn_command_internal(
         _ => {
             let activity = start_host_activity();
             let workspace = host_workspace_name();
-            let pane = spawn_host_runtime_entry(
-                cmd_builder,
-                cwd,
-                size,
-                current_pane_id.map(|handle| handle.as_u64()),
-                workspace,
-                spawn.position,
-            )
-            .await
-            .context("spawn_tab_or_window")?;
+            let pane = spawn_desktop_terminal(cmd_builder, cwd, size, current_pane_id, workspace)
+                .await
+                .context("spawn_desktop_terminal")?;
 
             pane.set_config(term_config);
             drop(activity);

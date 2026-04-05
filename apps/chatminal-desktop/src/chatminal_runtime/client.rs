@@ -6,7 +6,7 @@ use chatminal_runtime::{
 };
 use chatminal_runtime::{RuntimeSessionLaunchSpec, RuntimeSessionSnapshot};
 
-use crate::desktop_host_runtime::EmbeddedRuntime;
+use crate::desktop_session_host::EmbeddedRuntime;
 
 use super::{DesktopSessionBridgeAction, DesktopSessionLookup, RuntimeId};
 

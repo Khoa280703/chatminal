@@ -13,7 +13,6 @@ use super::canonical_scrollback::{
     build_logical_snapshot, materialize_output_chunk, render_snapshot, render_snapshot_for_terminal,
 };
 use super::explorer_utils::{normalize_relative_path, resolve_explorer_target};
-use super::test_bridge::make_test_bridge;
 use super::{
     RestoredPromptRedrawDecision, RuntimeState, SessionSpawnPlan,
     append_disconnected_restore_cleanup, classify_restored_prompt_redraw,
@@ -89,8 +88,7 @@ fn create_state_with_session() -> (RuntimeState, String, TempDb) {
         default_rows: 32,
         health_interval_ms: 1_000,
     };
-    let bridge = make_test_bridge();
-    let state = RuntimeState::new(config, store, bridge).expect("create runtime state");
+    let state = RuntimeState::new(config, store).expect("create runtime state");
     (state, session.session_id, db)
 }
 
@@ -111,12 +109,8 @@ fn reopen_state(db: &TempDb) -> RuntimeState {
         default_rows: 32,
         health_interval_ms: 1_000,
     };
-    RuntimeState::new(
-        config,
-        Store::initialize(&db.path).expect("reopen store"),
-        make_test_bridge(),
-    )
-    .expect("recreate runtime state")
+    RuntimeState::new(config, Store::initialize(&db.path).expect("reopen store"))
+        .expect("recreate runtime state")
 }
 
 fn create_state_with_two_sessions() -> (RuntimeState, String, String, TempDb) {
@@ -164,8 +158,7 @@ fn create_state_with_two_sessions() -> (RuntimeState, String, String, TempDb) {
         default_rows: 32,
         health_interval_ms: 1_000,
     };
-    let bridge = make_test_bridge();
-    let state = RuntimeState::new(config, store, bridge).expect("create runtime state");
+    let state = RuntimeState::new(config, store).expect("create runtime state");
     (state, session_a.session_id, session_b.session_id, db)
 }
 
@@ -754,8 +747,7 @@ fn workspace_layout_survives_profile_switch_and_restart_with_cross_profile_sessi
         health_interval_ms: 1_000,
     };
 
-    let state = RuntimeState::new(config.clone(), store.clone(), make_test_bridge())
-        .expect("create runtime state");
+    let state = RuntimeState::new(config.clone(), store.clone()).expect("create runtime state");
     let workspace_id = "desktop-main";
     let mut layout = WorkspaceLayoutState::new_single(session_a.session_id.clone());
     layout
@@ -792,15 +784,11 @@ fn workspace_layout_survives_profile_switch_and_restart_with_cross_profile_sessi
 
     drop(state);
 
-    let restored = RuntimeState::new(
-        config,
-        Store::initialize(&db.path).expect("reopen store"),
-        make_test_bridge(),
-    )
-    .expect("recreate runtime state")
-    .workspace_layout_restore_persisted(workspace_id)
-    .expect("restore persisted layout")
-    .expect("restored layout exists");
+    let restored = RuntimeState::new(config, Store::initialize(&db.path).expect("reopen store"))
+        .expect("recreate runtime state")
+        .workspace_layout_restore_persisted(workspace_id)
+        .expect("restore persisted layout")
+        .expect("restored layout exists");
     assert_eq!(restored.views.len(), 2);
     assert!(
         restored
@@ -958,8 +946,7 @@ fn runtime_new_resets_stale_running_sessions_to_disconnected_in_memory() {
         health_interval_ms: 1_000,
     };
 
-    let state =
-        RuntimeState::new(config, store.clone(), make_test_bridge()).expect("create runtime state");
+    let state = RuntimeState::new(config, store.clone()).expect("create runtime state");
 
     let workspace = state
         .workspace_load_passive()
@@ -1853,11 +1840,7 @@ fn restore_snapshot_collapses_duplicate_prompt_tail_from_terminal_replay() {
             .append_terminal_replay_chunk(
                 &session_id,
                 1,
-                concat!(
-                    "echo hi\r\n",
-                    "khoa2807@192 ~ % \r\n",
-                    "khoa2807@192 ~ % "
-                ),
+                concat!("echo hi\r\n", "khoa2807@192 ~ % \r\n", "khoa2807@192 ~ % "),
                 1,
             )
             .expect("append replay");

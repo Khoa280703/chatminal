@@ -240,21 +240,11 @@ impl TermWindow {
 
         let term_config: Arc<dyn TerminalConfiguration> =
             Arc::new(TermConfig::with_config(config.clone()));
-        if self.chatminal_sidebar.is_enabled() {
-            let snapshot = self.chatminal_sidebar.snapshot();
-            for session in snapshot.sessions {
-                for pane in self.positioned_panes_for_session(&session.session_id) {
-                    pane.pane.set_config(Arc::clone(&term_config));
-                }
+        let snapshot = self.chatminal_sidebar.snapshot();
+        for session in snapshot.sessions {
+            for pane in self.positioned_panes_for_session(&session.session_id) {
+                pane.pane.set_config(Arc::clone(&term_config));
             }
-        } else {
-            self.with_host_window(|window| {
-                for tab in window.iter() {
-                    for pane in tab.iter_panes_ignoring_zoom() {
-                        pane.pane.set_config(Arc::clone(&term_config));
-                    }
-                }
-            });
         }
         for state in self.terminal_ui_state_by_handle.borrow().values() {
             if let Some(overlay) = &state.overlay {
@@ -315,28 +305,6 @@ impl TermWindow {
         self.modal.borrow().as_ref().map(|m| Rc::clone(&m))
     }
 
-    fn update_scrollbar(&mut self) {
-        if !self.show_scroll_bar {
-            return;
-        }
-
-        let tab = match self.active_terminal_instance_or_overlay() {
-            Some(tab) => tab,
-            None => return,
-        };
-
-        let render_dims = tab.get_dimensions();
-        if render_dims == self.last_scroll_info {
-            return;
-        }
-
-        self.last_scroll_info = render_dims;
-
-        if let Some(window) = self.window.as_ref() {
-            window.invalidate();
-        }
-    }
-
     /// Called by various bits of code to update the title bar.
     /// Let's also trigger the status event so that it can choose
     /// to update the right-status.
@@ -346,24 +314,10 @@ impl TermWindow {
     }
 
     fn window_contains_pane(&mut self, pane_id: TerminalUiKey) -> bool {
-        if self.chatminal_sidebar.is_enabled() {
-            return self
-                .get_session_entry_information()
-                .iter()
-                .flat_map(|entry| entry.terminal_instances.iter())
-                .any(|leaf| leaf.host_terminal_handle == pane_id as u64);
-        }
-
-        let Some(host_pane_id) =
-            crate::desktop_termwindow_types::pane_id_from_terminal_ui_key(pane_id)
-        else {
-            return false;
-        };
-
-        self.with_host_window(|window| {
-            window.iter().any(|tab| tab.contains_pane(host_pane_id))
-        })
-        .unwrap_or(false)
+        self.get_session_entry_information()
+            .iter()
+            .flat_map(|entry| entry.terminal_instances.iter())
+            .any(|leaf| leaf.host_terminal_handle == pane_id as u64)
     }
 
     fn emit_user_var_event(&mut self, pane_id: TerminalUiKey, name: String, value: String) {
@@ -589,107 +543,19 @@ impl TermWindow {
     }
 
     fn activate_runtime_entry_index(&mut self, entry_idx: isize) -> anyhow::Result<()> {
-        if self.is_session_ui_mode() {
-            return self.activate_chatminal_session_index(entry_idx);
-        }
-        let activated = self
-            .with_host_window_mut(|window| {
-                // This logic is coupled with the runtime-entry activation CLI path
-                // logic in the desktop entrypoint. If you update this, update that!
-                let max = window.len();
-                let entry_idx = if entry_idx < 0 {
-                    max.saturating_sub(entry_idx.abs() as usize)
-                } else {
-                    entry_idx as usize
-                };
-
-                if entry_idx < max {
-                    window.save_and_then_set_active(entry_idx);
-                    true
-                } else {
-                    false
-                }
-            })
-            .ok_or_else(|| anyhow!("no such window"))?;
-
-        if activated {
-            if let Some(tab) = self.active_terminal_instance_or_overlay() {
-                tab.focus_changed(true);
-            }
-
-            self.update_title();
-            self.update_scrollbar();
-            self.sync_active_chatminal_session_from_mux();
-        }
-        Ok(())
+        self.activate_chatminal_session_index(entry_idx)
     }
 
     fn activate_runtime_entry_relative(&mut self, delta: isize, wrap: bool) -> anyhow::Result<()> {
-        if self.is_session_ui_mode() {
-            return self.activate_chatminal_session_relative(delta, wrap);
-        }
-        let entry_idx = self
-            .with_host_window(|window| {
-                let max = window.len();
-                (max, window.get_active_idx() as isize)
-            })
-            .ok_or_else(|| anyhow!("no such window"))
-            .and_then(|(max, active)| {
-                ensure!(max > 0, "no more tabs");
-                let entry_idx = active + delta;
-                Ok(if wrap {
-                    let entry_idx = if entry_idx < 0 {
-                        max as isize + entry_idx
-                    } else {
-                        entry_idx
-                    };
-                    (entry_idx as usize % max) as isize
-                } else if entry_idx < 0 {
-                    0
-                } else if entry_idx >= max as isize {
-                    max as isize - 1
-                } else {
-                    entry_idx
-                })
-            })?;
-        self.activate_runtime_entry_index(entry_idx)
+        self.activate_chatminal_session_relative(delta, wrap)
     }
 
     fn activate_last_runtime_entry(&mut self) -> anyhow::Result<()> {
-        if self.is_session_ui_mode() {
-            return self.activate_last_chatminal_session();
-        }
-        let last_idx = self
-            .with_host_window(|window| window.get_last_active_idx())
-            .ok_or_else(|| anyhow!("no such window"))?;
-        match last_idx {
-            Some(idx) => self.activate_runtime_entry_index(idx as isize),
-            None => Ok(()),
-        }
+        self.activate_last_chatminal_session()
     }
 
     fn move_runtime_entry(&mut self, entry_idx: usize) -> anyhow::Result<()> {
-        if self.is_session_ui_mode() {
-            return Ok(());
-        }
-        self.with_host_window_mut(|window| {
-            let max = window.len();
-            ensure!(max > 0, "no more tabs");
-
-            let active = window.get_active_idx();
-
-            ensure!(entry_idx < max, "cannot move a runtime out of range");
-
-            let tab = window.remove_by_idx(active);
-            window.insert(entry_idx, &tab);
-            window.set_active_without_saving(entry_idx);
-            Ok::<(), anyhow::Error>(())
-        })
-        .ok_or_else(|| anyhow!("no such window"))??;
-
-        self.update_title();
-        self.update_scrollbar();
-
+        let _ = entry_idx;
         Ok(())
     }
 
@@ -764,10 +630,7 @@ impl TermWindow {
         if self.is_session_ui_mode() {
             return;
         }
-        let active_tab_idx = match self.with_host_window(|window| window.get_active_idx()) {
-            Some(active_tab_idx) => active_tab_idx,
-            None => return,
-        };
+        let active_tab_idx = 0;
         let title = "Session Navigator".to_string();
         let args = LauncherActionArgs {
             title: Some(title),
@@ -930,25 +793,7 @@ impl TermWindow {
     }
 
     fn move_runtime_relative(&mut self, delta: isize) -> anyhow::Result<()> {
-        if self.is_session_ui_mode() {
-            return Ok(());
-        }
-        let entry_idx = self
-            .with_host_window(|window| {
-                let max = window.len();
-                (max, window.get_active_idx())
-            })
-            .ok_or_else(|| anyhow!("no such window"))
-            .and_then(|(max, active)| {
-                ensure!(max > 0, "no more tabs");
-                Ok(if active as isize + delta < 0 {
-                    0usize
-                } else if active as isize + delta >= max as isize {
-                    max - 1
-                } else {
-                    (active as isize + delta) as usize
-                })
-            })?;
-        self.move_runtime_entry(entry_idx)
+        let _ = delta;
+        Ok(())
     }
 }

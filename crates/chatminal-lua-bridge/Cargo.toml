@@ -12,7 +12,6 @@ config.workspace = true
 libc.workspace = true
 log.workspace = true
 luahelper.workspace = true
-host_runtime.workspace = true
 parking_lot.workspace = true
 portable-pty.workspace = true
 smol.workspace = true
@@ -22,3 +21,5 @@ url-funcs.workspace = true
 engine-dynamic.workspace = true
 engine-term.workspace = true
 chatminal-runtime = { path = "../chatminal-runtime" }
+procinfo.workspace = true
+url.workspace = true

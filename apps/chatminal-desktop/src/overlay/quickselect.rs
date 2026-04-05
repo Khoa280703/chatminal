@@ -1,13 +1,13 @@
 use crate::chatminal_runtime::SessionTerminalHandle;
-use crate::desktop_host_runtime::overlay_shell::{
+use crate::desktop_session_host::overlay_shell::{
     OverlayCachePolicy, OverlayForEachLogicalLine, OverlayLogicalLine, OverlayPane, OverlayPattern,
     OverlaySearchResult, OverlayWithPaneLines, RenderableDimensions, StableCursorPosition,
 };
 use crate::desktop_termwindow_types::terminal_ui_key_for_pane;
 use crate::selection::{SelectionCoordinate, SelectionRange};
 use crate::termwindow::{TermWindow, TermWindowNotif};
-use config::keyassignment::{ClipboardCopyDestination, QuickSelectArguments};
 use config::ConfigHandle;
+use config::keyassignment::{ClipboardCopyDestination, QuickSelectArguments};
 use engine_term::color::ColorPalette;
 use engine_term::{
     Clipboard, Intensity, KeyCode, KeyModifiers, Line, MouseEvent, StableRowIndex, TerminalSize,
@@ -19,7 +19,7 @@ use std::ops::Range;
 use std::sync::Arc;
 use termwiz::cell::{Cell, CellAttributes};
 use termwiz::color::AnsiColor;
-use termwiz::surface::{SequenceNo, SEQ_ZERO};
+use termwiz::surface::{SEQ_ZERO, SequenceNo};
 use url::Url;
 use window::WindowOps;
 

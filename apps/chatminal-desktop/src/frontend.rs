@@ -1,18 +1,15 @@
-use crate::chatminal_runtime::{
-    FrontendClientHandle, HostActivityGuard, RuntimeNotification,
-};
-use crate::desktop_host_runtime::{
-    active_frontend_client, active_workspace_for_client, focus_terminal_handle_by_id,
-    frontend_resolve_focused_pane, frontend_resolve_pane, host_activity_count, host_window_exists,
-    host_workspace_has_windows, host_workspace_name, primary_host_window_exists,
-    primary_host_window_id,
+use crate::TermWindow;
+use crate::desktop_session_host::{
+    FrontendClientHandle, HostActivityGuard, RuntimeNotification, active_frontend_client,
+    active_workspace_for_client, focus_terminal_handle_by_id, frontend_resolve_focused_pane,
+    frontend_resolve_pane, host_activity_count, host_window_exists, host_workspace_has_windows,
+    host_workspace_name, primary_host_window_exists, primary_host_window_id,
     set_active_workspace_for_client, spawn_local_shell_runner, start_host_activity,
     subscribe_frontend_notifications, workspace_is_empty, workspace_names,
 };
 use crate::scripting::guiwin::GuiWin;
 use crate::scripting::guiwin::PrimaryGuiWindowId;
 use crate::spawn::SpawnWhere;
-use crate::TermWindow;
 use ::window::*;
 use anyhow::{Context, Error};
 use config::keyassignment::{KeyAssignment, SpawnCommand};
@@ -577,7 +574,7 @@ pub fn try_new(initial_config: ConfigHandle) -> Result<Rc<GuiFrontEnd>, Error> {
                 let front_end = crate::frontend::front_end();
                 let config = front_end.refresh_config_snapshot(config);
                 front_end.connection.update_config(&config);
-                crate::desktop_host_runtime::apply_host_runtime_config(&config);
+                crate::desktop_session_host::apply_host_runtime_config(&config);
                 front_end.recreate_menubar();
             })
             .detach();

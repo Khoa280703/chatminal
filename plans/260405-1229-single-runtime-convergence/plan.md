@@ -1,7 +1,7 @@
 ---
 title: "Single Runtime Convergence"
 description: "Collapse execution architecture into chatminal-runtime as the only runtime crate, retire chatminal-host-runtime completely from active product architecture, and leave desktop as UI shell only."
-status: in_progress
+status: completed
 priority: P0
 effort: 8-12d
 branch: main
@@ -45,13 +45,13 @@ Gom toàn bộ active execution architecture về một owner duy nhất để p
 
 ## Ground Truth From Source
 - `chatminal-runtime` hiện đã own canonical `session_engine/*` code dưới `crates/chatminal-runtime/src/execution/*` và production startup path không còn đi qua `DesktopRuntimeExecutionBridge`
-- `apps/chatminal-desktop/src/desktop_host_runtime/execution_bridge.rs` và desktop-local `session_engine/*` đã bị rút khỏi active compile path; runtime mới là owner production của PTY/session execution
+- `apps/chatminal-desktop/src/desktop_session_host/*` là app-local facade; `desktop_host_runtime/*` đã bị retire khỏi active source path
 - `apps/chatminal-desktop/src/chatminal_runtime/mod.rs` không còn `desktop_runtime_host()` hay `Arc<dyn RuntimeHost>` trong active path; desktop đang gọi thẳng `DesktopSessionHost` thay vì giữ trait-object bridge
 - `RuntimeHost` seam đã bị cắt khỏi active source path; desktop facade hiện gọi concrete `DesktopSessionHost` trực tiếp và `crates/chatminal-runtime/src/runtime_host.rs` đã bị xóa
 - `chatminal-codec` đã nội địa hóa wire DTO (`protocol_types.rs`) và không còn depend `chatminal-host-runtime`
-- `chatminal-desktop` vẫn depend `chatminal-host-runtime`; `chatminal-lua-bridge` và `chatminal-codec` đã rời crate này
-- `apps/chatminal-desktop/src/desktop_host_runtime/mod.rs` còn re-export trực tiếp `host_runtime::*` cho overlay/render shell, nên host-runtime vẫn là vocabulary source xuyên crate trong desktop path
-- `chatminal-host-runtime` vẫn giữ execution-host concepts lớn (`Window`, `Tab`, `Pane`, control plane), trong khi product model canonical hiện là workspace/profile/session
+- `chatminal-desktop` không còn depend `chatminal-host-runtime`; active dependency graph chỉ còn `chatminal-runtime` là runtime crate
+- `crates/chatminal-host-runtime/` đã bị xóa khỏi workspace active path
+- `apps/chatminal-desktop/src/desktop_session_host/session_engine/mod.rs` chỉ còn thin re-export sang `chatminal-runtime::execution`, không còn implementation owner song song
 
 ## Canonical End-State
 - Chỉ còn **một** canonical execution owner cho session runtime lifecycle
@@ -119,10 +119,10 @@ chatminal-lua-bridge ──→ chatminal-host-runtime  # forbidden
 | Order | Phase | Status | Purpose |
 |---|---|---|---|
 | 1 | [phase-01-freeze-canonical-boundary.md](./phase-01-freeze-canonical-boundary.md) | completed | Chốt execution owner, contract đích, inventory seam, và frozen ownership map |
-| 2 | [phase-02-move-execution-ownership-into-runtime.md](./phase-02-move-execution-ownership-into-runtime.md) | in_progress | Đưa PTY/session execution + split tree ownership vào runtime canonical layer; seam `RuntimeHost` đã bị cắt khỏi active path |
-| 3 | [phase-03-collapse-desktop-bridge-and-product-wiring.md](./phase-03-collapse-desktop-bridge-and-product-wiring.md) | in_progress | Xóa adapter product path, rewiring desktop thành UI shell thuần |
+| 2 | [phase-02-move-execution-ownership-into-runtime.md](./phase-02-move-execution-ownership-into-runtime.md) | completed | Đưa PTY/session execution + split tree ownership vào runtime canonical layer; seam `RuntimeHost` đã bị cắt khỏi active path |
+| 3 | [phase-03-collapse-desktop-bridge-and-product-wiring.md](./phase-03-collapse-desktop-bridge-and-product-wiring.md) | completed | Xóa adapter product path, rewiring desktop thành UI shell thuần |
 | 4 | [phase-04-retire-host-runtime-crate.md](./phase-04-retire-host-runtime-crate.md) | completed | Xóa hẳn chatminal-host-runtime khỏi active graph |
-| 5 | [phase-05-lua-bridge-docs-and-closeout.md](./phase-05-lua-bridge-docs-and-closeout.md) | in_progress | Sync consumer còn lại, docs, verification, deadcode prune |
+| 5 | [phase-05-lua-bridge-docs-and-closeout.md](./phase-05-lua-bridge-docs-and-closeout.md) | completed | Sync consumer còn lại, docs, verification, deadcode prune |
 
 ## Success Criteria
 - Product path chỉ còn một canonical execution owner; không còn runtime business layer gọi qua execution bridge sang owner khác

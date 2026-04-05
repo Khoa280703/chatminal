@@ -4,16 +4,16 @@
 //! be rendered as a popup/context menu if the system supports it; at the
 //! time of writing our window layer doesn't provide an API for context
 //! menus.
-use crate::commands::derive_command_from_key_assignment;
 use crate::chatminal_runtime::desktop_current_active_session_id;
-use crate::desktop_host_runtime::{launcher_sessions, LauncherSessionEntry};
-use crate::desktop_host_runtime::overlay_shell::OverlayTerminal;
+use crate::commands::derive_command_from_key_assignment;
+use crate::desktop_session_host::overlay_shell::OverlayTerminal;
+use crate::desktop_session_host::{LauncherSessionEntry, launcher_sessions};
 use crate::inputmap::InputMap;
 use crate::overlay::quickselect;
 use crate::overlay::selector::{matcher_pattern, matcher_score};
 use crate::termwindow::TermWindowNotif;
-use config::keyassignment::KeyAssignment;
 use config::ConfigHandle;
+use config::keyassignment::KeyAssignment;
 use rayon::prelude::*;
 use std::collections::BTreeMap;
 use termwiz::cell::{AttributeChange, CellAttributes};

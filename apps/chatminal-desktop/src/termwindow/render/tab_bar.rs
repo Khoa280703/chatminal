@@ -1,4 +1,4 @@
-use crate::desktop_host_runtime::overlay_shell::RenderableDimensions;
+use crate::desktop_session_host::overlay_shell::RenderableDimensions;
 use crate::quad::TripleLayerQuadAllocator;
 use crate::termwindow::render::RenderScreenLineParams;
 use crate::utilsprites::RenderMetrics;

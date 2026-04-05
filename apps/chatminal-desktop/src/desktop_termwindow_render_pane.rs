@@ -1,4 +1,4 @@
-use crate::desktop_host_runtime::overlay_shell::{
+use crate::desktop_session_host::overlay_shell::{
     OverlayWithPaneLines as WithPaneLines, RenderableDimensions, StableCursorPosition,
 };
 use crate::desktop_termwindow_types::terminal_ui_key_for_pane;

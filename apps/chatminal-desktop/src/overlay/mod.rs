@@ -1,5 +1,5 @@
-use crate::desktop_host_runtime::overlay_shell::OverlayPane;
-use crate::desktop_host_runtime::overlay_shell::{allocate_overlay_terminal, OverlayTerminal};
+use crate::desktop_session_host::overlay_shell::OverlayPane;
+use crate::desktop_session_host::overlay_shell::{OverlayTerminal, allocate_overlay_terminal};
 use crate::termwindow::TermWindow;
 use engine_term::{TerminalConfiguration, TerminalSize};
 use std::pin::Pin;
@@ -17,7 +17,7 @@ pub mod selector;
 pub use confirm_close_pane::{confirm_close_tab, confirm_quit_program};
 pub use copy::{CopyModeParams, CopyOverlay};
 pub use debug::show_debug_overlay;
-pub use launcher::{launcher, LauncherArgs, LauncherFlags};
+pub use launcher::{LauncherArgs, LauncherFlags, launcher};
 pub use quickselect::QuickSelectOverlay;
 
 pub fn start_overlay<T, F>(

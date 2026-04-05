@@ -59,16 +59,15 @@ impl UserData for WindowRef {
             let host = get_host_for_lua(lua)?;
             let _ = this;
             let result = lua.create_table()?;
-            let active_runtime_id = host.root_active_runtime_id();
             let mut out_index = 0usize;
-            for entry_info in host.root_tab_infos()? {
-                let Some(session_id) = entry_info.session_id.clone() else {
+            for session_record in host.root_sessions_with_info()? {
+                let Some(session_id) = session_record.session_id.clone() else {
                     continue;
                 };
                 let session_ref = SessionRef::new(session_id);
                 let session_info = SessionInfo {
                     index: out_index,
-                    is_active: active_runtime_id == Some(entry_info.runtime_id),
+                    is_active: session_record.is_active,
                 };
                 let info = luahelper::dynamic_to_lua_value(lua, session_info.to_dynamic())?;
                 if let LuaValue::Table(t) = &info {
@@ -76,7 +75,7 @@ impl UserData for WindowRef {
                     t.set("session", session_ref)?;
                     t.set(
                         "active_terminal_instance_id",
-                        entry_info.active_terminal_instance_id,
+                        session_record.active_terminal_instance_id,
                     )?;
                 }
                 out_index += 1;

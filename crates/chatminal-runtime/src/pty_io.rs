@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
-use termwiz::escape::csi::{DecPrivateMode, DecPrivateModeCode, Device, Mode, Sgr};
+use termwiz::escape::csi::{DecPrivateMode, DecPrivateModeCode, Device, Mode};
 use termwiz::escape::{Action, CSI};
 #[cfg(windows)]
 use winapi::um::winsock2::{SOL_SOCKET, SO_RCVBUF, SO_SNDBUF};
@@ -58,46 +58,6 @@ impl PtyIoHooks {
         }
     }
 
-    pub(crate) fn with_output(
-        on_output: Option<Arc<dyn Fn(SessionTerminalHandle) + Send + Sync>>,
-    ) -> Self {
-        let mut hooks = Self::noop();
-        if let Some(on_output) = on_output {
-            hooks.on_output = on_output;
-        }
-        hooks
-    }
-
-    pub(crate) fn set_output(
-        &mut self,
-        on_output: Option<Arc<dyn Fn(SessionTerminalHandle) + Send + Sync>>,
-    ) {
-        if let Some(on_output) = on_output {
-            self.on_output = on_output;
-        }
-    }
-
-    pub(crate) fn set_cleanup(
-        &mut self,
-        on_cleanup: Option<Arc<dyn Fn(PaneId, Option<ExitBehavior>) + Send + Sync>>,
-    ) {
-        if let Some(on_cleanup) = on_cleanup {
-            self.on_cleanup = Arc::new(move |pane_id, exit_behavior, _default_exit_behavior| {
-                on_cleanup(pane_id, exit_behavior);
-            });
-        }
-    }
-
-    pub(crate) fn set_inline_error_output(
-        &mut self,
-        on_inline_error_output: Option<Arc<dyn Fn(PaneId, String) + Send + Sync>>,
-    ) {
-        if let Some(on_inline_error_output) = on_inline_error_output {
-            self.on_inline_error_output = Arc::new(move |pane_id, message, _on_output| {
-                on_inline_error_output(pane_id, message);
-            });
-        }
-    }
 }
 
 impl Default for PtyIoHooks {

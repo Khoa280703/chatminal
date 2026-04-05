@@ -13,7 +13,6 @@ config.workspace = true
 leb128.workspace = true
 log.workspace = true
 metrics.workspace = true
-host_runtime.workspace = true
 portable-pty = { workspace = true, features = ["serde_support"]}
 rangeset.workspace = true
 serde = {workspace=true, features = ["rc", "derive"]}
@@ -22,6 +21,7 @@ termwiz.workspace = true
 thiserror.workspace = true
 varbincode.workspace = true
 engine-term = { workspace=true, features=["use_serde"] }
+chatminal-runtime = { path = "../chatminal-runtime" }
 zstd.workspace = true
 
 [dev-dependencies]

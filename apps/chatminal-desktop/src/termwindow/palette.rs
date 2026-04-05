@@ -1,5 +1,5 @@
 use crate::commands::{CommandDef, ExpandedCommand};
-use crate::desktop_host_runtime::terminal_handle_for_pane as terminal_handle_for_overlay_pane;
+use crate::desktop_session_host::terminal_handle_for_pane as terminal_handle_for_overlay_pane;
 use crate::overlay::selector::{matcher_pattern, matcher_score};
 use crate::termwindow::box_model::*;
 use crate::termwindow::modal::Modal;
@@ -24,9 +24,9 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use termwiz::nerdfonts::NERD_FONTS;
-use window::color::LinearRgba;
 use window::DeadKeyStatus;
 use window::Modifiers;
+use window::color::LinearRgba;
 
 struct MatchResults {
     selection: String,

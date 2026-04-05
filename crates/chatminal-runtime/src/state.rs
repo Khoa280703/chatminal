@@ -15,9 +15,10 @@ use crate::api::{
     RuntimeSessionSnapshot, RuntimeWorkspace,
 };
 use crate::config::{RuntimeConfig, resolve_session_cwd};
+use crate::execution::SessionEngineShared;
 use crate::metrics::{RuntimeMetrics, RuntimeMetricsSnapshot};
 use crate::session::{SessionEvent, WriteInputError};
-use crate::state::runtime_bridge::{RuntimeExecutionAdapter, RuntimeHandle};
+use crate::state::runtime_bridge::{RuntimeExecution, RuntimeHandle};
 
 mod canonical_scrollback;
 mod explorer_utils;
@@ -28,8 +29,6 @@ mod runtime_lifecycle;
 mod session_event_processor;
 mod session_explorer;
 mod startup_recipe;
-#[cfg(test)]
-pub mod test_bridge;
 
 const MAX_INPUT_BYTES: usize = 65_536;
 const KEEP_ALIVE_ON_CLOSE_KEY: &str = "keep_alive_on_close";
@@ -50,6 +49,7 @@ struct SessionEntry {
     restored_trailing_fragment: Option<String>,
     restored_prompt_redraw_buffer: String,
     recent_output_tail: String,
+    active_startup_recipe_generation: Option<u64>,
 }
 
 struct SessionSpawnPlan {
@@ -77,12 +77,10 @@ struct StateInner {
 
 #[derive(Clone)]
 pub struct RuntimeState {
-    // `RuntimeState` owns business/workspace state.
-    // Live execution state is delegated to the `execution` adapter (concrete impl in
-    // `desktop_host_runtime`). No session_engine types leak into this struct.
+    // `RuntimeState` owns business/workspace state and the canonical execution owner.
     inner: Arc<Mutex<StateInner>>,
     metrics: RuntimeMetrics,
-    execution: Arc<dyn RuntimeExecutionAdapter>,
+    execution: Arc<RuntimeExecution>,
     persist_tx: std_mpsc::SyncSender<persist_worker::PersistJob>,
 }
 
@@ -119,19 +117,21 @@ impl Drop for RuntimeSubscription {
 }
 
 impl RuntimeState {
-    pub fn initialize_default(
-        execution: Arc<dyn RuntimeExecutionAdapter>,
-    ) -> Result<(Self, RuntimeConfig), String> {
+    pub fn initialize_default() -> Result<(Self, RuntimeConfig), String> {
         let config = RuntimeConfig::from_env()?;
         let store = Store::initialize_default()?;
-        let state = Self::new(config.clone(), store, execution)?;
+        let state = Self::new(config.clone(), store)?;
         Ok((state, config))
     }
 
-    pub fn new(
+    pub fn new(config: RuntimeConfig, store: Store) -> Result<Self, String> {
+        Self::new_with_execution(config, store, Arc::new(RuntimeExecution::new()))
+    }
+
+    fn new_with_execution(
         config: RuntimeConfig,
         store: Store,
-        execution: Arc<dyn RuntimeExecutionAdapter>,
+        execution: Arc<RuntimeExecution>,
     ) -> Result<Self, String> {
         let (events_tx, events_rx) = std_mpsc::sync_channel::<SessionEvent>(4096);
         execution.connect_session_events(events_tx.clone());
@@ -162,6 +162,7 @@ impl RuntimeState {
                         restored_trailing_fragment: None,
                         restored_prompt_redraw_buffer: String::new(),
                         recent_output_tail: String::new(),
+                        active_startup_recipe_generation: None,
                     },
                 );
             }
@@ -199,6 +200,10 @@ impl RuntimeState {
         });
 
         Ok(state)
+    }
+
+    pub fn session_engine_shared(&self) -> Arc<SessionEngineShared> {
+        self.execution.shared()
     }
 
     pub fn subscribe(&self) -> Result<RuntimeSubscription, String> {
@@ -1301,7 +1306,10 @@ enum RestoredPromptRedrawDecision {
     Mismatch,
 }
 
-fn classify_restored_prompt_redraw(restored: &str, buffered_chunk: &str) -> RestoredPromptRedrawDecision {
+fn classify_restored_prompt_redraw(
+    restored: &str,
+    buffered_chunk: &str,
+) -> RestoredPromptRedrawDecision {
     let expected_visible = visible_terminal_fragment(restored);
     if !looks_like_shell_prompt_fragment(restored) {
         return RestoredPromptRedrawDecision::Mismatch;

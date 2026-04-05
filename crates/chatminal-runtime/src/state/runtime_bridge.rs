@@ -1,58 +1,166 @@
-// Runtime execution adapter — abstraction boundary between `chatminal-runtime`
-// and the actual session execution engine (`desktop_host_runtime::session_engine`).
-//
-// `RuntimeState` depends only on this trait. The concrete implementation lives in
-// `desktop_host_runtime` (which depends on `desktop_host_runtime::session_engine`).
-//
-// Phase 07: this file was rewritten to remove the direct `desktop_host_runtime::session_engine`
-// dependency. All engine types are hidden behind `RuntimeExecutionAdapter`.
-//
-// ID ownership boundary:
-// - Runtime (`chatminal-runtime`) only needs: `session_id` (String) + `RuntimeId`
-// - Engine/desktop IDs (`PaneId`, `TabId`, `WindowId`, `TerminalInstanceId`) are
-//   desktop-only concerns and MUST NOT leak into this crate.
-//   See `DesktopSessionHost::session_tab_shim` for the desktop-local mapping.
-
+use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use chatminal_store::StoredSessionStatus;
+use engine_term::TerminalSize;
+use portable_pty::CommandBuilder;
 
 use crate::api::{RuntimeSessionBridgeAction, RuntimeSessionLookup as RuntimeOwnedSessionLookup};
-use crate::session::{InputWriteStats, WriteInputError};
+use crate::execution::{
+    SessionBridgeAction, SessionCoreState, SessionEngineShared, SessionEventBus,
+    SessionRuntimeBridge, SessionRuntimeEvent, SessionRuntimeLookup, SessionWorkspaceHost,
+    StatefulSessionEngine,
+};
+use crate::session::{InputWriteStats, SessionEvent, WriteInputError};
 use crate::workspace_ids::{RuntimeId, TerminalInstanceId};
 use crate::workspace_layout::WorkspaceLayoutRegistry;
-use chatminal_store::StoredSessionStatus;
 
 use super::{RuntimeState, StateInner, canonical_scrollback::build_logical_snapshot};
 
-// ─── handle ────────────────────────────────────────────────────────────────
+pub(super) type RuntimeHandle = Arc<Mutex<dyn RuntimeSessionHandle>>;
 
-pub(super) type RuntimeHandle = Arc<Mutex<dyn RuntimeSessionHandleTrait>>;
-
-/// Interface for a live session PTY handle owned by `SessionEntry`.
-/// The concrete type is `RuntimeSessionHandle` in `desktop_host_runtime`.
-pub trait RuntimeSessionHandleTrait: Send + Sync + std::fmt::Debug {
+pub(super) trait RuntimeSessionHandle: Send + Sync + std::fmt::Debug {
     fn write_input(&self, data: &str) -> Result<InputWriteStats, WriteInputError>;
     fn resize(&mut self, cols: usize, rows: usize) -> Result<(), String>;
     fn kill(&mut self);
+    #[cfg_attr(not(test), allow(dead_code))]
     fn size(&self) -> Result<(usize, usize), String>;
 }
 
-// ─── execution adapter trait ────────────────────────────────────────────────
+#[derive(Default)]
+struct RuntimeExecutionEventBus;
 
-/// Adapter between `RuntimeState` and the session execution engine.
-///
-/// This trait is implemented by `DesktopRuntimeExecutionBridge` in
-/// `desktop_host_runtime`. It is the only gateway through which
-/// `chatminal-runtime` reaches session engine internals.
-pub trait RuntimeExecutionAdapter: Send + Sync + std::fmt::Debug {
-    /// Called by `RuntimeState::new` to give the adapter a sender it can use to
-    /// forward PTY output events back into the state event loop.
-    fn connect_session_events(
-        &self,
-        events_tx: std::sync::mpsc::SyncSender<crate::session::SessionEvent>,
-    );
+impl SessionEventBus for RuntimeExecutionEventBus {
+    fn publish(&self, event: SessionRuntimeEvent) {
+        log::trace!("runtime execution event: {:?}", event);
+    }
+}
 
-    /// Spawn a new session PTY and return a handle.
-    fn spawn_handle(
+struct RuntimeStateHost<'a>(&'a RuntimeState);
+
+impl SessionWorkspaceHost for RuntimeStateHost<'_> {
+    fn active_session_id(&self) -> Option<String> {
+        self.0
+            .workspace_load_passive()
+            .ok()
+            .and_then(|workspace| workspace.active_session_id)
+    }
+
+    fn activate_session(&self, session_id: &str) -> Result<(), String> {
+        self.0.session_focus(session_id)
+    }
+}
+
+#[derive(Debug)]
+struct ExecutionSessionHandle {
+    shared: Arc<SessionEngineShared>,
+    runtime_id: RuntimeId,
+    terminal_instance_id: TerminalInstanceId,
+    size: (usize, usize),
+    closed: bool,
+}
+
+impl ExecutionSessionHandle {
+    fn new(
+        shared: Arc<SessionEngineShared>,
+        runtime_id: RuntimeId,
+        terminal_instance_id: TerminalInstanceId,
+        cols: usize,
+        rows: usize,
+    ) -> Self {
+        Self {
+            shared,
+            runtime_id,
+            terminal_instance_id,
+            size: (cols, rows),
+            closed: false,
+        }
+    }
+}
+
+impl RuntimeSessionHandle for ExecutionSessionHandle {
+    fn write_input(&self, data: &str) -> Result<InputWriteStats, WriteInputError> {
+        self.shared
+            .write_terminal_input(self.terminal_instance_id, data.as_bytes())
+            .map_err(|_| {
+                if self.closed {
+                    WriteInputError::Closing
+                } else {
+                    WriteInputError::Disconnected
+                }
+            })?;
+        Ok(InputWriteStats::default())
+    }
+
+    fn resize(&mut self, cols: usize, rows: usize) -> Result<(), String> {
+        self.shared.resize_terminal_instance(
+            self.terminal_instance_id,
+            TerminalSize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+                dpi: 96,
+            },
+        )?;
+        self.size = (cols, rows);
+        Ok(())
+    }
+
+    fn kill(&mut self) {
+        if self.closed {
+            return;
+        }
+        let engine = StatefulSessionEngine::with_shared(Arc::clone(&self.shared));
+        let _ = engine.close_detached_runtime(self.runtime_id);
+        self.closed = true;
+    }
+
+    fn size(&self) -> Result<(usize, usize), String> {
+        if self.closed {
+            return Err("session runtime is closed".to_string());
+        }
+        Ok(self.size)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct RuntimeExecution {
+    shared: Arc<SessionEngineShared>,
+}
+
+impl RuntimeExecution {
+    pub(super) fn new() -> Self {
+        Self {
+            shared: Arc::new(SessionEngineShared::new(Arc::new(Mutex::new(
+                SessionCoreState::default(),
+            )))),
+        }
+    }
+
+    pub(super) fn shared(&self) -> Arc<SessionEngineShared> {
+        Arc::clone(&self.shared)
+    }
+
+    pub(super) fn connect_session_events(&self, events_tx: std_mpsc::SyncSender<SessionEvent>) {
+        let subscription = self.shared.subscribe();
+        thread::spawn(move || {
+            while let Ok(event) = subscription.recv_timeout(std::time::Duration::from_millis(50)) {
+                match event {
+                    Some(event) => {
+                        if let Some(mapped) = map_execution_event(event) {
+                            let _ = events_tx.send(mapped);
+                        }
+                    }
+                    None => {}
+                }
+            }
+        });
+    }
+
+    pub(super) fn spawn_handle(
         &self,
         session_id: &str,
         generation: u64,
@@ -60,40 +168,147 @@ pub trait RuntimeExecutionAdapter: Send + Sync + std::fmt::Debug {
         cwd: &str,
         cols: usize,
         rows: usize,
-    ) -> Result<RuntimeHandle, String>;
+        initial_scrollback: Option<String>,
+    ) -> Result<RuntimeHandle, String> {
+        let mut command = CommandBuilder::new(shell);
+        command.cwd(cwd);
+        let engine = StatefulSessionEngine::with_shared(Arc::clone(&self.shared));
+        let state = engine.spawn_detached_runtime(
+            session_id.to_string(),
+            generation,
+            command,
+            TerminalSize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+                dpi: 96,
+            },
+            initial_scrollback,
+        )?;
+        let terminal_instance_id = state.snapshot.active_terminal_instance_id.ok_or_else(|| {
+            "spawned session runtime missing active terminal instance".to_string()
+        })?;
+        Ok(Arc::new(Mutex::new(ExecutionSessionHandle::new(
+            Arc::clone(&self.shared),
+            state.snapshot.runtime_id,
+            terminal_instance_id,
+            cols,
+            rows,
+        ))))
+    }
 
-    /// Return the shared workspace layout registry.
-    fn workspace_layouts(&self) -> Arc<Mutex<WorkspaceLayoutRegistry>>;
+    pub(super) fn workspace_layouts(&self) -> Arc<Mutex<WorkspaceLayoutRegistry>> {
+        self.shared.workspace_layouts()
+    }
 
-    /// Return (runtime_id, terminal_instance_id) for a running session, if any.
-    fn attachment(&self, session_id: &str) -> Option<(RuntimeId, TerminalInstanceId)>;
+    pub(super) fn attachment(&self, session_id: &str) -> Option<(RuntimeId, TerminalInstanceId)> {
+        let core = self.shared.core_state();
+        let core = core.lock().ok()?;
+        let runtime_id = core.runtime_id_for_session(session_id)?;
+        let terminal_instance_id = core.runtime(runtime_id)?.active_terminal_instance_id?;
+        Some((runtime_id, terminal_instance_id))
+    }
 
-    /// Reconcile the desktop session lookup with the runtime's authoritative state.
-    fn reconcile_session_lookup(
+    pub(super) fn reconcile_session_lookup(
         &self,
         host: &RuntimeState,
         lookup: &RuntimeOwnedSessionLookup,
-    ) -> Result<RuntimeSessionBridgeAction, String>;
+    ) -> Result<RuntimeSessionBridgeAction, String> {
+        let bus = RuntimeExecutionEventBus;
+        Ok(
+            match SessionRuntimeBridge::new(&RuntimeStateHost(host), &bus)
+                .reconcile_session_lookup(&into_execution_lookup(lookup))?
+            {
+                SessionBridgeAction::Noop => RuntimeSessionBridgeAction::Noop,
+                SessionBridgeAction::FocusSession { session_id } => {
+                    RuntimeSessionBridgeAction::FocusSession { session_id }
+                }
+            },
+        )
+    }
 
-    /// Notify the engine that a session was activated.
-    fn notify_session_activated(
+    pub(super) fn notify_session_activated(
         &self,
         host: &RuntimeState,
         session_id: &str,
         runtime_id: RuntimeId,
-    ) -> Result<(), String>;
+    ) -> Result<(), String> {
+        let bus = RuntimeExecutionEventBus;
+        SessionRuntimeBridge::new(&RuntimeStateHost(host), &bus)
+            .on_session_activated(session_id, runtime_id)?;
+        host.mark_session_running_and_publish(session_id)
+    }
 
-    /// Notify the engine that a session was closed.
-    fn notify_session_closed(
+    pub(super) fn notify_session_closed(
         &self,
         host: &RuntimeState,
         session_id: &str,
         runtime_id: RuntimeId,
         lookup_after_close: &RuntimeOwnedSessionLookup,
-    ) -> Result<(), String>;
+    ) -> Result<(), String> {
+        let bus = RuntimeExecutionEventBus;
+        SessionRuntimeBridge::new(&RuntimeStateHost(host), &bus).on_session_closed(
+            session_id,
+            runtime_id,
+            &into_execution_lookup(lookup_after_close),
+        )
+    }
 }
 
-// ─── RuntimeState impl ──────────────────────────────────────────────────────
+fn into_execution_lookup(lookup: &RuntimeOwnedSessionLookup) -> SessionRuntimeLookup {
+    SessionRuntimeLookup {
+        active_session_id: lookup.active_session_id.clone(),
+        last_active_session_id: lookup.last_active_session_id.clone(),
+        runtime_ids_by_session: lookup.runtime_ids_by_session.clone(),
+    }
+}
+
+fn map_execution_event(event: SessionRuntimeEvent) -> Option<SessionEvent> {
+    match event {
+        SessionRuntimeEvent::TerminalInstanceOutput {
+            session_id,
+            generation,
+            chunk,
+            ..
+        } => Some(SessionEvent::Output {
+            session_id,
+            generation,
+            chunk,
+            ts: event_timestamp_millis(),
+        }),
+        SessionRuntimeEvent::TerminalInstanceExited {
+            session_id,
+            generation,
+            exit_code,
+            ..
+        } => Some(SessionEvent::Exited {
+            session_id,
+            generation,
+            exit_code,
+            reason: "eof".to_string(),
+        }),
+        SessionRuntimeEvent::TerminalInstanceError {
+            session_id,
+            generation,
+            message,
+            ..
+        } => Some(SessionEvent::Exited {
+            session_id,
+            generation,
+            exit_code: None,
+            reason: message,
+        }),
+        _ => None,
+    }
+}
+
+fn event_timestamp_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|value| value.as_millis() as u64)
+        .unwrap_or(0)
+}
 
 impl RuntimeState {
     pub(super) fn spawn_runtime_handle(
@@ -105,8 +320,20 @@ impl RuntimeState {
         cols: usize,
         rows: usize,
     ) -> Result<RuntimeHandle, String> {
-        self.execution
-            .spawn_handle(session_id, generation, shell, cwd, cols, rows)
+        let initial_scrollback = self
+            .session_restore_snapshot_get(session_id)
+            .ok()
+            .map(|snapshot| snapshot.content)
+            .filter(|content| !content.is_empty());
+        self.execution.spawn_handle(
+            session_id,
+            generation,
+            shell,
+            cwd,
+            cols,
+            rows,
+            initial_scrollback,
+        )
     }
 
     pub fn reconcile_session_lookup(
@@ -143,8 +370,6 @@ impl RuntimeState {
     }
 
     pub fn mark_session_running_and_publish(&self, session_id: &str) -> Result<(), String> {
-        // Phase 5: moved build_logical_snapshot OUTSIDE global lock.
-        // Step 1: briefly acquire lock to check status + clone store.
         let store = {
             let inner = self
                 .inner
@@ -158,10 +383,8 @@ impl RuntimeState {
             }
             inner.store.clone()
         };
-        // Lock released — build snapshot without blocking other operations.
         let logical_snapshot = build_logical_snapshot(&store, session_id)?;
 
-        // Step 2: re-acquire lock to apply state mutations.
         let mut inner = self
             .inner
             .lock()

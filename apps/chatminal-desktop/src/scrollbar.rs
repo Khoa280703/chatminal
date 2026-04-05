@@ -1,4 +1,4 @@
-use crate::desktop_host_runtime::overlay_shell::OverlayPane;
+use crate::desktop_session_host::overlay_shell::OverlayPane;
 use engine_term::StableRowIndex;
 
 pub struct ScrollHit {

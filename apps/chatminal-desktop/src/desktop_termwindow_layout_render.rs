@@ -7,7 +7,7 @@ use crate::chatminal_runtime::{
     SessionViewId, WorkspaceLayoutNodeKind, WorkspaceLayoutState, WorkspaceNodeId,
     WorkspaceSplitAxis,
 };
-use crate::desktop_host_runtime::terminal_handle_arc_by_public_id;
+use crate::desktop_session_host::terminal_handle_arc_by_public_id;
 use crate::desktop_termwindow_types::{TerminalPaneLayout, TerminalSplit, TerminalSplitDirection};
 const WORKSPACE_SPLIT_INDEX_BASE: usize = 1_000_000;
 

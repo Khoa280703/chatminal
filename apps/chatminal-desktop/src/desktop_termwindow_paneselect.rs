@@ -19,7 +19,6 @@ pub struct PaneSelector {
     selection: RefCell<String>,
     alphabet: String,
     mode: SessionSelectMode,
-    was_zoomed: bool,
     show_session_ids: bool,
 }
 
@@ -31,18 +30,12 @@ impl PaneSelector {
             args.alphabet.clone()
         };
 
-        // Ensure that we are un-zoomed and remember the original state
-        let was_zoomed = term_window
-            .set_active_runtime_zoomed(false)
-            .unwrap_or(false);
-
         Self {
             element: RefCell::new(None),
             labels: RefCell::new(vec![]),
             selection: RefCell::new(String::new()),
             alphabet,
             mode: args.mode,
-            was_zoomed,
             show_session_ids: args.show_session_ids,
         }
     }
@@ -190,10 +183,6 @@ impl PaneSelector {
                     log::warn!("move to new session has been removed in single-window mode");
                 }
             }
-        }
-
-        if self.was_zoomed {
-            let _ = term_window.set_active_runtime_zoomed(true);
         }
 
         term_window.cancel_modal();

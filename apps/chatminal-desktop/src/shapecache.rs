@@ -114,7 +114,7 @@ impl<'a> std::hash::Hash for dyn ShapeCacheKeyTrait + 'a {
 
 #[cfg(test)]
 mod test {
-    use crate::desktop_host_runtime::acquire_host_runtime_test_lock;
+    use crate::desktop_session_host::acquire_host_runtime_test_lock;
     use crate::glyphcache::GlyphCache;
     use crate::shapecache::{GlyphPosition, ShapedInfo};
     use crate::utilsprites::RenderMetrics;

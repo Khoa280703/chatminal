@@ -3,9 +3,9 @@ use std::sync::Arc;
 use chatminal_store::StoredSessionStatus;
 
 use super::{
-    RuntimeState, RestoredPromptRedrawDecision, canonical_scrollback::materialize_output_chunk,
-    classify_restored_prompt_redraw, looks_like_shell_prompt_fragment,
-    logicalize_prepended_run_boundary, persist_worker::PersistJob, prepend_run_boundary,
+    RestoredPromptRedrawDecision, RuntimeState, canonical_scrollback::materialize_output_chunk,
+    classify_restored_prompt_redraw, logicalize_prepended_run_boundary,
+    looks_like_shell_prompt_fragment, persist_worker::PersistJob, prepend_run_boundary,
     startup_recipe::append_recent_output_tail, strip_volatile_terminal_control_sequences,
     strip_zsh_prompt_spacer_artifact, trim_live_output,
 };
@@ -46,9 +46,7 @@ impl RuntimeState {
                             .restored_trailing_fragment
                             .as_deref()
                             .is_some_and(looks_like_shell_prompt_fragment);
-                        entry
-                            .restored_prompt_redraw_buffer
-                            .push_str(&output_chunk);
+                        entry.restored_prompt_redraw_buffer.push_str(&output_chunk);
                         let redraw_decision = entry
                             .restored_trailing_fragment
                             .as_deref()

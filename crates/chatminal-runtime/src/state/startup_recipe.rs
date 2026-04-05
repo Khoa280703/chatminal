@@ -89,7 +89,9 @@ impl RuntimeState {
         let state = self.clone();
         let session_id = session_id.to_string();
         std::thread::spawn(move || {
-            if let Err(err) = state.run_startup_recipe_steps(&session_id, generation, &steps) {
+            let result = state.run_startup_recipe_steps(&session_id, generation, &steps);
+            state.finish_startup_recipe_run(&session_id, generation);
+            if let Err(err) = result {
                 log::warn!("startup recipe failed for {session_id}: {err}");
             }
         });
@@ -111,6 +113,9 @@ impl RuntimeState {
             if entry.runtime.is_none() {
                 return Err("session is not running".to_string());
             }
+            if entry.active_startup_recipe_generation == Some(entry.generation) {
+                return Ok((entry.generation, Vec::new()));
+            }
             let raw_recipe = entry
                 .session
                 .startup_command
@@ -120,7 +125,32 @@ impl RuntimeState {
         };
 
         let steps = parse_startup_recipe(&raw_recipe)?;
+        {
+            let mut inner = self
+                .inner
+                .lock()
+                .map_err(|_| "state lock poisoned".to_string())?;
+            let Some(entry) = inner.sessions.get_mut(session_id) else {
+                return Err("session not found".to_string());
+            };
+            if entry.runtime.is_none() || entry.generation != generation {
+                return Ok((generation, Vec::new()));
+            }
+            if entry.active_startup_recipe_generation == Some(generation) {
+                return Ok((generation, Vec::new()));
+            }
+            entry.active_startup_recipe_generation = Some(generation);
+        }
         Ok((generation, steps))
+    }
+
+    fn finish_startup_recipe_run(&self, session_id: &str, generation: u64) {
+        if let Ok(mut inner) = self.inner.lock()
+            && let Some(entry) = inner.sessions.get_mut(session_id)
+            && entry.active_startup_recipe_generation == Some(generation)
+        {
+            entry.active_startup_recipe_generation = None;
+        }
     }
 
     fn run_startup_recipe_steps(

@@ -1,14 +1,10 @@
-use crate::desktop_host_runtime::overlay_shell::{
-    OverlayPane, OverlayPaneHandle, OverlayPaneLayout, OverlaySplitDirection, OverlaySplitLayout,
-};
-use crate::desktop_host_runtime::terminal_handle_for_pane as terminal_handle_for_overlay_pane;
 use crate::chatminal_runtime::SessionTerminalHandle;
+use crate::desktop_session_host::overlay_shell::{
+    OverlayPane, OverlayPaneLayout, OverlaySplitDirection, OverlaySplitLayout,
+};
+use crate::desktop_session_host::terminal_handle_for_pane as terminal_handle_for_overlay_pane;
 
 pub type TerminalUiKey = u64;
-
-pub fn pane_id_from_terminal_ui_key(key: TerminalUiKey) -> Option<OverlayPaneHandle> {
-    Some(SessionTerminalHandle::new(key))
-}
 
 pub fn terminal_ui_key_for_pane(pane: &dyn OverlayPane) -> TerminalUiKey {
     terminal_handle_for_overlay_pane(pane).as_u64()

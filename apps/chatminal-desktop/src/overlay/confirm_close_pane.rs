@@ -1,6 +1,6 @@
 use super::confirm;
-use crate::desktop_host_runtime::remove_runtime_entry_scope;
-use crate::desktop_host_runtime::overlay_shell::OverlayTerminal;
+use crate::desktop_session_host::overlay_shell::OverlayTerminal;
+use crate::desktop_session_host::remove_runtime_entry_scope;
 
 pub fn confirm_close_tab(tab_id: u64, mut term: OverlayTerminal) -> anyhow::Result<()> {
     if confirm::run_confirmation(

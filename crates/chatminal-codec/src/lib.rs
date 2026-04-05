@@ -10,14 +10,17 @@
 //! manage unknown enum variants.
 #![allow(clippy::range_plus_one)]
 
+mod protocol_types;
+
 use anyhow::{bail, Context as _, Error};
 use config::keyassignment::SessionDirection;
 use engine_term::color::ColorPalette;
 use engine_term::{Alert, ClipboardSelection, StableRowIndex, TerminalSize};
-use host_runtime::client::{ClientId, ClientInfo};
-use host_runtime::renderable::{RenderableDimensions, StableCursorPosition};
-use host_runtime::tab::{PaneNode, SerdeUrl, SplitRequest};
 use portable_pty::CommandBuilder;
+use protocol_types::{
+    ClientId, ClientInfo, PaneNode, Pattern, RenderableDimensions, SearchResult, SerdeUrl,
+    SplitRequest, StableCursorPosition,
+};
 use rangeset::*;
 use serde::{Deserialize, Serialize};
 use smol::io::AsyncWriteExt;
@@ -1098,14 +1101,14 @@ pub struct GetLinesResponse {
 #[derive(Deserialize, Serialize, PartialEq, Debug)]
 pub struct SearchScrollbackRequest {
     pub pane_id: PaneId,
-    pub pattern: host_runtime::pane::Pattern,
+    pub pattern: Pattern,
     pub range: Range<StableRowIndex>,
     pub limit: Option<u32>,
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Debug)]
 pub struct SearchScrollbackResponse {
-    pub results: Vec<host_runtime::pane::SearchResult>,
+    pub results: Vec<SearchResult>,
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Debug)]

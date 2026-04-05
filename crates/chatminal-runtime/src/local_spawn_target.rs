@@ -10,7 +10,7 @@ use config::{ConfigHandle, SerialTarget};
 use engine_term::TerminalSize;
 use parking_lot::Mutex;
 use portable_pty::{
-    native_pty_system, Child, ChildKiller, CommandBuilder, ExitStatus, MasterPty, PtySize,
+    native_pty_system, CommandBuilder, ExitStatus, MasterPty, PtySize,
     PtySystem,
 };
 use std::io::Write;
@@ -39,7 +39,7 @@ impl LocalSpawnHooks {
         self.localpane_hooks.clone()
     }
 
-    pub fn pty_io_hooks(&self) -> PtyIoHooks {
+    pub(crate) fn pty_io_hooks(&self) -> PtyIoHooks {
         self.pty_io_hooks.clone()
     }
 }

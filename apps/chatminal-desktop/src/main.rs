@@ -6,14 +6,14 @@ use crate::customglyph::BlockKey;
 use crate::glyphcache::GlyphCache;
 use crate::utilsprites::RenderMetrics;
 use ::window::*;
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use clap::builder::ValueParser;
 use clap::{Parser, ValueHint};
 use config::keyassignment::SpawnCommand;
 use config::{ConfigHandle, SerialTarget};
 use engine_bidi::Direction;
-use engine_font::shaper::PresentationWidth;
 use engine_font::FontConfiguration;
+use engine_font::shaper::PresentationWidth;
 use engine_gui_subcommands::*;
 use engine_toast_notification::*;
 use portable_pty::cmdbuilder::CommandBuilder;
@@ -26,9 +26,9 @@ use termwiz::cell::CellAttributes;
 use termwiz::surface::{Line, SEQ_ZERO};
 use unicode_normalization::UnicodeNormalization;
 
-use crate::desktop_host_runtime::{
-    activate_host_runtime_entry, create_serial_spawn_target, host_has_panes_in_workspace,
-    primary_host_spawn_target, set_host_spawn_target, HostSpawnTargetHandle,
+use crate::desktop_session_host::{
+    activate_host_runtime_entry, host_has_panes_in_workspace, install_serial_spawn_target,
+    session_id_from_pane_metadata, spawn_in_primary_target,
 };
 
 mod chatminal_layout;
@@ -39,7 +39,7 @@ mod colorease;
 mod commands;
 mod customglyph;
 mod desktop_commands;
-mod desktop_host_runtime;
+mod desktop_session_host;
 mod desktop_mouse_actions;
 mod desktop_spawn;
 mod desktop_termwindow_types;
@@ -70,7 +70,7 @@ mod utilsprites;
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
 pub use selection::SelectionMode;
-pub use termwindow::{set_window_class, set_window_position, TermWindow, ICON_DATA};
+pub use termwindow::{ICON_DATA, TermWindow, set_window_class, set_window_position};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -153,18 +153,10 @@ async fn async_run_serial(config: ConfigHandle, opts: SerialCommand) -> anyhow::
 
     let cmd = None;
 
-    let spawn_target = create_serial_spawn_target(serial_target)?;
-    set_host_spawn_target(&spawn_target);
+    install_serial_spawn_target(serial_target)?;
 
     let should_publish = false;
-    async_run_terminal_gui(
-        config,
-        cmd,
-        start_command,
-        should_publish,
-        Some(spawn_target),
-    )
-    .await
+    async_run_terminal_gui(config, cmd, start_command, should_publish, true).await
 }
 
 fn run_serial(config: config::ConfigHandle, opts: SerialCommand) -> anyhow::Result<()> {
@@ -175,7 +167,7 @@ fn run_serial(config: config::ConfigHandle, opts: SerialCommand) -> anyhow::Resu
         set_window_position(pos.clone());
     }
 
-    crate::desktop_host_runtime::build_initial_host_runtime(&config, None)?;
+    crate::desktop_session_host::build_initial_host_runtime(&config, None)?;
 
     let gui = crate::frontend::try_new(config.clone())?;
 
@@ -190,41 +182,33 @@ fn run_serial(config: config::ConfigHandle, opts: SerialCommand) -> anyhow::Resu
     gui.run_forever()
 }
 
-fn have_panes_in_spawn_target_and_ws(
-    spawn_target: &HostSpawnTargetHandle,
-    workspace: &Option<String>,
-) -> bool {
-    let _ = spawn_target;
+fn have_panes_in_workspace(workspace: &Option<String>) -> bool {
     host_has_panes_in_workspace(workspace.as_deref())
 }
 
 async fn spawn_tab_in_spawn_target_if_mux_is_empty(
     config: ConfigHandle,
     cmd: Option<CommandBuilder>,
-    spawn_target: Option<HostSpawnTargetHandle>,
     workspace: Option<String>,
 ) -> anyhow::Result<()> {
-    let spawn_target = spawn_target.unwrap_or_else(primary_host_spawn_target);
-
-    if have_panes_in_spawn_target_and_ws(&spawn_target, &workspace) {
+    if have_panes_in_workspace(&workspace) {
         return Ok(());
     }
 
     config.update_ulimit()?;
 
-    if have_panes_in_spawn_target_and_ws(&spawn_target, &workspace) {
+    if have_panes_in_workspace(&workspace) {
         trigger_and_log_gui_attached().await;
         return Ok(());
     }
 
     let dpi = config.dpi.unwrap_or_else(|| ::window::default_dpi());
-    let _tab = spawn_target
-        .spawn(
-            config.initial_size(dpi as u32, Some(cell_pixel_dims(&config, dpi)?)),
-            cmd,
-            None,
-        )
-        .await?;
+    let _tab = spawn_in_primary_target(
+        config.initial_size(dpi as u32, Some(cell_pixel_dims(&config, dpi)?)),
+        cmd,
+        None,
+    )
+    .await?;
     trigger_and_log_gui_attached().await;
     Ok(())
 }
@@ -290,7 +274,7 @@ async fn async_run_terminal_gui(
     cmd: Option<CommandBuilder>,
     opts: StartCommand,
     should_publish: bool,
-    startup_spawn_target: Option<HostSpawnTargetHandle>,
+    force_startup_spawn: bool,
 ) -> anyhow::Result<()> {
     let unix_socket_path =
         config::RUNTIME_DIR.join(format!("gui-sock-{}", unsafe { libc::getpid() }));
@@ -305,28 +289,24 @@ async fn async_run_terminal_gui(
         None => None,
     };
 
-    let spawn_target = startup_spawn_target.or_else(|| {
-        cmd.as_ref()
-            .map(|_| primary_host_spawn_target())
-    });
+    let should_spawn_on_startup = force_startup_spawn || cmd.is_some();
 
     trigger_and_log_gui_startup(spawn_command).await;
 
-    if let Some(spawn_target) = &spawn_target {
+    if should_spawn_on_startup {
         let dpi = config.dpi.unwrap_or_else(|| ::window::default_dpi());
-        let tab = spawn_target
-            .spawn(
-                config.initial_size(dpi as u32, Some(cell_pixel_dims(&config, dpi)?)),
-                cmd.clone(),
-                None,
-            )
-            .await?;
-        activate_host_runtime_entry(tab.runtime_id().as_u64())?;
+        let initial_size = config.initial_size(dpi as u32, Some(cell_pixel_dims(&config, dpi)?));
+        let spawned = spawn_in_primary_target(initial_size, cmd.clone(), None).await?;
+        if let Some(session_id) = session_id_from_pane_metadata(spawned.pane.as_ref()) {
+            let _ =
+                crate::chatminal_runtime::desktop_activate_session(&session_id, None, initial_size);
+        } else {
+            activate_host_runtime_entry(spawned.runtime_id.as_u64())?;
+        }
         request_frontend_workspace_reconcile();
         trigger_and_log_gui_attached().await;
     }
-    let result =
-        spawn_tab_in_spawn_target_if_mux_is_empty(config, cmd, spawn_target, opts.workspace).await;
+    let result = spawn_tab_in_spawn_target_if_mux_is_empty(config, cmd, opts.workspace).await;
     request_frontend_workspace_reconcile();
     result
 }
@@ -361,13 +341,12 @@ fn run_terminal_gui(opts: StartCommand) -> anyhow::Result<()> {
         None
     };
 
-    crate::desktop_host_runtime::build_initial_host_runtime(&config, opts.workspace.as_deref())?;
-
+    crate::desktop_session_host::build_initial_host_runtime(&config, opts.workspace.as_deref())?;
     let gui = crate::frontend::try_new(config.clone())?;
-    let activity = crate::desktop_host_runtime::start_host_activity();
+    let activity = crate::desktop_session_host::start_host_activity();
 
     promise::spawn::spawn(async move {
-        if let Err(err) = async_run_terminal_gui(config.clone(), cmd, opts, false, None).await {
+        if let Err(err) = async_run_terminal_gui(config.clone(), cmd, opts, false, false).await {
             terminate_with_error(err);
         }
         drop(activity);
@@ -380,8 +359,8 @@ fn run_terminal_gui(opts: StartCommand) -> anyhow::Result<()> {
 
 fn desktop_shell_prog() -> Vec<OsString> {
     vec![
-        OsString::from(crate::desktop_host_runtime::CHATMINAL_RUNTIME_SPAWN_TARGET_NAME),
-        OsString::from(crate::desktop_host_runtime::DESKTOP_PROXY_COMMAND),
+        OsString::from(crate::desktop_session_host::CHATMINAL_RUNTIME_SPAWN_TARGET_NAME),
+        OsString::from(crate::desktop_session_host::DESKTOP_PROXY_COMMAND),
     ]
 }
 
@@ -434,13 +413,13 @@ fn main() {
 
     config::designate_this_as_the_main_thread();
     config::assign_error_callback(
-        crate::desktop_host_runtime::show_host_configuration_error_message,
+        crate::desktop_session_host::show_host_configuration_error_message,
     );
     notify_on_panic();
     if let Err(e) = run() {
         terminate_with_error(e);
     }
-    crate::desktop_host_runtime::shutdown_host_runtime();
+    crate::desktop_session_host::shutdown_host_runtime();
     frontend::shutdown();
 }
 
@@ -448,7 +427,7 @@ fn maybe_show_configuration_error_window() {
     let warnings = config::configuration_warnings_and_errors();
     if !warnings.is_empty() {
         let err = warnings.join("\n");
-        crate::desktop_host_runtime::show_host_configuration_error_message(&err);
+        crate::desktop_session_host::show_host_configuration_error_message(&err);
     }
 }
 
@@ -803,6 +782,7 @@ fn run() -> anyhow::Result<()> {
     };
 
     env_bootstrap::bootstrap();
+    crate::desktop_session_host::install_lua_bridge_backend_once();
     // window_funcs is not set up by env_bootstrap as window_funcs is
     // GUI environment specific and env_bootstrap is used to setup the
     // headless mux server.

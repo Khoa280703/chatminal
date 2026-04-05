@@ -1,5 +1,5 @@
 #[cfg(test)]
-use crate::chatminal_runtime::SessionEngineShared;
+use chatminal_runtime::execution::SessionEngineShared;
 use crate::chatminal_runtime::{
     SessionViewId, WorkspaceLayoutState, WorkspaceNodeId, WorkspaceSplitAxis,
 };
@@ -315,7 +315,6 @@ impl DesktopWorkspaceLayoutStore {
         }
     }
 
-
     pub fn focus_view(&self, view_id: SessionViewId) -> Option<WorkspaceLayoutState> {
         #[cfg(test)]
         if let Some(shared) = &self.shared {
@@ -445,12 +444,13 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use crate::chatminal_runtime::{
-        SessionEngineShared, SessionViewId, WorkspaceLayoutNodeKind, WorkspaceLayoutState,
-        WorkspaceNodeId, WorkspaceSplitAxis,
+        SessionViewId, WorkspaceLayoutNodeKind, WorkspaceLayoutState, WorkspaceNodeId,
+        WorkspaceSplitAxis,
     };
-    use crate::desktop_host_runtime::session_engine::SessionCoreState;
+    use crate::desktop_session_host::session_engine::SessionCoreState;
+    use chatminal_runtime::execution::SessionEngineShared;
 
-    use super::{DesktopWorkspaceLayoutStore, DEFAULT_LAYOUT_WORKSPACE_ID};
+    use super::{DEFAULT_LAYOUT_WORKSPACE_ID, DesktopWorkspaceLayoutStore};
 
     #[test]
     fn desktop_store_reads_and_mutates_workspace_layout() {
@@ -509,14 +509,18 @@ mod tests {
             .swap_profile_layout(Some("profile-b"), "profile-a", Some("session-a"))
             .expect("restore profile-a layout");
         assert_eq!(restored.views.len(), 2);
-        assert!(restored
-            .views
-            .iter()
-            .any(|view| view.session_id == "session-a"));
-        assert!(restored
-            .views
-            .iter()
-            .any(|view| view.session_id == "session-b"));
+        assert!(
+            restored
+                .views
+                .iter()
+                .any(|view| view.session_id == "session-a")
+        );
+        assert!(
+            restored
+                .views
+                .iter()
+                .any(|view| view.session_id == "session-b")
+        );
 
         let saved_profile_b = store
             .with_workspace_id(DesktopWorkspaceLayoutStore::profile_workspace_id(
@@ -566,14 +570,18 @@ mod tests {
             .restore_profile_layout_if_contains("profile-a", "session-a")
             .expect("restore preserved group alias");
         assert_eq!(restored_group.views.len(), 2);
-        assert!(restored_group
-            .views
-            .iter()
-            .any(|view| view.session_id == "session-a"));
-        assert!(restored_group
-            .views
-            .iter()
-            .any(|view| view.session_id == "session-b"));
+        assert!(
+            restored_group
+                .views
+                .iter()
+                .any(|view| view.session_id == "session-a")
+        );
+        assert!(
+            restored_group
+                .views
+                .iter()
+                .any(|view| view.session_id == "session-b")
+        );
     }
 
     #[test]
@@ -594,16 +602,20 @@ mod tests {
         let _ = store.save_as_profile_layout("profile-a");
 
         let _ = store.replace_layout(WorkspaceLayoutState::new_single("session-c".to_string()));
-        assert!(store
-            .restore_profile_layout_if_contains("profile-a", "session-a")
-            .is_some());
+        assert!(
+            store
+                .restore_profile_layout_if_contains("profile-a", "session-a")
+                .is_some()
+        );
         let restored = store.snapshot().expect("restored layout");
         assert_eq!(restored.views.len(), 2);
 
         let _ = store.replace_layout(WorkspaceLayoutState::new_single("session-c".to_string()));
-        assert!(store
-            .restore_profile_layout_if_contains("profile-a", "session-z")
-            .is_none());
+        assert!(
+            store
+                .restore_profile_layout_if_contains("profile-a", "session-z")
+                .is_none()
+        );
         let unchanged = store.snapshot().expect("unchanged layout");
         assert_eq!(unchanged.views.len(), 1);
         assert_eq!(unchanged.views[0].session_id, "session-c");
@@ -641,14 +653,18 @@ mod tests {
             .snapshot()
             .expect("saved profile-a layout");
         assert_eq!(saved_profile_layout.views.len(), 2);
-        assert!(saved_profile_layout
-            .views
-            .iter()
-            .any(|view| view.session_id == "session-a"));
-        assert!(saved_profile_layout
-            .views
-            .iter()
-            .any(|view| view.session_id == "session-b"));
+        assert!(
+            saved_profile_layout
+                .views
+                .iter()
+                .any(|view| view.session_id == "session-a")
+        );
+        assert!(
+            saved_profile_layout
+                .views
+                .iter()
+                .any(|view| view.session_id == "session-b")
+        );
     }
 
     #[test]
@@ -674,14 +690,18 @@ mod tests {
             .expect("restore session-b group layout");
 
         assert_eq!(restored.views.len(), 2);
-        assert!(restored
-            .views
-            .iter()
-            .any(|view| view.session_id == "session-a"));
-        assert!(restored
-            .views
-            .iter()
-            .any(|view| view.session_id == "session-b"));
+        assert!(
+            restored
+                .views
+                .iter()
+                .any(|view| view.session_id == "session-a")
+        );
+        assert!(
+            restored
+                .views
+                .iter()
+                .any(|view| view.session_id == "session-b")
+        );
     }
 
     #[test]
@@ -713,27 +733,35 @@ mod tests {
             .restore_profile_layout_if_contains("profile-a", "session-a")
             .expect("restore session-a group");
         assert_eq!(restored_ab.views.len(), 2);
-        assert!(restored_ab
-            .views
-            .iter()
-            .any(|view| view.session_id == "session-a"));
-        assert!(restored_ab
-            .views
-            .iter()
-            .any(|view| view.session_id == "session-b"));
+        assert!(
+            restored_ab
+                .views
+                .iter()
+                .any(|view| view.session_id == "session-a")
+        );
+        assert!(
+            restored_ab
+                .views
+                .iter()
+                .any(|view| view.session_id == "session-b")
+        );
 
         let restored_cd = store
             .restore_profile_layout_if_contains("profile-a", "session-c")
             .expect("restore session-c group");
         assert_eq!(restored_cd.views.len(), 2);
-        assert!(restored_cd
-            .views
-            .iter()
-            .any(|view| view.session_id == "session-c"));
-        assert!(restored_cd
-            .views
-            .iter()
-            .any(|view| view.session_id == "session-d"));
+        assert!(
+            restored_cd
+                .views
+                .iter()
+                .any(|view| view.session_id == "session-c")
+        );
+        assert!(
+            restored_cd
+                .views
+                .iter()
+                .any(|view| view.session_id == "session-d")
+        );
     }
 
     #[test]
@@ -760,8 +788,10 @@ mod tests {
                 "session-c".to_string()
             ]
         );
-        assert!(store
-            .profile_group_session_ids("profile-a", "session-z")
-            .is_empty());
+        assert!(
+            store
+                .profile_group_session_ids("profile-a", "session-z")
+                .is_empty()
+        );
     }
 }

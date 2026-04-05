@@ -28,7 +28,7 @@ impl TerminalRef {
     }
 }
 
-fn text_from_semantic_zone(pane: &Arc<dyn Pane>, zone: SemanticZone) -> String {
+fn text_from_semantic_zone(pane: &Arc<dyn LuaPane>, zone: SemanticZone) -> String {
     let mut last_was_wrapped = false;
     let first_row = zone.start_y;
     let last_row = zone.end_y;
@@ -132,8 +132,7 @@ impl UserData for TerminalRef {
         methods.add_method("send_text", |lua, this, text: String| {
             let host = get_host_for_lua(lua)?;
             host.with_pane_result(*this, |pane| {
-                pane.writer()
-                    .write_all(text.as_bytes())
+                pane.send_text(&text)
                     .map_err(|e| mlua::Error::external(format!("{:#}", e)))?;
                 Ok(())
             })
@@ -296,8 +295,8 @@ impl UserData for TerminalRef {
             let host = get_host_for_lua(lua)?;
             let of_type: Option<SemanticType> = from_lua(of_type)?;
             let mut zones = host.with_pane_result(*this, |pane| {
-                pane.get_semantic_zones()
-                    .map_err(|e| mlua::Error::external(format!("{:#}", e)))
+                    pane.get_semantic_zones()
+                        .map_err(|e| mlua::Error::external(format!("{:#}", e)))
             })?;
 
             if let Some(of_type) = of_type {
@@ -398,7 +397,7 @@ fn default_split_size() -> f32 {
 impl SplitSession {
     async fn run(&self, lua: &Lua, pane: &TerminalRef) -> mlua::Result<TerminalRef> {
         let (command, command_dir) = self.cmd_builder.to_command_builder();
-        let source = SplitSource::Spawn {
+        let source = LuaSplitSource::Spawn {
             command,
             command_dir,
         };

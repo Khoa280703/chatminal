@@ -2,40 +2,40 @@
 use super::renderstate::*;
 use super::utilsprites::RenderMetrics;
 use crate::chatminal_layout::workspace_store::{
-    DesktopWorkspaceLayoutStore, DEFAULT_LAYOUT_WORKSPACE_ID,
+    DEFAULT_LAYOUT_WORKSPACE_ID, DesktopWorkspaceLayoutStore,
 };
 use crate::chatminal_runtime::{
+    DesktopSessionBridgeAction, DesktopSessionRuntimeSummary, RuntimeId, SessionViewId,
+    TerminalInstanceId, WorkspaceLayoutState,
     desktop_activate_session, desktop_can_close_view_only,
     desktop_detach_session_runtime_and_notify, desktop_focus_session_view_with_previous,
     desktop_last_active_session_id, desktop_prepare_workspace_layout,
-    desktop_resize_visible_sessions, desktop_session_entry_bindings, desktop_session_window_snapshot,
-    notify_runtime_session_activated, reconcile_runtime_session_lookup,
-    run_runtime_session_startup_command, DesktopSessionBridgeAction,
-    DesktopSessionRuntimeSummary, PrimaryHostWindowId, RuntimeId, RuntimeNotification,
-    RuntimeWindow, SessionViewId, TerminalInstanceId, WorkspaceLayoutState,
+    desktop_resize_visible_sessions, desktop_session_entry_bindings,
+    desktop_session_window_snapshot, notify_runtime_session_activated,
+    reconcile_runtime_session_lookup, run_runtime_session_startup_command,
 };
 use crate::chatminal_sidebar::{ChatminalSidebar, SidebarSessionDropTarget};
 use crate::colorease::ColorEase;
-use crate::desktop_host_runtime::{
-    active_host_runtime_entry_size, host_active_render_scope_id, host_window_initial_position,
-    resize_host_window_tabs, resolve_public_pane, resolved_window_title,
-};
-use crate::desktop_host_runtime::overlay_shell::{
+use crate::desktop_session_host::overlay_shell::{
     OverlayAssignmentResult as PerformAssignmentResult, OverlayCachePolicy as CachePolicy,
     OverlayCloseReason as CloseReason, OverlayPane, OverlayPattern, OverlayTerminal,
     RenderableDimensions,
 };
-use crate::desktop_host_runtime::subscribe_runtime_notifications;
-use crate::overlay::confirm_close_tab as show_close_runtime_entry_overlay;
+use crate::desktop_session_host::subscribe_runtime_notifications;
+use crate::desktop_session_host::{
+    PrimaryHostWindowId, RuntimeNotification, host_window_initial_position, resolve_public_pane,
+    resolved_window_title,
+};
 use crate::desktop_termwindow_types::{
-    terminal_handle_for_ui_key, terminal_ui_key_for_pane, TerminalPaneLayout, TerminalSplit,
-    TerminalUiKey,
+    TerminalPaneLayout, TerminalSplit, TerminalUiKey, terminal_handle_for_ui_key,
+    terminal_ui_key_for_pane,
 };
 use crate::frontend::{front_end, try_front_end};
 use crate::inputmap::InputMap;
+use crate::overlay::confirm_close_tab as show_close_runtime_entry_overlay;
 use crate::overlay::{
-    confirm_quit_program, launcher, start_overlay, CopyModeParams, CopyOverlay, LauncherArgs,
-    LauncherFlags, QuickSelectOverlay,
+    CopyModeParams, CopyOverlay, LauncherArgs, LauncherFlags, QuickSelectOverlay,
+    confirm_quit_program, launcher, start_overlay,
 };
 use crate::resize_increment_calculator::ResizeIncrementCalculator;
 use crate::scripting::guiwin::GuiWin;
@@ -45,7 +45,7 @@ use crate::selection::{Selection, SelectionMode};
 use crate::shapecache::*;
 use crate::tabbar::{SessionBarItem, SessionBarState};
 use crate::termwindow::background::{
-    load_background_image, reload_background_image, LoadedBackgroundLayer,
+    LoadedBackgroundLayer, load_background_image, reload_background_image,
 };
 use crate::termwindow::keyevent::{KeyTableArgs, KeyTableState};
 use crate::termwindow::modal::Modal;
@@ -58,11 +58,11 @@ use crate::termwindow::startup_recipe_modal::StartupRecipeModal;
 use crate::termwindow::webgpu::WebGpuState;
 use ::engine_term::input::{ClickPosition, MouseButton as TMB};
 use ::window::*;
-use anyhow::{anyhow, ensure, Context};
+use anyhow::{Context, anyhow, ensure};
 use chatminal_runtime::RuntimeWorkspace;
 use config::keyassignment::{
     Confirmation, KeyAssignment, LauncherActionArgs, Pattern, PromptInputLine,
-    QuickSelectArguments, RotationDirection, SessionDirection, SpawnCommand, SplitSize,
+    QuickSelectArguments, SessionDirection, SpawnCommand, SplitSize,
 };
 use config::window::WindowLevel;
 use config::{
@@ -76,8 +76,8 @@ use engine_term::input::LastMouseClick;
 use engine_term::{Alert, Progress, StableRowIndex, TerminalConfiguration, TerminalSize};
 use lfucache::*;
 use mlua::{FromLua, LuaSerdeExt, UserData, UserDataFields};
-use smol::channel::Sender;
 use smol::Timer;
+use smol::channel::Sender;
 use std::cell::{RefCell, RefMut};
 use std::collections::{BTreeSet, HashMap, LinkedList};
 use std::convert::TryFrom;
@@ -438,7 +438,6 @@ pub struct TermWindow {
     window_drag_position: Option<MouseEvent>,
     current_mouse_event: Option<MouseEvent>,
     prev_cursor: PrevCursorPos,
-    last_scroll_info: RenderableDimensions,
 
     runtime_ui_state: RefCell<HashMap<u64, RuntimeUiState>>,
     terminal_ui_state_by_handle: RefCell<HashMap<TerminalUiKey, TerminalUiState>>,
@@ -1230,13 +1229,9 @@ impl TermWindow {
     }
 
     fn active_render_scope_id(&self) -> Option<u64> {
-        if self.chatminal_sidebar.is_enabled() {
-            return self
-                .active_session_id()
-                .as_deref()
-                .and_then(|session_id| self.session_render_scope_id(session_id));
-        }
-        host_active_render_scope_id()
+        self.active_session_id()
+            .as_deref()
+            .and_then(|session_id| self.session_render_scope_id(session_id))
     }
 
     pub(crate) fn active_session_id(&self) -> Option<String> {
@@ -1669,17 +1664,7 @@ impl TermWindow {
         let dpi = config.dpi.unwrap_or_else(|| ::window::default_dpi()) as usize;
         let fontconfig = Rc::new(FontConfiguration::new(Some(config.clone()), dpi)?);
 
-        let size = if chatminal_sidebar.is_enabled() {
-            Default::default()
-        } else {
-            match active_host_runtime_entry_size() {
-                Some(size) => size,
-                None => {
-                    log::debug!("new_window has no tabs... yet?");
-                    Default::default()
-                }
-            }
-        };
+        let size = TerminalSize::default();
         let physical_rows = size.rows as usize;
         let physical_cols = size.cols as usize;
 
@@ -1714,9 +1699,6 @@ impl TermWindow {
                 size,
                 terminal_size,
             );
-            if !chatminal_sidebar.is_enabled() {
-                resize_host_window_tabs(terminal_size);
-            }
         }
 
         let h_context = DimensionContext {
@@ -1818,7 +1800,6 @@ impl TermWindow {
             current_mouse_event: None,
             current_modifier_and_leds: Default::default(),
             prev_cursor: PrevCursorPos::new(),
-            last_scroll_info: RenderableDimensions::default(),
             runtime_ui_state: RefCell::new(HashMap::new()),
             terminal_ui_state_by_handle: RefCell::new(HashMap::new()),
             current_mouse_buttons: vec![],
@@ -2652,87 +2633,49 @@ impl TermWindow {
     }
 
     fn get_session_entry_information(&mut self) -> Vec<SessionEntryInformation> {
-        if self.chatminal_sidebar.is_enabled() {
-            let entry_bindings = desktop_session_entry_bindings();
-            let leaves_by_session: HashMap<String, Vec<TerminalInstanceInformation>> =
-                entry_bindings
-                    .iter()
-                    .filter_map(|entry| {
-                        let panes = self.positioned_panes_for_session(&entry.session_id);
-                        if panes.is_empty() {
-                            return None;
-                        }
-                        Some((
-                            entry.session_id.clone(),
-                            panes
-                                .iter()
-                                .map(|pane| self.positioned_pane_to_terminal_instance_info(pane))
-                                .collect(),
-                        ))
-                    })
-                    .collect();
-
-            return entry_bindings
-                .into_iter()
-                .map(|entry| {
-                    let terminal_instances = leaves_by_session
-                        .get(&entry.session_id)
-                        .cloned()
-                        .unwrap_or_default();
-                    let active_terminal_instance = terminal_instances
-                        .iter()
-                        .find(|leaf| leaf.is_active)
-                        .cloned();
-
-                    SessionEntryInformation {
-                        entry_index: entry.entry_index,
-                        render_target_id: entry.render_target_id.map(|id| id.as_u64()).unwrap_or(0),
-                        is_active: entry.is_active,
-                        is_last_active: entry.is_last_active,
-                        entry_title: entry.title,
-                        active_terminal_instance,
-                        terminal_instances,
-                        session_id: Some(entry.session_id),
-                        view_id: entry.view_id,
-                    }
-                })
-                .collect();
-        }
-
-        self.with_host_window(|window| {
-            let tab_index = window.get_active_idx();
-            let last_active_idx = window.get_last_active_idx();
-
-            window
-                .iter()
-                .enumerate()
-                .map(|(idx, tab)| {
-                    let terminal_instances = self
-                        .get_positioned_panes_for_render_scope(tab.runtime_id().as_u64())
+        let entry_bindings = desktop_session_entry_bindings();
+        let leaves_by_session: HashMap<String, Vec<TerminalInstanceInformation>> = entry_bindings
+            .iter()
+            .filter_map(|entry| {
+                let panes = self.positioned_panes_for_session(&entry.session_id);
+                if panes.is_empty() {
+                    return None;
+                }
+                Some((
+                    entry.session_id.clone(),
+                    panes
                         .iter()
                         .map(|pane| self.positioned_pane_to_terminal_instance_info(pane))
-                        .collect::<Vec<_>>();
+                        .collect(),
+                ))
+            })
+            .collect();
 
-                    SessionEntryInformation {
-                        entry_index: idx,
-                        render_target_id: tab.runtime_id().as_u64(),
-                        is_active: tab_index == idx,
-                        is_last_active: last_active_idx
-                            .map(|last_active| last_active == idx)
-                            .unwrap_or(false),
-                        entry_title: tab.get_title(),
-                        active_terminal_instance: terminal_instances
-                            .iter()
-                            .find(|leaf| leaf.is_active)
-                            .cloned(),
-                        terminal_instances,
-                        session_id: None,
-                        view_id: None,
-                    }
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+        entry_bindings
+            .into_iter()
+            .map(|entry| {
+                let terminal_instances = leaves_by_session
+                    .get(&entry.session_id)
+                    .cloned()
+                    .unwrap_or_default();
+                let active_terminal_instance = terminal_instances
+                    .iter()
+                    .find(|leaf| leaf.is_active)
+                    .cloned();
+
+                SessionEntryInformation {
+                    entry_index: entry.entry_index,
+                    render_target_id: entry.render_target_id.map(|id| id.as_u64()).unwrap_or(0),
+                    is_active: entry.is_active,
+                    is_last_active: entry.is_last_active,
+                    entry_title: entry.title,
+                    active_terminal_instance,
+                    terminal_instances,
+                    session_id: Some(entry.session_id),
+                    view_id: entry.view_id,
+                }
+            })
+            .collect()
     }
 
     fn get_terminal_instance_information(&self) -> Vec<TerminalInstanceInformation> {
@@ -2765,7 +2708,7 @@ impl TermWindow {
             }]
         } else {
             let mut panes =
-                crate::desktop_host_runtime::host_overlay_pane_layouts_by_id(render_target_id);
+                crate::desktop_session_host::host_overlay_pane_layouts_by_id(render_target_id);
             for p in &mut panes {
                 if let Some(overlay) = self
                     .terminal_ui_state(terminal_ui_key_for_pane(&*p.pane))
@@ -2825,7 +2768,7 @@ impl TermWindow {
 include!("../desktop_termwindow_actions_items.rs");
 include!("../desktop_termwindow_close_helpers.rs");
 include!("../desktop_termwindow_event_helpers.rs");
-include!("../desktop_termwindow_host_runtime_helpers.rs");
+include!("../desktop_termwindow_session_host_helpers.rs");
 include!("../desktop_termwindow_overlay_helpers.rs");
 include!("../desktop_termwindow_positioned_session_helpers.rs");
 include!("../desktop_termwindow_session_close_helpers.rs");

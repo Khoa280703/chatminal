@@ -322,11 +322,10 @@ pub fn perform_key_assignment(
             }
         }
         AdjustSplitSize(direction, amount) => {
-            if self.adjust_active_terminal_size(*direction, *amount) == false
-                && self.active_render_scope_id().is_none()
-            {
-                return Ok(PerformAssignmentResult::Handled);
-            }
+            log::warn!(
+                "AdjustSplitSize({direction:?}, {amount}) is not supported in Chatminal session UI"
+            );
+            return Ok(PerformAssignmentResult::Handled);
         }
         ActivateTerminalByIndex(index) => {
             if !self.active_runtime_has_overlay() {
@@ -350,14 +349,14 @@ pub fn perform_key_assignment(
             }
         }
         ToggleTerminalZoomState => {
-            if !self.toggle_active_runtime_zoom() {
-                return Ok(PerformAssignmentResult::Handled);
-            }
+            log::warn!("ToggleTerminalZoomState is not supported in Chatminal session UI");
+            return Ok(PerformAssignmentResult::Handled);
         }
         SetTerminalZoomState(zoomed) => {
-            if self.set_active_runtime_zoomed(*zoomed).is_none() {
-                return Ok(PerformAssignmentResult::Handled);
-            }
+            log::warn!(
+                "SetTerminalZoomState({zoomed}) is not supported in Chatminal session UI"
+            );
+            return Ok(PerformAssignmentResult::Handled);
         }
         SwitchWorkspaceRelative(_) | SwitchToWorkspace { .. } => {
             log::warn!("workspace switching has been removed from Chatminal Desktop");
@@ -367,9 +366,8 @@ pub fn perform_key_assignment(
             // NOP here; handled by the overlay directly
         }
         RotatePanes(direction) => {
-            if !self.rotate_active_terminals(direction.clone()) {
-                return Ok(PerformAssignmentResult::Handled);
-            }
+            log::warn!("RotatePanes({direction:?}) is not supported in Chatminal session UI");
+            return Ok(PerformAssignmentResult::Handled);
         }
         SplitSession(split) => {
             log::trace!("SplitSession {:?}", split);
@@ -408,7 +406,7 @@ pub fn perform_key_assignment(
         ResetTerminal => {
             if let Ok(session_pane) = pane
                 .clone()
-                .downcast_arc::<crate::desktop_host_runtime::ChatminalSessionPane>()
+                .downcast_arc::<crate::desktop_session_host::ChatminalSessionPane>()
             {
                 session_pane.reset_display_state_with_flash();
             } else {

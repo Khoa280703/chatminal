@@ -10,13 +10,13 @@ use crate::termwindow::{
 use crate::utilsprites::RenderMetrics;
 use anyhow::anyhow;
 use config::{Dimension, DimensionContext};
-use engine_font::units::PixelUnit;
 use engine_font::LoadedFont;
+use engine_font::units::PixelUnit;
 use engine_term::color::{ColorAttribute, ColorPalette};
 use finl_unicode::grapheme_clusters::Graphemes;
 use std::cell::RefCell;
 use std::rc::Rc;
-use termwiz::cell::{grapheme_column_width, Presentation};
+use termwiz::cell::{Presentation, grapheme_column_width};
 use termwiz::surface::Line;
 use window::bitmaps::atlas::Sprite;
 use window::{RectF, WindowOps};
@@ -941,11 +941,7 @@ impl super::TermWindow {
                         }
                         None => false,
                     } && matches!(self.current_mouse_capture, None | Some(MouseCapture::UI));
-                if hovering {
-                    hc
-                } else {
-                    &element.colors
-                }
+                if hovering { hc } else { &element.colors }
             }
             None => &element.colors,
         };
