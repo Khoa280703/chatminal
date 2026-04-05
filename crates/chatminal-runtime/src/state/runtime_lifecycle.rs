@@ -169,6 +169,7 @@ impl RuntimeState {
                             entry.prepend_run_boundary_on_next_output =
                                 prepend_run_boundary_on_next_output;
                             entry.restored_trailing_fragment = restored_trailing_fragment;
+                            entry.restored_prompt_redraw_buffer.clear();
                             entry.recent_output_tail.clear();
                         }
                         inner
@@ -213,6 +214,7 @@ impl StateInner {
                 generation: 0,
                 prepend_run_boundary_on_next_output: false,
                 restored_trailing_fragment: None,
+                restored_prompt_redraw_buffer: String::new(),
                 recent_output_tail: String::new(),
             },
         );
@@ -376,6 +378,7 @@ fn disconnect_session_entry(
     }
     entry.prepend_run_boundary_on_next_output = false;
     entry.restored_trailing_fragment = None;
+    entry.restored_prompt_redraw_buffer.clear();
     entry.recent_output_tail.clear();
     entry.session.status = StoredSessionStatus::Disconnected;
     entry.runtime.take()

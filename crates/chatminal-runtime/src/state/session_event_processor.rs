@@ -3,10 +3,11 @@ use std::sync::Arc;
 use chatminal_store::StoredSessionStatus;
 
 use super::{
-    RuntimeState, canonical_scrollback::materialize_output_chunk,
+    RuntimeState, RestoredPromptRedrawDecision, canonical_scrollback::materialize_output_chunk,
+    classify_restored_prompt_redraw, looks_like_shell_prompt_fragment,
     logicalize_prepended_run_boundary, persist_worker::PersistJob, prepend_run_boundary,
-    startup_recipe::append_recent_output_tail, strip_duplicate_restored_prompt_prefix,
-    strip_volatile_terminal_control_sequences, strip_zsh_prompt_spacer_artifact, trim_live_output,
+    startup_recipe::append_recent_output_tail, strip_volatile_terminal_control_sequences,
+    strip_zsh_prompt_spacer_artifact, trim_live_output,
 };
 use crate::api::{
     RuntimeEvent, RuntimePtyErrorEvent, RuntimePtyExitedEvent, RuntimePtyOutputEvent,
@@ -41,28 +42,55 @@ impl RuntimeState {
                         return;
                     }
                     if entry.prepend_run_boundary_on_next_output && !output_chunk.is_empty() {
-                        let stripped_duplicate_prompt = entry
+                        let restore_tail_was_shell_prompt = entry
                             .restored_trailing_fragment
                             .as_deref()
-                            .and_then(|fragment| {
-                                strip_duplicate_restored_prompt_prefix(fragment, &output_chunk)
-                            });
-                        if let Some(stripped_chunk) = stripped_duplicate_prompt {
-                            if stripped_chunk.is_empty() {
-                                return;
+                            .is_some_and(looks_like_shell_prompt_fragment);
+                        entry
+                            .restored_prompt_redraw_buffer
+                            .push_str(&output_chunk);
+                        let redraw_decision = entry
+                            .restored_trailing_fragment
+                            .as_deref()
+                            .map(|fragment| {
+                                classify_restored_prompt_redraw(
+                                    fragment,
+                                    &entry.restored_prompt_redraw_buffer,
+                                )
+                            })
+                            .unwrap_or(RestoredPromptRedrawDecision::Mismatch);
+                        match redraw_decision {
+                            RestoredPromptRedrawDecision::AwaitMore => return,
+                            RestoredPromptRedrawDecision::Strip(stripped_chunk) => {
+                                entry.restored_prompt_redraw_buffer.clear();
+                                if stripped_chunk.is_empty() {
+                                    return;
+                                }
+                                entry.prepend_run_boundary_on_next_output = false;
+                                entry.restored_trailing_fragment = None;
+                                output_chunk = if restore_tail_was_shell_prompt {
+                                    stripped_chunk
+                                } else {
+                                    synthetic_run_boundary_prepended = true;
+                                    prepend_run_boundary(&stripped_chunk)
+                                };
                             }
-                            entry.prepend_run_boundary_on_next_output = false;
-                            entry.restored_trailing_fragment = None;
-                            output_chunk = prepend_run_boundary(&stripped_chunk);
-                            synthetic_run_boundary_prepended = true;
-                        } else {
-                            entry.prepend_run_boundary_on_next_output = false;
-                            entry.restored_trailing_fragment = None;
-                            output_chunk = prepend_run_boundary(&output_chunk);
-                            synthetic_run_boundary_prepended = true;
+                            RestoredPromptRedrawDecision::Mismatch => {
+                                let buffered_chunk =
+                                    std::mem::take(&mut entry.restored_prompt_redraw_buffer);
+                                entry.prepend_run_boundary_on_next_output = false;
+                                entry.restored_trailing_fragment = None;
+                                output_chunk = if restore_tail_was_shell_prompt {
+                                    buffered_chunk
+                                } else {
+                                    synthetic_run_boundary_prepended = true;
+                                    prepend_run_boundary(&buffered_chunk)
+                                };
+                            }
                         }
                     } else if !output_chunk.is_empty() {
                         entry.restored_trailing_fragment = None;
+                        entry.restored_prompt_redraw_buffer.clear();
                     }
                     raw_replay_chunk = output_chunk.clone();
                     entry.session.seq += 1;

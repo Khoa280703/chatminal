@@ -7,7 +7,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::workspace_ids::{SessionViewId, WorkspaceNodeId};
 use crate::workspace_layout::{WorkspaceLayoutState, WorkspaceSplitAxis};
-#[cfg(test)]
 use chatminal_store::StoredSessionSnapshot;
 use chatminal_store::{Store, StoredSession, StoredSessionStatus};
 
@@ -49,6 +48,7 @@ struct SessionEntry {
     generation: u64,
     prepend_run_boundary_on_next_output: bool,
     restored_trailing_fragment: Option<String>,
+    restored_prompt_redraw_buffer: String,
     recent_output_tail: String,
 }
 
@@ -160,6 +160,7 @@ impl RuntimeState {
                         generation: 0,
                         prepend_run_boundary_on_next_output: false,
                         restored_trailing_fragment: None,
+                        restored_prompt_redraw_buffer: String::new(),
                         recent_output_tail: String::new(),
                     },
                 );
@@ -445,6 +446,7 @@ impl RuntimeState {
                     entry.session.status = StoredSessionStatus::Disconnected;
                     entry.prepend_run_boundary_on_next_output = false;
                     entry.restored_trailing_fragment = None;
+                    entry.restored_prompt_redraw_buffer.clear();
                     Activation::Recover(
                         stale_runtime,
                         SessionSpawnPlan {
@@ -1078,6 +1080,12 @@ fn snapshot_trailing_fragment(snapshot: &StoredSessionSnapshot) -> Option<String
     (!fragment.is_empty()).then_some(fragment)
 }
 
+fn normalize_restore_replay_snapshot(mut snapshot: StoredSessionSnapshot) -> StoredSessionSnapshot {
+    snapshot.content = strip_volatile_terminal_control_sequences(&snapshot.content);
+    snapshot.content = collapse_trailing_restored_prompt_fragment_dup(&snapshot.content);
+    snapshot
+}
+
 #[cfg(test)]
 fn normalize_session_snapshot(mut snapshot: StoredSessionSnapshot) -> StoredSessionSnapshot {
     snapshot.content = strip_volatile_terminal_control_sequences(&snapshot.content);
@@ -1287,6 +1295,73 @@ fn strip_duplicate_restored_prompt_prefix(restored: &str, chunk: &str) -> Option
     Some(chunk[prefix_end..].to_string())
 }
 
+enum RestoredPromptRedrawDecision {
+    AwaitMore,
+    Strip(String),
+    Mismatch,
+}
+
+fn classify_restored_prompt_redraw(restored: &str, buffered_chunk: &str) -> RestoredPromptRedrawDecision {
+    let expected_visible = visible_terminal_fragment(restored);
+    if !looks_like_shell_prompt_fragment(restored) {
+        return RestoredPromptRedrawDecision::Mismatch;
+    }
+
+    let visible = visible_terminal_fragment(buffered_chunk);
+    if visible.is_empty() {
+        return RestoredPromptRedrawDecision::AwaitMore;
+    }
+
+    if let Some(stripped) = strip_duplicate_restored_prompt_prefix(restored, buffered_chunk) {
+        return RestoredPromptRedrawDecision::Strip(stripped);
+    }
+
+    if expected_visible.starts_with(&visible) {
+        return RestoredPromptRedrawDecision::AwaitMore;
+    }
+
+    RestoredPromptRedrawDecision::Mismatch
+}
+
+fn collapse_trailing_restored_prompt_fragment_dup(content: &str) -> String {
+    if content.is_empty() {
+        return String::new();
+    }
+
+    let lines = split_lines_with_endings(content);
+    let Some(last) = lines.last() else {
+        return String::new();
+    };
+    if last.raw.ends_with('\n') || last.raw.ends_with('\r') {
+        return content.to_string();
+    }
+
+    let last_visible = visible_terminal_fragment(last.content);
+    if last_visible.is_empty() || !looks_like_shell_prompt_fragment(last.content) {
+        return content.to_string();
+    }
+
+    let mut duplicate_start = lines.len();
+    for index in (0..lines.len().saturating_sub(1)).rev() {
+        let line = &lines[index];
+        let visible = visible_terminal_fragment(line.content);
+        if visible != last_visible || !looks_like_shell_prompt_fragment(line.content) {
+            break;
+        }
+        duplicate_start = index;
+    }
+
+    if duplicate_start == lines.len() {
+        return content.to_string();
+    }
+
+    let prefix = lines[..duplicate_start]
+        .iter()
+        .map(|line| line.raw)
+        .collect::<String>();
+    format!("{prefix}{}", last.raw)
+}
+
 #[cfg(test)]
 fn collapse_trailing_duplicate_prompt_redraws(content: &str) -> String {
     if content.is_empty() {
@@ -1373,13 +1448,11 @@ fn collapse_trailing_prompt_only_lines(content: &str) -> String {
     format!("{prefix}{preserved_prompt}")
 }
 
-#[cfg(test)]
 struct SnapshotLine<'a> {
     content: &'a str,
     raw: &'a str,
 }
 
-#[cfg(test)]
 fn split_lines_with_endings(content: &str) -> Vec<SnapshotLine<'_>> {
     let bytes = content.as_bytes();
     let mut out = Vec::new();

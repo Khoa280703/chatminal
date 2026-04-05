@@ -27,6 +27,7 @@ pub(crate) fn spawn_reader_waiter_loop(
             .as_deref()
             .and_then(snapshot_trailing_fragment)
             .filter(|fragment| looks_like_shell_prompt_fragment(fragment));
+        let mut restored_prompt_redraw_buffer = String::new();
         let mut last_visible_prompt = restored_prompt_fragment
             .as_deref()
             .map(visible_terminal_fragment)
@@ -37,25 +38,32 @@ pub(crate) fn spawn_reader_waiter_loop(
             match reader.read(&mut buffer) {
                 Ok(0) => break,
                 Ok(read) => {
-                    let raw_chunk = String::from_utf8_lossy(&buffer[..read]).to_string();
+                    let sanitized = sanitize_zsh_prompt_spacer(&buffer[..read]);
+                    let raw_chunk = String::from_utf8_lossy(&sanitized).to_string();
                     io_terminal
                         .lock()
                         .unwrap()
                         .advance_bytes(raw_chunk.as_bytes());
                     let mut chunk = raw_chunk;
                     if let Some(restored) = restored_prompt_fragment.as_deref() {
-                        if visible_terminal_fragment(&chunk).is_empty() {
-                            // Keep prompt-dedupe armed across pure control-sequence chunks.
-                        } else if let Some(stripped) =
-                            strip_duplicate_restored_prompt_redraws(restored, &chunk)
-                        {
-                            if stripped.is_empty() {
-                                continue;
+                        restored_prompt_redraw_buffer.push_str(&chunk);
+                        match classify_restored_prompt_redraw(
+                            restored,
+                            &restored_prompt_redraw_buffer,
+                        ) {
+                            RestoredPromptRedrawDecision::AwaitMore => continue,
+                            RestoredPromptRedrawDecision::Strip(stripped) => {
+                                restored_prompt_redraw_buffer.clear();
+                                if stripped.is_empty() {
+                                    continue;
+                                }
+                                restored_prompt_fragment = None;
+                                chunk = stripped;
                             }
-                            chunk = stripped;
-                            restored_prompt_fragment = None;
-                        } else {
-                            restored_prompt_fragment = None;
+                            RestoredPromptRedrawDecision::Mismatch => {
+                                chunk = std::mem::take(&mut restored_prompt_redraw_buffer);
+                                restored_prompt_fragment = None;
+                            }
                         }
                     }
 
@@ -292,9 +300,41 @@ fn strip_duplicate_restored_prompt_redraws(restored: &str, chunk: &str) -> Optio
     stripped_any.then_some(remainder)
 }
 
+enum RestoredPromptRedrawDecision {
+    AwaitMore,
+    Strip(String),
+    Mismatch,
+}
+
+fn classify_restored_prompt_redraw(
+    restored: &str,
+    buffered_chunk: &str,
+) -> RestoredPromptRedrawDecision {
+    let expected_visible = visible_terminal_fragment(restored);
+    if !looks_like_shell_prompt_fragment(restored) {
+        return RestoredPromptRedrawDecision::Mismatch;
+    }
+
+    let visible = visible_terminal_fragment(buffered_chunk);
+    if visible.is_empty() {
+        return RestoredPromptRedrawDecision::AwaitMore;
+    }
+
+    if let Some(stripped) = strip_duplicate_restored_prompt_redraws(restored, buffered_chunk) {
+        return RestoredPromptRedrawDecision::Strip(stripped);
+    }
+
+    if expected_visible.starts_with(&visible) {
+        return RestoredPromptRedrawDecision::AwaitMore;
+    }
+
+    RestoredPromptRedrawDecision::Mismatch
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
+        RestoredPromptRedrawDecision, classify_restored_prompt_redraw,
         looks_like_shell_prompt_fragment, sanitize_zsh_prompt_spacer, snapshot_trailing_fragment,
         strip_duplicate_restored_prompt_redraws, visible_terminal_fragment,
     };
@@ -350,6 +390,25 @@ mod tests {
         )
         .expect("leading prompt redraw stripped");
         assert_eq!(stripped, "\r\nls\r\nfile.txt\r\n");
+    }
+
+    #[test]
+    fn buffers_split_prompt_redraw_until_full_match() {
+        assert!(matches!(
+            classify_restored_prompt_redraw(
+                "user@host ~ % ",
+                "\r\x1b[0m\x1b[27m\x1b[24m\x1b[Juser"
+            ),
+            RestoredPromptRedrawDecision::AwaitMore
+        ));
+
+        assert!(matches!(
+            classify_restored_prompt_redraw(
+                "user@host ~ % ",
+                "\r\x1b[0m\x1b[27m\x1b[24m\x1b[Juser@host ~ % "
+            ),
+            RestoredPromptRedrawDecision::Strip(stripped) if stripped.is_empty()
+        ));
     }
 
     #[test]

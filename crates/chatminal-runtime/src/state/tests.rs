@@ -15,7 +15,8 @@ use super::canonical_scrollback::{
 use super::explorer_utils::{normalize_relative_path, resolve_explorer_target};
 use super::test_bridge::make_test_bridge;
 use super::{
-    RuntimeState, SessionSpawnPlan, append_disconnected_restore_cleanup,
+    RestoredPromptRedrawDecision, RuntimeState, SessionSpawnPlan,
+    append_disconnected_restore_cleanup, classify_restored_prompt_redraw,
     collapse_trailing_duplicate_prompt_redraws, is_duplicate_restored_prompt_fragment,
     normalize_session_snapshot, normalize_terminal_fragment_for_compare, prepend_run_boundary,
     snapshot_requires_run_boundary, snapshot_trailing_fragment,
@@ -91,6 +92,31 @@ fn create_state_with_session() -> (RuntimeState, String, TempDb) {
     let bridge = make_test_bridge();
     let state = RuntimeState::new(config, store, bridge).expect("create runtime state");
     (state, session.session_id, db)
+}
+
+fn reopen_state(db: &TempDb) -> RuntimeState {
+    let config = RuntimeConfig {
+        endpoint: format!(
+            "/tmp/chatminal-state-reopen-{}-{}.sock",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|value| value.as_millis())
+                .unwrap_or(0)
+        ),
+        default_shell: "/bin/sh".to_string(),
+        default_preview_lines: 1000,
+        max_scrollback_lines_per_session: 5_000,
+        default_cols: 120,
+        default_rows: 32,
+        health_interval_ms: 1_000,
+    };
+    RuntimeState::new(
+        config,
+        Store::initialize(&db.path).expect("reopen store"),
+        make_test_bridge(),
+    )
+    .expect("recreate runtime state")
 }
 
 fn create_state_with_two_sessions() -> (RuntimeState, String, String, TempDb) {
@@ -356,6 +382,25 @@ fn duplicate_restored_prompt_prefix_can_be_stripped_from_mixed_chunk() {
     )
     .expect("prompt prefix stripped");
     assert_eq!(stripped, "command output\n");
+}
+
+#[test]
+fn duplicate_restored_prompt_redraw_waits_for_split_chunks() {
+    assert!(matches!(
+        classify_restored_prompt_redraw(
+            "khoa2807@host ~ % ",
+            "\r\x1b[0m\x1b[27m\x1b[24m\x1b[Jkhoa2807"
+        ),
+        RestoredPromptRedrawDecision::AwaitMore
+    ));
+
+    assert!(matches!(
+        classify_restored_prompt_redraw(
+            "khoa2807@host ~ % ",
+            "\r\x1b[0m\x1b[27m\x1b[24m\x1b[Jkhoa2807@host ~ % "
+        ),
+        RestoredPromptRedrawDecision::Strip(stripped) if stripped.is_empty()
+    ));
 }
 
 #[test]
@@ -1475,7 +1520,7 @@ fn first_distinct_output_after_respawn_still_starts_on_new_line() {
 
     state.flush_persist();
     let snapshot = restore_snapshot(&state, &session_id);
-    assert_eq!(snapshot.content, "khoa2807@host ~ % \r\ncommand output\n");
+    assert_eq!(snapshot.content, "khoa2807@host ~ % command output\n");
 }
 
 #[test]
@@ -1577,7 +1622,7 @@ fn repeated_prompt_redraws_after_respawn_are_all_ignored_until_real_output() {
 
     state.flush_persist();
     let snapshot = restore_snapshot(&state, &session_id);
-    assert_eq!(snapshot.content, "khoa2807@host ~ % \r\necho hi\nhi\n");
+    assert_eq!(snapshot.content, "khoa2807@host ~ % echo hi\nhi\n");
 }
 
 #[test]
@@ -1667,7 +1712,55 @@ fn prompt_redraw_prefixed_output_after_respawn_persists_only_new_output() {
 
     state.flush_persist();
     let snapshot = restore_snapshot(&state, &session_id);
-    assert_eq!(snapshot.content, "khoa2807@host ~ % \r\ncommand output\n");
+    assert_eq!(snapshot.content, "khoa2807@host ~ % command output\n");
+}
+
+#[test]
+fn restored_prompt_keeps_first_command_echo_on_same_line() {
+    let (state, session_id, _db) = create_state_with_session();
+    {
+        let mut inner = state.inner.lock().expect("lock state");
+        let entry = inner
+            .sessions
+            .get_mut(&session_id)
+            .expect("session entry exists");
+        entry.session.persist_history = true;
+        entry.session.status = StoredSessionStatus::Running;
+    }
+
+    state.apply_session_event(SessionEvent::Output {
+        session_id: Arc::from(session_id.as_str()),
+        generation: 0,
+        chunk: "khoa2807@192 ~ % ".to_string(),
+        ts: 1,
+    });
+
+    {
+        let mut inner = state.inner.lock().expect("lock state");
+        let entry = inner
+            .sessions
+            .get_mut(&session_id)
+            .expect("session entry exists");
+        entry.generation = 1;
+        entry.runtime = None;
+        entry.session.status = StoredSessionStatus::Disconnected;
+        entry.prepend_run_boundary_on_next_output = true;
+        entry.restored_trailing_fragment = Some("khoa2807@192 ~ % ".to_string());
+    }
+
+    state.apply_session_event(SessionEvent::Output {
+        session_id: Arc::from(session_id.as_str()),
+        generation: 1,
+        chunk: "abc\r\nzsh: command not found: abc\r\nkhoa2807@192 ~ % ".to_string(),
+        ts: 2,
+    });
+
+    state.flush_persist();
+    let snapshot = restore_snapshot(&state, &session_id);
+    assert_eq!(
+        snapshot.content,
+        "khoa2807@192 ~ % abc\r\nzsh: command not found: abc\r\nkhoa2807@192 ~ % "
+    );
 }
 
 #[test]
@@ -1741,7 +1834,190 @@ fn restore_snapshot_prefers_terminal_replay_over_canonical_snapshot() {
 
     let snapshot = restore_snapshot(&state, &session_id);
     assert_eq!(snapshot.seq, 2);
-    assert_eq!(snapshot.content, "\u{1b}]2;Claude Code\u{7}prompt % ");
+    assert_eq!(snapshot.content, "prompt % ");
+}
+
+#[test]
+fn restore_snapshot_collapses_duplicate_prompt_tail_from_terminal_replay() {
+    let (state, session_id, _db) = create_state_with_session();
+    {
+        let mut inner = state.inner.lock().expect("lock state");
+        inner
+            .sessions
+            .get_mut(&session_id)
+            .expect("session entry exists")
+            .session
+            .status = StoredSessionStatus::Running;
+        inner
+            .store
+            .append_terminal_replay_chunk(
+                &session_id,
+                1,
+                concat!(
+                    "echo hi\r\n",
+                    "khoa2807@192 ~ % \r\n",
+                    "khoa2807@192 ~ % "
+                ),
+                1,
+            )
+            .expect("append replay");
+    }
+
+    let snapshot = restore_snapshot(&state, &session_id);
+    assert_eq!(snapshot.seq, 1);
+    assert_eq!(snapshot.content, "echo hi\r\nkhoa2807@192 ~ % ");
+}
+
+#[test]
+fn restore_snapshot_keeps_duplicate_prompt_lines_when_last_prompt_is_committed() {
+    let (state, session_id, _db) = create_state_with_session();
+    {
+        let mut inner = state.inner.lock().expect("lock state");
+        inner
+            .sessions
+            .get_mut(&session_id)
+            .expect("session entry exists")
+            .session
+            .status = StoredSessionStatus::Running;
+        inner
+            .store
+            .append_terminal_replay_chunk(
+                &session_id,
+                1,
+                concat!(
+                    "echo hi\r\n",
+                    "khoa2807@192 ~ % \r\n",
+                    "khoa2807@192 ~ % \r\n"
+                ),
+                1,
+            )
+            .expect("append replay");
+    }
+
+    let snapshot = restore_snapshot(&state, &session_id);
+    assert_eq!(snapshot.seq, 1);
+    assert_eq!(
+        snapshot.content,
+        "echo hi\r\nkhoa2807@192 ~ % \r\nkhoa2807@192 ~ % \r\n"
+    );
+}
+
+#[test]
+fn restore_snapshot_stays_stable_across_restart_and_prompt_redraw_cycle() {
+    let (state, session_id, db) = create_state_with_session();
+    {
+        let mut inner = state.inner.lock().expect("lock state");
+        let entry = inner
+            .sessions
+            .get_mut(&session_id)
+            .expect("session entry exists");
+        entry.session.persist_history = true;
+        entry.session.status = StoredSessionStatus::Running;
+    }
+
+    state.apply_session_event(SessionEvent::Output {
+        session_id: Arc::from(session_id.as_str()),
+        generation: 0,
+        chunk: "khoa2807@192 ~ % ".to_string(),
+        ts: 1,
+    });
+    state.flush_persist();
+    state.app_shutdown();
+    drop(state);
+
+    let reopened = reopen_state(&db);
+    let restored_before = restore_snapshot(&reopened, &session_id);
+    assert_eq!(
+        restored_before.content,
+        append_disconnected_restore_cleanup("khoa2807@192 ~ % ")
+    );
+
+    reopened
+        .session_activate(&session_id, 120, 32)
+        .expect("activate reopened session");
+    let generation = {
+        let inner = reopened.inner.lock().expect("lock reopened state");
+        inner
+            .sessions
+            .get(&session_id)
+            .expect("session entry exists")
+            .generation
+    };
+    reopened.apply_session_event(SessionEvent::Output {
+        session_id: Arc::from(session_id.as_str()),
+        generation,
+        chunk: "\r\x1b[0m\x1b[27m\x1b[24m\x1b[Jkhoa2807@192 ~ % ".to_string(),
+        ts: 2,
+    });
+    reopened.flush_persist();
+    reopened.app_shutdown();
+    drop(reopened);
+
+    let reopened_again = reopen_state(&db);
+    let restored_after = restore_snapshot(&reopened_again, &session_id);
+    assert_eq!(
+        restored_after.content,
+        append_disconnected_restore_cleanup("khoa2807@192 ~ % ")
+    );
+}
+
+#[test]
+fn restore_snapshot_stays_stable_across_restart_and_split_prompt_redraw_cycle() {
+    let (state, session_id, db) = create_state_with_session();
+    {
+        let mut inner = state.inner.lock().expect("lock state");
+        let entry = inner
+            .sessions
+            .get_mut(&session_id)
+            .expect("session entry exists");
+        entry.session.persist_history = true;
+        entry.session.status = StoredSessionStatus::Running;
+    }
+
+    state.apply_session_event(SessionEvent::Output {
+        session_id: Arc::from(session_id.as_str()),
+        generation: 0,
+        chunk: "khoa2807@192 ~ % ".to_string(),
+        ts: 1,
+    });
+    state.flush_persist();
+    state.app_shutdown();
+    drop(state);
+
+    let reopened = reopen_state(&db);
+    reopened
+        .session_activate(&session_id, 120, 32)
+        .expect("activate reopened session");
+    let generation = {
+        let inner = reopened.inner.lock().expect("lock reopened state");
+        inner
+            .sessions
+            .get(&session_id)
+            .expect("session entry exists")
+            .generation
+    };
+    reopened.apply_session_event(SessionEvent::Output {
+        session_id: Arc::from(session_id.as_str()),
+        generation,
+        chunk: "\r\x1b[0m\x1b[27m\x1b[24m\x1b[Jkhoa2807".to_string(),
+        ts: 2,
+    });
+    reopened.apply_session_event(SessionEvent::Output {
+        session_id: Arc::from(session_id.as_str()),
+        generation,
+        chunk: "@192 ~ % ".to_string(),
+        ts: 3,
+    });
+    reopened.flush_persist();
+    reopened.app_shutdown();
+    drop(reopened);
+
+    let reopened_again = reopen_state(&db);
+    let restored_after = restore_snapshot(&reopened_again, &session_id);
+    assert_eq!(
+        restored_after.content,
+        append_disconnected_restore_cleanup("khoa2807@192 ~ % ")
+    );
 }
 
 #[test]
@@ -1758,7 +2034,7 @@ fn disconnected_restore_snapshot_appends_cleanup_to_terminal_replay() {
     let snapshot = restore_snapshot(&state, &session_id);
     assert_eq!(
         snapshot.content,
-        "\u{1b}]2;Claude Code\u{7}abc\x1b]1;Chatminal\x07\x1b]2;Chatminal\x07\x1b[?25h"
+        "abc\x1b]1;Chatminal\x07\x1b]2;Chatminal\x07\x1b[?25h"
     );
 }
 

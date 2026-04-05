@@ -1,6 +1,7 @@
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use chatminal_runtime::terminal_text_utils::visible_terminal_fragment;
 use config::current_config_handle;
 use engine_term::TerminalSize;
 use portable_pty::CommandBuilder;
@@ -88,6 +89,29 @@ fn leaf_runtime_seeds_terminal_from_initial_scrollback() {
 
     assert!(runtime.replay_output().contains("restored-line-1"));
     assert!(runtime.replay_output().contains("restored-line-2"));
+}
+
+#[test]
+fn leaf_runtime_ignores_zsh_prompt_redraw_artifact_after_restore() {
+    let (events_tx, events_rx) = mpsc::sync_channel(32);
+    let mut spawn = runtime_spawn(
+        "printf '\\033[1m\\033[7m%%\\033[27m\\033[1m\\033[0m     \\r \\r\\033[0muser@host ~ %% '",
+    );
+    spawn.initial_scrollback = Some("user@host ~ % ".to_string());
+
+    let runtime = TerminalInstanceRuntime::spawn(spawn, events_tx).expect("spawn runtime");
+
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_secs(3) {
+        if let Ok(TerminalInstanceRuntimeEvent::Exited { .. }) =
+            events_rx.recv_timeout(Duration::from_millis(200))
+        {
+            break;
+        }
+    }
+
+    let replay = runtime.replay_output();
+    assert_eq!(visible_terminal_fragment(&replay), "user@host ~ % ");
 }
 
 #[test]

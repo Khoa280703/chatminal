@@ -8,7 +8,7 @@ use super::{
         build_logical_snapshot, materialize_output_chunk, render_snapshot,
         render_snapshot_for_terminal,
     },
-    now_millis, strip_zsh_prompt_spacer_artifact,
+    normalize_restore_replay_snapshot, now_millis, strip_zsh_prompt_spacer_artifact,
 };
 use crate::api::{
     RuntimeLifecyclePreferences, RuntimeProfile, RuntimeSessionSnapshot, RuntimeWorkspace,
@@ -164,7 +164,9 @@ impl StateInner {
             return Err("session not found".to_string());
         }
 
-        let snapshot = self.store.session_terminal_replay_snapshot(session_id)?;
+        let snapshot = normalize_restore_replay_snapshot(
+            self.store.session_terminal_replay_snapshot(session_id)?,
+        );
         let snapshot = if snapshot.content.is_empty() {
             render_snapshot_for_terminal(&build_logical_snapshot(&self.store, session_id)?)
         } else {
