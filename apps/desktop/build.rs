@@ -33,6 +33,20 @@ fn main() {
 }
 
 fn ensure_vendored_native_deps(repo_root: &Path) {
+    // If all sentinel files are present the vendor deps are already hydrated.
+    // Skip the bash bootstrap script entirely — avoids WSL/bash resolution
+    // issues on Windows where CI pre-runs the bootstrap via Git Bash.
+    let vendor_dir = repo_root.join("vendor").join("terminal-deps");
+    let sentinels = [
+        "freetype/zlib/adler32.c",
+        "freetype/libpng/png.c",
+        "freetype/freetype2/include/freetype/freetype.h",
+        "harfbuzz/harfbuzz/src/harfbuzz.cc",
+    ];
+    if sentinels.iter().all(|s| vendor_dir.join(s).exists()) {
+        return;
+    }
+
     let script = repo_root
         .join("scripts")
         .join("bootstrap-terminal-vendor-deps.sh");
