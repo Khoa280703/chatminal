@@ -1,0 +1,40 @@
+[package]
+authors = ["Chatminal Contributors"]
+name = "terminal-surface"
+version = "0.1.0"
+edition = "2018"
+description = "Surface and Line types for terminals"
+license = "MIT"
+documentation = "https://docs.rs/terminal-surface"
+keywords = ["terminal", "surface", "line"]
+
+[lib]
+name = "terminal_surface"
+
+[dependencies]
+bitflags = "2.0"
+fancy-regex.workspace = true
+finl_unicode.workspace = true
+fixedbitset.workspace = true
+ordered-float.workspace = true
+serde = {workspace=true, optional=true}
+siphasher.workspace = true
+unicode-segmentation.workspace = true
+terminal-bidi.workspace = true
+terminal-blob-leases = {workspace=true, optional=true}
+terminal-cell = {workspace = true}
+terminal-char-props.workspace = true
+terminal-color-types = {workspace = true}
+dynamic = {workspace = true}
+terminal-escape-parser = {workspace = true}
+terminal-input-types.workspace = true
+
+[features]
+default = []
+std = ["fancy-regex/std", "terminal-cell/std", "dynamic/std", "terminal-escape-parser/std", "fixedbitset/std", "fancy-regex/perf", "fancy-regex/unicode"]
+appdata = ["std"]
+use_serde = ["serde"] #, "terminal-color-types/use_serde", "terminal-blob-leases/serde", "bitflags/serde", "terminal-input-types/serde", "terminal-escape-parser/use_serde", "terminal-cell/use_serde"]
+use_image = ["terminal-cell/use_image"] # "image", "dep:image", "terminal-escape-parser/use_image", "terminal-escape-parser/kitty-shm", "terminal-cell/use_image"]
+
+[dev-dependencies]
+k9.workspace = true

@@ -1,67 +1,67 @@
 [workspace]
 members = [
-  "apps/chatminal-desktop",
-  "crates/chatminal-runtime",
-  "crates/chatminal-base91",
-  "crates/chatminal-battery",
-  "crates/chatminal-bintree",
-  "crates/chatminal-config",
-  "crates/chatminal-codec",
-  "crates/chatminal-color-funcs",
-  "crates/chatminal-env-bootstrap",
-  "crates/chatminal-filedescriptor",
-  "crates/chatminal-filesystem",
-  "crates/chatminal-frecency",
-  "crates/chatminal-lfucache",
-  "crates/chatminal-luahelper",
-  "crates/chatminal-logging",
-  "crates/chatminal-lua-bridge",
-  "crates/chatminal-promise",
-  "crates/chatminal-plugin",
-  "crates/chatminal-portable-pty",
-  "crates/chatminal-procinfo",
-  "crates/chatminal-procinfo-funcs",
-  "crates/chatminal-rangeset",
-  "crates/chatminal-ratelim",
-  "crates/chatminal-serde-funcs",
-  "crates/chatminal-share-data",
-  "crates/chatminal-spawn-funcs",
-  "crates/chatminal-tabout",
-  "crates/chatminal-termwiz",
-  "crates/chatminal-termwiz-funcs",
-  "crates/chatminal-time-funcs",
-  "crates/chatminal-umask",
-  "crates/chatminal-url-funcs",
-  "crates/chatminal-vtparse",
-  "crates/chatminal-config-derive",
-  "crates/chatminal-terminal-bidi",
-  "crates/chatminal-terminal-blob-leases",
-  "crates/chatminal-terminal-cell",
-  "crates/chatminal-terminal-char-props",
-  "crates/chatminal-terminal-color-types",
-  "crates/chatminal-dynamic",
-  "crates/chatminal-dynamic-derive",
-  "crates/chatminal-terminal-escape-parser",
-  "crates/chatminal-terminal-font",
-  "crates/chatminal-gui-subcommands",
-  "crates/chatminal-terminal-input-types",
-  "crates/chatminal-open-url",
-  "crates/chatminal-terminal-surface",
-  "crates/chatminal-terminal-emulator",
-  "crates/chatminal-toast-notification",
-  "crates/chatminal-uds",
-  "crates/chatminal-store",
-  "crates/chatminal-window",
-  "crates/chatminal-window-funcs",
+  "apps/desktop",
+  "crates/runtime",
+  "crates/base91",
+  "crates/battery",
+  "crates/bintree",
+  "crates/config",
+  "crates/codec",
+  "crates/color-funcs",
+  "crates/env-bootstrap",
+  "crates/filedescriptor",
+  "crates/filesystem",
+  "crates/frecency",
+  "crates/lfucache",
+  "crates/luahelper",
+  "crates/logging",
+  "crates/lua-bridge",
+  "crates/promise",
+  "crates/plugin",
+  "crates/portable-pty",
+  "crates/procinfo",
+  "crates/procinfo-funcs",
+  "crates/rangeset",
+  "crates/ratelim",
+  "crates/serde-funcs",
+  "crates/share-data",
+  "crates/spawn-funcs",
+  "crates/tabout",
+  "crates/termwiz",
+  "crates/termwiz-funcs",
+  "crates/time-funcs",
+  "crates/umask",
+  "crates/url-funcs",
+  "crates/vtparse",
+  "crates/config-derive",
+  "crates/terminal-bidi",
+  "crates/terminal-blob-leases",
+  "crates/terminal-cell",
+  "crates/terminal-char-props",
+  "crates/terminal-color-types",
+  "crates/dynamic",
+  "crates/dynamic-derive",
+  "crates/terminal-escape-parser",
+  "crates/terminal-font",
+  "crates/gui-subcommands",
+  "crates/terminal-input-types",
+  "crates/open-url",
+  "crates/terminal-surface",
+  "crates/terminal-emulator",
+  "crates/toast-notification",
+  "crates/uds",
+  "crates/store",
+  "crates/window",
+  "crates/window-funcs",
   "vendor/terminal-deps/cairo",
   "vendor/terminal-deps/fontconfig",
   "vendor/terminal-deps/freetype",
   "vendor/terminal-deps/harfbuzz",
 ]
 default-members = [
-  "apps/chatminal-desktop",
-  "crates/chatminal-runtime",
-  "crates/chatminal-store",
+  "apps/desktop",
+  "crates/runtime",
+  "crates/store",
 ]
 resolver = "2"
 
@@ -81,10 +81,10 @@ async-task = "4.7"
 async-trait = "0.1"
 backtrace = "0.3"
 base64 = { version = "0.22", default-features = false }
-base91 = { package = "chatminal-base91", path = "crates/chatminal-base91" }
-battery = { package = "chatminal-battery", path = "crates/chatminal-battery" }
+base91 = { path = "crates/base91" }
+battery = { path = "crates/battery" }
 benchmarking = "0.4"
-bintree = { package = "chatminal-bintree", path = "crates/chatminal-bintree" }
+bintree = { path = "crates/bintree" }
 bitflags = "1.3"
 block2 = "0.6"
 bstr = "1.0"
@@ -101,10 +101,10 @@ clap_complete = "4.4"
 clap_complete_fig = "4.0"
 clipboard-win = "2.2"
 cocoa = "=0.25.0"
-codec = { package = "chatminal-codec", path = "crates/chatminal-codec" }
-color-funcs = { package = "chatminal-color-funcs", path = "crates/chatminal-color-funcs" }
+codec = { path = "crates/codec" }
+color-funcs = { path = "crates/color-funcs" }
 colorgrad = "0.6"
-config = { package = "chatminal-config", path = "crates/chatminal-config" }
+config = { path = "crates/config" }
 core-foundation = "=0.10.0"
 core-graphics = "=0.24.0"
 core-text = "=21.0.0"
@@ -121,21 +121,21 @@ embed-resource = "1.7"
 emojis = "0.6"
 encoding_rs = "0.8"
 enum-display-derive = "0.1"
-env-bootstrap = { package = "chatminal-env-bootstrap", path = "crates/chatminal-env-bootstrap" }
+env-bootstrap = { path = "crates/env-bootstrap" }
 env_logger = "0.11"
 euclid = { version = "0.22", default-features = false }
 fancy-regex = { version = "0.14", default-features = false, features = [] }
 fastrand = "2.0"
-filedescriptor = { package = "chatminal-filedescriptor", path = "crates/chatminal-filedescriptor", version = "0.8.3" }
+filedescriptor = { path = "crates/filedescriptor", version = "0.8.3" }
 filenamegen = "0.2.6"
-filesystem = { package = "chatminal-filesystem", path = "crates/chatminal-filesystem" }
+filesystem = { path = "crates/filesystem" }
 finl_unicode = { version = "1.3", git = "https://github.com/wez/finl_unicode.git", branch = "no_std", default-features = false, features = ["categories", "grapheme_clusters"] }
 fixed = "1.23"
 fixedbitset = { version = "0.4", default-features = false }
 flume = "0.11"
 fnv = "1.0"
 fontconfig = { path = "vendor/terminal-deps/fontconfig" }
-frecency = { package = "chatminal-frecency", path = "crates/chatminal-frecency" }
+frecency = { path = "crates/frecency" }
 freetype = { path = "vendor/terminal-deps/freetype" }
 futures = "0.3"
 futures-lite = "2.3"
@@ -160,15 +160,15 @@ intrusive-collections = "0.9"
 k9 = "0.12.0"
 lazy_static = "1.4"
 leb128 = "0.2"
-lfucache = { package = "chatminal-lfucache", path = "crates/chatminal-lfucache" }
+lfucache = { path = "crates/lfucache" }
 libc = "0.2"
 libflate = "2"
 libloading = "0.8"
 line_drawing = "0.8"
 log = "0.4"
-logging = { package = "chatminal-logging", path = "crates/chatminal-logging" }
+logging = { path = "crates/logging" }
 lru = "0.16"
-luahelper = { package = "chatminal-luahelper", path = "crates/chatminal-luahelper" }
+luahelper = { path = "crates/luahelper" }
 maplit = "1.0"
 memmap2 = "0.9"
 memmem = "0.1"
@@ -176,7 +176,7 @@ metrics = "0.23"
 miniz_oxide = "0.7"
 mio = "0.8"
 mlua = "0.9"
-chatminal-lua-bridge = { package = "chatminal-lua-bridge", path = "crates/chatminal-lua-bridge" }
+lua-bridge = { path = "crates/lua-bridge" }
 names = { version = "0.12", default-features = false }
 nix = "0.29"
 notify = "5.0.0"
@@ -200,16 +200,16 @@ phf = { version = "0.11", default-features = false }
 phf_codegen = "0.10"
 pkg-config = "0.3"
 plist = "1.7"
-plugin = { package = "chatminal-plugin", path = "crates/chatminal-plugin" }
-portable-pty = { package = "chatminal-portable-pty", path = "crates/chatminal-portable-pty" }
+plugin = { path = "crates/plugin" }
+portable-pty = { path = "crates/portable-pty" }
 predicates = "3.0"
 proc-macro2 = "1.0"
-procinfo = { package = "chatminal-procinfo", path = "crates/chatminal-procinfo" }
-procinfo-funcs = { package = "chatminal-procinfo-funcs", path = "crates/chatminal-procinfo-funcs" }
-promise = { package = "chatminal-promise", path = "crates/chatminal-promise" }
+procinfo = { path = "crates/procinfo" }
+procinfo-funcs = { path = "crates/procinfo-funcs" }
+promise = { path = "crates/promise" }
 quote = "1.0.2"
-rangeset = { package = "chatminal-rangeset", path = "crates/chatminal-rangeset" }
-ratelim = { package = "chatminal-ratelim", path = "crates/chatminal-ratelim" }
+rangeset = { path = "crates/rangeset" }
+ratelim = { path = "crates/ratelim" }
 raw-window-handle = "0.6"
 rayon = "1.10"
 rcgen = "0.12"
@@ -218,13 +218,13 @@ resize = "0.5"
 rstest = "0.21"
 rusqlite = "0.32"
 serde = { version = "1.0", default-features = false, features = ["derive"] }
-serde-funcs = { package = "chatminal-serde-funcs", path = "crates/chatminal-serde-funcs" }
+serde-funcs = { path = "crates/serde-funcs" }
 serde_json = "1.0"
 serde_with = { version = "2.0", features = ["chrono_0_4"] }
 serde_yaml = "0.9"
 serial2 = "0.2"
 sha2 = "0.10"
-share-data = { package = "chatminal-share-data", path = "crates/chatminal-share-data" }
+share-data = { path = "crates/share-data" }
 shared_library = "0.1"
 shell-words = "1.1"
 shlex = "1.1"
@@ -234,63 +234,63 @@ smithay-client-toolkit = { version = "0.19", default-features = false }
 smol = "2.0"
 socket2 = "0.5"
 spa = "0.3.1"
-spawn-funcs = { package = "chatminal-spawn-funcs", path = "crates/chatminal-spawn-funcs" }
+spawn-funcs = { path = "crates/spawn-funcs" }
 sqlite-cache = "0.1.4"
 starship-battery = "0.10"
 strsim = "0.11"
 syn = "1.0"
-tabout = { package = "chatminal-tabout", path = "crates/chatminal-tabout" }
+tabout = { path = "crates/tabout" }
 tar = "0.4"
 tempfile = "3.20"
 terminfo = "0.9"
 termios = "0.3"
-termwiz = { package = "chatminal-termwiz", path = "crates/chatminal-termwiz", version = "0.24.0" }
-termwiz-funcs = { package = "chatminal-termwiz-funcs", path = "crates/chatminal-termwiz-funcs" }
+termwiz = { path = "crates/termwiz", version = "0.24.0" }
+termwiz-funcs = { path = "crates/termwiz-funcs" }
 textwrap = "0.16"
 thiserror = "1.0"
-time-funcs = { package = "chatminal-time-funcs", path = "crates/chatminal-time-funcs" }
+time-funcs = { path = "crates/time-funcs" }
 tiny-skia = "0.11"
 toml = "0.8"
 ucd-trie = { version = "0.1", default-features = false }
 uds_windows = "1.1"
-umask = { package = "chatminal-umask", path = "crates/chatminal-umask" }
+umask = { path = "crates/umask" }
 unicode-normalization = "0.1.24"
 unicode-segmentation = "1.12"
 url = "2"
-url-funcs = { package = "chatminal-url-funcs", path = "crates/chatminal-url-funcs" }
+url-funcs = { path = "crates/url-funcs" }
 utf8parse = "0.2"
 uuid = "1.13"
 varbincode = "0.1"
-vtparse = { package = "chatminal-vtparse", path = "crates/chatminal-vtparse", version = "0.7", default-features = false }
+vtparse = { path = "crates/vtparse", version = "0.7", default-features = false }
 walkdir = "2"
 wayland-backend = "0.3.5"
 wayland-client = "0.31"
 wayland-egl = "0.32"
 wayland-protocols = "0.32"
 wayland-protocols-plasma = { version = "0.3.6", features = ["client"] }
-engine-bidi = { package = "chatminal-terminal-bidi", path = "crates/chatminal-terminal-bidi", version = "0.2.3", default-features = false }
-engine-blob-leases = { package = "chatminal-terminal-blob-leases", path = "crates/chatminal-terminal-blob-leases", version = "0.1.1" }
-engine-cell = { package = "chatminal-terminal-cell", path = "crates/chatminal-terminal-cell" }
-engine-char-props = { package = "chatminal-terminal-char-props", path = "crates/chatminal-terminal-char-props", default-features = false }
-engine-color-types = { package = "chatminal-terminal-color-types", path = "crates/chatminal-terminal-color-types", version = "0.3", default-features = false }
-engine-config-derive = { package = "chatminal-config-derive", path = "crates/chatminal-config-derive", version = "0.1" }
-engine-dynamic = { package = "chatminal-dynamic", path = "crates/chatminal-dynamic", version = "0.2.1", default-features = false }
-engine-dynamic-derive = { package = "chatminal-dynamic-derive", path = "crates/chatminal-dynamic-derive", version = "0.1.1" }
-engine-escape-parser = { package = "chatminal-terminal-escape-parser", path = "crates/chatminal-terminal-escape-parser", version = "0.1.0" }
-engine-font = { package = "chatminal-terminal-font", path = "crates/chatminal-terminal-font" }
-engine-gui-subcommands = { package = "chatminal-gui-subcommands", path = "crates/chatminal-gui-subcommands" }
-engine-input-types = { package = "chatminal-terminal-input-types", path = "crates/chatminal-terminal-input-types", version = "0.1", default-features = false }
-engine-open-url = { package = "chatminal-open-url", path = "crates/chatminal-open-url" }
-engine-surface = { package = "chatminal-terminal-surface", path = "crates/chatminal-terminal-surface" }
-engine-term = { package = "chatminal-terminal-emulator", path = "crates/chatminal-terminal-emulator" }
-engine-toast-notification = { package = "chatminal-toast-notification", path = "crates/chatminal-toast-notification" }
-engine-uds = { package = "chatminal-uds", path = "crates/chatminal-uds" }
-engine-version = { package = "chatminal-version", path = "crates/chatminal-version" }
+terminal-bidi = { path = "crates/terminal-bidi", version = "0.2.3", default-features = false }
+terminal-blob-leases = { path = "crates/terminal-blob-leases", version = "0.1.1" }
+terminal-cell = { path = "crates/terminal-cell" }
+terminal-char-props = { path = "crates/terminal-char-props", default-features = false }
+terminal-color-types = { path = "crates/terminal-color-types", version = "0.3", default-features = false }
+config-derive = { path = "crates/config-derive", version = "0.1" }
+dynamic = { path = "crates/dynamic", version = "0.2.1", default-features = false }
+dynamic-derive = { path = "crates/dynamic-derive", version = "0.1.1" }
+terminal-escape-parser = { path = "crates/terminal-escape-parser", version = "0.1.0" }
+terminal-font = { path = "crates/terminal-font" }
+gui-subcommands = { path = "crates/gui-subcommands" }
+terminal-input-types = { path = "crates/terminal-input-types", version = "0.1", default-features = false }
+open-url = { path = "crates/open-url" }
+terminal-surface = { path = "crates/terminal-surface" }
+terminal-emulator = { path = "crates/terminal-emulator" }
+toast-notification = { path = "crates/toast-notification" }
+uds = { path = "crates/uds" }
+terminal-version = { path = "crates/terminal-version" }
 wgpu = "25.0.2"
 whoami = "1.5"
 winapi = "0.3.9"
-window = { package = "chatminal-window", path = "crates/chatminal-window" }
-window-funcs = { package = "chatminal-window-funcs", path = "crates/chatminal-window-funcs" }
+window = { path = "crates/window" }
+window-funcs = { path = "crates/window-funcs" }
 windows = "0.33.0"
 winreg = "0.10"
 x11 = "2.21"

@@ -441,10 +441,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
+name = "base91"
+version = "0.1.0"
+
+[[package]]
+name = "battery"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "config",
+ "dynamic",
+ "luahelper",
+ "starship-battery",
+]
+
+[[package]]
 name = "benchmarking"
 version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c335a9de639ba6a3e4107fe7763c9dcd4eb9422575f1191c2b8f2009f03fe4a"
+
+[[package]]
+name = "bintree"
+version = "0.1.0"
 
 [[package]]
 name = "bit-set"
@@ -667,952 +686,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "chatminal-base91"
-version = "0.1.0"
-
-[[package]]
-name = "chatminal-battery"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chatminal-config",
- "chatminal-dynamic",
- "chatminal-luahelper",
- "starship-battery",
-]
-
-[[package]]
-name = "chatminal-bintree"
-version = "0.1.0"
-
-[[package]]
-name = "chatminal-codec"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chatminal-base91",
- "chatminal-config",
- "chatminal-portable-pty",
- "chatminal-rangeset",
- "chatminal-runtime",
- "chatminal-terminal-emulator",
- "chatminal-termwiz",
- "leb128",
- "log",
- "metrics",
- "serde",
- "smol",
- "thiserror 1.0.69",
- "varbincode",
- "zstd",
-]
-
-[[package]]
-name = "chatminal-color-funcs"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chatminal-config",
- "chatminal-dynamic",
- "chatminal-luahelper",
- "chatminal-terminal-color-types",
- "chatminal-terminal-emulator",
- "csscolorparser",
- "deltae",
- "image",
- "lazy_static",
- "log",
- "lru",
- "plist",
- "serde",
- "serde_json",
- "serde_yaml",
-]
-
-[[package]]
-name = "chatminal-config"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bitflags 1.3.2",
- "chatminal-config-derive",
- "chatminal-dynamic",
- "chatminal-luahelper",
- "chatminal-portable-pty",
- "chatminal-promise",
- "chatminal-terminal-bidi",
- "chatminal-terminal-emulator",
- "chatminal-terminal-input-types",
- "chatminal-termwiz",
- "chatminal-umask",
- "colorgrad",
- "dirs",
- "enum-display-derive",
- "env_logger 0.11.9",
- "hostname",
- "lazy_static",
- "libc",
- "log",
- "mlua",
- "nix",
- "notify",
- "ordered-float 4.6.0",
- "serde",
- "serde_json",
- "shlex",
- "smol",
- "toml 0.8.23",
- "winapi",
-]
-
-[[package]]
-name = "chatminal-config-derive"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "chatminal-desktop"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "benchmarking",
- "bitflags 1.3.2",
- "bytemuck",
- "cc",
- "chatminal-codec",
- "chatminal-config",
- "chatminal-dynamic",
- "chatminal-env-bootstrap",
- "chatminal-filedescriptor",
- "chatminal-frecency",
- "chatminal-gui-subcommands",
- "chatminal-lfucache",
- "chatminal-lua-bridge",
- "chatminal-luahelper",
- "chatminal-open-url",
- "chatminal-portable-pty",
- "chatminal-procinfo",
- "chatminal-promise",
- "chatminal-rangeset",
- "chatminal-ratelim",
- "chatminal-runtime",
- "chatminal-store",
- "chatminal-tabout",
- "chatminal-terminal-bidi",
- "chatminal-terminal-blob-leases",
- "chatminal-terminal-emulator",
- "chatminal-terminal-font",
- "chatminal-termwiz",
- "chatminal-termwiz-funcs",
- "chatminal-toast-notification",
- "chatminal-umask",
- "chatminal-url-funcs",
- "chatminal-window",
- "chatminal-window-funcs",
- "chrono",
- "clap",
- "colorgrad",
- "dhat",
- "dirs",
- "downcast-rs",
- "embed-resource",
- "emojis",
- "env_logger 0.11.9",
- "euclid",
- "fastrand",
- "finl_unicode",
- "futures",
- "hdrhistogram",
- "image",
- "k9",
- "lazy_static",
- "libc",
- "log",
- "metrics",
- "mlua",
- "nucleo-matcher",
- "ordered-float 4.6.0",
- "parking_lot",
- "rayon",
- "regex",
- "resvg",
- "serde",
- "serde_json",
- "shared_library",
- "shlex",
- "smol",
- "sysinfo",
- "tempfile",
- "terminfo",
- "textwrap",
- "thiserror 1.0.69",
- "tiny-skia",
- "unicode-normalization",
- "unicode-segmentation",
- "url",
- "usvg",
- "walkdir",
- "wgpu",
- "winapi",
- "windows 0.33.0",
-]
-
-[[package]]
-name = "chatminal-dynamic"
-version = "0.2.1"
-dependencies = [
- "chatminal-dynamic-derive",
- "log",
- "maplit",
- "ordered-float 4.6.0",
- "strsim",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "chatminal-dynamic-derive"
-version = "0.1.1"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "chatminal-env-bootstrap"
-version = "0.1.0"
-dependencies = [
- "backtrace",
- "chatminal-battery",
- "chatminal-color-funcs",
- "chatminal-config",
- "chatminal-filesystem",
- "chatminal-logging",
- "chatminal-lua-bridge",
- "chatminal-plugin",
- "chatminal-procinfo-funcs",
- "chatminal-serde-funcs",
- "chatminal-share-data",
- "chatminal-spawn-funcs",
- "chatminal-termwiz",
- "chatminal-termwiz-funcs",
- "chatminal-time-funcs",
- "chatminal-url-funcs",
- "chatminal-version",
- "chrono",
- "dirs",
- "env_logger 0.10.2",
- "lazy_static",
- "libc",
- "log",
- "objc2",
- "objc2-foundation",
- "winapi",
-]
-
-[[package]]
-name = "chatminal-filedescriptor"
-version = "0.8.3"
-dependencies = [
- "libc",
- "thiserror 1.0.69",
- "winapi",
-]
-
-[[package]]
-name = "chatminal-filesystem"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chatminal-config",
- "chatminal-luahelper",
- "filenamegen",
- "smol",
-]
-
-[[package]]
-name = "chatminal-frecency"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "serde",
- "serde_json",
- "serde_with",
-]
-
-[[package]]
-name = "chatminal-gui-subcommands"
-version = "0.1.0"
-dependencies = [
- "chatminal-config",
- "clap",
-]
-
-[[package]]
-name = "chatminal-lfucache"
-version = "0.1.0"
-dependencies = [
- "ahash",
- "chatminal-config",
- "fnv",
- "intrusive-collections",
- "k9",
- "metrics",
-]
-
-[[package]]
-name = "chatminal-logging"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chatminal-config",
- "chatminal-luahelper",
- "log",
-]
-
-[[package]]
-name = "chatminal-lua-bridge"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chatminal-config",
- "chatminal-dynamic",
- "chatminal-luahelper",
- "chatminal-portable-pty",
- "chatminal-procinfo",
- "chatminal-runtime",
- "chatminal-terminal-emulator",
- "chatminal-termwiz",
- "chatminal-termwiz-funcs",
- "chatminal-url-funcs",
- "libc",
- "log",
- "parking_lot",
- "smol",
- "url",
-]
-
-[[package]]
-name = "chatminal-luahelper"
-version = "0.1.0"
-dependencies = [
- "bstr",
- "chatminal-dynamic",
- "log",
- "mlua",
-]
-
-[[package]]
-name = "chatminal-open-url"
-version = "0.1.0"
-dependencies = [
- "winapi",
-]
-
-[[package]]
-name = "chatminal-plugin"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chatminal-config",
- "chatminal-dynamic",
- "chatminal-luahelper",
- "git2",
- "log",
- "tempfile",
-]
-
-[[package]]
-name = "chatminal-portable-pty"
-version = "0.9.0"
-dependencies = [
- "anyhow",
- "bitflags 1.3.2",
- "chatminal-filedescriptor",
- "downcast-rs",
- "futures",
- "lazy_static",
- "libc",
- "log",
- "nix",
- "serde",
- "serial2",
- "shared_library",
- "shell-words",
- "smol",
- "winapi",
- "winreg",
-]
-
-[[package]]
-name = "chatminal-procinfo"
-version = "0.1.0"
-dependencies = [
- "chatminal-dynamic",
- "chatminal-luahelper",
- "libc",
- "log",
- "ntapi",
- "winapi",
-]
-
-[[package]]
-name = "chatminal-procinfo-funcs"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chatminal-config",
- "chatminal-dynamic",
- "chatminal-luahelper",
- "chatminal-procinfo",
- "libc",
-]
-
-[[package]]
-name = "chatminal-promise"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "async-executor",
- "async-io",
- "async-task",
- "flume",
- "lazy_static",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "chatminal-rangeset"
-version = "0.1.0"
-dependencies = [
- "criterion",
- "num",
-]
-
-[[package]]
-name = "chatminal-ratelim"
-version = "0.1.0"
-dependencies = [
- "chatminal-config",
- "governor",
-]
-
-[[package]]
-name = "chatminal-runtime"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "chatminal-config",
- "chatminal-dynamic",
- "chatminal-filedescriptor",
- "chatminal-luahelper",
- "chatminal-portable-pty",
- "chatminal-procinfo",
- "chatminal-rangeset",
- "chatminal-store",
- "chatminal-terminal-emulator",
- "chatminal-termwiz",
- "chatminal-termwiz-funcs",
- "chrono",
- "crossbeam",
- "dirs",
- "downcast-rs",
- "fancy-regex",
- "hostname",
- "k9",
- "lazy_static",
- "libc",
- "log",
- "metrics",
- "mlua",
- "nix",
- "parking_lot",
- "serde",
- "serde_json",
- "smol",
- "url",
- "whoami",
-]
-
-[[package]]
-name = "chatminal-serde-funcs"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chatminal-config",
- "chatminal-dynamic",
- "chatminal-luahelper",
- "serde_json",
- "serde_yaml",
- "toml 0.8.23",
-]
-
-[[package]]
-name = "chatminal-share-data"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chatminal-config",
- "chatminal-dynamic",
- "chatminal-luahelper",
- "lazy_static",
- "ordered-float 4.6.0",
-]
-
-[[package]]
-name = "chatminal-spawn-funcs"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bstr",
- "chatminal-config",
- "chatminal-dynamic",
- "chatminal-luahelper",
- "chatminal-open-url",
- "log",
- "smol",
- "winapi",
-]
-
-[[package]]
-name = "chatminal-store"
-version = "0.1.0"
-dependencies = [
- "dirs",
- "rusqlite",
- "uuid",
-]
-
-[[package]]
-name = "chatminal-tabout"
-version = "0.3.0"
-dependencies = [
- "chatminal-termwiz",
-]
-
-[[package]]
-name = "chatminal-terminal-bidi"
-version = "0.2.3"
-dependencies = [
- "chatminal-dynamic",
- "env_logger 0.11.9",
- "k9",
- "log",
-]
-
-[[package]]
-name = "chatminal-terminal-blob-leases"
-version = "0.1.1"
-dependencies = [
- "getrandom 0.3.4",
- "serde",
- "sha2",
- "tempfile",
- "thiserror 1.0.69",
- "uuid",
-]
-
-[[package]]
-name = "chatminal-terminal-cell"
-version = "0.1.0"
-dependencies = [
- "chatminal-dynamic",
- "chatminal-terminal-blob-leases",
- "chatminal-terminal-char-props",
- "chatminal-terminal-color-types",
- "chatminal-terminal-escape-parser",
- "finl_unicode",
- "image",
- "log",
- "ordered-float 4.6.0",
- "serde",
- "sha2",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "chatminal-terminal-char-props"
-version = "0.1.3"
-dependencies = [
- "chatminal-termwiz",
- "criterion",
- "k9",
- "phf",
- "serde",
- "ucd-trie",
-]
-
-[[package]]
-name = "chatminal-terminal-color-types"
-version = "0.3.0"
-dependencies = [
- "chatminal-dynamic",
- "csscolorparser",
- "deltae",
- "num-traits",
- "serde",
-]
-
-[[package]]
-name = "chatminal-terminal-emulator"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bitflags 1.3.2",
- "chatminal-dynamic",
- "chatminal-terminal-bidi",
- "chatminal-terminal-cell",
- "chatminal-terminal-escape-parser",
- "chatminal-terminal-surface",
- "chatminal-termwiz",
- "csscolorparser",
- "downcast-rs",
- "env_logger 0.11.9",
- "finl_unicode",
- "hex",
- "humansize",
- "image",
- "k9",
- "lazy_static",
- "log",
- "lru",
- "miniz_oxide 0.7.4",
- "num-traits",
- "ordered-float 4.6.0",
- "serde",
- "terminfo",
- "unicode-normalization",
- "url",
-]
-
-[[package]]
-name = "chatminal-terminal-escape-parser"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "bitflags 2.11.0",
- "chatminal-dynamic",
- "chatminal-terminal-blob-leases",
- "chatminal-terminal-color-types",
- "chatminal-terminal-input-types",
- "chatminal-vtparse",
- "criterion",
- "env_logger 0.11.9",
- "hex",
- "image",
- "k9",
- "log",
- "nix",
- "num-derive",
- "num-traits",
- "ordered-float 4.6.0",
- "pest",
- "pest_derive",
- "serde",
- "sha2",
- "thiserror 2.0.18",
- "winapi",
-]
-
-[[package]]
-name = "chatminal-terminal-font"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "cairo-rs",
- "chatminal-config",
- "chatminal-lfucache",
- "chatminal-rangeset",
- "chatminal-terminal-bidi",
- "chatminal-terminal-color-types",
- "chatminal-terminal-emulator",
- "chatminal-terminal-input-types",
- "chatminal-termwiz",
- "chatminal-toast-notification",
- "cocoa",
- "core-foundation 0.10.0",
- "core-text",
- "dwrote",
- "encoding_rs",
- "enum-display-derive",
- "env_logger 0.11.9",
- "euclid",
- "finl_unicode",
- "fontconfig",
- "freetype",
- "harfbuzz",
- "image",
- "k9",
- "lazy_static",
- "log",
- "memmap2 0.9.10",
- "metrics",
- "objc",
- "ordered-float 4.6.0",
- "thiserror 1.0.69",
- "walkdir",
- "winapi",
-]
-
-[[package]]
-name = "chatminal-terminal-input-types"
-version = "0.1.0"
-dependencies = [
- "bitflags 1.3.2",
- "chatminal-dynamic",
- "euclid",
- "serde",
-]
-
-[[package]]
-name = "chatminal-terminal-surface"
-version = "0.1.0"
-dependencies = [
- "bitflags 2.11.0",
- "chatminal-dynamic",
- "chatminal-terminal-bidi",
- "chatminal-terminal-blob-leases",
- "chatminal-terminal-cell",
- "chatminal-terminal-char-props",
- "chatminal-terminal-color-types",
- "chatminal-terminal-escape-parser",
- "chatminal-terminal-input-types",
- "fancy-regex",
- "finl_unicode",
- "fixedbitset",
- "k9",
- "ordered-float 4.6.0",
- "serde",
- "siphasher",
- "unicode-segmentation",
-]
-
-[[package]]
-name = "chatminal-termwiz"
-version = "0.24.0"
-dependencies = [
- "anyhow",
- "bitflags 2.11.0",
- "cassowary",
- "chatminal-dynamic",
- "chatminal-filedescriptor",
- "chatminal-terminal-bidi",
- "chatminal-terminal-blob-leases",
- "chatminal-terminal-cell",
- "chatminal-terminal-char-props",
- "chatminal-terminal-color-types",
- "chatminal-terminal-escape-parser",
- "chatminal-terminal-input-types",
- "chatminal-terminal-surface",
- "chatminal-vtparse",
- "criterion",
- "env_logger 0.11.9",
- "fancy-regex",
- "finl_unicode",
- "fixedbitset",
- "fnv",
- "image",
- "k9",
- "libc",
- "log",
- "memmem",
- "nix",
- "num-derive",
- "num-traits",
- "ordered-float 4.6.0",
- "pest",
- "pest_derive",
- "phf",
- "serde",
- "sha2",
- "signal-hook",
- "siphasher",
- "terminfo",
- "termios",
- "thiserror 1.0.69",
- "ucd-trie",
- "unicode-segmentation",
- "winapi",
-]
-
-[[package]]
-name = "chatminal-termwiz-funcs"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chatminal-config",
- "chatminal-dynamic",
- "chatminal-luahelper",
- "chatminal-terminal-input-types",
- "chatminal-termwiz",
- "finl_unicode",
- "lazy_static",
- "terminfo",
-]
-
-[[package]]
-name = "chatminal-time-funcs"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chatminal-config",
- "chatminal-dynamic",
- "chatminal-luahelper",
- "chatminal-promise",
- "chrono",
- "lazy_static",
- "smol",
- "spa",
-]
-
-[[package]]
-name = "chatminal-toast-notification"
-version = "0.1.0"
-dependencies = [
- "async-io",
- "block2",
- "chatminal-open-url",
- "futures-util",
- "log",
- "objc2",
- "objc2-foundation",
- "objc2-user-notifications",
- "serde",
- "uuid",
- "windows 0.33.0",
- "xml-rs",
- "zbus",
- "zvariant",
-]
-
-[[package]]
-name = "chatminal-uds"
-version = "0.1.0"
-dependencies = [
- "async-io",
- "uds_windows",
-]
-
-[[package]]
-name = "chatminal-umask"
-version = "0.1.0"
-dependencies = [
- "lazy_static",
- "libc",
-]
-
-[[package]]
-name = "chatminal-url-funcs"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chatminal-config",
- "chatminal-dynamic",
- "chatminal-luahelper",
- "percent-encoding",
- "url",
-]
-
-[[package]]
-name = "chatminal-version"
-version = "0.1.0"
-dependencies = [
- "git2",
-]
-
-[[package]]
-name = "chatminal-vtparse"
-version = "0.7.0"
-dependencies = [
- "heapless",
- "k9",
- "utf8parse",
-]
-
-[[package]]
-name = "chatminal-window"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-channel",
- "async-io",
- "async-task",
- "async-trait",
- "bitflags 1.3.2",
- "bytes",
- "cgl",
- "chatminal-config",
- "chatminal-filedescriptor",
- "chatminal-promise",
- "chatminal-terminal-bidi",
- "chatminal-terminal-color-types",
- "chatminal-terminal-font",
- "chatminal-terminal-input-types",
- "clipboard-win",
- "cocoa",
- "core-foundation 0.10.0",
- "core-graphics 0.24.0",
- "dirs",
- "downcast-rs",
- "euclid",
- "futures-lite",
- "futures-util",
- "gl_generator",
- "glium",
- "guillotiere",
- "k9",
- "lazy_static",
- "libc",
- "libloading",
- "line_drawing",
- "log",
- "metrics",
- "mio",
- "objc",
- "objc2-core-graphics",
- "plist",
- "raw-window-handle",
- "resize",
- "serde",
- "shared_library",
- "shlex",
- "smithay-client-toolkit",
- "thiserror 1.0.69",
- "tiny-skia",
- "url",
- "wayland-backend",
- "wayland-client",
- "wayland-egl",
- "wayland-protocols",
- "wayland-protocols-plasma",
- "winapi",
- "windows 0.33.0",
- "winreg",
- "x11",
- "xcb",
- "xkbcommon",
- "zbus",
- "zvariant",
-]
-
-[[package]]
-name = "chatminal-window-funcs"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chatminal-config",
- "chatminal-dynamic",
- "chatminal-luahelper",
- "chatminal-window",
-]
-
-[[package]]
 name = "chrono"
 version = "0.4.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1732,6 +805,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "codec"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base91",
+ "config",
+ "leb128",
+ "log",
+ "metrics",
+ "portable-pty",
+ "rangeset",
+ "runtime",
+ "serde",
+ "smol",
+ "terminal-emulator",
+ "termwiz",
+ "thiserror 1.0.69",
+ "varbincode",
+ "zstd",
+]
+
+[[package]]
 name = "codespan-reporting"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1740,6 +835,28 @@ dependencies = [
  "serde",
  "termcolor",
  "unicode-width",
+]
+
+[[package]]
+name = "color-funcs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "config",
+ "csscolorparser",
+ "deltae",
+ "dynamic",
+ "image",
+ "lazy_static",
+ "log",
+ "lru",
+ "luahelper",
+ "plist",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "terminal-color-types",
+ "terminal-emulator",
 ]
 
 [[package]]
@@ -1780,6 +897,51 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ca0197aee26d1ae37445ee532fefce43251d24cc7c166799f4d46817f1d3973"
 dependencies = [
  "crossbeam-utils",
+]
+
+[[package]]
+name = "config"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitflags 1.3.2",
+ "colorgrad",
+ "config-derive",
+ "dirs",
+ "dynamic",
+ "enum-display-derive",
+ "env_logger 0.11.9",
+ "hostname",
+ "lazy_static",
+ "libc",
+ "log",
+ "luahelper",
+ "mlua",
+ "nix",
+ "notify",
+ "ordered-float 4.6.0",
+ "portable-pty",
+ "promise",
+ "serde",
+ "serde_json",
+ "shlex",
+ "smol",
+ "terminal-bidi",
+ "terminal-emulator",
+ "terminal-input-types",
+ "termwiz",
+ "toml 0.8.23",
+ "umask",
+ "winapi",
+]
+
+[[package]]
+name = "config-derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -2095,6 +1257,94 @@ dependencies = [
 ]
 
 [[package]]
+name = "desktop"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "benchmarking",
+ "bitflags 1.3.2",
+ "bytemuck",
+ "cc",
+ "chrono",
+ "clap",
+ "codec",
+ "colorgrad",
+ "config",
+ "dhat",
+ "dirs",
+ "downcast-rs",
+ "dynamic",
+ "embed-resource",
+ "emojis",
+ "env-bootstrap",
+ "env_logger 0.11.9",
+ "euclid",
+ "fastrand",
+ "filedescriptor",
+ "finl_unicode",
+ "frecency",
+ "futures",
+ "gui-subcommands",
+ "hdrhistogram",
+ "image",
+ "k9",
+ "lazy_static",
+ "lfucache",
+ "libc",
+ "log",
+ "lua-bridge",
+ "luahelper",
+ "metrics",
+ "mlua",
+ "nucleo-matcher",
+ "open-url",
+ "ordered-float 4.6.0",
+ "parking_lot",
+ "portable-pty",
+ "procinfo",
+ "promise",
+ "rangeset",
+ "ratelim",
+ "rayon",
+ "regex",
+ "resvg",
+ "runtime",
+ "serde",
+ "serde_json",
+ "shared_library",
+ "shlex",
+ "smol",
+ "store",
+ "sysinfo",
+ "tabout",
+ "tempfile",
+ "terminal-bidi",
+ "terminal-blob-leases",
+ "terminal-emulator",
+ "terminal-font",
+ "terminfo",
+ "termwiz",
+ "termwiz-funcs",
+ "textwrap",
+ "thiserror 1.0.69",
+ "tiny-skia",
+ "toast-notification",
+ "umask",
+ "unicode-normalization",
+ "unicode-segmentation",
+ "url",
+ "url-funcs",
+ "usvg",
+ "walkdir",
+ "wgpu",
+ "winapi",
+ "window",
+ "window-funcs",
+ "windows 0.33.0",
+]
+
+[[package]]
 name = "dhat"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2207,6 +1457,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "dynamic"
+version = "0.2.1"
+dependencies = [
+ "dynamic-derive",
+ "log",
+ "maplit",
+ "ordered-float 4.6.0",
+ "strsim",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "dynamic-derive"
+version = "0.1.1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2279,6 +1550,38 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "env-bootstrap"
+version = "0.1.0"
+dependencies = [
+ "backtrace",
+ "battery",
+ "chrono",
+ "color-funcs",
+ "config",
+ "dirs",
+ "env_logger 0.10.2",
+ "filesystem",
+ "lazy_static",
+ "libc",
+ "log",
+ "logging",
+ "lua-bridge",
+ "objc2",
+ "objc2-foundation",
+ "plugin",
+ "procinfo-funcs",
+ "serde-funcs",
+ "share-data",
+ "spawn-funcs",
+ "terminal-version",
+ "termwiz",
+ "termwiz-funcs",
+ "time-funcs",
+ "url-funcs",
+ "winapi",
 ]
 
 [[package]]
@@ -2474,6 +1777,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "filedescriptor"
+version = "0.8.3"
+dependencies = [
+ "libc",
+ "thiserror 1.0.69",
+ "winapi",
+]
+
+[[package]]
 name = "filenamegen"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2483,6 +1795,17 @@ dependencies = [
  "bstr",
  "regex",
  "walkdir",
+]
+
+[[package]]
+name = "filesystem"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "config",
+ "filenamegen",
+ "luahelper",
+ "smol",
 ]
 
 [[package]]
@@ -2636,6 +1959,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "frecency"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "serde_with",
 ]
 
 [[package]]
@@ -2951,6 +2284,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fdf242682df893b86f33a73828fb09ca4b2d3bb6cc95249707fc684d27484b91"
 dependencies = [
  "bitflags 2.11.0",
+]
+
+[[package]]
+name = "gui-subcommands"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "config",
 ]
 
 [[package]]
@@ -3567,6 +2908,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a79a3332a6609480d7d0c9eab957bca6b455b91bb84e66d19f5ff66294b85b8"
 
 [[package]]
+name = "lfucache"
+version = "0.1.0"
+dependencies = [
+ "ahash",
+ "config",
+ "fnv",
+ "intrusive-collections",
+ "k9",
+ "metrics",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.182"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3701,6 +3054,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
+name = "logging"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "config",
+ "log",
+ "luahelper",
+]
+
+[[package]]
 name = "loop9"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3719,12 +3082,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "lua-bridge"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "config",
+ "dynamic",
+ "libc",
+ "log",
+ "luahelper",
+ "parking_lot",
+ "portable-pty",
+ "procinfo",
+ "runtime",
+ "smol",
+ "terminal-emulator",
+ "termwiz",
+ "termwiz-funcs",
+ "url",
+ "url-funcs",
+]
+
+[[package]]
 name = "lua-src"
 version = "547.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1edaf29e3517b49b8b746701e5648ccb5785cde1c119062cbabbc5d5cd115e42"
 dependencies = [
  "cc",
+]
+
+[[package]]
+name = "luahelper"
+version = "0.1.0"
+dependencies = [
+ "bstr",
+ "dynamic",
+ "log",
+ "mlua",
 ]
 
 [[package]]
@@ -4282,6 +3677,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 
 [[package]]
+name = "open-url"
+version = "0.1.0"
+dependencies = [
+ "winapi",
+]
+
+[[package]]
 name = "openssl-probe"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4554,6 +3956,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "plugin"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "config",
+ "dynamic",
+ "git2",
+ "log",
+ "luahelper",
+ "tempfile",
+]
+
+[[package]]
 name = "png"
 version = "0.17.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4606,6 +4021,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a9db96d7fa8782dd8c15ce32ffe8680bbd1e978a43bf51a34d39483540495f5"
 dependencies = [
  "portable-atomic",
+]
+
+[[package]]
+name = "portable-pty"
+version = "0.9.0"
+dependencies = [
+ "anyhow",
+ "bitflags 1.3.2",
+ "downcast-rs",
+ "filedescriptor",
+ "futures",
+ "lazy_static",
+ "libc",
+ "log",
+ "nix",
+ "serde",
+ "serial2",
+ "shared_library",
+ "shell-words",
+ "smol",
+ "winapi",
+ "winreg",
 ]
 
 [[package]]
@@ -4667,6 +4104,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "procinfo"
+version = "0.1.0"
+dependencies = [
+ "dynamic",
+ "libc",
+ "log",
+ "luahelper",
+ "ntapi",
+ "winapi",
+]
+
+[[package]]
+name = "procinfo-funcs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "config",
+ "dynamic",
+ "libc",
+ "luahelper",
+ "procinfo",
+]
+
+[[package]]
 name = "profiling"
 version = "1.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4683,6 +4144,19 @@ checksum = "52717f9a02b6965224f95ca2a81e2e0c5c43baacd28ca057577988930b6c3d5b"
 dependencies = [
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "promise"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "async-executor",
+ "async-io",
+ "async-task",
+ "flume",
+ "lazy_static",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -4843,6 +4317,22 @@ name = "range-alloc"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ca45419789ae5a7899559e9512e58ca889e41f04f1f2445e9f4b290ceccd1d08"
+
+[[package]]
+name = "rangeset"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "num",
+]
+
+[[package]]
+name = "ratelim"
+version = "0.1.0"
+dependencies = [
+ "config",
+ "governor",
+]
 
 [[package]]
 name = "rav1e"
@@ -5023,6 +4513,44 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
 
 [[package]]
+name = "runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "config",
+ "crossbeam",
+ "dirs",
+ "downcast-rs",
+ "dynamic",
+ "fancy-regex",
+ "filedescriptor",
+ "hostname",
+ "k9",
+ "lazy_static",
+ "libc",
+ "log",
+ "luahelper",
+ "metrics",
+ "mlua",
+ "nix",
+ "parking_lot",
+ "portable-pty",
+ "procinfo",
+ "rangeset",
+ "serde",
+ "serde_json",
+ "smol",
+ "store",
+ "terminal-emulator",
+ "termwiz",
+ "termwiz-funcs",
+ "url",
+ "whoami",
+]
+
+[[package]]
 name = "rusqlite"
 version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5171,6 +4699,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde-funcs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "config",
+ "dynamic",
+ "luahelper",
+ "serde_json",
+ "serde_yaml",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "serde-value"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5305,6 +4846,18 @@ dependencies = [
  "cfg-if",
  "cpufeatures 0.2.17",
  "digest",
+]
+
+[[package]]
+name = "share-data"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "config",
+ "dynamic",
+ "lazy_static",
+ "luahelper",
+ "ordered-float 4.6.0",
 ]
 
 [[package]]
@@ -5456,6 +5009,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "spawn-funcs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bstr",
+ "config",
+ "dynamic",
+ "log",
+ "luahelper",
+ "open-url",
+ "smol",
+ "winapi",
+]
+
+[[package]]
 name = "spin"
 version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5502,6 +5070,15 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
+name = "store"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "rusqlite",
+ "uuid",
+]
 
 [[package]]
 name = "strict-num"
@@ -5603,6 +5180,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "tabout"
+version = "0.3.0"
+dependencies = [
+ "termwiz",
+]
+
+[[package]]
 name = "tempfile"
 version = "3.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5622,6 +5206,210 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "terminal-bidi"
+version = "0.2.3"
+dependencies = [
+ "dynamic",
+ "env_logger 0.11.9",
+ "k9",
+ "log",
+]
+
+[[package]]
+name = "terminal-blob-leases"
+version = "0.1.1"
+dependencies = [
+ "getrandom 0.3.4",
+ "serde",
+ "sha2",
+ "tempfile",
+ "thiserror 1.0.69",
+ "uuid",
+]
+
+[[package]]
+name = "terminal-cell"
+version = "0.1.0"
+dependencies = [
+ "dynamic",
+ "finl_unicode",
+ "image",
+ "log",
+ "ordered-float 4.6.0",
+ "serde",
+ "sha2",
+ "terminal-blob-leases",
+ "terminal-char-props",
+ "terminal-color-types",
+ "terminal-escape-parser",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "terminal-char-props"
+version = "0.1.3"
+dependencies = [
+ "criterion",
+ "k9",
+ "phf",
+ "serde",
+ "termwiz",
+ "ucd-trie",
+]
+
+[[package]]
+name = "terminal-color-types"
+version = "0.3.0"
+dependencies = [
+ "csscolorparser",
+ "deltae",
+ "dynamic",
+ "num-traits",
+ "serde",
+]
+
+[[package]]
+name = "terminal-emulator"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitflags 1.3.2",
+ "csscolorparser",
+ "downcast-rs",
+ "dynamic",
+ "env_logger 0.11.9",
+ "finl_unicode",
+ "hex",
+ "humansize",
+ "image",
+ "k9",
+ "lazy_static",
+ "log",
+ "lru",
+ "miniz_oxide 0.7.4",
+ "num-traits",
+ "ordered-float 4.6.0",
+ "serde",
+ "terminal-bidi",
+ "terminal-cell",
+ "terminal-escape-parser",
+ "terminal-surface",
+ "terminfo",
+ "termwiz",
+ "unicode-normalization",
+ "url",
+]
+
+[[package]]
+name = "terminal-escape-parser"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "bitflags 2.11.0",
+ "criterion",
+ "dynamic",
+ "env_logger 0.11.9",
+ "hex",
+ "image",
+ "k9",
+ "log",
+ "nix",
+ "num-derive",
+ "num-traits",
+ "ordered-float 4.6.0",
+ "pest",
+ "pest_derive",
+ "serde",
+ "sha2",
+ "terminal-blob-leases",
+ "terminal-color-types",
+ "terminal-input-types",
+ "thiserror 2.0.18",
+ "vtparse",
+ "winapi",
+]
+
+[[package]]
+name = "terminal-font"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cairo-rs",
+ "cocoa",
+ "config",
+ "core-foundation 0.10.0",
+ "core-text",
+ "dwrote",
+ "encoding_rs",
+ "enum-display-derive",
+ "env_logger 0.11.9",
+ "euclid",
+ "finl_unicode",
+ "fontconfig",
+ "freetype",
+ "harfbuzz",
+ "image",
+ "k9",
+ "lazy_static",
+ "lfucache",
+ "log",
+ "memmap2 0.9.10",
+ "metrics",
+ "objc",
+ "ordered-float 4.6.0",
+ "rangeset",
+ "terminal-bidi",
+ "terminal-color-types",
+ "terminal-emulator",
+ "terminal-input-types",
+ "termwiz",
+ "thiserror 1.0.69",
+ "toast-notification",
+ "walkdir",
+ "winapi",
+]
+
+[[package]]
+name = "terminal-input-types"
+version = "0.1.0"
+dependencies = [
+ "bitflags 1.3.2",
+ "dynamic",
+ "euclid",
+ "serde",
+]
+
+[[package]]
+name = "terminal-surface"
+version = "0.1.0"
+dependencies = [
+ "bitflags 2.11.0",
+ "dynamic",
+ "fancy-regex",
+ "finl_unicode",
+ "fixedbitset",
+ "k9",
+ "ordered-float 4.6.0",
+ "serde",
+ "siphasher",
+ "terminal-bidi",
+ "terminal-blob-leases",
+ "terminal-cell",
+ "terminal-char-props",
+ "terminal-color-types",
+ "terminal-escape-parser",
+ "terminal-input-types",
+ "unicode-segmentation",
+]
+
+[[package]]
+name = "terminal-version"
+version = "0.1.0"
+dependencies = [
+ "git2",
 ]
 
 [[package]]
@@ -5653,6 +5441,69 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "411c5bf740737c7918b8b1fe232dca4dc9f8e754b8ad5e20966814001ed0ac6b"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "termwiz"
+version = "0.24.0"
+dependencies = [
+ "anyhow",
+ "bitflags 2.11.0",
+ "cassowary",
+ "criterion",
+ "dynamic",
+ "env_logger 0.11.9",
+ "fancy-regex",
+ "filedescriptor",
+ "finl_unicode",
+ "fixedbitset",
+ "fnv",
+ "image",
+ "k9",
+ "libc",
+ "log",
+ "memmem",
+ "nix",
+ "num-derive",
+ "num-traits",
+ "ordered-float 4.6.0",
+ "pest",
+ "pest_derive",
+ "phf",
+ "serde",
+ "sha2",
+ "signal-hook",
+ "siphasher",
+ "terminal-bidi",
+ "terminal-blob-leases",
+ "terminal-cell",
+ "terminal-char-props",
+ "terminal-color-types",
+ "terminal-escape-parser",
+ "terminal-input-types",
+ "terminal-surface",
+ "terminfo",
+ "termios",
+ "thiserror 1.0.69",
+ "ucd-trie",
+ "unicode-segmentation",
+ "vtparse",
+ "winapi",
+]
+
+[[package]]
+name = "termwiz-funcs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "config",
+ "dynamic",
+ "finl_unicode",
+ "lazy_static",
+ "luahelper",
+ "terminal-input-types",
+ "terminfo",
+ "termwiz",
 ]
 
 [[package]]
@@ -5748,6 +5599,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7694e1cfe791f8d31026952abf09c69ca6f6fa4e1a1229e18988f06a04a12dca"
 
 [[package]]
+name = "time-funcs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "config",
+ "dynamic",
+ "lazy_static",
+ "luahelper",
+ "promise",
+ "smol",
+ "spa",
+]
+
+[[package]]
 name = "time-macros"
 version = "0.2.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5817,6 +5683,26 @@ name = "tinyvec_macros"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
+
+[[package]]
+name = "toast-notification"
+version = "0.1.0"
+dependencies = [
+ "async-io",
+ "block2",
+ "futures-util",
+ "log",
+ "objc2",
+ "objc2-foundation",
+ "objc2-user-notifications",
+ "open-url",
+ "serde",
+ "uuid",
+ "windows 0.33.0",
+ "xml-rs",
+ "zbus",
+ "zvariant",
+]
 
 [[package]]
 name = "toml"
@@ -5957,6 +5843,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2896d95c02a80c6d6a5d6e953d479f5ddf2dfdb6a244441010e373ac0fb88971"
 
 [[package]]
+name = "uds"
+version = "0.1.0"
+dependencies = [
+ "async-io",
+ "uds_windows",
+]
+
+[[package]]
 name = "uds_windows"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5965,6 +5859,14 @@ dependencies = [
  "memoffset",
  "tempfile",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "umask"
+version = "0.1.0"
+dependencies = [
+ "lazy_static",
+ "libc",
 ]
 
 [[package]]
@@ -6071,6 +5973,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "url-funcs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "config",
+ "dynamic",
+ "luahelper",
+ "percent-encoding",
+ "url",
+]
+
+[[package]]
 name = "usvg"
 version = "0.45.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6174,6 +6088,15 @@ checksum = "fb067e4cbd1ff067d1df46c9194b5de0e98efd2810bbc95c5d5e5f25a3231150"
 dependencies = [
  "cc",
  "libc",
+]
+
+[[package]]
+name = "vtparse"
+version = "0.7.0"
+dependencies = [
+ "heapless",
+ "k9",
+ "utf8parse",
 ]
 
 [[package]]
@@ -6644,6 +6567,83 @@ name = "winapi-x86_64-pc-windows-gnu"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
+
+[[package]]
+name = "window"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-channel",
+ "async-io",
+ "async-task",
+ "async-trait",
+ "bitflags 1.3.2",
+ "bytes",
+ "cgl",
+ "clipboard-win",
+ "cocoa",
+ "config",
+ "core-foundation 0.10.0",
+ "core-graphics 0.24.0",
+ "dirs",
+ "downcast-rs",
+ "euclid",
+ "filedescriptor",
+ "futures-lite",
+ "futures-util",
+ "gl_generator",
+ "glium",
+ "guillotiere",
+ "k9",
+ "lazy_static",
+ "libc",
+ "libloading",
+ "line_drawing",
+ "log",
+ "metrics",
+ "mio",
+ "objc",
+ "objc2-core-graphics",
+ "plist",
+ "promise",
+ "raw-window-handle",
+ "resize",
+ "serde",
+ "shared_library",
+ "shlex",
+ "smithay-client-toolkit",
+ "terminal-bidi",
+ "terminal-color-types",
+ "terminal-font",
+ "terminal-input-types",
+ "thiserror 1.0.69",
+ "tiny-skia",
+ "url",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-egl",
+ "wayland-protocols",
+ "wayland-protocols-plasma",
+ "winapi",
+ "windows 0.33.0",
+ "winreg",
+ "x11",
+ "xcb",
+ "xkbcommon",
+ "zbus",
+ "zvariant",
+]
+
+[[package]]
+name = "window-funcs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "config",
+ "dynamic",
+ "luahelper",
+ "window",
+]
 
 [[package]]
 name = "windows"

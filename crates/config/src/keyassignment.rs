@@ -1,0 +1,606 @@
+use crate::keys::KeyNoAction;
+use crate::window::WindowLevel;
+use dynamic::{FromDynamic, FromDynamicOptions, ToDynamic, Value};
+use terminal_input_types::{KeyCode, Modifiers};
+use terminal_emulator::input::MouseButton;
+use terminal_emulator::SemanticType;
+use luahelper::impl_lua_conversion_dynamic;
+use ordered_float::NotNan;
+use portable_pty::CommandBuilder;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::convert::TryFrom;
+use std::path::PathBuf;
+
+#[derive(Default, Debug, Clone, FromDynamic, ToDynamic, PartialEq, Eq)]
+pub struct LauncherActionArgs {
+    pub flags: LauncherFlags,
+    pub title: Option<String>,
+    pub help_text: Option<String>,
+    pub fuzzy_help_text: Option<String>,
+    pub alphabet: Option<String>,
+}
+
+bitflags::bitflags! {
+    #[derive(Default,  FromDynamic, ToDynamic)]
+    #[dynamic(try_from="String", into="String")]
+    pub struct LauncherFlags :u32 {
+        const ZERO = 0;
+        const FUZZY = 1;
+        const TABS = 2;
+        const LAUNCH_MENU_ITEMS = 4;
+        const DOMAINS = 8;
+        const KEY_ASSIGNMENTS = 16;
+        const WORKSPACES = 32;
+        const COMMANDS = 64;
+    }
+}
+
+impl From<LauncherFlags> for String {
+    fn from(val: LauncherFlags) -> Self {
+        val.to_string()
+    }
+}
+
+impl From<&LauncherFlags> for String {
+    fn from(val: &LauncherFlags) -> Self {
+        val.to_string()
+    }
+}
+
+impl ToString for LauncherFlags {
+    fn to_string(&self) -> String {
+        let mut s = vec![];
+        if self.contains(Self::FUZZY) {
+            s.push("FUZZY");
+        }
+        if self.contains(Self::TABS) {
+            s.push("TABS");
+        }
+        if self.contains(Self::LAUNCH_MENU_ITEMS) {
+            s.push("LAUNCH_MENU_ITEMS");
+        }
+        if self.contains(Self::DOMAINS) {
+            s.push("DOMAINS");
+        }
+        if self.contains(Self::KEY_ASSIGNMENTS) {
+            s.push("KEY_ASSIGNMENTS");
+        }
+        if self.contains(Self::WORKSPACES) {
+            s.push("WORKSPACES");
+        }
+        if self.contains(Self::COMMANDS) {
+            s.push("COMMANDS");
+        }
+        s.join("|")
+    }
+}
+
+impl TryFrom<String> for LauncherFlags {
+    type Error = String;
+    fn try_from(s: String) -> Result<Self, String> {
+        let mut flags = LauncherFlags::default();
+
+        for ele in s.split('|') {
+            let ele = ele.trim();
+            match ele {
+                "FUZZY" => flags |= Self::FUZZY,
+                "TABS" => flags |= Self::TABS,
+                "LAUNCH_MENU_ITEMS" => flags |= Self::LAUNCH_MENU_ITEMS,
+                "DOMAINS" => flags |= Self::DOMAINS,
+                "KEY_ASSIGNMENTS" => flags |= Self::KEY_ASSIGNMENTS,
+                "WORKSPACES" => flags |= Self::WORKSPACES,
+                "COMMANDS" => flags |= Self::COMMANDS,
+                _ => {
+                    return Err(format!("invalid LauncherFlags `{}` in `{}`", ele, s));
+                }
+            }
+        }
+
+        Ok(flags)
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, FromDynamic, ToDynamic)]
+pub enum SelectionMode {
+    Cell,
+    Word,
+    Line,
+    SemanticZone,
+    Block,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, FromDynamic, ToDynamic)]
+pub enum Pattern {
+    CaseSensitiveString(String),
+    CaseInSensitiveString(String),
+    Regex(String),
+    CurrentSelectionOrEmptyString,
+}
+
+impl Pattern {
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::CaseSensitiveString(s) | Self::CaseInSensitiveString(s) | Self::Regex(s) => {
+                s.is_empty()
+            }
+            Self::CurrentSelectionOrEmptyString => true,
+        }
+    }
+}
+
+impl Default for Pattern {
+    fn default() -> Self {
+        Self::CurrentSelectionOrEmptyString
+    }
+}
+
+/// A mouse event that can trigger an action
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, FromDynamic, ToDynamic)]
+pub enum MouseEventTrigger {
+    /// Mouse button is pressed. streak is how many times in a row
+    /// it was pressed.
+    Down { streak: usize, button: MouseButton },
+    /// Mouse button is held down while the cursor is moving. streak is how many times in a row
+    /// it was pressed, with the last of those being held to form the drag.
+    Drag { streak: usize, button: MouseButton },
+    /// Mouse button is being released. streak is how many times
+    /// in a row it was pressed and released.
+    Up { streak: usize, button: MouseButton },
+}
+
+#[derive(Default, Clone, PartialEq, FromDynamic, ToDynamic)]
+pub struct SpawnCommand {
+    /// Optional descriptive label
+    pub label: Option<String>,
+
+    /// The command line to use.
+    /// If omitted, the default command associated with the
+    /// spawn target will be used instead, which is typically the
+    /// shell for the user.
+    pub args: Option<Vec<String>>,
+
+    /// Specifies the current working directory for the command.
+    /// If omitted, a default will be used; typically that will
+    /// be the home directory of the user, but may also be the
+    /// current working directory of the Chatminal process when
+    /// it was launched, or for some targets it may be some
+    /// other location appropriate to that target.
+    pub cwd: Option<PathBuf>,
+
+    /// Specifies a map of environment variables that should be set.
+    /// Whether this is used depends on the target.
+    #[dynamic(default)]
+    pub set_environment_variables: HashMap<String, String>,
+
+    pub position: Option<crate::GuiPosition>,
+}
+impl_lua_conversion_dynamic!(SpawnCommand);
+
+impl std::fmt::Debug for SpawnCommand {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(fmt, "{}", self)
+    }
+}
+
+impl std::fmt::Display for SpawnCommand {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(fmt, "SpawnCommand")?;
+        if let Some(label) = &self.label {
+            write!(fmt, " label='{}'", label)?;
+        }
+        if let Some(args) = &self.args {
+            write!(fmt, " args={:?}", args)?;
+        }
+        if let Some(cwd) = &self.cwd {
+            write!(fmt, " cwd={}", cwd.display())?;
+        }
+        for (k, v) in &self.set_environment_variables {
+            write!(fmt, " {}={}", k, v)?;
+        }
+        Ok(())
+    }
+}
+
+impl SpawnCommand {
+    pub fn label_for_palette(&self) -> Option<String> {
+        if let Some(label) = &self.label {
+            Some(label.to_string())
+        } else if let Some(args) = &self.args {
+            Some(shlex::try_join(args.iter().map(|s| s.as_str())).ok()?)
+        } else {
+            None
+        }
+    }
+
+    pub fn from_command_builder(cmd: &CommandBuilder) -> anyhow::Result<Self> {
+        let mut args = vec![];
+        let mut set_environment_variables = HashMap::new();
+        for arg in cmd.get_argv() {
+            args.push(
+                arg.to_str()
+                    .ok_or_else(|| anyhow::anyhow!("command argument is not utf8"))?
+                    .to_string(),
+            );
+        }
+        for (k, v) in cmd.iter_full_env_as_str() {
+            set_environment_variables.insert(k.to_string(), v.to_string());
+        }
+        let cwd = match cmd.get_cwd() {
+            Some(cwd) => Some(PathBuf::from(cwd)),
+            None => None,
+        };
+        Ok(Self {
+            label: None,
+            args: if args.is_empty() { None } else { Some(args) },
+            set_environment_variables,
+            cwd,
+            position: None,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, FromDynamic, ToDynamic)]
+pub enum SessionDirection {
+    Up,
+    Down,
+    Left,
+    Right,
+    Next,
+    Prev,
+}
+
+impl SessionDirection {
+    pub fn direction_from_str(arg: &str) -> Result<SessionDirection, String> {
+        for candidate in SessionDirection::variants() {
+            if candidate.to_lowercase() == arg.to_lowercase() {
+                if let Ok(direction) = SessionDirection::from_dynamic(
+                    &Value::String(candidate.to_string()),
+                    FromDynamicOptions::default(),
+                ) {
+                    return Ok(direction);
+                }
+            }
+        }
+        Err(format!(
+            "invalid direction {arg}, possible values are {:?}",
+            SessionDirection::variants()
+        ))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, FromDynamic, ToDynamic)]
+pub enum ClipboardCopyDestination {
+    Clipboard,
+    PrimarySelection,
+    ClipboardAndPrimarySelection,
+}
+impl_lua_conversion_dynamic!(ClipboardCopyDestination);
+
+impl Default for ClipboardCopyDestination {
+    fn default() -> Self {
+        Self::ClipboardAndPrimarySelection
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, FromDynamic, ToDynamic)]
+pub enum ClipboardPasteSource {
+    Clipboard,
+    PrimarySelection,
+}
+
+impl Default for ClipboardPasteSource {
+    fn default() -> Self {
+        Self::Clipboard
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, FromDynamic, ToDynamic)]
+pub enum SessionSelectMode {
+    SwapWithActive,
+    SwapWithActiveKeepFocus,
+    MoveToNewSession,
+}
+
+impl Default for SessionSelectMode {
+    fn default() -> Self {
+        Self::SwapWithActive
+    }
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Eq, FromDynamic, ToDynamic)]
+pub struct SessionSelectArguments {
+    /// Overrides the main quick_select_alphabet config
+    #[dynamic(default)]
+    pub alphabet: String,
+
+    #[dynamic(default)]
+    pub mode: SessionSelectMode,
+
+    #[dynamic(default)]
+    pub show_session_ids: bool,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, FromDynamic, ToDynamic)]
+pub struct QuickSelectArguments {
+    /// Overrides the main quick_select_alphabet config
+    #[dynamic(default)]
+    pub alphabet: String,
+    /// Overrides the main quick_select_patterns config
+    #[dynamic(default)]
+    pub patterns: Vec<String>,
+    #[dynamic(default)]
+    pub action: Option<Box<KeyAssignment>>,
+    /// Skip triggering `action` after paste is performed (capital selection)
+    #[dynamic(default)]
+    pub skip_action_on_paste: bool,
+    /// Label to use in place of "copy" when `action` is set
+    #[dynamic(default)]
+    pub label: String,
+    /// How many lines before and how many lines after the viewport to
+    /// search to produce the quickselect results
+    pub scope_lines: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, FromDynamic, ToDynamic)]
+pub struct PromptInputLine {
+    pub action: Box<KeyAssignment>,
+    /// Optional label to pre-fill the input line with
+    #[dynamic(default)]
+    pub initial_value: Option<String>,
+    /// Descriptive text to show ahead of prompt
+    #[dynamic(default)]
+    pub description: String,
+    /// Text to show for prompt
+    #[dynamic(default = "default_prompt")]
+    pub prompt: String,
+}
+
+fn default_prompt() -> String {
+    "> ".to_string()
+}
+
+#[derive(Debug, Clone, PartialEq, FromDynamic, ToDynamic)]
+pub struct InputSelectorEntry {
+    pub label: String,
+    pub id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, FromDynamic, ToDynamic)]
+pub struct InputSelector {
+    pub action: Box<KeyAssignment>,
+    #[dynamic(default)]
+    pub title: String,
+
+    pub choices: Vec<InputSelectorEntry>,
+
+    #[dynamic(default)]
+    pub fuzzy: bool,
+
+    #[dynamic(default = "default_num_alphabet")]
+    pub alphabet: String,
+
+    #[dynamic(default = "default_description")]
+    pub description: String,
+
+    #[dynamic(default = "default_fuzzy_description")]
+    pub fuzzy_description: String,
+}
+
+fn default_num_alphabet() -> String {
+    "1234567890abcdefghilmnopqrstuvwxyz".to_string()
+}
+
+fn default_description() -> String {
+    "Select an item and press Enter = accept,  Esc = cancel,  / = filter".to_string()
+}
+
+fn default_fuzzy_description() -> String {
+    "Fuzzy matching: ".to_string()
+}
+
+#[derive(Debug, Clone, PartialEq, FromDynamic, ToDynamic)]
+pub struct Confirmation {
+    pub action: Box<KeyAssignment>,
+    #[dynamic(default)]
+    pub cancel: Option<Box<KeyAssignment>>,
+    /// Text to show for confirmation
+    #[dynamic(default = "default_message")]
+    pub message: String,
+}
+
+fn default_message() -> String {
+    "🛑 Really continue?".to_string()
+}
+
+#[derive(Debug, Clone, PartialEq, FromDynamic, ToDynamic)]
+pub enum KeyAssignment {
+    SpawnSession,
+    ToggleFullScreen,
+    ToggleAlwaysOnTop,
+    ToggleAlwaysOnBottom,
+    SetWindowLevel(WindowLevel),
+    CopyTo(ClipboardCopyDestination),
+    CopyTextTo {
+        text: String,
+        destination: ClipboardCopyDestination,
+    },
+    PasteFrom(ClipboardPasteSource),
+    ActivateSessionRelative(isize),
+    ActivateSessionRelativeNoWrap(isize),
+    IncreaseFontSize,
+    DecreaseFontSize,
+    ResetFontSize,
+    ResetFontAndWindowSize,
+    ActivateSession(isize),
+    ActivateLastSession,
+    SendString(String),
+    SendKey(KeyNoAction),
+    Nop,
+    DisableDefaultAssignment,
+    Hide,
+    Show,
+    CloseCurrentSession {
+        confirm: bool,
+    },
+    ReloadConfiguration,
+    MoveSessionRelative(isize),
+    MoveSession(usize),
+    ScrollByPage(NotNan<f64>),
+    ScrollByLine(isize),
+    ScrollByCurrentEventWheelDelta,
+    ScrollToPrompt(isize),
+    ScrollToTop,
+    ScrollToBottom,
+    ToggleRealtimeFooter,
+    ShowSessionNavigator,
+    ShowDebugOverlay,
+    HideApplication,
+    QuitApplication,
+    SpawnCommandInNewSession(SpawnCommand),
+    SplitHorizontal(SpawnCommand),
+    SplitVertical(SpawnCommand),
+    ShowLauncher,
+    ShowLauncherArgs(LauncherActionArgs),
+    Search(Pattern),
+    ActivateCopyMode,
+
+    SelectTextAtMouseCursor(SelectionMode),
+    ExtendSelectionToMouseCursor(SelectionMode),
+    OpenLinkAtMouseCursor,
+    ClearSelection,
+    CompleteSelection(ClipboardCopyDestination),
+    CompleteSelectionOrOpenLinkAtMouseCursor(ClipboardCopyDestination),
+    StartWindowDrag,
+
+    AdjustSplitSize(SessionDirection, usize),
+    ActivateSessionDirection(SessionDirection),
+    ActivateTerminalByIndex(usize),
+    ToggleTerminalZoomState,
+    SetTerminalZoomState(bool),
+    EmitEvent(String),
+    QuickSelect,
+    QuickSelectArgs(QuickSelectArguments),
+
+    Multiple(Vec<KeyAssignment>),
+
+    SwitchToWorkspace {
+        name: Option<String>,
+        spawn: Option<SpawnCommand>,
+    },
+    SwitchWorkspaceRelative(isize),
+
+    ActivateKeyTable {
+        name: String,
+        #[dynamic(default)]
+        timeout_milliseconds: Option<u64>,
+        #[dynamic(default)]
+        replace_current: bool,
+        #[dynamic(default = "crate::default_true")]
+        one_shot: bool,
+        #[dynamic(default)]
+        until_unknown: bool,
+        #[dynamic(default)]
+        prevent_fallback: bool,
+    },
+    PopKeyTable,
+    ClearKeyTableStack,
+    CopyMode(CopyModeAssignment),
+    RotatePanes(RotationDirection),
+    SplitSession(SplitSession),
+    SessionSelect(SessionSelectArguments),
+
+    ResetTerminal,
+    OpenUri(String),
+    ActivateCommandPalette,
+    PromptInputLine(PromptInputLine),
+    InputSelector(InputSelector),
+    Confirmation(Confirmation),
+}
+impl_lua_conversion_dynamic!(KeyAssignment);
+
+#[derive(Debug, Clone, PartialEq, FromDynamic, ToDynamic)]
+pub struct SplitSession {
+    pub direction: SessionDirection,
+    #[dynamic(default)]
+    pub size: SplitSize,
+    #[dynamic(default)]
+    pub command: SpawnCommand,
+    #[dynamic(default)]
+    pub top_level: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, FromDynamic, ToDynamic)]
+pub enum SplitSize {
+    Cells(usize),
+    Percent(u8),
+}
+
+impl Default for SplitSize {
+    fn default() -> Self {
+        Self::Percent(50)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, FromDynamic, ToDynamic)]
+pub enum RotationDirection {
+    Clockwise,
+    CounterClockwise,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, FromDynamic, ToDynamic)]
+pub enum CopyModeAssignment {
+    MoveToViewportBottom,
+    MoveToViewportTop,
+    MoveToViewportMiddle,
+    MoveToScrollbackTop,
+    MoveToScrollbackBottom,
+    SetSelectionMode(Option<SelectionMode>),
+    ClearSelectionMode,
+    MoveToStartOfLineContent,
+    MoveToEndOfLineContent,
+    MoveToStartOfLine,
+    MoveToStartOfNextLine,
+    MoveToSelectionOtherEnd,
+    MoveToSelectionOtherEndHoriz,
+    MoveBackwardWord,
+    MoveForwardWord,
+    MoveForwardWordEnd,
+    MoveRight,
+    MoveLeft,
+    MoveUp,
+    MoveDown,
+    MoveByPage(NotNan<f64>),
+    PageUp,
+    PageDown,
+    Close,
+    PriorMatch,
+    NextMatch,
+    PriorMatchPage,
+    NextMatchPage,
+    CycleMatchType,
+    ClearPattern,
+    EditPattern,
+    AcceptPattern,
+    MoveBackwardSemanticZone,
+    MoveForwardSemanticZone,
+    MoveBackwardZoneOfType(SemanticType),
+    MoveForwardZoneOfType(SemanticType),
+    JumpForward { prev_char: bool },
+    JumpBackward { prev_char: bool },
+    JumpAgain,
+    JumpReverse,
+}
+
+pub type KeyTable = HashMap<(KeyCode, Modifiers), KeyTableEntry>;
+
+#[derive(Debug, Clone, Default)]
+pub struct KeyTables {
+    pub default: KeyTable,
+    pub by_name: HashMap<String, KeyTable>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct KeyTableEntry {
+    pub action: KeyAssignment,
+}
