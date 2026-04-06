@@ -280,6 +280,7 @@ impl FontLocator for FontConfigFontLocator {
     }
 
     fn enumerate_all_fonts(&self) -> anyhow::Result<Vec<ParsedFont>> {
+        let runtime_config = current_config_handle();
         let mut fonts = vec![];
         let pattern = FontPattern::new()?;
         let mut files = HashSet::new();
