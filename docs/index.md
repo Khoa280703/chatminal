@@ -1,16 +1,18 @@
-# Docs Index
+# Documentation Index
 
-Tài liệu này phản ánh runtime hiện tại: `chatminal-desktop (single-process) + chatminal-terminal-emulator + chatminal-store`.
+Welcome to Chatminal documentation.
 
-- [Project Overview and PDR](./project-overview-pdr.md)
-- [System Architecture](./system-architecture.md)
-- [Architecture Audit](./architecture-audit.md) — Performance optimizations, resource footprint, tech debt
-- [Codebase Summary](./codebase-summary.md)
-- [Code Standards](./code-standards.md)
-- [Deployment Guide](./deployment-guide.md)
-- [Design Guidelines](./design-guidelines.md)
-- [Project Roadmap](./project-roadmap.md)
-- [Development Roadmap](./development-roadmap.md)
-- [Project Changelog](./project-changelog.md)
-- [Terminal Fidelity Matrix](./terminal-fidelity-matrix.md)
-- [Release Checklist](./release-checklist.md)
+## Getting Started
+
+- [Project Roadmap](./project-roadmap.md) - Current status and future plans
+- [Changelog](./project-changelog.md) - Release history and changes
+
+## Architecture
+
+- [System Architecture](./system-architecture.md) - How Chatminal works
+- [Design Guidelines](./design-guidelines.md) - Design principles
+
+## Development
+
+- [Code Standards](./code-standards.md) - Contributing guidelines
+- [Deployment Guide](./deployment-guide.md) - Building for production

@@ -1,81 +1,98 @@
 # Chatminal
 
-Chatminal hiện chạy theo mô hình `single-runtime desktop`: cửa sổ mặc định là `Chatminal Desktop` first-party với runtime session/profile/history nhúng trực tiếp trong process GUI, có sidebar profile/session bên trái. Repo hiện không còn daemon/CLI compatibility path trong workspace active; đường chạy chính thức là desktop app.
+A modern terminal emulator for everyone. Simple, fast, and powerful.
 
-## Runtime hiện tại
-- Desktop app: `apps/chatminal-desktop`
-- Runtime lõi: `crates/chatminal-runtime`
-- Shared persistence: `crates/chatminal-store` (SQLite)
-- Terminal domain: `crates/chatminal-terminal-emulator` (`lib.name = engine_term`)
-- Native vendored deps: `vendor/terminal-deps`
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## Cấu trúc repo
-- `apps/chatminal-desktop/`: desktop app first-party, runtime chính cho window
-- `crates/chatminal-runtime/`: session/profile/history/explorer/runtime state và runtime DTO/event native
-- `crates/chatminal-terminal-emulator/`: terminal parser/state/input core nội bộ
-- `crates/chatminal-store/`: SQLite store (profiles/sessions/scrollback)
-- `docs/`: tài liệu kiến trúc, roadmap, changelog
+## Features
 
-## Yêu cầu
-- Rust stable (khuyến nghị >= 1.93)
-- Linux/macOS
-- Lần build GUI đầu tiên sẽ hydrate các C deps vendored còn thiếu vào `vendor/terminal-deps/` qua `scripts/bootstrap-terminal-vendor-deps.sh`
+- **Native Performance**: Built with Rust for speed and reliability
+- **Cross-Platform**: Runs on macOS and Linux
+- **Session Management**: Save and restore your terminal sessions
+- **Profile Support**: Create custom profiles for different workflows
+- **Modern UI**: Clean, minimal interface that gets out of your way
+- **GPU Accelerated**: Smooth rendering with hardware acceleration
 
-## Chạy local
-Mở desktop app:
+## Quick Start
+
+### Installation
+
+**From Source (macOS/Linux):**
+
 ```bash
+# Clone the repository
+git clone https://github.com/chatminal/chatminal.git
+cd chatminal
+
+# Build and run
 make window
 ```
 
-Hoặc gọi trực tiếp:
-```bash
-cargo run --manifest-path apps/chatminal-desktop/Cargo.toml
-```
+**Build Requirements:**
+- Rust stable (>= 1.93)
+- On first build, vendor dependencies will be hydrated automatically
 
-Hydrate vendor deps trước nếu cần:
-```bash
-make bootstrap-terminal-deps
-make verify-third-party-reference-only
-```
+### First Run
 
-## Lệnh hỗ trợ
+After building, the desktop window will open automatically. You can:
+
+1. Create a new session with your default shell
+2. Configure profiles in settings
+3. Start using Chatminal as your daily terminal
+
+## Configuration
+
+Chatminal respects these environment variables:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `CHATMINAL_DATA_DIR` | Directory for app data | `~/.local/share/chatminal` |
+| `CHATMINAL_DEFAULT_SHELL` | Default shell to spawn | `/bin/bash` |
+| `CHATMINAL_DEFAULT_COLS` | Default terminal columns | `120` |
+| `CHATMINAL_DEFAULT_ROWS` | Default terminal rows | `32` |
+
+See `.env.example` for all available configuration options.
+
+## Documentation
+
+- [Project Overview](./docs/index.md) - Introduction and getting started
+- [System Architecture](./docs/system-architecture.md) - How Chatminal works
+- [Code Standards](./docs/code-standards.md) - Contributing guidelines
+- [Deployment Guide](./docs/deployment-guide.md) - Building for production
+- [Development Roadmap](./docs/project-roadmap.md) - Future plans
+- [Changelog](./docs/project-changelog.md) - Release history
+
+## Contributing
+
+We welcome contributions! Please see our [Contributing Guide](./CONTRIBUTING.md) for details on:
+
+- Setting up your development environment
+- Building and testing
+- Submitting pull requests
+- Code style and conventions
+
+## Building from Source
+
 ```bash
-make clean-data
+# Run the desktop app
 make window
-make bootstrap-terminal-deps
-make verify-third-party-reference-only
+
+# Check the build
 make check
-make check-desktop
+
+# Run tests
 make test
+
+# Clean build artifacts
+make clean
 ```
 
-`cargo run --release` ở root workspace cũng đi cùng unified desktop shell path này.
+For more build commands, run `make help`.
 
-## Biến môi trường
-- `CHATMINAL_DATA_DIR`
-- `CHATMINAL_PREVIEW_LINES`
-- `CHATMINAL_MAX_LINES_PER_SESSION`
-- `CHATMINAL_DEFAULT_SHELL`
-- `CHATMINAL_DEFAULT_COLS`
-- `CHATMINAL_DEFAULT_ROWS`
-- `CHATMINAL_HEALTH_INTERVAL_MS`
-- `CHATMINAL_INPUT_PIPELINE_MODE`
+## License
 
-## Validate
-```bash
-cargo check --workspace
-cargo check -p chatminal-desktop
-cargo test -p chatminal-runtime
-cargo test --manifest-path crates/chatminal-store/Cargo.toml
-```
+This project is licensed under the [MIT License](./LICENSE).
 
-## Tài liệu
-- [Docs Index](./docs/index.md)
-- [System Architecture](./docs/system-architecture.md)
-- [Codebase Summary](./docs/codebase-summary.md)
-- [Code Standards](./docs/code-standards.md)
-- [Deployment Guide](./docs/deployment-guide.md)
-- [Project Roadmap](./docs/project-roadmap.md)
-- [Development Roadmap](./docs/development-roadmap.md)
-- [Project Changelog](./docs/project-changelog.md)
-- [Release Checklist](./docs/release-checklist.md)
+## Acknowledgments
+
+Chatminal is built on the foundation of [WezTerm](https://wezfurlong.org/wezterm/), the wonderful terminal multiplexer by Wez Furlong.

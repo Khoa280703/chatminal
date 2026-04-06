@@ -1,17 +1,26 @@
 # Design Guidelines
 
-Last updated: 2026-03-04
+Last updated: 2026-04-06
 
-## UX direction
-- Terminal-first native experience.
-- Ưu tiên fidelity và độ ổn định của terminal behavior.
-- Không thêm panel/phần UI phụ khi chưa cần cho terminal core.
+## UX Direction
+
+- Terminal-first native experience
+- Prioritize fidelity and stability of terminal behavior
+- Do not add panels or UI elements unless needed for terminal core
 
 ## Interaction
-- Session switch phải giữ đúng pane state theo session.
-- Reconnect phải giữ history preview hợp lý trước live stream.
-- Input/output path không chặn render loop.
 
-## Visual constraints
-- Giao diện tối giản, dễ đọc.
-- Focus vào mật độ thông tin (sessions + active pane + status).
+- Session switching must preserve correct pane state per session
+- Reconnect must maintain reasonable history preview before live stream
+- Input/output paths must not block the render loop
+
+## Visual Constraints
+
+- Minimal interface, easy to read
+- Focus on information density (sessions + active pane + status)
+
+## Principles
+
+- **YAGNI** (You Aren't Gonna Need It): Don't add features until needed
+- **KISS** (Keep It Simple, Stupid): Simple solutions are better
+- **DRY** (Don't Repeat Yourself): Avoid code duplication

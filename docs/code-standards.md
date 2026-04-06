@@ -1,44 +1,48 @@
 # Code Standards
 
-Last updated: 2026-04-04 (single terminal architecture)
-Scope: `apps/chatminal-desktop` + `crates/*`.
+Last updated: 2026-04-06
+
+Scope: `apps/desktop` + `crates/*`.
 
 ## Principles
+
 1. Keep desktop as single source of truth for session/profile/history state (single-process).
-2. Keep protocol crate stable (if protocols re-emerge in future); breaking changes phải cập nhật đồng bộ + docs.
-3. Keep PTY hot path non-blocking; DB write đi qua async persist worker (background thread, zero lock contention).
-4. Keep code straightforward, avoid feature creep.
+2. Keep PTY hot path non-blocking; DB writes go through async persist worker (background thread, zero lock contention).
+3. Keep code straightforward, avoid feature creep.
+4. Follow YAGNI (You Aren't Gonna Need It) and KISS (Keep It Simple, Stupid).
 
 ## Boundaries
-- `apps/chatminal-desktop`: desktop app, session manager, PTY runtime, GUI shell, native API.
-- `crates/chatminal-runtime`: embedded orchestrator, session state, startup recipes, persist worker, store facade.
-- `crates/chatminal-store`: SQLite schema + CRUD store.
-- `crates/chatminal-terminal-emulator`: terminal parser/state/input core canonical cho active product path.
-- `crates/chatminal-host-runtime`: private engine primitives (Mux/Tab/Pane, not public API).
+
+- `apps/desktop`: Desktop app, session manager, PTY runtime, GUI shell, native API.
+- `crates/runtime`: Embedded orchestrator, session state, startup recipes, persist worker, store facade.
+- `crates/store`: SQLite schema and CRUD operations.
+- `crates/terminal-emulator`: Terminal parser, state, and input core.
 
 ## Naming
-- Rust: dùng `snake_case` cho function/field; tên type dùng kiểu CamelCase chuẩn của Rust.
-- Protocol fields: giữ `snake_case` để đồng nhất serde payload.
 
-## Runtime rules
-1. Desktop app không spawn shell bên ngoài process; PTY tạo thông qua LeafRuntime.
-2. Session lifecycle hoàn toàn nằm trong desktop process (no IPC).
-3. History retention phải đi qua store policy (`max lines`, output history cap 512KB).
-4. Persist writes phải đi qua background worker thread (zero lock contention on hot path).
-5. Startup recipes invariant:
+- Rust: Use `snake_case` for functions and fields; use PascalCase for types.
+- Protocol fields: Keep `snake_case` for consistent serde payloads.
+
+## Runtime Rules
+
+1. Desktop app does not spawn shells outside the process; PTY is created through LeafRuntime.
+2. Session lifecycle is entirely within the desktop process (no IPC).
+3. History retention must go through store policy (`max lines`, output history cap 512KB).
+4. Persist writes must go through background worker thread (zero lock contention on hot path).
+5. Startup recipes:
    - Per-session registry, persisted in SQLite.
    - Executed before first prompt (run/type/enter/wait/wait-for sequence).
    - Available for inspection via native API.
-6. Desktop invariant:
+6. Desktop invariants:
    - Single Window, single Tab, multiple Panes mapped to sessions.
-   - Session owns Pane via `session_id → Arc<ChatminalSessionPane>` lookup.
-   - No public host Tab/Pane surface (private adapter zone only).
+   - Session owns Pane via `session_id → Arc<SessionPane>` lookup.
+   - No public Tab/Pane surface (private adapter zone only).
 
-## Validation commands
+## Validation Commands
+
 ```bash
 cargo check --workspace
-cargo check -p chatminal-desktop
-cargo test --manifest-path crates/chatminal-runtime/Cargo.toml -- --test-threads=1
-cargo test --manifest-path crates/chatminal-store/Cargo.toml
-cargo test --manifest-path apps/chatminal-desktop/Cargo.toml -- --test-threads=1
+cargo check -p desktop
+cargo test -p runtime
+cargo test --manifest-path crates/store/Cargo.toml
 ```

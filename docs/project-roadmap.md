@@ -1,28 +1,43 @@
 # Project Roadmap
 
-Last updated: 2026-03-31 (performance optimization, startup recipes, UI shell in progress)
+Last updated: 2026-04-06
 
-## Milestones
-| Milestone | Status |
-| --- | --- |
-| Workspace chuyển sang native runtime-only | Completed |
-| Single-process desktop model (daemon deleted) | Completed (2026-03-31) |
-| Native client + internal terminal-core integration | Completed |
-| Hard-cut WezTerm runtime dependency | Completed |
-| Internal terminal-core boundary established | Completed |
-| Cross-platform transport hardening (UDS + Named Pipe) | Completed |
-| Input pipeline rollout/rollback (Phase 06) | Completed |
-| Windows input parity follow-up (Phase 07) | Completed |
-| Non-blocking session creation in native UI | Completed |
-| Performance optimization phases 1-4 | Completed (2026-03-31) |
-| Startup recipes per-session | Completed (2026-03-31) |
-| Canonical scrollback dual-read/canonical-write | Completed (2026-03-27) |
-| UI Shell without terminal-core touch | In Progress |
-| Full window-parity + multi-session UX | In Progress |
+## Completed Milestones
 
-## Next priorities
-1. Complete UI Shell phase (GPU scissor, overlay bounds, coordinate calculations)
-2. Verify window parity across Linux/macOS (sidebar, footer, tab-bar rendering)
-3. Profile remaining hot-path allocations (duplicate terminal parser, workspace_load caching)
-4. Expand test coverage for startup recipes, persist worker, session lifecycle
-5. Prepare for multi-window session management (optional Phase 46+)
+- [x] Single-process desktop model (daemon deleted)
+- [x] Native terminal emulator integration
+- [x] Cross-platform support (macOS, Linux)
+- [x] Session management with SQLite persistence
+- [x] Profile support for different workflows
+- [x] Performance optimizations
+- [x] Crates renamed (removed `chatminal-` prefix)
+
+## In Progress
+
+- UI Shell improvements (GPU rendering, overlay bounds)
+- Window parity across platforms
+- Multi-session UX enhancements
+
+## Future Plans
+
+### Phase 1: Polish (Q2 2026)
+- Complete UI shell rendering optimizations
+- Expand test coverage
+- Performance profiling and optimization
+- Documentation improvements
+
+### Phase 2: Features (Q3 2026)
+- Enhanced session management
+- Plugin system
+- Theme customization
+- Keyboard shortcut customization
+
+### Phase 3: Ecosystem (Q4 2026)
+- Package manager integration (Homebrew, AUR)
+- CI/CD improvements
+- Community contributions
+- Open source outreach
+
+## Contributing
+
+We welcome contributions! See [CONTRIBUTING.md](../CONTRIBUTING.md) for details.
