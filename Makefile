@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-DESKTOP_MANIFEST := apps/chatminal-desktop/Cargo.toml
+DESKTOP_MANIFEST := apps/desktop/Cargo.toml
 DEFAULT_DATA_DIR := $(HOME)/Library/Application Support/chatminal
 DEFAULT_CACHE_DIR := $(HOME)/Library/Caches/chatminal
 DEFAULT_LOG_DIR := $(HOME)/Library/Logs/chatminal
@@ -44,8 +44,8 @@ check:
 
 check-desktop:
 	bash scripts/verify-third-party-terminal-reference-only.sh
-	cargo check -p chatminal-desktop
+	cargo check -p desktop
 
 test:
-	cargo test -p chatminal-runtime
-	cargo test --manifest-path crates/chatminal-store/Cargo.toml
+	cargo test -p runtime
+	cargo test --manifest-path crates/store/Cargo.toml
