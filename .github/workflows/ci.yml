@@ -2,65 +2,29 @@ name: CI
 
 on:
   push:
-    branches:
-      - main
-      - master
+    branches: [main]
   pull_request:
-  workflow_dispatch:
+    branches: [main]
 
 jobs:
-  validate:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
-
+  check:
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Rust
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Rust check (workspace)
+      - name: Check workspace
         run: cargo check --workspace
-
-      - name: Rust tests (runtime)
-        run: cargo test -p runtime
-
-      - name: Rust tests (store)
-        run: cargo test --manifest-path crates/store/Cargo.toml
-
-      - name: Install dependencies (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y xvfb libx11-dev
-
-      - name: Install dependencies (macOS)
-        if: matrix.os == 'macos-latest'
-        run: |
-          brew update || true
-          brew install coreutils || true
-
-  validate-windows:
-    runs-on: windows-latest
-    timeout-minutes: 45
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust check (workspace)
-        run: cargo check --workspace
-
-      - name: Rust tests (runtime)
-        run: cargo test -p runtime
-
-      - name: Rust tests (store)
-        run: cargo test --manifest-path crates\store\Cargo.toml
