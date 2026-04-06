@@ -1,0 +1,52 @@
+[package]
+name = "config"
+version = "0.1.0"
+authors = ["Wez Furlong <wez@wezfurlong.org>"]
+edition = "2018"
+publish = false
+
+[lib]
+name = "config"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dev-dependencies]
+env_logger.workspace = true
+
+[features]
+distro-defaults = []
+
+[dependencies]
+anyhow.workspace = true
+bitflags.workspace = true
+colorgrad.workspace = true
+dirs.workspace = true
+enum-display-derive.workspace = true
+hostname.workspace = true
+lazy_static.workspace = true
+libc.workspace = true
+log.workspace = true
+luahelper.workspace = true
+mlua = {workspace=true, features=["vendored", "lua54", "async", "send", "serialize"]}
+notify.workspace = true
+ordered-float = { workspace=true, features = ["serde"] }
+portable-pty = { workspace=true, features = ["serde_support"]}
+promise.workspace = true
+serde = {workspace=true, features = ["rc", "derive"]}
+serde_json.workspace = true
+shlex.workspace = true
+smol.workspace = true
+termwiz = { workspace=true, features=["use_serde"] }
+toml.workspace = true
+umask.workspace = true
+terminal-bidi.workspace = true
+config-derive.workspace = true
+dynamic.workspace = true
+terminal-input-types.workspace = true
+terminal-emulator = { workspace = true, features=["use_serde"] }
+
+[target."cfg(unix)".dependencies]
+nix = {workspace=true, features=["resource"]}
+
+[target."cfg(windows)".dependencies]
+winapi = { workspace=true, features = ["winuser"]}
