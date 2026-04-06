@@ -53,6 +53,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwayland-dev \
+            libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev \
+            libx11-dev libx11-xcb-dev \
+            libfontconfig1-dev libfreetype-dev \
+            pkg-config
+
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo registry
@@ -94,6 +105,23 @@ jobs:
             target
           key: windows-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: windows-cargo-
+
+      # Run bootstrap via Git Bash so vendor deps are populated before cargo build.
+      # This also lets us pre-generate zconf.h (needed by vendored freetype/zlib on MSVC)
+      # because the raw zlib git clone does not include a pre-generated zconf.h.
+      - name: Bootstrap vendor deps and generate zconf.h
+        shell: bash
+        run: |
+          bash scripts/bootstrap-terminal-vendor-deps.sh
+          ZLIB_DIR="vendor/terminal-deps/freetype/zlib"
+          if [[ -f "$ZLIB_DIR/CMakeLists.txt" && ! -f "$ZLIB_DIR/zconf.h" ]]; then
+            cmake -S "$ZLIB_DIR" -B "$ZLIB_DIR/_cmake_gen" -G "NMake Makefiles" \
+              -DCMAKE_BUILD_TYPE=Release > /dev/null 2>&1 || true
+            if [[ -f "$ZLIB_DIR/_cmake_gen/zconf.h" ]]; then
+              cp "$ZLIB_DIR/_cmake_gen/zconf.h" "$ZLIB_DIR/zconf.h"
+            fi
+            rm -rf "$ZLIB_DIR/_cmake_gen"
+          fi
 
       - name: Build and package .zip
         shell: pwsh

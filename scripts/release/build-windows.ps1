@@ -21,7 +21,28 @@ $StagingDir = "$RepoRoot\target\windows-staging\chatminal-$Version"
 
 Write-Host "==> Building Chatminal $Version for Windows"
 
-# ── 1. Cargo release build ────────────────────────────────────────────────────
+# ── 1. Bootstrap vendor deps (only if not already done by CI step) ────────────
+$ZlibSentinel = "$RepoRoot\vendor\terminal-deps\freetype\zlib\adler32.c"
+if (-not (Test-Path $ZlibSentinel)) {
+    Write-Host "==> Bootstrapping vendor deps via Git Bash"
+    bash "$RepoRoot/scripts/bootstrap-terminal-vendor-deps.sh"
+    if ($LASTEXITCODE -ne 0) { throw "bootstrap failed" }
+
+    # Generate zconf.h for MSVC: raw zlib git repo does not include it
+    $ZlibDir = "$RepoRoot\vendor\terminal-deps\freetype\zlib"
+    $ZconfH = "$ZlibDir\zconf.h"
+    if ((Test-Path "$ZlibDir\CMakeLists.txt") -and (-not (Test-Path $ZconfH))) {
+        Write-Host "==> Generating zconf.h via cmake"
+        $GenDir = "$ZlibDir\_cmake_gen"
+        cmake -S $ZlibDir -B $GenDir -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Release 2>&1 | Out-Null
+        if (Test-Path "$GenDir\zconf.h") {
+            Copy-Item "$GenDir\zconf.h" $ZconfH
+        }
+        Remove-Item -Recurse -Force $GenDir -ErrorAction SilentlyContinue
+    }
+}
+
+# ── 2. Cargo release build ────────────────────────────────────────────────────
 if (-not $SkipBuild) {
     cargo build --release --manifest-path "$RepoRoot\apps\desktop\Cargo.toml"
     if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
