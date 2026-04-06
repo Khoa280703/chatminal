@@ -23,5 +23,7 @@
 repomix-output.xml
 home/
 
-# Internal plans
+# Internal/Developer tools
+.plans/
 /plans/
+.claude/
