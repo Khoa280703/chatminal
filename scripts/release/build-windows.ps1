@@ -28,17 +28,18 @@ if (-not (Test-Path $ZlibSentinel)) {
     bash "$RepoRoot/scripts/bootstrap-terminal-vendor-deps.sh"
     if ($LASTEXITCODE -ne 0) { throw "bootstrap failed" }
 
-    # Generate zconf.h for MSVC: raw zlib git repo does not include it
+    # Generate zconf.h for MSVC by processing zconf.h.in template directly.
+    # zlib git repo ships zconf.h.in but not the generated zconf.h.
     $ZlibDir = "$RepoRoot\vendor\terminal-deps\freetype\zlib"
-    $ZconfH = "$ZlibDir\zconf.h"
-    if ((Test-Path "$ZlibDir\CMakeLists.txt") -and (-not (Test-Path $ZconfH))) {
-        Write-Host "==> Generating zconf.h via cmake"
-        $GenDir = "$ZlibDir\_cmake_gen"
-        cmake -S $ZlibDir -B $GenDir -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Release 2>&1 | Out-Null
-        if (Test-Path "$GenDir\zconf.h") {
-            Copy-Item "$GenDir\zconf.h" $ZconfH
-        }
-        Remove-Item -Recurse -Force $GenDir -ErrorAction SilentlyContinue
+    $ZconfIn  = "$ZlibDir\zconf.h.in"
+    $ZconfOut = "$ZlibDir\zconf.h"
+    if ((Test-Path $ZconfIn) -and (-not (Test-Path $ZconfOut))) {
+        Write-Host "==> Generating zconf.h from zconf.h.in"
+        $content = Get-Content $ZconfIn -Raw
+        $content = $content -replace '(?m)^#cmakedefine Z_HAVE_UNISTD_H.*$', ''
+        $content = $content -replace '(?m)^#cmakedefine Z_HAVE_STDARG_H.*$', '#define Z_HAVE_STDARG_H'
+        $content = $content -replace '(?m)^#cmakedefine Z_PREFIX.*$', ''
+        [System.IO.File]::WriteAllText($ZconfOut, $content)
     }
 }
 

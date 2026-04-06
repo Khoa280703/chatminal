@@ -18,9 +18,13 @@ echo "==> Building Chatminal $VERSION for Linux ($ARCH)"
 if command -v apt-get &>/dev/null && [[ "${CI:-}" == "true" ]]; then
     sudo apt-get update -qq
     sudo apt-get install -y -qq \
-        libx11-dev libxcb1-dev libxcb-render0-dev libxcb-shape0-dev \
-        libxcb-xfixes0-dev libxkbcommon-dev libxkbcommon-x11-dev \
-        libfontconfig1-dev libfreetype-dev
+        libwayland-dev \
+        libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+        libxcb-image0-dev libxcb-util0-dev \
+        libxkbcommon-dev libxkbcommon-x11-dev \
+        libx11-dev libx11-xcb-dev \
+        libfontconfig1-dev libfreetype-dev \
+        pkg-config
 fi
 
 # ── 2. Bootstrap native vendor deps ──────────────────────────────────────────

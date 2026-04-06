@@ -59,6 +59,7 @@ jobs:
           sudo apt-get install -y \
             libwayland-dev \
             libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxcb-image0-dev libxcb-util0-dev \
             libxkbcommon-dev libxkbcommon-x11-dev \
             libx11-dev libx11-xcb-dev \
             libfontconfig1-dev libfreetype-dev \
@@ -106,22 +107,34 @@ jobs:
           key: windows-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: windows-cargo-
 
-      # Run bootstrap via Git Bash so vendor deps are populated before cargo build.
-      # This also lets us pre-generate zconf.h (needed by vendored freetype/zlib on MSVC)
-      # because the raw zlib git clone does not include a pre-generated zconf.h.
-      - name: Bootstrap vendor deps and generate zconf.h
+      # Bootstrap vendor deps via Git Bash (populates vendor/terminal-deps).
+      - name: Bootstrap vendor deps
         shell: bash
+        run: bash scripts/bootstrap-terminal-vendor-deps.sh
+
+      # zlib git repo ships zconf.h.in (cmake template) but not the generated zconf.h.
+      # MSVC compilation fails without it. Process the template manually in PowerShell —
+      # no cmake or MSVC env needed; only 3 cmake variables need substitution.
+      - name: Generate zconf.h for MSVC
+        shell: pwsh
         run: |
-          bash scripts/bootstrap-terminal-vendor-deps.sh
-          ZLIB_DIR="vendor/terminal-deps/freetype/zlib"
-          if [[ -f "$ZLIB_DIR/CMakeLists.txt" && ! -f "$ZLIB_DIR/zconf.h" ]]; then
-            cmake -S "$ZLIB_DIR" -B "$ZLIB_DIR/_cmake_gen" -G "NMake Makefiles" \
-              -DCMAKE_BUILD_TYPE=Release > /dev/null 2>&1 || true
-            if [[ -f "$ZLIB_DIR/_cmake_gen/zconf.h" ]]; then
-              cp "$ZLIB_DIR/_cmake_gen/zconf.h" "$ZLIB_DIR/zconf.h"
-            fi
-            rm -rf "$ZLIB_DIR/_cmake_gen"
-          fi
+          $ZlibDir = "vendor\terminal-deps\freetype\zlib"
+          $ZconfIn  = "$ZlibDir\zconf.h.in"
+          $ZconfOut = "$ZlibDir\zconf.h"
+          if ((Test-Path $ZconfIn) -and -not (Test-Path $ZconfOut)) {
+            $content = Get-Content $ZconfIn -Raw
+            # Substitute cmake template variables for Windows/MSVC:
+            # Z_HAVE_UNISTD_H  → undef (Windows has no unistd.h)
+            # Z_HAVE_STDARG_H  → define (Windows has stdarg.h)
+            # Z_PREFIX         → undef (no symbol prefix needed)
+            $content = $content -replace '(?m)^#cmakedefine Z_HAVE_UNISTD_H.*$', ''
+            $content = $content -replace '(?m)^#cmakedefine Z_HAVE_STDARG_H.*$', '#define Z_HAVE_STDARG_H'
+            $content = $content -replace '(?m)^#cmakedefine Z_PREFIX.*$', ''
+            [System.IO.File]::WriteAllText((Resolve-Path $ZlibDir).Path + "\zconf.h", $content)
+            Write-Host "Generated $ZconfOut"
+          } else {
+            Write-Host "zconf.h already present or zconf.h.in missing — skipping"
+          }
 
       - name: Build and package .zip
         shell: pwsh
