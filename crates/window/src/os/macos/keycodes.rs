@@ -1,6 +1,6 @@
 #![allow(non_upper_case_globals)]
-use terminal_input_types::PhysKeyCode;
 use std::collections::HashMap;
+use terminal_input_types::PhysKeyCode;
 
 fn build_map() -> HashMap<u16, PhysKeyCode> {
     [

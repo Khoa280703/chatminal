@@ -1,26 +1,26 @@
-use crate::TermWindow;
 use crate::desktop_session_host::{
-    FrontendClientHandle, HostActivityGuard, active_frontend_client, active_workspace_for_client,
-    focus_terminal_handle_by_id, frontend_resolve_focused_pane, frontend_resolve_pane,
-    host_activity_count, host_window_exists, host_workspace_has_windows, host_workspace_name,
-    primary_host_window_exists, primary_host_window_id, set_active_workspace_for_client,
-    spawn_local_shell_runner, start_host_activity, subscribe_frontend_notifications,
-    workspace_is_empty, workspace_names,
+    active_frontend_client, active_workspace_for_client, focus_terminal_handle_by_id,
+    frontend_resolve_focused_pane, frontend_resolve_pane, host_activity_count, host_window_exists,
+    host_workspace_has_windows, host_workspace_name, primary_host_window_exists,
+    primary_host_window_id, set_active_workspace_for_client, spawn_local_shell_runner,
+    start_host_activity, subscribe_frontend_notifications, workspace_is_empty, workspace_names,
+    FrontendClientHandle, HostActivityGuard,
 };
 use crate::scripting::guiwin::GuiWin;
 use crate::scripting::guiwin::PrimaryGuiWindowId;
 use crate::spawn::SpawnWhere;
+use crate::TermWindow;
 use ::window::*;
 use anyhow::{Context, Error};
-use runtime::HostRuntimeNotification;
 use config::keyassignment::{KeyAssignment, SpawnCommand};
 use config::{ConfigHandle, ConfigSubscription, NotificationHandling};
-use terminal_emulator::{Alert, ClipboardSelection};
-use toast_notification::*;
 use promise::{Future, Promise};
+use runtime::HostRuntimeNotification;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
+use terminal_emulator::{Alert, ClipboardSelection};
+use toast_notification::*;
 
 pub struct GuiFrontEnd {
     connection: Rc<Connection>,

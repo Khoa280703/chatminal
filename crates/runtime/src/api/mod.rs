@@ -2,11 +2,11 @@ use std::collections::HashMap;
 
 use crate::workspace_ids::{RuntimeId, SessionViewId, TerminalInstanceId};
 pub use crate::workspace_ids::{SessionGroupId, SessionRenderTargetId, SessionTerminalHandle};
+use serde::{Deserialize, Serialize};
 use store::{
     StoredProfile, StoredSessionExplorerState, StoredSessionSnapshot, StoredSessionStatus,
     StoredSessionSummary,
 };
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

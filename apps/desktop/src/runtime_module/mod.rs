@@ -17,6 +17,8 @@ use runtime::{
 pub(crate) type ChatminalSessionPane = crate::desktop_session_host::ChatminalSessionPane;
 pub(crate) type DesktopSessionHost = crate::desktop_session_host::DesktopSessionHost;
 pub(crate) type EmbeddedRuntime = crate::desktop_session_host::EmbeddedRuntime;
+pub(crate) use client::resolve_target_session_id;
+pub(crate) use client::ChatminalRuntimeClient;
 pub(crate) use runtime::{
     RuntimeId, RuntimeSessionBridgeAction as DesktopSessionBridgeAction,
     RuntimeSessionLookup as DesktopSessionLookup, SessionEngineCapability, SessionGroupId,
@@ -24,8 +26,6 @@ pub(crate) use runtime::{
     SessionTerminalHandle, SessionViewBinding, SessionViewId, TerminalInstanceId,
     WorkspaceLayoutNodeKind, WorkspaceLayoutState, WorkspaceNodeId, WorkspaceSplitAxis,
 };
-pub(crate) use client::resolve_target_session_id;
-pub(crate) use client::ChatminalRuntimeClient;
 
 pub const DESKTOP_LAYOUT_WORKSPACE_ID: &str = DEFAULT_LAYOUT_WORKSPACE_ID;
 

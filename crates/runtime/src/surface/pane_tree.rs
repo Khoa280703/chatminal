@@ -1,6 +1,6 @@
 use super::{SplitDirection, StableCursorPosition};
-use terminal_emulator::{Line, StableRowIndex, TerminalSize};
 use serde::{Deserialize, Serialize};
+use terminal_emulator::{Line, StableRowIndex, TerminalSize};
 use url::Url;
 
 type PaneId = usize;

@@ -10,12 +10,12 @@ use crate::termwindow::{
 use crate::utilsprites::RenderMetrics;
 use anyhow::anyhow;
 use config::{Dimension, DimensionContext};
-use terminal_font::LoadedFont;
-use terminal_font::units::PixelUnit;
-use terminal_emulator::color::{ColorAttribute, ColorPalette};
 use finl_unicode::grapheme_clusters::Graphemes;
 use std::cell::RefCell;
 use std::rc::Rc;
+use terminal_emulator::color::{ColorAttribute, ColorPalette};
+use terminal_font::LoadedFont;
+use terminal_font::units::PixelUnit;
 use termwiz::cell::{Presentation, grapheme_column_width};
 use termwiz::surface::Line;
 use window::bitmaps::atlas::Sprite;

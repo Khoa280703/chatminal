@@ -2,8 +2,8 @@ use crate::TermWindow;
 use crate::termwindow::box_model::ComputedElement;
 use config::keyassignment::KeyAssignment;
 use downcast_rs::{Downcast, impl_downcast};
-use terminal_emulator::{KeyCode, KeyModifiers, MouseEvent};
 use std::cell::Ref;
+use terminal_emulator::{KeyCode, KeyModifiers, MouseEvent};
 use window::DeadKeyStatus;
 
 pub trait Modal: Downcast {

@@ -4,12 +4,12 @@ use crate::{
     WindowEventSender, WindowKeyEvent,
 };
 use anyhow::{anyhow, ensure};
-use terminal_input_types::{KeyboardLedStatus, PhysKeyCode};
 use libc;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::{CStr, OsStr};
 use std::os::unix::ffi::OsStrExt;
+use terminal_input_types::{KeyboardLedStatus, PhysKeyCode};
 use xcb::x::KeyButMask;
 use xkb::compose::Status as ComposeStatus;
 use xkbcommon::xkb;

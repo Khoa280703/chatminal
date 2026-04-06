@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use terminal_emulator::TerminalSize;
 use portable_pty::CommandBuilder;
+use terminal_emulator::TerminalSize;
 
 use super::super::{
     RuntimeId, SessionCoreState, SessionRuntimeEvent, StatefulSessionEngine, TerminalInstanceId,

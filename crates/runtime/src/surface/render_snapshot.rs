@@ -1,7 +1,7 @@
 use dynamic::{FromDynamic, ToDynamic};
-use terminal_emulator::StableRowIndex;
 use luahelper::impl_lua_conversion_dynamic;
 use serde::{Deserialize, Serialize};
+use terminal_emulator::StableRowIndex;
 
 /// Describes the location of the cursor in stable-row space.
 #[derive(

@@ -1,13 +1,13 @@
 use crate::{Position, StableRowIndex, TerminalState};
 use anyhow::Context;
-use terminal_cell::image::{ImageCell, ImageDataType};
-use terminal_cell::Cell;
-use terminal_surface::change::ImageData;
-use terminal_surface::TextureCoordinate;
 use humansize::{SizeFormatter, DECIMAL};
 use num_traits::{One, Zero};
 use ordered_float::NotNan;
 use std::sync::Arc;
+use terminal_cell::image::{ImageCell, ImageDataType};
+use terminal_cell::Cell;
+use terminal_surface::change::ImageData;
+use terminal_surface::TextureCoordinate;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PlacementInfo {

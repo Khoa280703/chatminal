@@ -3,8 +3,8 @@ use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use terminal_input_types::{KeyCode, KeyEvent, KeyboardLedStatus, Modifiers};
 use smithay_client_toolkit::globals::GlobalData;
+use terminal_input_types::{KeyCode, KeyEvent, KeyboardLedStatus, Modifiers};
 use wayland_client::backend::ObjectId;
 use wayland_client::globals::{BindError, GlobalList};
 use wayland_client::protocol::wl_keyboard::WlKeyboard;

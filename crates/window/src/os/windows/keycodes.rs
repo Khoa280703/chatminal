@@ -1,5 +1,5 @@
-use terminal_input_types::PhysKeyCode;
 use std::collections::HashMap;
+use terminal_input_types::PhysKeyCode;
 use winapi::shared::minwindef::WPARAM;
 use winapi::um::winuser::*;
 

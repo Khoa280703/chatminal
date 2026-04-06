@@ -1,9 +1,6 @@
 use crate::keys::KeyNoAction;
 use crate::window::WindowLevel;
 use dynamic::{FromDynamic, FromDynamicOptions, ToDynamic, Value};
-use terminal_input_types::{KeyCode, Modifiers};
-use terminal_emulator::input::MouseButton;
-use terminal_emulator::SemanticType;
 use luahelper::impl_lua_conversion_dynamic;
 use ordered_float::NotNan;
 use portable_pty::CommandBuilder;
@@ -11,6 +8,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::path::PathBuf;
+use terminal_emulator::input::MouseButton;
+use terminal_emulator::SemanticType;
+use terminal_input_types::{KeyCode, Modifiers};
 
 #[derive(Default, Debug, Clone, FromDynamic, ToDynamic, PartialEq, Eq)]
 pub struct LauncherActionArgs {

@@ -5,8 +5,8 @@ use crate::hyperlink::{Hyperlink, Rule};
 use crate::line::clusterline::ClusteredLine;
 use crate::SEQ_ZERO;
 use alloc::sync::Arc;
-use terminal_cell::{Cell, CellAttributes};
 use k9::assert_equal as assert_eq;
+use terminal_cell::{Cell, CellAttributes};
 
 /// There are 4 double-wide graphemes that occupy 2 cells each.
 /// When we join the lines, we must preserve the invisible blank

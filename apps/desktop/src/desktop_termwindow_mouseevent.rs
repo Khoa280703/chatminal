@@ -1,30 +1,30 @@
-use crate::runtime_module::desktop_focus_session_view;
 use crate::chatminal_sidebar::SidebarSessionDropTarget;
 use crate::desktop_session_host::overlay_shell::{
     OverlayPane, OverlayWithPaneLines as WithPaneLines,
 };
 use crate::desktop_session_host::terminal_handle_for_pane as terminal_handle_for_overlay_pane;
 use crate::desktop_termwindow_types::{
-    terminal_ui_key_for_pane, TerminalSplit, TerminalSplitDirection,
+    TerminalSplit, TerminalSplitDirection, terminal_ui_key_for_pane,
 };
+use crate::runtime_module::desktop_focus_session_view;
 use crate::tabbar::SessionBarItem;
 use crate::termwindow::{
-    GuiWin, MouseCapture, ScrollHit, TermWindowNotif, UIItem, UIItemType, TMB,
+    GuiWin, MouseCapture, ScrollHit, TMB, TermWindowNotif, UIItem, UIItemType,
 };
 use ::window::{
     MouseButtons as WMB, MouseCursor, MouseEvent, MouseEventKind as WMEK, MousePress,
     WindowDecorations, WindowOps, WindowState,
 };
-use lua_bridge::TerminalRef;
-use config::keyassignment::{KeyAssignment, MouseEventTrigger};
 use config::MouseEventAltScreen;
+use config::keyassignment::{KeyAssignment, MouseEventTrigger};
 use dynamic::ToDynamic;
-use terminal_emulator::input::{MouseButton, MouseEventKind as TMEK};
-use terminal_emulator::{ClickPosition, LastMouseClick, StableRowIndex};
+use lua_bridge::TerminalRef;
 use std::ops::Sub;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
+use terminal_emulator::input::{MouseButton, MouseEventKind as TMEK};
+use terminal_emulator::{ClickPosition, LastMouseClick, StableRowIndex};
 use termwiz::hyperlink::Hyperlink;
 use termwiz::surface::Line;
 
@@ -1035,7 +1035,7 @@ impl super::TermWindow {
             let session_id = session_id.to_string();
             self.dismiss_chatminal_sidebar_context_menu(context);
             window.notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-                term_window.close_chatminal_session_by_id(&session_id);
+                term_window.close_chatminal_selected_sessions(&session_id);
             })));
         }
         context.set_cursor(Some(MouseCursor::Arrow));

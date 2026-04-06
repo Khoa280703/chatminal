@@ -1,8 +1,8 @@
 use crate::line::cellref::CellRef;
 use alloc::sync::Arc;
-use terminal_cell::Cell;
 #[cfg(feature = "use_serde")]
 use serde::{Deserialize, Serialize};
+use terminal_cell::Cell;
 use unicode_segmentation::UnicodeSegmentation;
 
 extern crate alloc;

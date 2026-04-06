@@ -7,7 +7,6 @@ use crate::locator::{FontDataHandle, FontDataSource};
 use crate::rasterizer::colr::{ColorLine, ColorStop, DrawOp};
 use anyhow::{ensure, Context, Error};
 use cairo::Extend;
-use terminal_color_types::SrgbaPixel;
 use memmap2::{Mmap, MmapOptions};
 use std::ffi::CStr;
 use std::io::Read;
@@ -15,6 +14,7 @@ use std::mem;
 use std::ops::Range;
 use std::os::raw::{c_char, c_int, c_uint, c_void};
 use std::sync::Arc;
+use terminal_color_types::SrgbaPixel;
 
 extern "C" {
     fn hb_ft_font_set_load_flags(font: *mut hb_font_t, load_flags: i32);

@@ -144,10 +144,7 @@ impl ToDynamic for FontWeight {
 }
 
 impl FromDynamic for FontWeight {
-    fn from_dynamic(
-        value: &Value,
-        _options: FromDynamicOptions,
-    ) -> Result<Self, dynamic::Error> {
+    fn from_dynamic(value: &Value, _options: FromDynamicOptions) -> Result<Self, dynamic::Error> {
         match value {
             Value::String(s) => {
                 Ok(Self::from_str(s).ok_or_else(|| format!("invalid font weight {}", s))?)

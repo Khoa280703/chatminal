@@ -23,14 +23,8 @@ use crate::{
     CONFIG_SKIP, HOME_DIR,
 };
 use anyhow::Context;
-use terminal_bidi::ParagraphDirectionHint;
 use config_derive::ConfigMeta;
 use dynamic::{FromDynamic, ToDynamic};
-use terminal_input_types::{
-    IntegratedTitleButton, IntegratedTitleButtonAlignment, IntegratedTitleButtonStyle, Modifiers,
-    UIKeyCapRendering, WindowDecorations,
-};
-use terminal_emulator::TerminalSize;
 use luahelper::impl_lua_conversion_dynamic;
 use mlua::FromLua;
 use portable_pty::CommandBuilder;
@@ -43,6 +37,12 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::{fs::DirBuilder, io};
+use terminal_bidi::ParagraphDirectionHint;
+use terminal_emulator::TerminalSize;
+use terminal_input_types::{
+    IntegratedTitleButton, IntegratedTitleButtonAlignment, IntegratedTitleButtonStyle, Modifiers,
+    UIKeyCapRendering, WindowDecorations,
+};
 use termwiz::hyperlink;
 use termwiz::surface::CursorShape;
 
@@ -915,10 +915,9 @@ impl Config {
     }
 
     pub fn try_default() -> anyhow::Result<LoadedConfig> {
-        let (config, warnings) =
-            dynamic::Error::capture_warnings(|| -> anyhow::Result<Config> {
-                Ok(default_config_with_overrides_applied()?.compute_extra_defaults(None))
-            });
+        let (config, warnings) = dynamic::Error::capture_warnings(|| -> anyhow::Result<Config> {
+            Ok(default_config_with_overrides_applied()?.compute_extra_defaults(None))
+        });
 
         Ok(LoadedConfig {
             config: Ok(config?),
@@ -946,38 +945,37 @@ impl Config {
         file.read_to_string(&mut s)?;
         let lua = make_lua_context(p)?;
 
-        let (config, warnings) =
-            dynamic::Error::capture_warnings(|| -> anyhow::Result<Config> {
-                let cfg: Config;
+        let (config, warnings) = dynamic::Error::capture_warnings(|| -> anyhow::Result<Config> {
+            let cfg: Config;
 
-                let config: mlua::Value = smol::block_on(
-                    // Skip a potential BOM that Windows software may have placed in the
-                    // file. Note that we can't catch this happening for files that are
-                    // imported via the lua require function.
-                    lua.load(s.trim_start_matches('\u{FEFF}'))
-                        .set_name(p.to_string_lossy())
-                        .eval_async(),
-                )?;
-                let config = Config::apply_overrides_to(&lua, config)?;
-                let config = Config::apply_overrides_obj_to(&lua, config, overrides)?;
-                cfg = Config::from_lua(config, &lua).with_context(|| {
-                    format!(
-                        "Error converting lua value returned by script {} to Config struct",
-                        p.display()
-                    )
-                })?;
-                cfg.check_consistency()?;
+            let config: mlua::Value = smol::block_on(
+                // Skip a potential BOM that Windows software may have placed in the
+                // file. Note that we can't catch this happening for files that are
+                // imported via the lua require function.
+                lua.load(s.trim_start_matches('\u{FEFF}'))
+                    .set_name(p.to_string_lossy())
+                    .eval_async(),
+            )?;
+            let config = Config::apply_overrides_to(&lua, config)?;
+            let config = Config::apply_overrides_obj_to(&lua, config, overrides)?;
+            cfg = Config::from_lua(config, &lua).with_context(|| {
+                format!(
+                    "Error converting lua value returned by script {} to Config struct",
+                    p.display()
+                )
+            })?;
+            cfg.check_consistency()?;
 
-                // Compute but discard the key bindings here so that we raise any
-                // problems earlier than we use them.
-                let _ = cfg.key_bindings();
+            // Compute but discard the key bindings here so that we raise any
+            // problems earlier than we use them.
+            let _ = cfg.key_bindings();
 
-                std::env::set_var("CHATMINAL_CONFIG_FILE", p);
-                if let Some(dir) = p.parent() {
-                    std::env::set_var("CHATMINAL_CONFIG_DIR", dir);
-                }
-                Ok(cfg)
-            });
+            std::env::set_var("CHATMINAL_CONFIG_FILE", p);
+            if let Some(dir) = p.parent() {
+                std::env::set_var("CHATMINAL_CONFIG_DIR", dir);
+            }
+            Ok(cfg)
+        });
         let cfg = config?;
 
         Ok(Some(LoadedConfig {

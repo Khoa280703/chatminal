@@ -4,13 +4,13 @@ use crate::units::*;
 use crate::{ftwrap, hbwrap as harfbuzz};
 use anyhow::{anyhow, Context};
 use config::ConfigHandle;
-use terminal_bidi::Direction;
 use finl_unicode::grapheme_clusters::Graphemes;
 use log::error;
 use ordered_float::NotNan;
 use std::cell::{RefCell, RefMut};
 use std::collections::HashMap;
 use std::ops::Range;
+use terminal_bidi::Direction;
 use termwiz::cell::{unicode_column_width, Presentation};
 
 // Changing these will switch to using harfbuzz's opentype functions.

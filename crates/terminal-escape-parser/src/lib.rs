@@ -10,8 +10,8 @@
 #[cfg(feature = "tmux_cc")]
 use crate::tmux_cc::Event;
 use core::fmt::{Display, Formatter, Result as FmtResult, Write as FmtWrite};
-use terminal_color_types::LinearRgba;
 use num_derive::*;
+use terminal_color_types::LinearRgba;
 
 #[cfg_attr(not(feature = "std"), macro_use)]
 extern crate alloc;

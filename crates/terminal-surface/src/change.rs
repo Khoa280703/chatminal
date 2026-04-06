@@ -1,13 +1,13 @@
 use crate::{CursorShape, CursorVisibility, Position};
 #[cfg(feature = "use_image")]
 use alloc::sync::Arc;
+use finl_unicode::grapheme_clusters::Graphemes;
+#[cfg(feature = "use_serde")]
+use serde::{Deserialize, Serialize};
 use terminal_cell::color::ColorAttribute;
 #[cfg(feature = "use_image")]
 pub use terminal_cell::image::{ImageData, TextureCoordinate};
 use terminal_cell::{unicode_column_width, AttributeChange, CellAttributes};
-use finl_unicode::grapheme_clusters::Graphemes;
-#[cfg(feature = "use_serde")]
-use serde::{Deserialize, Serialize};
 
 extern crate alloc;
 use alloc::string::String;

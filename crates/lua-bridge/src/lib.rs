@@ -1,10 +1,10 @@
-use runtime::{SessionTerminalHandle, SplitDirection, SplitRequest, SplitSize};
 use config::keyassignment::SessionDirection;
 use config::lua::mlua::{self, Lua, UserData, UserDataMethods, Value as LuaValue};
 use config::lua::{get_or_create_module, get_or_create_sub_module};
 use dynamic::{FromDynamic, ToDynamic, Value};
 use luahelper::impl_lua_conversion_dynamic;
 use portable_pty::CommandBuilder;
+use runtime::{SessionTerminalHandle, SplitDirection, SplitRequest, SplitSize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -329,7 +329,10 @@ impl LuaBridgeHost {
             .map_err(mlua::Error::external)
     }
 
-    pub(crate) fn session_size(&self, session_id: &str) -> mlua::Result<terminal_emulator::TerminalSize> {
+    pub(crate) fn session_size(
+        &self,
+        session_id: &str,
+    ) -> mlua::Result<terminal_emulator::TerminalSize> {
         self.session_record(session_id).map(|session| session.size)
     }
 
@@ -624,9 +627,9 @@ mod tests {
         BackendFuture, LuaBridgeBackend, LuaPane, LuaSessionRecord, LuaSessionTerminalRecord,
         LuaSpawnContext, LuaSpawnResult,
     };
+    use procinfo::LocalProcessInfo;
     use runtime::{CachePolicy, LogicalLine};
     use terminal_emulator::{Progress, SemanticZone, StableRowIndex, TerminalSize};
-    use procinfo::LocalProcessInfo;
     use termwiz::surface::Line;
     use url::Url;
 

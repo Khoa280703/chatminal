@@ -10,10 +10,10 @@ use config::{
     BackgroundSource, BackgroundVerticalAlignment, ConfigHandle, DimensionContext, Gradient,
     GradientOrientation,
 };
-use terminal_emulator::StableRowIndex;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
+use terminal_emulator::StableRowIndex;
 use termwiz::image::{ImageData, ImageDataType};
 
 lazy_static::lazy_static! {

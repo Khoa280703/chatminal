@@ -11,10 +11,10 @@ use ::window::glium::{
 };
 use ::window::*;
 use anyhow::Context;
-use terminal_font::FontConfiguration;
 use std::cell::{Ref, RefCell, RefMut};
 use std::convert::TryInto;
 use std::rc::Rc;
+use terminal_font::FontConfiguration;
 use wgpu::util::DeviceExt;
 
 const INDICES_PER_CELL: usize = 6;

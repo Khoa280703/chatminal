@@ -36,9 +36,9 @@ mod egl;
 
 pub use bitmaps::{BitmapImage, Image};
 pub use connection::*;
-pub use terminal_input_types::*;
 pub use glium;
 pub use os::*;
+pub use terminal_input_types::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Clipboard {

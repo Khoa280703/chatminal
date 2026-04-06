@@ -3,9 +3,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use portable_pty::CommandBuilder;
 use store::StoredSessionStatus;
 use terminal_emulator::TerminalSize;
-use portable_pty::CommandBuilder;
 
 use crate::api::{RuntimeSessionBridgeAction, RuntimeSessionLookup as RuntimeOwnedSessionLookup};
 use crate::execution::{

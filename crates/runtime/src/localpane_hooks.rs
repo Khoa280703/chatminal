@@ -1,7 +1,7 @@
 use crate::pane::PaneId;
 use config::ExitBehavior;
-use terminal_emulator::Alert;
 use std::sync::Arc;
+use terminal_emulator::Alert;
 
 #[derive(Clone)]
 pub struct LocalPaneHooks {

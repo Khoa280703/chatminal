@@ -1,22 +1,22 @@
-use crate::runtime_module::SessionTerminalHandle;
 use crate::desktop_session_host::overlay_shell::{
     OverlayCachePolicy, OverlayForEachLogicalLine, OverlayLogicalLine, OverlayPane, OverlayPattern,
     OverlaySearchResult, OverlayWithPaneLines, RenderableDimensions, StableCursorPosition,
 };
 use crate::desktop_termwindow_types::terminal_ui_key_for_pane;
+use crate::runtime_module::SessionTerminalHandle;
 use crate::selection::{SelectionCoordinate, SelectionRange};
 use crate::termwindow::{TermWindow, TermWindowNotif};
 use config::keyassignment::{ClipboardCopyDestination, QuickSelectArguments};
 use config::ConfigHandle;
-use terminal_emulator::color::ColorPalette;
-use terminal_emulator::{
-    Clipboard, Intensity, KeyCode, KeyModifiers, Line, MouseEvent, StableRowIndex, TerminalSize,
-};
 use parking_lot::{MappedMutexGuard, Mutex};
 use rangeset::RangeSet;
 use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
+use terminal_emulator::color::ColorPalette;
+use terminal_emulator::{
+    Clipboard, Intensity, KeyCode, KeyModifiers, Line, MouseEvent, StableRowIndex, TerminalSize,
+};
 use termwiz::cell::{Cell, CellAttributes};
 use termwiz::color::AnsiColor;
 use termwiz::surface::{SequenceNo, SEQ_ZERO};

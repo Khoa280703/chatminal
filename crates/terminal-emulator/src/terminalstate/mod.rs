@@ -4,6 +4,13 @@
 use super::*;
 use crate::color::{ColorPalette, RgbColor};
 use crate::config::{BidiMode, NewlineCanon};
+use log::debug;
+use num_traits::ToPrimitive;
+use std::collections::HashMap;
+use std::io::{BufWriter, Write};
+use std::num::NonZeroUsize;
+use std::sync::mpsc::{channel, Sender};
+use std::sync::Arc;
 use terminal_bidi::ParagraphDirectionHint;
 use terminal_cell::image::ImageData;
 use terminal_cell::UnicodeVersion;
@@ -14,13 +21,6 @@ use terminal_escape_parser::csi::{
 };
 use terminal_escape_parser::{OneBased, OperatingSystemCommand, CSI};
 use terminal_surface::{CursorShape, CursorVisibility, SequenceNo};
-use log::debug;
-use num_traits::ToPrimitive;
-use std::collections::HashMap;
-use std::io::{BufWriter, Write};
-use std::num::NonZeroUsize;
-use std::sync::mpsc::{channel, Sender};
-use std::sync::Arc;
 use terminfo::{Database, Value};
 use termwiz::input::KeyboardEncoding;
 use url::Url;

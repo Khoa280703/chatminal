@@ -4,10 +4,6 @@ use crate::renderstate::RenderContext;
 use crate::termwindow::render::paint::AllowImage;
 use anyhow::Context;
 use config::{AllowSquareGlyphOverflow, TextStyle};
-use terminal_blob_leases::{BlobLease, BlobManager, BoxedReader};
-use terminal_font::units::*;
-use terminal_font::{FontConfiguration, GlyphInfo, LoadedFont, LoadedFontId};
-use terminal_emulator::Underline;
 use euclid::num::Zero;
 use image::{
     AnimationDecoder, DynamicImage, Frame, Frames, ImageDecoder, ImageFormat, ImageResult, Limits,
@@ -22,6 +18,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender, TryRecvError};
 use std::sync::{Arc, LazyLock, MutexGuard};
 use std::time::{Duration, Instant};
+use terminal_blob_leases::{BlobLease, BlobManager, BoxedReader};
+use terminal_emulator::Underline;
+use terminal_font::units::*;
+use terminal_font::{FontConfiguration, GlyphInfo, LoadedFont, LoadedFontId};
 use termwiz::color::RgbColor;
 use termwiz::image::{ImageData, ImageDataType};
 use termwiz::surface::CursorShape;

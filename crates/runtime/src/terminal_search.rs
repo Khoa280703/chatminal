@@ -1,5 +1,5 @@
-use terminal_emulator::StableRowIndex;
 use serde::{Deserialize, Serialize};
+use terminal_emulator::StableRowIndex;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct SearchResult {

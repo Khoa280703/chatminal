@@ -5,9 +5,9 @@ use config::keyassignment::{
 };
 use config::{ConfigHandle, MouseEventAltScreen, MouseEventTriggerMods};
 use dynamic::{ToDynamic, Value};
-use terminal_emulator::input::MouseButton;
 use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
+use terminal_emulator::input::MouseButton;
 use window::{KeyCode, Modifiers, PhysKeyCode, UIKeyCapRendering};
 
 pub struct InputMap {

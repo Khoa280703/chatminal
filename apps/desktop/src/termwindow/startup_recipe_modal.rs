@@ -8,9 +8,9 @@ use crate::termwindow::render::corners::{
 use crate::termwindow::{TermWindow, UIItemType};
 use crate::utilsprites::RenderMetrics;
 use config::Dimension;
-use terminal_emulator::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use std::cell::{Ref, RefCell};
 use std::time::{Duration, Instant};
+use terminal_emulator::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
 const MODAL_MAX_VISIBLE_LINES: usize = 10;
 const MODAL_MIN_INPUT_HEIGHT_PX: f32 = 220.0;

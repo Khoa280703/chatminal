@@ -3,6 +3,13 @@ use crate::terminalstate::{
     default_color_map, CharSet, MouseEncoding, TabStop, UnicodeVersionStackEntry,
 };
 use crate::{ClipboardSelection, Position, TerminalState, VisibleRowIndex, DCS, ST};
+use finl_unicode::grapheme_clusters::Graphemes;
+use log::{debug, error};
+use num_traits::FromPrimitive;
+use ordered_float::NotNan;
+use std::fmt::Write;
+use std::io::Write as _;
+use std::ops::{Deref, DerefMut};
 use terminal_bidi::ParagraphDirectionHint;
 use terminal_cell::{
     grapheme_column_width, is_white_space_grapheme, Cell, CellAttributes, SemanticType,
@@ -17,13 +24,6 @@ use terminal_escape_parser::osc::{
 use terminal_escape_parser::{
     Action, ControlCode, DeviceControlMode, Esc, EscCode, OperatingSystemCommand, CSI,
 };
-use finl_unicode::grapheme_clusters::Graphemes;
-use log::{debug, error};
-use num_traits::FromPrimitive;
-use ordered_float::NotNan;
-use std::fmt::Write;
-use std::io::Write as _;
-use std::ops::{Deref, DerefMut};
 use termwiz::input::KeyboardEncoding;
 use unicode_normalization::{is_nfc_quick, IsNormalized, UnicodeNormalization};
 use url::Url;

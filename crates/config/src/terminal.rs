@@ -1,9 +1,9 @@
 //! Bridge our gui config into the terminal crate configuration
 
 use crate::{ConfigHandle, NewlineCanon};
+use std::sync::Mutex;
 use terminal_emulator::color::ColorPalette;
 use terminal_emulator::config::BidiMode;
-use std::sync::Mutex;
 use termwiz::cell::UnicodeVersion;
 
 #[derive(Debug)]
@@ -85,7 +85,9 @@ impl terminal_emulator::TerminalConfiguration for TermConfig {
             None => terminal_emulator::config::NewlineCanon::default(),
             Some(NewlineCanon::None) => terminal_emulator::config::NewlineCanon::None,
             Some(NewlineCanon::LineFeed) => terminal_emulator::config::NewlineCanon::LineFeed,
-            Some(NewlineCanon::CarriageReturn) => terminal_emulator::config::NewlineCanon::CarriageReturn,
+            Some(NewlineCanon::CarriageReturn) => {
+                terminal_emulator::config::NewlineCanon::CarriageReturn
+            }
             Some(NewlineCanon::CarriageReturnAndLineFeed) => {
                 terminal_emulator::config::NewlineCanon::CarriageReturnAndLineFeed
             }

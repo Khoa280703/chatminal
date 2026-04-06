@@ -14,8 +14,6 @@ mod protocol_types;
 
 use anyhow::{bail, Context as _, Error};
 use config::keyassignment::SessionDirection;
-use terminal_emulator::color::ColorPalette;
-use terminal_emulator::{Alert, ClipboardSelection, StableRowIndex, TerminalSize};
 use portable_pty::CommandBuilder;
 use protocol_types::{
     ClientId, ClientInfo, PaneNode, Pattern, RenderableDimensions, SearchResult, SerdeUrl,
@@ -30,6 +28,8 @@ use std::io::Cursor;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::Arc;
+use terminal_emulator::color::ColorPalette;
+use terminal_emulator::{Alert, ClipboardSelection, StableRowIndex, TerminalSize};
 use termwiz::hyperlink::Hyperlink;
 use termwiz::image::{ImageData, TextureCoordinate};
 use termwiz::surface::{Line, SequenceNo};

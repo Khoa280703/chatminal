@@ -15,11 +15,11 @@
 //! struct.
 use anyhow::Error;
 use dynamic::{FromDynamic, ToDynamic};
-use terminal_surface::SequenceNo;
 #[cfg(feature = "use_serde")]
 use serde::{Deserialize, Serialize};
 use std::ops::{Deref, DerefMut, Range};
 use std::str;
+use terminal_surface::SequenceNo;
 
 pub mod config;
 pub use config::TerminalConfiguration;

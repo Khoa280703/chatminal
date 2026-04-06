@@ -3,8 +3,8 @@ use std::time::{Duration, Instant};
 
 use crate::terminal_text_utils::visible_terminal_fragment;
 use config::current_config_handle;
-use terminal_emulator::TerminalSize;
 use portable_pty::CommandBuilder;
+use terminal_emulator::TerminalSize;
 
 use super::super::{RuntimeId, TerminalInstanceId};
 use super::{TerminalInstanceRuntime, TerminalInstanceRuntimeEvent, TerminalInstanceRuntimeSpawn};

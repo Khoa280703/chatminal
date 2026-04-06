@@ -2,8 +2,8 @@ use std::io::Read;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use terminal_emulator::{Terminal as IoTerminal, TerminalSize};
 use portable_pty::{Child, CommandBuilder, PtySize};
+use terminal_emulator::{Terminal as IoTerminal, TerminalSize};
 
 use super::leaf_runtime::{
     TerminalInstanceRuntimeEvent, TerminalInstanceRuntimeHooks, TerminalInstanceRuntimeSpawn,

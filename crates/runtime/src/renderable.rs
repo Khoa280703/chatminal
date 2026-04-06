@@ -1,8 +1,8 @@
 use crate::pane::{ForEachPaneLogicalLine, WithPaneLines};
 pub use crate::{RenderableDimensions, StableCursorPosition};
-use terminal_emulator::{Line, StableRowIndex, Terminal};
 use rangeset::RangeSet;
 use std::ops::Range;
+use terminal_emulator::{Line, StableRowIndex, Terminal};
 use termwiz::surface::SequenceNo;
 
 /// Implements Pane::get_cursor_position for Terminal

@@ -2,10 +2,10 @@
 // for FromPrimitive
 #![allow(clippy::useless_attribute)]
 
-pub use terminal_color_types::{LinearRgba, SrgbaTuple};
 use dynamic::{FromDynamic, ToDynamic};
 #[cfg(feature = "use_serde")]
 use serde::{Deserialize, Serialize};
+pub use terminal_color_types::{LinearRgba, SrgbaTuple};
 
 #[cfg(not(feature = "std"))]
 extern crate alloc;

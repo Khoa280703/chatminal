@@ -2,8 +2,6 @@
 
 use anyhow::{bail, Context, Error};
 use dynamic::{FromDynamic, FromDynamicOptions, ToDynamic, UnknownFieldAction, Value};
-use terminal_emulator::TerminalSize;
-use terminal_emulator::UnicodeVersion;
 use lazy_static::lazy_static;
 use mlua::Lua;
 use ordered_float::NotNan;
@@ -20,6 +18,8 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use terminal_emulator::TerminalSize;
+use terminal_emulator::UnicodeVersion;
 
 mod background;
 mod bell;

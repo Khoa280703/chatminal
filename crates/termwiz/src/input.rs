@@ -7,10 +7,10 @@ use crate::escape::parser::Parser;
 use crate::escape::{Action, CSI};
 use crate::keymap::{Found, KeyMap};
 use crate::readbuf::ReadBuffer;
-use terminal_input_types::ctrl_mapping;
 #[cfg(feature = "use_serde")]
 use serde::{Deserialize, Serialize};
 use std::fmt::Write;
+use terminal_input_types::ctrl_mapping;
 
 pub use terminal_input_types::Modifiers;
 

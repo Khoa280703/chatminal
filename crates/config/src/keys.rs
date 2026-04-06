@@ -1,7 +1,7 @@
 use crate::keyassignment::{KeyAssignment, MouseEventTrigger};
 use dynamic::{Error as DynError, FromDynamic, FromDynamicOptions, ToDynamic, Value};
-use terminal_input_types::{KeyCode, Modifiers, PhysKeyCode};
 use std::convert::TryFrom;
+use terminal_input_types::{KeyCode, Modifiers, PhysKeyCode};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, FromDynamic, ToDynamic)]
 pub enum KeyMapPreference {

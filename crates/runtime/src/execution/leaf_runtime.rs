@@ -3,11 +3,11 @@ use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex};
 
 use config::ConfigHandle;
+use portable_pty::{Child, CommandBuilder, MasterPty, native_pty_system};
 use terminal_emulator::{
     KeyCode as IoKeyCode, KeyModifiers as IoKeyModifiers, MouseEvent as IoMouseEvent,
     Terminal as IoTerminal, TerminalSize,
 };
-use portable_pty::{Child, CommandBuilder, MasterPty, native_pty_system};
 
 use super::leaf_runtime_command::prepare_leaf_command;
 use super::leaf_runtime_threads::{

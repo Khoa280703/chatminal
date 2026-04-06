@@ -1,9 +1,9 @@
 use crate::runtime_module::SessionViewId;
 use crate::termwindow::{SessionEntryInformation, TerminalInstanceInformation, UIItem, UIItemType};
 use config::{ConfigHandle, SessionBarColors};
-use terminal_emulator::{Line, Progress};
 use finl_unicode::grapheme_clusters::Graphemes;
 use mlua::FromLua;
+use terminal_emulator::{Line, Progress};
 use termwiz::cell::{unicode_column_width, Cell, CellAttributes};
 use termwiz::color::{AnsiColor, ColorSpec};
 use termwiz::escape::csi::Sgr;

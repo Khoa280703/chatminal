@@ -1,4 +1,3 @@
-use crate::runtime_module::SessionTerminalHandle;
 use crate::desktop_session_host::overlay_shell::{
     OverlayAssignmentResult, OverlayCachePolicy, OverlayForEachLogicalLine, OverlayLogicalLine,
     OverlayPane, OverlayPattern, OverlayPatternType, OverlayRuntimeEntryHandle,
@@ -8,6 +7,7 @@ use crate::desktop_session_host::{
     frontend_resolve_pane, terminal_handle_for_pane as terminal_handle_for_overlay_pane,
 };
 use crate::desktop_termwindow_types::terminal_ui_key_for_pane;
+use crate::runtime_module::SessionTerminalHandle;
 use crate::selection::{SelectionCoordinate, SelectionRange, SelectionX};
 use crate::termwindow::keyevent::KeyTableArgs;
 use crate::termwindow::{TermWindow, TermWindowNotif};
@@ -16,11 +16,6 @@ use config::keyassignment::{
     SelectionMode,
 };
 use config::ConfigHandle;
-use terminal_emulator::color::ColorPalette;
-use terminal_emulator::{
-    unicode_column_width, Clipboard, KeyCode, KeyModifiers, Line, MouseEvent, SemanticType,
-    StableRowIndex, TerminalSize,
-};
 use ordered_float::NotNan;
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
 use rangeset::RangeSet;
@@ -28,6 +23,11 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
+use terminal_emulator::color::ColorPalette;
+use terminal_emulator::{
+    unicode_column_width, Clipboard, KeyCode, KeyModifiers, Line, MouseEvent, SemanticType,
+    StableRowIndex, TerminalSize,
+};
 use termwiz::cell::{Cell, CellAttributes};
 use termwiz::color::AnsiColor;
 use termwiz::lineedit::{LineEditBuffer, Movement};

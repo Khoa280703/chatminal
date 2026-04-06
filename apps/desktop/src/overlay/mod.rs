@@ -1,9 +1,9 @@
 use crate::desktop_session_host::overlay_shell::OverlayPane;
 use crate::desktop_session_host::overlay_shell::{allocate_overlay_terminal, OverlayTerminal};
 use crate::termwindow::TermWindow;
-use terminal_emulator::{TerminalConfiguration, TerminalSize};
 use std::pin::Pin;
 use std::sync::Arc;
+use terminal_emulator::{TerminalConfiguration, TerminalSize};
 
 pub mod confirm;
 pub mod confirm_close_pane;

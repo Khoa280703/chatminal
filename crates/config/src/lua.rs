@@ -5,9 +5,7 @@ use crate::{
     TextStyle,
 };
 use anyhow::{anyhow, Context};
-use dynamic::{
-    FromDynamic, FromDynamicOptions, ToDynamic, UnknownFieldAction, Value as DynValue,
-};
+use dynamic::{FromDynamic, FromDynamicOptions, ToDynamic, UnknownFieldAction, Value as DynValue};
 use luahelper::{from_lua_value_dynamic, lua_value_to_dynamic, to_lua};
 use mlua::{FromLua, IntoLuaMulti, Lua, Table, Value, Variadic};
 use ordered_float::NotNan;

@@ -3,11 +3,11 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use super::{
-    HostTerminal, active_frontend_client, active_workspace_for_client,
-    focus_host_root_runtime_entry, host_iter_all_panes, host_root_active_runtime_id,
-    host_root_runtime_entry_infos, host_root_window_spawn_context, host_root_window_title,
-    host_root_window_workspace_name_value, host_runtime_available,
-    host_runtime_entry_exists_for_session, host_runtime_entry_info_by_session_id,
+    active_frontend_client, active_workspace_for_client, focus_host_root_runtime_entry,
+    host_iter_all_panes, host_root_active_runtime_id, host_root_runtime_entry_infos,
+    host_root_window_spawn_context, host_root_window_title, host_root_window_workspace_name_value,
+    host_runtime_available, host_runtime_entry_exists_for_session,
+    host_runtime_entry_info_by_session_id,
     host_runtime_entry_terminal_handle_in_direction_by_session_id,
     host_runtime_entry_terminal_handles_by_session_id,
     host_runtime_entry_terminal_infos_by_session_id, host_spawn_tab_raw, primary_host_window_id,
@@ -15,20 +15,20 @@ use super::{
     session_id_from_pane_metadata, set_active_workspace_for_client, set_host_active_workspace_name,
     set_host_root_window_title, set_host_root_window_workspace_name,
     set_host_runtime_entry_active_terminal, set_host_runtime_entry_title_by_session_id,
-    terminal_handle_arc, workspace_names,
+    terminal_handle_arc, workspace_names, HostTerminal,
 };
+use config::keyassignment::SessionDirection;
+use dynamic::Value;
 use lua_bridge::backend::{
     BackendFuture, LuaBridgeBackend, LuaPane, LuaSessionRecord, LuaSessionTerminalRecord,
     LuaSpawnContext, LuaSpawnResult, LuaSplitSource,
 };
+use procinfo::LocalProcessInfo;
 use runtime::{
     CachePolicy, LogicalLine, RenderableDimensions, SessionTerminalHandle, SplitRequest,
     StableCursorPosition,
 };
-use config::keyassignment::SessionDirection;
-use dynamic::Value;
 use terminal_emulator::{Progress, SemanticZone, StableRowIndex, TerminalSize};
-use procinfo::LocalProcessInfo;
 use termwiz::surface::Line;
 use url::Url;
 

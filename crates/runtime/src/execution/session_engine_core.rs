@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use terminal_emulator::TerminalSize;
 use portable_pty::CommandBuilder;
+use terminal_emulator::TerminalSize;
 
 use super::{
     RuntimeId, SessionEventBus, SessionLayoutSnapshot, SessionRuntimeEvent, SessionRuntimeState,

@@ -9,10 +9,6 @@ use crate::pane::{
 };
 use crate::renderable::*;
 use crossbeam::channel::{Receiver, Sender, unbounded as channel};
-use terminal_emulator::color::ColorPalette;
-use terminal_emulator::{
-    KeyCode, KeyModifiers, MouseEvent, StableRowIndex, TerminalConfiguration, TerminalSize,
-};
 use filedescriptor::{FileDescriptor, Pipe};
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
 use rangeset::RangeSet;
@@ -20,6 +16,10 @@ use std::io::{BufWriter, Write};
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
+use terminal_emulator::color::ColorPalette;
+use terminal_emulator::{
+    KeyCode, KeyModifiers, MouseEvent, StableRowIndex, TerminalConfiguration, TerminalSize,
+};
 use termwiz::Context;
 use termwiz::input::{InputEvent, KeyEvent, Modifiers, MouseEvent as TermWizMouseEvent};
 use termwiz::render::terminfo::TerminfoRenderer;

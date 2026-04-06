@@ -26,10 +26,7 @@ impl std::ops::Deref for ImageFileSourceWrap {
 }
 
 impl FromDynamic for ImageFileSourceWrap {
-    fn from_dynamic(
-        value: &Value,
-        options: FromDynamicOptions,
-    ) -> Result<Self, dynamic::Error> {
+    fn from_dynamic(value: &Value, options: FromDynamicOptions) -> Result<Self, dynamic::Error> {
         match value {
             Value::String(path) => Ok(Self {
                 inner: ImageFileSource {
@@ -149,10 +146,7 @@ pub enum BackgroundSize {
 }
 
 impl FromDynamic for BackgroundSize {
-    fn from_dynamic(
-        value: &Value,
-        options: FromDynamicOptions,
-    ) -> Result<Self, dynamic::Error> {
+    fn from_dynamic(value: &Value, options: FromDynamicOptions) -> Result<Self, dynamic::Error> {
         match value {
             Value::String(label) => match label.as_str() {
                 "Contain" => return Ok(Self::Contain),

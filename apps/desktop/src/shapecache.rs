@@ -1,9 +1,9 @@
 use crate::customglyph::BlockKey;
 use crate::glyphcache::CachedGlyph;
 use config::TextStyle;
+use std::rc::Rc;
 use terminal_font::shaper::GlyphInfo;
 use terminal_font::units::*;
-use std::rc::Rc;
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
 pub struct ShapeCacheKey {
@@ -119,10 +119,10 @@ mod test {
     use crate::shapecache::{GlyphPosition, ShapedInfo};
     use crate::utilsprites::RenderMetrics;
     use config::{FontAttributes, TextStyle};
+    use std::rc::Rc;
     use terminal_bidi::Direction;
     use terminal_font::shaper::PresentationWidth;
     use terminal_font::{FontConfiguration, LoadedFont};
-    use std::rc::Rc;
     use termwiz::cell::CellAttributes;
     use termwiz::surface::{Line, SEQ_ZERO};
 

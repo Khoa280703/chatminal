@@ -10,9 +10,6 @@ use crate::{
 use anyhow::{bail, Context};
 use async_trait::async_trait;
 use config::{ConfigHandle, ImePreeditRendering, SystemBackdrop};
-use terminal_color_types::LinearRgba;
-use terminal_font::FontConfiguration;
-use terminal_input_types::KeyboardLedStatus;
 use lazy_static::lazy_static;
 use promise::Future;
 use raw_window_handle::{
@@ -32,6 +29,9 @@ use std::path::PathBuf;
 use std::ptr::{null, null_mut};
 use std::rc::Rc;
 use std::sync::Mutex;
+use terminal_color_types::LinearRgba;
+use terminal_font::FontConfiguration;
+use terminal_input_types::KeyboardLedStatus;
 use winapi::shared::minwindef::*;
 use winapi::shared::ntdef::*;
 use winapi::shared::windef::*;

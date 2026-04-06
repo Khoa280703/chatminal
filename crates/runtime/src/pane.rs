@@ -5,17 +5,17 @@ use config::ExitBehavior;
 use config::keyassignment::KeyAssignment;
 use downcast_rs::{DowncastSync, impl_downcast};
 use dynamic::Value;
-use terminal_emulator::color::ColorPalette;
-use terminal_emulator::{
-    Clipboard, DownloadHandler, KeyCode, KeyModifiers, MouseEvent, Progress, SemanticZone,
-    StableRowIndex, TerminalConfiguration, TerminalSize,
-};
 use parking_lot::MappedMutexGuard;
 use rangeset::RangeSet;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::ops::Range;
 use std::sync::Arc;
+use terminal_emulator::color::ColorPalette;
+use terminal_emulator::{
+    Clipboard, DownloadHandler, KeyCode, KeyModifiers, MouseEvent, Progress, SemanticZone,
+    StableRowIndex, TerminalConfiguration, TerminalSize,
+};
 use termwiz::hyperlink::Rule;
 use termwiz::input::KeyboardEncoding;
 use termwiz::surface::{Line, SequenceNo};

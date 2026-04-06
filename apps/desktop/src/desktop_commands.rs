@@ -1,5 +1,5 @@
-use crate::runtime_module::desktop_current_active_session_id;
 use crate::inputmap::InputMap;
+use crate::runtime_module::desktop_current_active_session_id;
 use config::keyassignment::*;
 use config::window::WindowLevel;
 use config::{ConfigHandle, DeferredKeyCode};

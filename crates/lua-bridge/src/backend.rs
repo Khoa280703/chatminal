@@ -5,14 +5,14 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
+use config::keyassignment::SessionDirection;
+use dynamic::Value;
+use procinfo::LocalProcessInfo;
 use runtime::{
     CachePolicy, LogicalLine, RenderableDimensions, SessionTerminalHandle, SplitRequest,
     StableCursorPosition,
 };
-use config::keyassignment::SessionDirection;
-use dynamic::Value;
 use terminal_emulator::{Progress, SemanticZone, StableRowIndex, TerminalSize};
-use procinfo::LocalProcessInfo;
 use termwiz::surface::Line;
 use url::Url;
 

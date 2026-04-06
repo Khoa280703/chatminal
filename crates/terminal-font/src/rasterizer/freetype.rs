@@ -18,11 +18,11 @@ use ::freetype::{
 use anyhow::{bail, Context as _};
 use cairo::{Content, Context, Extend, Format, ImageSurface, Matrix, Operator, RecordingSurface};
 use config::{ConfigHandle, DisplayPixelGeometry, FreeTypeLoadFlags, FreeTypeLoadTarget};
-use terminal_color_types::{linear_u8_to_srgb8, SrgbaPixel};
 use std::cell::RefCell;
 use std::f64::consts::PI;
 use std::mem;
 use std::mem::MaybeUninit;
+use terminal_color_types::{linear_u8_to_srgb8, SrgbaPixel};
 
 pub struct FreeTypeRasterizer {
     config: ConfigHandle,

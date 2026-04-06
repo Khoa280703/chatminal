@@ -1,10 +1,10 @@
 use super::*;
-use terminal_emulator::{SemanticZone, StableRowIndex};
 use luahelper::mlua::LuaSerdeExt;
 use luahelper::{dynamic_to_lua_value, from_lua, to_lua};
 use mlua::Value;
 use std::cmp::Ordering;
 use std::sync::Arc;
+use terminal_emulator::{SemanticZone, StableRowIndex};
 use termwiz::cell::SemanticType;
 use termwiz_funcs::lines_to_escapes;
 use url_funcs::Url;
@@ -13,9 +13,7 @@ use url_funcs::Url;
 pub struct TerminalRef(runtime::SessionTerminalHandle);
 
 impl TerminalRef {
-    pub const fn from_terminal_handle(
-        terminal_handle: runtime::SessionTerminalHandle,
-    ) -> Self {
+    pub const fn from_terminal_handle(terminal_handle: runtime::SessionTerminalHandle) -> Self {
         Self(terminal_handle)
     }
 

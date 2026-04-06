@@ -5,9 +5,7 @@ use std::time::Duration;
 
 use crate::workspace_ids::SessionViewId;
 use crate::workspace_layout::{WorkspaceLayoutState, WorkspaceSplitAxis};
-use store::{
-    Store, StoredScrollbackRecordInput, StoredScrollbackRecordKind, StoredSessionStatus,
-};
+use store::{Store, StoredScrollbackRecordInput, StoredScrollbackRecordKind, StoredSessionStatus};
 
 use super::canonical_scrollback::{
     build_logical_snapshot, materialize_output_chunk, render_snapshot, render_snapshot_for_terminal,

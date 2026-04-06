@@ -1,8 +1,8 @@
-pub use terminal_color_types::{LinearRgba, SrgbaTuple};
 use dynamic::{FromDynamic, FromDynamicOptions, ToDynamic, Value};
 use num_derive::FromPrimitive;
 #[cfg(feature = "use_serde")]
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+pub use terminal_color_types::{LinearRgba, SrgbaTuple};
 
 use crate::allocate::*;
 
@@ -206,10 +206,7 @@ impl ToDynamic for RgbColor {
 }
 
 impl FromDynamic for RgbColor {
-    fn from_dynamic(
-        value: &Value,
-        options: FromDynamicOptions,
-    ) -> Result<Self, dynamic::Error> {
+    fn from_dynamic(value: &Value, options: FromDynamicOptions) -> Result<Self, dynamic::Error> {
         let s = String::from_dynamic(value, options)?;
         Ok(RgbColor::from_named_or_rgb_string(&s)
             .ok_or_else(|| format!("unknown color name: {}", s))?)

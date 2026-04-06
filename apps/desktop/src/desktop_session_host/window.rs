@@ -1,5 +1,5 @@
-use runtime::{HostRuntimeNotification, RuntimeId};
 use config::GuiPosition;
+use runtime::{HostRuntimeNotification, RuntimeId};
 
 use super::publish_runtime_notification;
 

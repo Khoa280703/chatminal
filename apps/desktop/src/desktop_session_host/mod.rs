@@ -8,31 +8,31 @@ mod window;
 
 use std::collections::HashMap;
 use std::ffi::OsStr;
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
 
 use crate::runtime_module::{
-    ChatminalRuntimeClient, desktop_activate_session,
-    desktop_close_view_or_session_for_render_target, desktop_focus_session_terminal_handle,
-    desktop_render_state_for_session, desktop_session_host, desktop_session_id_for_render_target,
+    desktop_activate_session, desktop_close_view_or_session_for_render_target,
+    desktop_focus_session_terminal_handle, desktop_render_state_for_session, desktop_session_host,
+    desktop_session_id_for_render_target, ChatminalRuntimeClient,
 };
 use activity::Activity;
 use anyhow::anyhow;
+use config::keyassignment::SessionDirection;
+use config::ConfigHandle;
+use dynamic::Value;
+use portable_pty::CommandBuilder;
 use runtime::{
     ClientId, HostRuntimeNotification, RuntimeEntryInfo, RuntimeEntryTerminalInfo, RuntimeId,
     RuntimeState, SessionTerminalHandle,
 };
-use config::ConfigHandle;
-use config::keyassignment::SessionDirection;
-use dynamic::Value;
 use terminal_emulator::TerminalSize;
-use portable_pty::CommandBuilder;
 use window::{Window as HostWindow, WindowId as HostWindowId};
 
 use lua_bridge_backend::DesktopLuaBridgeBackend;
 use session_host::terminal_handle_for_host_terminal;
-pub(crate) use session_host::{DesktopSessionHost, get_or_init_session_host};
+pub(crate) use session_host::{get_or_init_session_host, DesktopSessionHost};
 pub(crate) use session_pane::ChatminalSessionPane;
 
 pub(crate) const CHATMINAL_RUNTIME_SPAWN_TARGET_NAME: &str = "chatminal-runtime";
@@ -51,7 +51,7 @@ pub(crate) mod overlay_shell {
     };
     pub use runtime::renderable::*;
     pub use runtime::termwiztermtab::{
-        TermWizTerminal as OverlayTerminal, allocate as allocate_overlay_terminal,
+        allocate as allocate_overlay_terminal, TermWizTerminal as OverlayTerminal,
     };
     pub use runtime::{
         Pattern as OverlayPattern, PatternType as OverlayPatternType,
@@ -464,9 +464,9 @@ pub(crate) fn remove_terminal_handle(terminal_handle: SessionTerminalHandle) {
 }
 
 pub(crate) fn remove_runtime_entry_scope(render_scope_id: u64) {
-    if desktop_close_view_or_session_for_render_target(
-        runtime::SessionRenderTargetId::new(render_scope_id),
-    ) {
+    if desktop_close_view_or_session_for_render_target(runtime::SessionRenderTargetId::new(
+        render_scope_id,
+    )) {
         return;
     }
     if let Some(host) = desktop_session_host() {
@@ -731,9 +731,9 @@ pub(crate) fn shutdown_host_runtime() {
 }
 
 pub(crate) fn activate_host_runtime_entry(render_scope_id: u64) -> anyhow::Result<()> {
-    if let Some(session_id) = desktop_session_id_for_render_target(
-        runtime::SessionRenderTargetId::new(render_scope_id),
-    ) {
+    if let Some(session_id) =
+        desktop_session_id_for_render_target(runtime::SessionRenderTargetId::new(render_scope_id))
+    {
         let size = desktop_render_state_for_session(&session_id)
             .map(|state| state.terminal_size)
             .ok_or_else(|| {

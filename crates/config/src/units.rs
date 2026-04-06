@@ -5,10 +5,7 @@ use std::str::FromStr;
 pub struct OptPixelUnit(Option<Dimension>);
 
 impl FromDynamic for OptPixelUnit {
-    fn from_dynamic(
-        value: &Value,
-        _options: FromDynamicOptions,
-    ) -> Result<Self, dynamic::Error> {
+    fn from_dynamic(value: &Value, _options: FromDynamicOptions) -> Result<Self, dynamic::Error> {
         match value {
             Value::Null => Ok(Self(None)),
             value => Ok(Self(Some(DefaultUnit::Pixels.from_dynamic_impl(value)?))),
@@ -32,10 +29,7 @@ impl From<PixelUnit> for Dimension {
 }
 
 impl FromDynamic for PixelUnit {
-    fn from_dynamic(
-        value: &Value,
-        _options: FromDynamicOptions,
-    ) -> Result<Self, dynamic::Error> {
+    fn from_dynamic(value: &Value, _options: FromDynamicOptions) -> Result<Self, dynamic::Error> {
         Ok(Self(DefaultUnit::Pixels.from_dynamic_impl(value)?))
     }
 }

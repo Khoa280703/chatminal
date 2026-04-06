@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex};
 
-use terminal_emulator::TerminalSize;
 use portable_pty::CommandBuilder;
+use terminal_emulator::TerminalSize;
 
 use super::leaf_runtime::{
     TerminalInstanceRuntime, TerminalInstanceRuntimeEvent, TerminalInstanceRuntimeSpawn,

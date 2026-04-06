@@ -11,8 +11,6 @@ use crate::{
 use anyhow::{anyhow, Context as _};
 use async_trait::async_trait;
 use config::ConfigHandle;
-use terminal_font::FontConfiguration;
-use terminal_input_types::{KeyCode, KeyEvent, KeyboardLedStatus, Modifiers};
 use promise::{Future, Promise};
 use raw_window_handle::{
     DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, RawDisplayHandle,
@@ -25,6 +23,8 @@ use std::path::PathBuf;
 use std::ptr::NonNull;
 use std::rc::{Rc, Weak};
 use std::sync::{Arc, Mutex};
+use terminal_font::FontConfiguration;
+use terminal_input_types::{KeyCode, KeyEvent, KeyboardLedStatus, Modifiers};
 use url::Url;
 use xcb::x::{Atom, PropMode};
 use xcb::{Event, Xid};

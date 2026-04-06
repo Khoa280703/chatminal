@@ -4,11 +4,11 @@ use bitflags::bitflags;
 use core::convert::TryInto;
 use core::fmt::{Display, Error as FmtError, Formatter};
 use dynamic::{FromDynamic, ToDynamic};
-use terminal_input_types::Modifiers;
 use num_derive::*;
 use num_traits::{FromPrimitive, ToPrimitive};
 #[cfg(feature = "use_serde")]
 use serde::{Deserialize, Serialize};
+use terminal_input_types::Modifiers;
 
 use crate::allocate::*;
 

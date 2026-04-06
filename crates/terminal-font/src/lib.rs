@@ -10,9 +10,6 @@ use config::{
     BoldBrightening, ConfigHandle, DisplayPixelGeometry, FontAttributes, FontRasterizerSelection,
     FontStretch, FontStyle, FontWeight, TextStyle,
 };
-use terminal_bidi::Direction;
-use terminal_emulator::{CellAttributes, Intensity};
-use toast_notification::ToastNotification;
 use rangeset::RangeSet;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -21,8 +18,11 @@ use std::rc::{Rc, Weak};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use terminal_bidi::Direction;
+use terminal_emulator::{CellAttributes, Intensity};
 use termwiz::cell::Presentation;
 use thiserror::Error;
+use toast_notification::ToastNotification;
 
 mod hbwrap;
 

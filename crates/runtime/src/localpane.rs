@@ -9,11 +9,6 @@ use anyhow::Error;
 use async_trait::async_trait;
 use config::{ConfigHandle, ExitBehavior, ExitBehaviorMessaging};
 use dynamic::Value;
-use terminal_emulator::color::ColorPalette;
-use terminal_emulator::{
-    Alert, AlertHandler, Clipboard, DownloadHandler, KeyCode, KeyModifiers, MouseEvent, Progress,
-    SemanticZone, StableRowIndex, Terminal, TerminalConfiguration, TerminalSize,
-};
 use fancy_regex::Regex;
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
 use portable_pty::{Child, ChildKiller, ExitStatus, MasterPty, PtySize};
@@ -27,6 +22,11 @@ use std::io::{Result as IoResult, Write};
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use terminal_emulator::color::ColorPalette;
+use terminal_emulator::{
+    Alert, AlertHandler, Clipboard, DownloadHandler, KeyCode, KeyModifiers, MouseEvent, Progress,
+    SemanticZone, StableRowIndex, Terminal, TerminalConfiguration, TerminalSize,
+};
 use termwiz::escape::DeviceControlMode;
 use termwiz::input::KeyboardEncoding;
 use termwiz::surface::{Line, SequenceNo};

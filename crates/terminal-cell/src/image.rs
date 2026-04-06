@@ -11,14 +11,14 @@
 //! protocol appears to track the images out of band as attachments with
 //! z-order.
 
-#[cfg(feature = "std")]
-use terminal_blob_leases::{BlobLease, BlobManager};
 use ordered_float::NotNan;
 #[cfg(feature = "use_serde")]
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
+#[cfg(feature = "std")]
+use terminal_blob_leases::{BlobLease, BlobManager};
 
 #[cfg(feature = "use_serde")]
 fn deserialize_notnan<'de, D>(deserializer: D) -> Result<NotNan<f32>, D::Error>
@@ -205,7 +205,10 @@ pub enum ImageDataType {
     /// and is stored as a blob via the blob manager.
     #[cfg(feature = "std")]
     EncodedLease(
-        #[cfg_attr(feature = "use_serde", serde(with = "terminal_blob_leases::lease_bytes"))]
+        #[cfg_attr(
+            feature = "use_serde",
+            serde(with = "terminal_blob_leases::lease_bytes")
+        )]
         BlobLease,
     ),
     /// Data is RGBA u8 data

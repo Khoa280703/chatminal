@@ -13,14 +13,14 @@ use alloc::sync::{Arc, Weak};
 use core::any::Any;
 use core::hash::Hash;
 use core::ops::Range;
-use terminal_bidi::{Direction, ParagraphDirectionHint};
-use terminal_cell::{Cell, CellAttributes, SemanticType, UnicodeVersion};
 use finl_unicode::grapheme_clusters::Graphemes;
 #[cfg(feature = "use_serde")]
 use serde::{Deserialize, Serialize};
 use siphasher::sip128::{Hasher128, SipHasher};
 #[cfg(feature = "appdata")]
 use std::sync::Mutex;
+use terminal_bidi::{Direction, ParagraphDirectionHint};
+use terminal_cell::{Cell, CellAttributes, SemanticType, UnicodeVersion};
 
 extern crate alloc;
 use crate::alloc::string::ToString;

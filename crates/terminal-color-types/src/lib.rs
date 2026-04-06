@@ -326,10 +326,7 @@ impl ToDynamic for SrgbaTuple {
 }
 
 impl FromDynamic for SrgbaTuple {
-    fn from_dynamic(
-        value: &Value,
-        options: FromDynamicOptions,
-    ) -> Result<Self, dynamic::Error> {
+    fn from_dynamic(value: &Value, options: FromDynamicOptions) -> Result<Self, dynamic::Error> {
         let s = String::from_dynamic(value, options)?;
         Ok(SrgbaTuple::from_str(&s).map_err(|()| format!("unknown color name: {}", s))?)
     }

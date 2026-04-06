@@ -6,14 +6,14 @@ use crate::image::ImageCell;
 use alloc::sync::Arc;
 use core::hash::{Hash, Hasher};
 use core::mem;
-pub use terminal_char_props::emoji::Presentation;
-use terminal_char_props::emoji_variation::WCWIDTH_TABLE;
-use terminal_char_props::widechar_width::WcWidth;
 use dynamic::{FromDynamic, ToDynamic};
-pub use terminal_escape_parser::osc::Hyperlink;
 use finl_unicode::grapheme_clusters::Graphemes;
 #[cfg(feature = "use_serde")]
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+pub use terminal_char_props::emoji::Presentation;
+use terminal_char_props::emoji_variation::WCWIDTH_TABLE;
+use terminal_char_props::widechar_width::WcWidth;
+pub use terminal_escape_parser::osc::Hyperlink;
 
 extern crate alloc;
 use crate::alloc::string::ToString;

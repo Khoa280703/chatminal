@@ -1,9 +1,9 @@
 use crate::*;
 use dynamic::{FromDynamic, ToDynamic};
-use terminal_emulator::color::ColorPalette;
 use luahelper::impl_lua_conversion_dynamic;
 use std::convert::{TryFrom, TryInto};
 use std::str::FromStr;
+use terminal_emulator::color::ColorPalette;
 use termwiz::cell::CellAttributes;
 use termwiz::color::ColorSpec as TWColorSpec;
 pub use termwiz::color::{AnsiColor, ColorAttribute, RgbColor, SrgbaTuple};

@@ -4,9 +4,9 @@ use crate::termwindow::TermWindowNotif;
 use crate::TermWindow;
 use config::keyassignment::{ClipboardCopyDestination, KeyAssignment};
 use dynamic::{FromDynamic, ToDynamic};
-use toast_notification::ToastNotification;
 use luahelper::*;
 use mlua::{UserData, UserDataMethods};
+use toast_notification::ToastNotification;
 use window::{Connection, ConnectionOps, DeadKeyStatus, WindowOps, WindowState};
 
 pub type PrimaryGuiWindowId = u64;

@@ -8,11 +8,11 @@ mod c1;
 mod csi;
 // mod selection; FIXME: port to render layer
 use crate::color::ColorPalette;
+use k9::assert_equal as assert_eq;
+use std::sync::{Arc, Mutex};
 use terminal_escape_parser::csi::{Edit, EraseInDisplay, EraseInLine};
 use terminal_escape_parser::{OneBased, OperatingSystemCommand, CSI};
 use terminal_surface::{CursorShape, CursorVisibility, SequenceNo, SEQ_ZERO};
-use k9::assert_equal as assert_eq;
-use std::sync::{Arc, Mutex};
 
 #[derive(Debug)]
 struct LocalClip {
@@ -1127,10 +1127,12 @@ fn test_scroll_margins() {
     term.print("1\n2\n3\n4\n");
     assert_all_contents(&term, file!(), line!(), &["1", "2", "3", "4", ""]);
 
-    let margins = CSI::Cursor(terminal_escape_parser::csi::Cursor::SetTopAndBottomMargins {
-        top: OneBased::new(1),
-        bottom: OneBased::new(2),
-    });
+    let margins = CSI::Cursor(
+        terminal_escape_parser::csi::Cursor::SetTopAndBottomMargins {
+            top: OneBased::new(1),
+            bottom: OneBased::new(2),
+        },
+    );
     term.print(format!("{}", margins));
 
     term.print("z\n");

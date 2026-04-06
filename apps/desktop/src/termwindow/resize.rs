@@ -1,11 +1,11 @@
-use crate::runtime_module::desktop_resize_visible_sessions;
 use crate::resize_increment_calculator::ResizeIncrementCalculator;
+use crate::runtime_module::desktop_resize_visible_sessions;
 use crate::utilsprites::RenderMetrics;
 use ::window::{Dimensions, ResizeIncrement, Window, WindowOps, WindowState};
 use config::{ConfigHandle, DimensionContext};
-use terminal_font::FontConfiguration;
-use terminal_emulator::TerminalSize;
 use std::rc::Rc;
+use terminal_emulator::TerminalSize;
+use terminal_font::FontConfiguration;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ShellWindowPadding {

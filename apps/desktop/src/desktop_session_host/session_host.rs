@@ -11,18 +11,18 @@ use super::session_engine::{
     RuntimeId, SessionEngineShared, SessionRuntimeState, StatefulSessionEngine, TerminalInstanceId,
 };
 use super::spawn_target::DesktopSpawnTarget;
-use runtime::{ClientId, RuntimeEntryInfo, RuntimeEntryTerminalInfo};
-use config::ConfigHandle;
 use config::keyassignment::SessionDirection;
-use terminal_emulator::{Clipboard, ClipboardSelection, DownloadHandler, TerminalSize};
+use config::ConfigHandle;
 use portable_pty::CommandBuilder;
+use runtime::{ClientId, RuntimeEntryInfo, RuntimeEntryTerminalInfo};
+use terminal_emulator::{Clipboard, ClipboardSelection, DownloadHandler, TerminalSize};
 
 use super::session_pane::ChatminalSessionPane;
 use super::{
-    FrontendClientHandle, FrontendFocusedPane, FrontendResolvedPane, HostSpawnTargetHandle,
-    HostTerminal, LauncherSessionEntry, PRIMARY_HOST_WINDOW_ID, ROOT_HOST_WINDOW_ID, RuntimeWindow,
     configured_default_workspace_name, host_window_exists, overlay_shell,
     publish_runtime_notification_from_any_thread, subscribe_desktop_runtime_notifications,
+    FrontendClientHandle, FrontendFocusedPane, FrontendResolvedPane, HostSpawnTargetHandle,
+    HostTerminal, LauncherSessionEntry, RuntimeWindow, PRIMARY_HOST_WINDOW_ID, ROOT_HOST_WINDOW_ID,
 };
 use crate::chatminal_render::{ChatminalRenderPane, ChatminalRenderState};
 use crate::runtime_module::{
@@ -566,11 +566,10 @@ impl DesktopSessionHost {
         size: TerminalSize,
         activate: bool,
     ) -> Option<SessionRuntimeState> {
-        let initial_scrollback =
-            crate::runtime_module::read_session_restore_snapshot(session_id)
-                .ok()
-                .map(|snapshot| snapshot.content)
-                .filter(|content| !content.is_empty());
+        let initial_scrollback = crate::runtime_module::read_session_restore_snapshot(session_id)
+            .ok()
+            .map(|snapshot| snapshot.content)
+            .filter(|content| !content.is_empty());
         let state = self
             .engine()
             .ensure_session_runtime_native(
@@ -1623,20 +1622,20 @@ mod tests {
 
     use super::super::acquire_host_runtime_test_lock;
     use super::{
-        ChatminalSessionPane, DesktopSessionHost, RenderableDimensions,
         build_host_runtime_for_test, shutdown_host_runtime_for_test, test_active_frontend_client,
-        test_active_workspace_for_client,
+        test_active_workspace_for_client, ChatminalSessionPane, DesktopSessionHost,
+        RenderableDimensions,
     };
     use crate::chatminal_render::ChatminalRenderState;
-    use crate::runtime_module::{
-        SessionRenderTargetId, SessionRenderTargetSnapshot, SessionTerminalHandle,
-    };
     use crate::desktop_session_host::session_engine::{
         RuntimeId, SessionCoreState, SessionEngineShared, TerminalInstanceId,
     };
-    use runtime::RuntimeEntryTerminalInfo;
-    use config::ConfigHandle;
+    use crate::runtime_module::{
+        SessionRenderTargetId, SessionRenderTargetSnapshot, SessionTerminalHandle,
+    };
     use config::keyassignment::SessionDirection;
+    use config::ConfigHandle;
+    use runtime::RuntimeEntryTerminalInfo;
     use terminal_emulator::TerminalSize;
 
     fn host_with_registered_session_pane(
@@ -1689,10 +1688,9 @@ mod tests {
         let (host, pane) =
             host_with_registered_session_pane("session-a", runtime_id, terminal_instance_id);
         assert_eq!(pane.pane_id_value().as_u64(), terminal_instance_id.as_u64());
-        assert!(
-            host.pane_for_terminal_handle(pane.pane_id_value())
-                .is_some()
-        );
+        assert!(host
+            .pane_for_terminal_handle(pane.pane_id_value())
+            .is_some());
 
         let from_handle = host
             .terminal_binding_for_public_id(pane.pane_id_value().as_u64())
@@ -1717,10 +1715,9 @@ mod tests {
         let terminal_instance_id = TerminalInstanceId::new(52);
         let (host, pane) =
             host_with_registered_session_pane("session-b", runtime_id, terminal_instance_id);
-        assert!(
-            host.pane_for_public_id(pane.pane_id_value().as_u64())
-                .is_some()
-        );
+        assert!(host
+            .pane_for_public_id(pane.pane_id_value().as_u64())
+            .is_some());
 
         let resolved_from_handle = host
             .frontend_resolve_pane_fallback(pane.pane_id_value())
@@ -1749,21 +1746,18 @@ mod tests {
         host.remove_terminal_handle(pane.pane_id_value());
 
         assert!(host.pane_for_session("session-c").is_none());
-        assert!(
-            host.pane_for_terminal_handle(pane.pane_id_value())
-                .is_none()
-        );
-        assert!(
-            host.pane_for_public_id(terminal_instance_id.as_u64())
-                .is_none()
-        );
-        assert!(
-            host.runtime_terminal_instances
-                .lock()
-                .unwrap()
-                .get(&runtime_id)
-                .is_none()
-        );
+        assert!(host
+            .pane_for_terminal_handle(pane.pane_id_value())
+            .is_none());
+        assert!(host
+            .pane_for_public_id(terminal_instance_id.as_u64())
+            .is_none());
+        assert!(host
+            .runtime_terminal_instances
+            .lock()
+            .unwrap()
+            .get(&runtime_id)
+            .is_none());
     }
 
     #[test]

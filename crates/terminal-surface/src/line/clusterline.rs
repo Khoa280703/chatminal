@@ -1,11 +1,11 @@
 use crate::line::CellRef;
 use core::convert::TryInto;
 use core::num::NonZeroU8;
-use terminal_cell::{Cell, CellAttributes};
 use finl_unicode::grapheme_clusters::Graphemes;
 use fixedbitset::FixedBitSet;
 #[cfg(feature = "use_serde")]
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use terminal_cell::{Cell, CellAttributes};
 
 extern crate alloc;
 use alloc::boxed::Box;

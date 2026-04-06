@@ -11,19 +11,19 @@ use clap::builder::ValueParser;
 use clap::{Parser, ValueHint};
 use config::keyassignment::SpawnCommand;
 use config::{ConfigHandle, SerialTarget};
-use terminal_bidi::Direction;
-use terminal_font::shaper::PresentationWidth;
-use terminal_font::FontConfiguration;
 use gui_subcommands::*;
-use toast_notification::*;
 use portable_pty::cmdbuilder::CommandBuilder;
 use std::borrow::Cow;
 use std::env::current_dir;
 use std::ffi::OsString;
 use std::rc::Rc;
 use std::sync::Arc;
+use terminal_bidi::Direction;
+use terminal_font::shaper::PresentationWidth;
+use terminal_font::FontConfiguration;
 use termwiz::cell::CellAttributes;
 use termwiz::surface::{Line, SEQ_ZERO};
+use toast_notification::*;
 use unicode_normalization::UnicodeNormalization;
 
 use crate::desktop_session_host::{
@@ -33,7 +33,6 @@ use crate::desktop_session_host::{
 
 mod chatminal_layout;
 mod chatminal_render;
-mod runtime_module;
 mod chatminal_sidebar;
 mod colorease;
 mod commands;
@@ -52,6 +51,7 @@ mod overlay;
 mod quad;
 mod renderstate;
 mod resize_increment_calculator;
+mod runtime_module;
 mod scripting;
 mod scrollbar;
 mod selection;

@@ -1,8 +1,8 @@
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 
-use terminal_emulator::TerminalSize;
 use portable_pty::CommandBuilder;
+use terminal_emulator::TerminalSize;
 
 use super::super::{
     LayoutNodeId, RuntimeId, SessionCoreState, SessionLayoutSnapshot, TerminalInstanceId,

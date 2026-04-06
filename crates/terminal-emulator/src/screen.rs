@@ -1,10 +1,10 @@
 #![allow(clippy::range_plus_one)]
 use super::*;
 use crate::config::BidiMode;
-use terminal_surface::SequenceNo;
 use log::debug;
 use std::collections::VecDeque;
 use std::sync::Arc;
+use terminal_surface::SequenceNo;
 use termwiz::input::KeyboardEncoding;
 
 /// Holds the model of a screen.  This can either be the primary screen

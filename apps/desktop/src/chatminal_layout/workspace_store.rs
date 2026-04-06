@@ -92,10 +92,8 @@ impl DesktopWorkspaceLayoutStore {
             return layout;
         }
 
-        match crate::runtime_module::workspace_layout_ensure_session(
-            &self.workspace_id,
-            session_id,
-        ) {
+        match crate::runtime_module::workspace_layout_ensure_session(&self.workspace_id, session_id)
+        {
             Ok(layout) => layout,
             Err(err) => {
                 log::error!("failed to ensure workspace layout session: {err}");
@@ -443,11 +441,11 @@ impl DesktopWorkspaceLayoutStore {
 mod tests {
     use std::sync::{Arc, Mutex};
 
+    use crate::desktop_session_host::session_engine::SessionCoreState;
     use crate::runtime_module::{
         SessionViewId, WorkspaceLayoutNodeKind, WorkspaceLayoutState, WorkspaceNodeId,
         WorkspaceSplitAxis,
     };
-    use crate::desktop_session_host::session_engine::SessionCoreState;
     use runtime::execution::SessionEngineShared;
 
     use super::{DesktopWorkspaceLayoutStore, DEFAULT_LAYOUT_WORKSPACE_ID};

@@ -2,9 +2,9 @@
 // and inclusive range
 #![allow(clippy::range_plus_one)]
 use crate::desktop_session_host::overlay_shell::OverlayPane;
-use terminal_emulator::{SemanticZone, StableRowIndex};
 use std::cmp::Ordering;
 use std::ops::Range;
+use terminal_emulator::{SemanticZone, StableRowIndex};
 use termwiz::surface::line::DoubleClickRange;
 use termwiz::surface::SequenceNo;
 

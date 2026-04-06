@@ -7,12 +7,12 @@ use crate::pane::{Pane, PaneId, alloc_pane_id};
 use crate::pty_io::{PtyIoHooks, start_pane_pty_reader};
 use anyhow::Context;
 use config::{ConfigHandle, SerialTarget};
-use terminal_emulator::TerminalSize;
 use parking_lot::Mutex;
 use portable_pty::{CommandBuilder, ExitStatus, MasterPty, PtySize, PtySystem, native_pty_system};
 use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
+use terminal_emulator::TerminalSize;
 
 // ---------------------------------------------------------------------------
 // LocalSpawnHooks

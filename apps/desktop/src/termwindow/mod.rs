@@ -4,16 +4,6 @@ use super::utilsprites::RenderMetrics;
 use crate::chatminal_layout::workspace_store::{
     DEFAULT_LAYOUT_WORKSPACE_ID, DesktopWorkspaceLayoutStore,
 };
-use crate::runtime_module::{
-    DesktopSessionBridgeAction, DesktopSessionRuntimeSummary, RuntimeId, SessionViewId,
-    TerminalInstanceId, WorkspaceLayoutState, desktop_activate_session,
-    desktop_can_close_view_only, desktop_detach_session_runtime_and_notify,
-    desktop_focus_session_view_with_previous, desktop_last_active_session_id,
-    desktop_prepare_workspace_layout, desktop_resize_visible_sessions,
-    desktop_session_entry_bindings, desktop_session_window_snapshot,
-    notify_runtime_session_activated, reconcile_runtime_session_lookup,
-    run_runtime_session_startup_command,
-};
 use crate::chatminal_sidebar::{ChatminalSidebar, SidebarSessionDropTarget};
 use crate::colorease::ColorEase;
 use crate::desktop_session_host::overlay_shell::{
@@ -37,6 +27,16 @@ use crate::overlay::{
     confirm_quit_program, launcher, start_overlay,
 };
 use crate::resize_increment_calculator::ResizeIncrementCalculator;
+use crate::runtime_module::{
+    DesktopSessionBridgeAction, DesktopSessionRuntimeSummary, RuntimeId, SessionViewId,
+    TerminalInstanceId, WorkspaceLayoutState, desktop_activate_session,
+    desktop_can_close_view_only, desktop_detach_session_runtime_and_notify,
+    desktop_focus_session_view_with_previous, desktop_last_active_session_id,
+    desktop_prepare_workspace_layout, desktop_resize_visible_sessions,
+    desktop_session_entry_bindings, desktop_session_window_snapshot,
+    notify_runtime_session_activated, reconcile_runtime_session_lookup,
+    run_runtime_session_startup_command,
+};
 use crate::scripting::guiwin::GuiWin;
 use crate::scripting::guiwin::PrimaryGuiWindowId;
 use crate::scrollbar::*;
@@ -58,7 +58,6 @@ use crate::termwindow::webgpu::WebGpuState;
 use ::terminal_emulator::input::{ClickPosition, MouseButton as TMB};
 use ::window::*;
 use anyhow::{Context, anyhow, ensure};
-use runtime::{HostRuntimeNotification, RuntimeWorkspace};
 use config::keyassignment::{
     Confirmation, KeyAssignment, LauncherActionArgs, Pattern, PromptInputLine,
     QuickSelectArguments, SessionDirection, SpawnCommand, SplitSize,
@@ -69,12 +68,9 @@ use config::{
     GuiPosition, TermConfig, WindowCloseConfirmation,
 };
 use dynamic::Value;
-use terminal_font::FontConfiguration;
-use terminal_emulator::color::ColorPalette;
-use terminal_emulator::input::LastMouseClick;
-use terminal_emulator::{Alert, Progress, StableRowIndex, TerminalConfiguration, TerminalSize};
 use lfucache::*;
 use mlua::{FromLua, LuaSerdeExt, UserData, UserDataFields};
+use runtime::{HostRuntimeNotification, RuntimeWorkspace};
 use smol::Timer;
 use smol::channel::Sender;
 use std::cell::{RefCell, RefMut};
@@ -85,6 +81,10 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use terminal_emulator::color::ColorPalette;
+use terminal_emulator::input::LastMouseClick;
+use terminal_emulator::{Alert, Progress, StableRowIndex, TerminalConfiguration, TerminalSize};
+use terminal_font::FontConfiguration;
 use termwiz::hyperlink::Hyperlink;
 use termwiz::surface::{Line, SequenceNo};
 use termwiz_funcs::lines_to_escapes;
@@ -900,6 +900,43 @@ impl TermWindow {
         }
 
         ordered
+    }
+
+    fn selected_chatminal_session_ids_for_delete(&self, anchor_session_id: &str) -> Vec<String> {
+        if !self.chatminal_sidebar.is_enabled() {
+            return Vec::new();
+        }
+
+        let selected_ids = self.chatminal_sidebar.selected_session_ids();
+        let delete_selected = selected_ids.len() > 1
+            && selected_ids
+                .iter()
+                .any(|session_id| session_id == anchor_session_id);
+        if !delete_selected {
+            return vec![anchor_session_id.to_string()];
+        }
+
+        let selected: BTreeSet<_> = selected_ids.into_iter().collect();
+        self.chatminal_sidebar
+            .snapshot()
+            .sessions
+            .into_iter()
+            .filter(|session| selected.contains(&session.session_id))
+            .map(|session| session.session_id)
+            .collect()
+    }
+
+    fn close_chatminal_selected_sessions(&mut self, anchor_session_id: &str) -> bool {
+        let session_ids = self.selected_chatminal_session_ids_for_delete(anchor_session_id);
+        if session_ids.is_empty() {
+            return false;
+        }
+
+        let mut changed = false;
+        for session_id in session_ids {
+            changed |= self.close_chatminal_session_by_id(&session_id);
+        }
+        changed
     }
 
     fn move_chatminal_sessions_to_sidebar_target(

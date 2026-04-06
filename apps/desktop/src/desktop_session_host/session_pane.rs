@@ -12,31 +12,31 @@ use super::session_engine::{
 };
 use config::{ConfigHandle, TermConfig};
 use dynamic::Value;
+use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
+use rangeset::RangeSet;
+use regex::Regex;
 use terminal_emulator::color::ColorPalette;
 use terminal_emulator::{
     Clipboard, DownloadHandler, KeyCode, KeyModifiers, MouseEvent, Progress, SemanticZone,
     StableRowIndex, Terminal, TerminalConfiguration, TerminalSize,
 };
-use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
-use rangeset::RangeSet;
-use regex::Regex;
-use termwiz::escape::Action;
 use termwiz::escape::parser::Parser as EscapeParser;
+use termwiz::escape::Action;
 use termwiz::input::KeyboardEncoding;
 use termwiz::surface::{Line, SequenceNo};
 use url::Url;
 
 use super::{
-    HostTerminal, alloc_host_terminal_handle, host_impl_get_logical_lines_via_get_lines,
+    alloc_host_terminal_handle, host_impl_get_logical_lines_via_get_lines,
     host_terminal_for_each_logical_line_in_stable_range_mut, host_terminal_get_cursor_position,
     host_terminal_get_dimensions, host_terminal_get_dirty_lines, host_terminal_get_lines,
     host_terminal_with_lines_mut, publish_runtime_notification_from_any_thread,
-    record_host_input_for_current_identity,
+    record_host_input_for_current_identity, HostTerminal,
 };
-use crate::runtime_module::SessionTerminalHandle;
 use crate::desktop_session_host::overlay_shell::{
     OverlayForEachLogicalLine as ForEachPaneLogicalLine, OverlayWithPaneLines as WithPaneLines,
 };
+use crate::runtime_module::SessionTerminalHandle;
 use runtime::pane::{CachePolicy, CloseReason, LogicalLine};
 use runtime::{
     HostRuntimeNotification, Pattern, RenderableDimensions, SearchResult, StableCursorPosition,
@@ -212,23 +212,21 @@ impl ChatminalSessionPane {
     fn spawn_event_loop(self: &Arc<Self>) -> anyhow::Result<()> {
         let subscription = self.shared.subscribe();
         let pane = Arc::downgrade(self);
-        thread::spawn(move || {
-            loop {
-                let Some(pane) = pane.upgrade() else {
-                    break;
-                };
-                match subscription.recv_timeout(EVENT_POLL_TIMEOUT) {
-                    Ok(Some(event)) => pane.handle_event(event),
-                    Ok(None) => {}
-                    Err(err) => {
-                        log::error!("chatminal session pane event loop failed: {err}");
-                        *pane.dead.lock() = true;
-                        break;
-                    }
-                }
-                if *pane.dead.lock() {
+        thread::spawn(move || loop {
+            let Some(pane) = pane.upgrade() else {
+                break;
+            };
+            match subscription.recv_timeout(EVENT_POLL_TIMEOUT) {
+                Ok(Some(event)) => pane.handle_event(event),
+                Ok(None) => {}
+                Err(err) => {
+                    log::error!("chatminal session pane event loop failed: {err}");
+                    *pane.dead.lock() = true;
                     break;
                 }
+            }
+            if *pane.dead.lock() {
+                break;
             }
         });
         Ok(())
@@ -315,9 +313,9 @@ fn parse_output_actions(parser: &mut EscapeParser, bytes: &[u8]) -> Vec<Action> 
 #[cfg(test)]
 mod parser_tests {
     use super::parse_output_actions;
-    use termwiz::escape::Action;
-    use termwiz::escape::csi::{CSI, Sgr};
+    use termwiz::escape::csi::{Sgr, CSI};
     use termwiz::escape::parser::Parser as EscapeParser;
+    use termwiz::escape::Action;
 
     #[test]
     fn parser_state_survives_across_split_escape_chunks() {
@@ -789,9 +787,9 @@ mod tests {
     use std::sync::{Arc, Mutex, MutexGuard};
     use std::time::{Duration, Instant};
 
+    use portable_pty::CommandBuilder;
     use runtime::Pattern;
     use terminal_emulator::{KeyCode, KeyModifiers, StableRowIndex};
-    use portable_pty::CommandBuilder;
 
     use super::super::session_engine::{
         LayoutNodeId, RuntimeId, SessionCoreState, SessionEngineShared, SessionLayoutSnapshot,
@@ -801,8 +799,8 @@ mod tests {
         acquire_host_runtime_test_lock, build_initial_host_runtime, shutdown_host_runtime,
     };
     use super::{
-        Action, ChatminalSessionPane, HostTerminal, TerminalSize, decode_input_payload_chunks,
-        looks_like_chatminal_internal_title,
+        decode_input_payload_chunks, looks_like_chatminal_internal_title, Action,
+        ChatminalSessionPane, HostTerminal, TerminalSize,
     };
 
     struct HostRuntimeTestGuard {

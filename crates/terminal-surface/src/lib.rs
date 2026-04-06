@@ -2,14 +2,14 @@
 use crate::line::CellRef;
 use alloc::borrow::Cow;
 use core::cmp::min;
-use terminal_cell::color::ColorAttribute;
-#[cfg(feature = "use_image")]
-use terminal_cell::image::ImageCell;
-use terminal_cell::{Cell, CellAttributes};
 use dynamic::{FromDynamic, ToDynamic};
 use finl_unicode::grapheme_clusters::Graphemes;
 #[cfg(feature = "use_serde")]
 use serde::{Deserialize, Serialize};
+use terminal_cell::color::ColorAttribute;
+#[cfg(feature = "use_image")]
+use terminal_cell::image::ImageCell;
+use terminal_cell::{Cell, CellAttributes};
 
 extern crate alloc;
 use crate::alloc::borrow::ToOwned;

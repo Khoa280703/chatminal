@@ -1,8 +1,6 @@
 use std::path::PathBuf;
 
-use store::{
-    Store, StoredScrollbackRecordInput, StoredScrollbackRecordKind, StoredSessionStatus,
-};
+use store::{Store, StoredScrollbackRecordInput, StoredScrollbackRecordKind, StoredSessionStatus};
 use uuid::Uuid;
 
 struct TempDb {
