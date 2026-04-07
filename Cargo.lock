@@ -4548,6 +4548,7 @@ dependencies = [
  "termwiz-funcs",
  "url",
  "whoami",
+ "winapi",
 ]
 
 [[package]]

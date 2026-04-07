@@ -9,9 +9,9 @@ use runtime::{RuntimeCreatedSession, RuntimeProfile, RuntimeWorkspace};
 use crate::runtime_module::DESKTOP_LAYOUT_WORKSPACE_ID;
 use crate::runtime_module::{
     build_desktop_sidebar_sessions, close_runtime_session, create_runtime_profile,
-    create_runtime_session, desktop_workspace_subscribe, move_runtime_session_to_profile,
-    move_runtime_sessions_to_profile, rename_runtime_session, set_runtime_session_startup_command,
-    switch_runtime_profile,
+    create_runtime_session, delete_runtime_profile, desktop_workspace_subscribe,
+    move_runtime_session_to_profile, move_runtime_sessions_to_profile, rename_runtime_session,
+    set_runtime_session_startup_command, switch_runtime_profile,
 };
 pub use crate::runtime_module::{
     DesktopSidebarProfile as SidebarProfile, DesktopSidebarSession as SidebarSession,
@@ -27,6 +27,13 @@ const EVENT_POLL_TIMEOUT: Duration = Duration::from_millis(400);
 #[derive(Debug)]
 pub struct SidebarSessionContextMenu {
     pub session_id: String,
+    pub anchor_x_px: f32,
+    pub anchor_y_px: f32,
+}
+
+#[derive(Debug)]
+pub struct SidebarProfileContextMenu {
+    pub profile_id: String,
     pub anchor_x_px: f32,
     pub anchor_y_px: f32,
 }
@@ -72,6 +79,7 @@ struct SharedState {
     max_scroll_offset_px: f32,
     width_override_px: Option<f32>,
     session_context_menu: Option<SidebarSessionContextMenu>,
+    profile_context_menu: Option<SidebarProfileContextMenu>,
     inline_session_edit: Option<SidebarInlineSessionEditState>,
     session_drag: Option<SidebarSessionDragState>,
 }
@@ -87,6 +95,7 @@ impl Default for SharedState {
             max_scroll_offset_px: 0.0,
             width_override_px: None,
             session_context_menu: None,
+            profile_context_menu: None,
             inline_session_edit: None,
             session_drag: None,
         }
@@ -197,6 +206,47 @@ impl ChatminalSidebar {
             return false;
         }
         state.session_context_menu = Some(next);
+        state.profile_context_menu = None;
+        state.snapshot.version = state.snapshot.version.saturating_add(1);
+        true
+    }
+
+    pub fn open_profile_context_menu(
+        &self,
+        profile_id: &str,
+        anchor_x_px: f32,
+        anchor_y_px: f32,
+    ) -> bool {
+        let Ok(mut state) = self.shared.lock() else {
+            return false;
+        };
+        let Some(profile) = state
+            .snapshot
+            .profiles
+            .iter()
+            .find(|profile| profile.profile_id == profile_id)
+        else {
+            return false;
+        };
+        let next = SidebarProfileContextMenu {
+            profile_id: profile.profile_id.clone(),
+            anchor_x_px,
+            anchor_y_px,
+        };
+        let changed = state
+            .profile_context_menu
+            .as_ref()
+            .map(|menu| {
+                menu.profile_id != next.profile_id
+                    || (menu.anchor_x_px - next.anchor_x_px).abs() >= f32::EPSILON
+                    || (menu.anchor_y_px - next.anchor_y_px).abs() >= f32::EPSILON
+            })
+            .unwrap_or(true);
+        if !changed {
+            return false;
+        }
+        state.profile_context_menu = Some(next);
+        state.session_context_menu = None;
         state.snapshot.version = state.snapshot.version.saturating_add(1);
         true
     }
@@ -292,7 +342,9 @@ impl ChatminalSidebar {
         let Ok(mut state) = self.shared.lock() else {
             return false;
         };
-        if state.session_context_menu.take().is_none() {
+        let closed_session = state.session_context_menu.take().is_some();
+        let closed_profile = state.profile_context_menu.take().is_some();
+        if !closed_session && !closed_profile {
             return false;
         }
         state.snapshot.version = state.snapshot.version.saturating_add(1);
@@ -304,6 +356,18 @@ impl ChatminalSidebar {
             .lock()
             .ok()
             .and_then(|state| state.session_context_menu.as_ref().map(clone_context_menu))
+    }
+
+    pub fn profile_context_menu(&self) -> Option<SidebarProfileContextMenu> {
+        self.shared
+            .lock()
+            .ok()
+            .and_then(|state| {
+                state
+                    .profile_context_menu
+                    .as_ref()
+                    .map(clone_profile_context_menu)
+            })
     }
 
     fn start_inline_session_edit(
@@ -342,6 +406,7 @@ impl ChatminalSidebar {
             return false;
         }
         state.session_context_menu = None;
+        state.profile_context_menu = None;
         state.inline_session_edit = Some(next);
         state.snapshot.version = state.snapshot.version.saturating_add(1);
         true
@@ -477,6 +542,7 @@ impl ChatminalSidebar {
             return false;
         }
         state.session_context_menu = None;
+        state.profile_context_menu = None;
         state.inline_session_edit = None;
         state.session_drag = Some(next);
         state.snapshot.version = state.snapshot.version.saturating_add(1);
@@ -651,6 +717,10 @@ impl ChatminalSidebar {
 
     pub fn create_profile(&self) -> Result<RuntimeProfile, String> {
         create_runtime_profile(None)
+    }
+
+    pub fn delete_profile(&self, profile_id: &str) -> Result<RuntimeWorkspace, String> {
+        delete_runtime_profile(profile_id)
     }
 
     pub fn apply_workspace(&self, workspace: RuntimeWorkspace) {
@@ -854,6 +924,13 @@ fn replace_snapshot(shared: &Arc<Mutex<SharedState>>, mut next: SidebarSnapshot)
         state.session_context_menu = None;
     }
     if state
+        .profile_context_menu
+        .as_ref()
+        .is_some_and(|menu| !valid_profile_ids.contains(menu.profile_id.as_str()))
+    {
+        state.profile_context_menu = None;
+    }
+    if state
         .inline_session_edit
         .as_ref()
         .is_some_and(|edit| !valid_session_ids.contains(edit.session_id.as_str()))
@@ -882,6 +959,14 @@ fn replace_snapshot(shared: &Arc<Mutex<SharedState>>, mut next: SidebarSnapshot)
 fn clone_context_menu(menu: &SidebarSessionContextMenu) -> SidebarSessionContextMenu {
     SidebarSessionContextMenu {
         session_id: menu.session_id.clone(),
+        anchor_x_px: menu.anchor_x_px,
+        anchor_y_px: menu.anchor_y_px,
+    }
+}
+
+fn clone_profile_context_menu(menu: &SidebarProfileContextMenu) -> SidebarProfileContextMenu {
+    SidebarProfileContextMenu {
+        profile_id: menu.profile_id.clone(),
         anchor_x_px: menu.anchor_x_px,
         anchor_y_px: menu.anchor_y_px,
     }

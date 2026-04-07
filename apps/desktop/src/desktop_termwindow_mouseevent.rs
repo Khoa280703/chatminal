@@ -137,6 +137,8 @@ impl super::TermWindow {
             | UIItemType::ChatminalSidebarSessionMenuStartupCommand(_)
             | UIItemType::ChatminalSidebarSessionMenuRunStartupCommand(_)
             | UIItemType::ChatminalSidebarSessionMenuDelete(_)
+            | UIItemType::ChatminalSidebarProfileMenu
+            | UIItemType::ChatminalSidebarProfileMenuDelete(_)
             | UIItemType::ChatminalStartupRecipeModalBackdrop
             | UIItemType::ChatminalStartupRecipeModalPanel
             | UIItemType::ChatminalStartupRecipeModalInput
@@ -169,6 +171,8 @@ impl super::TermWindow {
             | UIItemType::ChatminalSidebarSessionMenuStartupCommand(_)
             | UIItemType::ChatminalSidebarSessionMenuRunStartupCommand(_)
             | UIItemType::ChatminalSidebarSessionMenuDelete(_)
+            | UIItemType::ChatminalSidebarProfileMenu
+            | UIItemType::ChatminalSidebarProfileMenuDelete(_)
             | UIItemType::ChatminalStartupRecipeModalBackdrop
             | UIItemType::ChatminalStartupRecipeModalPanel
             | UIItemType::ChatminalStartupRecipeModalInput
@@ -661,6 +665,12 @@ impl super::TermWindow {
             UIItemType::ChatminalSidebarSessionMenuDelete(session_id) => {
                 self.mouse_event_chatminal_sidebar_session_menu_delete(&session_id, event, context);
             }
+            UIItemType::ChatminalSidebarProfileMenu => {
+                self.mouse_event_chatminal_sidebar_profile_menu(event, context);
+            }
+            UIItemType::ChatminalSidebarProfileMenuDelete(profile_id) => {
+                self.mouse_event_chatminal_sidebar_profile_menu_delete(&profile_id, event, context);
+            }
             UIItemType::ChatminalStartupRecipeModalBackdrop
             | UIItemType::ChatminalStartupRecipeModalPanel
             | UIItemType::ChatminalStartupRecipeModalInput
@@ -727,6 +737,24 @@ impl super::TermWindow {
         event: MouseEvent,
         context: &dyn WindowOps,
     ) {
+        if Self::is_secondary_click_event(&event) {
+            if matches!(
+                event.kind,
+                WMEK::Release(MousePress::Right) | WMEK::Release(MousePress::Left)
+            ) {
+                let menu_changed = self.chatminal_sidebar.open_profile_context_menu(
+                    profile_id,
+                    event.coords.x as f32,
+                    event.coords.y as f32,
+                );
+                if menu_changed {
+                    self.chatminal_sidebar.inline_session_edit_cancel();
+                    context.invalidate();
+                }
+            }
+            context.set_cursor(Some(MouseCursor::Arrow));
+            return;
+        }
         if matches!(event.kind, WMEK::Press(_) | WMEK::Release(_)) {
             self.dismiss_chatminal_sidebar_context_menu(context);
             self.cancel_chatminal_sidebar_inline_session_edit(context);
@@ -921,6 +949,18 @@ impl super::TermWindow {
         context.set_cursor(Some(MouseCursor::Arrow));
     }
 
+    fn mouse_event_chatminal_sidebar_profile_menu(
+        &mut self,
+        event: MouseEvent,
+        context: &dyn WindowOps,
+    ) {
+        if Self::is_secondary_click_event(&event) {
+            self.dismiss_chatminal_sidebar_context_menu(context);
+            self.cancel_chatminal_sidebar_inline_session_edit(context);
+        }
+        context.set_cursor(Some(MouseCursor::Arrow));
+    }
+
     fn mouse_event_chatminal_sidebar_session_menu_rename(
         &mut self,
         session_id: &str,
@@ -1036,6 +1076,26 @@ impl super::TermWindow {
             self.dismiss_chatminal_sidebar_context_menu(context);
             window.notify(TermWindowNotif::Apply(Box::new(move |term_window| {
                 term_window.close_chatminal_selected_sessions(&session_id);
+            })));
+        }
+        context.set_cursor(Some(MouseCursor::Arrow));
+    }
+
+    fn mouse_event_chatminal_sidebar_profile_menu_delete(
+        &mut self,
+        profile_id: &str,
+        event: MouseEvent,
+        context: &dyn WindowOps,
+    ) {
+        if let WMEK::Release(MousePress::Left) = event.kind {
+            let Some(window) = self.window.as_ref().cloned() else {
+                context.set_cursor(Some(MouseCursor::Arrow));
+                return;
+            };
+            let profile_id = profile_id.to_string();
+            self.dismiss_chatminal_sidebar_context_menu(context);
+            window.notify(TermWindowNotif::Apply(Box::new(move |term_window| {
+                term_window.delete_chatminal_profile(&profile_id);
             })));
         }
         context.set_cursor(Some(MouseCursor::Arrow));

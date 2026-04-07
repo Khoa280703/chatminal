@@ -864,6 +864,10 @@ pub fn create_runtime_profile(name: Option<String>) -> Result<RuntimeProfile, St
     runtime_client()?.profile_create(name)
 }
 
+pub fn delete_runtime_profile(profile_id: &str) -> Result<RuntimeWorkspace, String> {
+    runtime_client()?.profile_delete(profile_id)
+}
+
 pub fn read_session_restore_snapshot(session_id: &str) -> Result<RuntimeSessionSnapshot, String> {
     runtime_client()?.session_restore_snapshot_get(session_id)
 }

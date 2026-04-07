@@ -1,5 +1,21 @@
 # Project Changelog
 
+## 2026-04-06
+
+### Added
+- Landing page app cho Chatminal tại `apps/landing` đã được dựng từ Stitch screen `Chatminal Landing Page - Fixed Background`:
+  - đã tải HTML screen, screenshot reference, và logo hosted URL bằng `curl -L`
+  - đã chuyển output Stitch thành app Next.js 15 + Tailwind với app router
+  - layout được tách thành các section nhỏ (`hero`, `features`, `command`, `download`, `footer`) để dễ bảo trì
+  - logo Stitch đã được localize vào `apps/landing/public/chatminal-logo.png`
+  - release/doc links được nối sang GitHub repo hiện tại thay cho placeholder `#`
+  - verify xanh:
+    - `npm run lint` trong `apps/landing`
+    - `npm run build` trong `apps/landing`
+
+### Changed
+- Dependency của `apps/landing` đã được bump từ nhánh `next` 15.1.0 có cảnh báo bảo mật sang `15.5.14`, đồng thời thêm flat ESLint config để lint chạy non-interactive.
+
 ## 2026-04-04
 
 ### Changed

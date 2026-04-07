@@ -215,6 +215,8 @@ pub enum UIItemType {
     ChatminalSidebarSessionMenuStartupCommand(String),
     ChatminalSidebarSessionMenuRunStartupCommand(String),
     ChatminalSidebarSessionMenuDelete(String),
+    ChatminalSidebarProfileMenu,
+    ChatminalSidebarProfileMenuDelete(String),
     ChatminalStartupRecipeModalBackdrop,
     ChatminalStartupRecipeModalPanel,
     ChatminalStartupRecipeModalInput,
@@ -1577,6 +1579,20 @@ impl TermWindow {
             }
             Err(err) => {
                 log::error!("failed to create sidebar profile: {err}");
+            }
+        }
+    }
+
+    fn delete_chatminal_profile(&mut self, profile_id: &str) {
+        if !self.chatminal_sidebar.is_enabled() {
+            return;
+        }
+        match self.chatminal_sidebar.delete_profile(profile_id) {
+            Ok(workspace) => {
+                self.apply_chatminal_profile_workspace(workspace);
+            }
+            Err(err) => {
+                log::error!("failed to delete sidebar profile {profile_id}: {err}");
             }
         }
     }

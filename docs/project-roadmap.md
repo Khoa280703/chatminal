@@ -11,12 +11,14 @@ Last updated: 2026-04-06
 - [x] Profile support for different workflows
 - [x] Performance optimizations
 - [x] Crates renamed (removed `chatminal-` prefix)
+- [x] Marketing landing page scaffolded from Stitch design output (`apps/landing`)
 
 ## In Progress
 
 - UI Shell improvements (GPU rendering, overlay bounds)
 - Window parity across platforms
 - Multi-session UX enhancements
+- Landing page polish and release/download wiring
 
 ## Future Plans
 

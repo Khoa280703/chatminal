@@ -216,7 +216,9 @@ impl crate::TermWindow {
         let footer_background = self.build_chatminal_terminal_footer_background(&bounds)?;
         let footer_content = self.build_chatminal_terminal_footer_content(&bounds)?;
         let sidebar_tooltip = self.build_chatminal_sidebar_header_tooltip()?;
-        let sidebar_context_menu = self.build_chatminal_sidebar_session_context_menu(&bounds)?;
+        let sidebar_context_menu = self
+            .build_chatminal_sidebar_session_context_menu(&bounds)?
+            .or(self.build_chatminal_sidebar_profile_context_menu(&bounds)?);
 
         self.append_and_render_overlay(&sidebar_background)?;
         if let Some(tree) = sidebar_tree.as_ref() {
@@ -794,6 +796,18 @@ impl crate::TermWindow {
         }
     }
 
+    fn hovered_sidebar_profile_menu_item(&self) -> Option<UIItemType> {
+        let item = self.last_ui_item.as_ref()?;
+        let event = self.current_mouse_event.as_ref()?;
+        if !item.hit_test(event.coords.x, event.coords.y) {
+            return None;
+        }
+        match &item.item_type {
+            UIItemType::ChatminalSidebarProfileMenuDelete(_) => Some(item.item_type.clone()),
+            _ => None,
+        }
+    }
+
     fn build_chatminal_sidebar_session_context_menu(
         &mut self,
         sb: &crate::shell_bounds::ShellBounds,
@@ -939,6 +953,101 @@ impl crate::TermWindow {
         )?))
     }
 
+    fn build_chatminal_sidebar_profile_context_menu(
+        &mut self,
+        sb: &crate::shell_bounds::ShellBounds,
+    ) -> anyhow::Result<Option<crate::termwindow::box_model::ComputedElement>> {
+        let Some(menu) = self.chatminal_sidebar.profile_context_menu() else {
+            return Ok(None);
+        };
+        let snapshot = self.chatminal_sidebar.snapshot();
+        let Some(profile) = snapshot
+            .profiles
+            .iter()
+            .find(|profile| profile.profile_id == menu.profile_id)
+        else {
+            return Ok(None);
+        };
+
+        let body_font = self.sidebar_text_font()?;
+        let text = LinearRgba::with_components(0.92, 0.92, 0.92, 1.0);
+        let hover_bg = LinearRgba::with_components(0.20, 0.24, 0.28, 1.0);
+        let bg = LinearRgba::with_components(0.03, 0.03, 0.03, 0.995);
+        let border = bg;
+        let hovered_item = self.hovered_sidebar_profile_menu_item();
+        let item_type = UIItemType::ChatminalSidebarProfileMenuDelete(profile.profile_id.clone());
+        let is_hovered = hovered_item.as_ref() == Some(&item_type);
+        let child = Element::new(&body_font, ElementContent::Text("Delete".into()))
+            .display(crate::termwindow::box_model::DisplayType::Block)
+            .item_type(item_type)
+            .padding(BoxDimension {
+                left: Dimension::Pixels(10.0),
+                right: Dimension::Pixels(10.0),
+                top: Dimension::Pixels(6.0),
+                bottom: Dimension::Pixels(6.0),
+            })
+            .min_width(Some(Dimension::Pixels(
+                SIDEBAR_CONTEXT_MENU_ITEM_CONTENT_WIDTH_PX,
+            )))
+            .max_width(Some(Dimension::Pixels(
+                SIDEBAR_CONTEXT_MENU_ITEM_CONTENT_WIDTH_PX,
+            )))
+            .colors(filled_colors(
+                if is_hovered {
+                    hover_bg
+                } else {
+                    LinearRgba::TRANSPARENT
+                },
+                text,
+            ));
+
+        let root = Element::new(&body_font, ElementContent::Children(vec![child]))
+            .display(crate::termwindow::box_model::DisplayType::Block)
+            .item_type(UIItemType::ChatminalSidebarProfileMenu)
+            .padding(BoxDimension::default())
+            .border(BoxDimension::new(Dimension::Pixels(1.0)))
+            .border_corners(Some(rounded_corners(7.0)))
+            .colors(ElementColors {
+                border: BorderColor::new(border),
+                bg: bg.into(),
+                text: text.into(),
+            })
+            .min_width(Some(Dimension::Pixels(SIDEBAR_CONTEXT_MENU_WIDTH_PX)))
+            .max_width(Some(Dimension::Pixels(SIDEBAR_CONTEXT_MENU_WIDTH_PX)));
+
+        let width = SIDEBAR_CONTEXT_MENU_WIDTH_PX;
+        let estimated_height = 40.0;
+        let x = menu.anchor_x_px.clamp(
+            4.0,
+            (self.dimensions.pixel_width as f32 - width - 4.0).max(4.0),
+        );
+        let y = menu.anchor_y_px.clamp(
+            sb.sidebar_y + 4.0,
+            (self.dimensions.pixel_height as f32 - estimated_height - 4.0).max(sb.sidebar_y + 4.0),
+        );
+
+        Ok(Some(self.compute_element(
+            &crate::termwindow::box_model::LayoutContext {
+                width: config::DimensionContext {
+                    dpi: self.dimensions.dpi as f32,
+                    pixel_max: self.dimensions.pixel_width as f32,
+                    pixel_cell: self.render_metrics.cell_size.width as f32,
+                },
+                height: config::DimensionContext {
+                    dpi: self.dimensions.dpi as f32,
+                    pixel_max: self.dimensions.pixel_height as f32,
+                    pixel_cell: self.render_metrics.cell_size.height as f32,
+                },
+                bounds: euclid::rect(x, y, width, estimated_height),
+                metrics: &self.render_metrics,
+                gl_state: self.render_state.as_ref().unwrap(),
+                custom_block_glyphs: self.config.custom_block_glyphs,
+                zindex: 7,
+            },
+            &root,
+        )?))
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn build_chatminal_sidebar_tree_row_elements(
         &mut self,
@@ -955,7 +1064,8 @@ impl crate::TermWindow {
         offline: LinearRgba,
         error_fg: LinearRgba,
     ) -> anyhow::Result<Vec<Element>> {
-        let suppress_hover = self.chatminal_sidebar.session_context_menu().is_some();
+        let suppress_hover = self.chatminal_sidebar.session_context_menu().is_some()
+            || self.chatminal_sidebar.profile_context_menu().is_some();
         let drag_state = self.chatminal_sidebar.session_drag_state();
         rows.iter()
             .map(|row| match row {
