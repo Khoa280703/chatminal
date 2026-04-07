@@ -1,0 +1,15 @@
+services:
+  landing:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chatminal-landing
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+    expose:
+      - "3000"
+    restart: unless-stopped
+    labels:
+      - "traefik.docker.network=coolify"
