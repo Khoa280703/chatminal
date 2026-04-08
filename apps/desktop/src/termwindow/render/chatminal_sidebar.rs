@@ -23,8 +23,9 @@ const SIDEBAR_SCROLLBAR_WIDTH_PX: f32 = 4.0;
 const SIDEBAR_SCROLLBAR_MIN_THUMB_HEIGHT_PX: f32 = 28.0;
 const SIDEBAR_COMPACT_TITLE_HIDE_WIDTH_PX: f32 = 120.0;
 const SIDEBAR_TOOLTIP_GAP_PX: f32 = 6.0;
-const SIDEBAR_CONTEXT_MENU_WIDTH_PX: f32 = 228.0;
-const SIDEBAR_CONTEXT_MENU_ITEM_CONTENT_WIDTH_PX: f32 = 204.0;
+const SIDEBAR_CONTEXT_MENU_ITEM_HORIZONTAL_PADDING_PX: f32 = 10.0;
+const SIDEBAR_CONTEXT_MENU_MIN_CONTENT_WIDTH_PX: f32 = 84.0;
+const SIDEBAR_CONTEXT_MENU_TEXT_SLACK_PX: f32 = 4.0;
 const SIDEBAR_JOIN_CONNECTOR_WIDTH_PX: f32 = 14.0;
 const SIDEBAR_JOIN_CONNECTOR_SLOT_WIDTH_PX: f32 = 18.0;
 const SIDEBAR_JOIN_CONNECTOR_HEIGHT_OVERLAP_PX: f32 = 10.0;
@@ -808,6 +809,52 @@ impl crate::TermWindow {
         }
     }
 
+    fn sidebar_context_menu_dimensions(
+        &mut self,
+        font: &std::rc::Rc<terminal_font::LoadedFont>,
+        labels: &[&str],
+    ) -> anyhow::Result<(f32, f32)> {
+        let gl_state = self.render_state.as_ref().unwrap();
+        let text_width = labels
+            .iter()
+            .try_fold(SIDEBAR_CONTEXT_MENU_MIN_CONTENT_WIDTH_PX, |max_width, label| {
+                let measured = self.compute_element(
+                    &crate::termwindow::box_model::LayoutContext {
+                        width: config::DimensionContext {
+                            dpi: self.dimensions.dpi as f32,
+                            pixel_max: self.dimensions.pixel_width as f32,
+                            pixel_cell: self.render_metrics.cell_size.width as f32,
+                        },
+                        height: config::DimensionContext {
+                            dpi: self.dimensions.dpi as f32,
+                            pixel_max: self.dimensions.pixel_height as f32,
+                            pixel_cell: self.render_metrics.cell_size.height as f32,
+                        },
+                        bounds: euclid::rect(
+                            0.0,
+                            0.0,
+                            self.dimensions.pixel_width as f32,
+                            self.render_metrics.cell_size.height as f32 + 12.0,
+                        ),
+                        metrics: &self.render_metrics,
+                        gl_state,
+                        custom_block_glyphs: self.config.custom_block_glyphs,
+                        zindex: 0,
+                    },
+                    &Element::new(font, ElementContent::Text((*label).into()))
+                        .display(crate::termwindow::box_model::DisplayType::Block),
+                )?;
+                Ok::<f32, anyhow::Error>(max_width.max(measured.bounds.width()))
+            })?
+            .ceil();
+        let item_width = (text_width
+            + SIDEBAR_CONTEXT_MENU_TEXT_SLACK_PX
+            + SIDEBAR_CONTEXT_MENU_ITEM_HORIZONTAL_PADDING_PX * 2.0)
+            .ceil();
+        let menu_width = (item_width + 2.0).ceil();
+        Ok((menu_width, item_width))
+    }
+
     fn build_chatminal_sidebar_session_context_menu(
         &mut self,
         sb: &crate::shell_bounds::ShellBounds,
@@ -837,35 +884,9 @@ impl crate::TermWindow {
         let body_font = self.sidebar_text_font()?;
         let text = LinearRgba::with_components(0.92, 0.92, 0.92, 1.0);
         let hover_bg = LinearRgba::with_components(0.20, 0.24, 0.28, 1.0);
-        let bg = LinearRgba::with_components(0.03, 0.03, 0.03, 0.995);
+        let bg = LinearRgba::with_components(0.03, 0.03, 0.03, 1.0);
         let border = bg;
         let hovered_item = self.hovered_sidebar_session_menu_item();
-        let menu_item = |label: &str, item_type| {
-            let is_hovered = hovered_item.as_ref() == Some(&item_type);
-            Element::new(&body_font, ElementContent::Text(label.into()))
-                .display(crate::termwindow::box_model::DisplayType::Block)
-                .item_type(item_type)
-                .padding(BoxDimension {
-                    left: Dimension::Pixels(10.0),
-                    right: Dimension::Pixels(10.0),
-                    top: Dimension::Pixels(6.0),
-                    bottom: Dimension::Pixels(6.0),
-                })
-                .min_width(Some(Dimension::Pixels(
-                    SIDEBAR_CONTEXT_MENU_ITEM_CONTENT_WIDTH_PX,
-                )))
-                .max_width(Some(Dimension::Pixels(
-                    SIDEBAR_CONTEXT_MENU_ITEM_CONTENT_WIDTH_PX,
-                )))
-                .colors(filled_colors(
-                    if is_hovered {
-                        hover_bg
-                    } else {
-                        LinearRgba::TRANSPARENT
-                    },
-                    text,
-                ))
-        };
         let mut entries: Vec<(&str, UIItemType)> = Vec::with_capacity(6);
         if can_join_selected_sessions {
             entries.push((
@@ -884,7 +905,7 @@ impl crate::TermWindow {
             UIItemType::ChatminalSidebarSessionMenuRename(session.session_id.clone()),
         ));
         entries.push((
-            "Startup recipe...",
+            "Startup recipe",
             UIItemType::ChatminalSidebarSessionMenuStartupCommand(session.session_id.clone()),
         ));
         if has_startup_command {
@@ -900,6 +921,31 @@ impl crate::TermWindow {
             UIItemType::ChatminalSidebarSessionMenuDelete(session.session_id.clone()),
         ));
 
+        let labels = entries.iter().map(|(label, _)| *label).collect::<Vec<_>>();
+        let (menu_width, item_content_width) =
+            self.sidebar_context_menu_dimensions(&body_font, &labels)?;
+        let menu_item = |label: &str, item_type| {
+            let is_hovered = hovered_item.as_ref() == Some(&item_type);
+            Element::new(&body_font, ElementContent::Text(label.into()))
+                .display(crate::termwindow::box_model::DisplayType::Block)
+                .item_type(item_type)
+                .padding(BoxDimension {
+                    left: Dimension::Pixels(SIDEBAR_CONTEXT_MENU_ITEM_HORIZONTAL_PADDING_PX),
+                    right: Dimension::Pixels(SIDEBAR_CONTEXT_MENU_ITEM_HORIZONTAL_PADDING_PX),
+                    top: Dimension::Pixels(6.0),
+                    bottom: Dimension::Pixels(6.0),
+                })
+                .min_width(Some(Dimension::Pixels(item_content_width)))
+                .max_width(Some(Dimension::Pixels(item_content_width)))
+                .colors(filled_colors(
+                    if is_hovered {
+                        hover_bg
+                    } else {
+                        LinearRgba::TRANSPARENT
+                    },
+                    text,
+                ))
+        };
         let item_count = entries.len();
         let children = entries
             .into_iter()
@@ -917,10 +963,10 @@ impl crate::TermWindow {
                 bg: bg.into(),
                 text: text.into(),
             })
-            .min_width(Some(Dimension::Pixels(SIDEBAR_CONTEXT_MENU_WIDTH_PX)))
-            .max_width(Some(Dimension::Pixels(SIDEBAR_CONTEXT_MENU_WIDTH_PX)));
+            .min_width(Some(Dimension::Pixels(menu_width)))
+            .max_width(Some(Dimension::Pixels(menu_width)));
 
-        let width = SIDEBAR_CONTEXT_MENU_WIDTH_PX;
+        let width = menu_width;
         let estimated_height = 8.0 + item_count as f32 * 32.0;
         let x = menu.anchor_x_px.clamp(
             4.0,
@@ -972,8 +1018,10 @@ impl crate::TermWindow {
         let body_font = self.sidebar_text_font()?;
         let text = LinearRgba::with_components(0.92, 0.92, 0.92, 1.0);
         let hover_bg = LinearRgba::with_components(0.20, 0.24, 0.28, 1.0);
-        let bg = LinearRgba::with_components(0.03, 0.03, 0.03, 0.995);
+        let bg = LinearRgba::with_components(0.03, 0.03, 0.03, 1.0);
         let border = bg;
+        let (menu_width, item_content_width) =
+            self.sidebar_context_menu_dimensions(&body_font, &["Delete"])?;
         let hovered_item = self.hovered_sidebar_profile_menu_item();
         let item_type = UIItemType::ChatminalSidebarProfileMenuDelete(profile.profile_id.clone());
         let is_hovered = hovered_item.as_ref() == Some(&item_type);
@@ -981,17 +1029,13 @@ impl crate::TermWindow {
             .display(crate::termwindow::box_model::DisplayType::Block)
             .item_type(item_type)
             .padding(BoxDimension {
-                left: Dimension::Pixels(10.0),
-                right: Dimension::Pixels(10.0),
+                left: Dimension::Pixels(SIDEBAR_CONTEXT_MENU_ITEM_HORIZONTAL_PADDING_PX),
+                right: Dimension::Pixels(SIDEBAR_CONTEXT_MENU_ITEM_HORIZONTAL_PADDING_PX),
                 top: Dimension::Pixels(6.0),
                 bottom: Dimension::Pixels(6.0),
             })
-            .min_width(Some(Dimension::Pixels(
-                SIDEBAR_CONTEXT_MENU_ITEM_CONTENT_WIDTH_PX,
-            )))
-            .max_width(Some(Dimension::Pixels(
-                SIDEBAR_CONTEXT_MENU_ITEM_CONTENT_WIDTH_PX,
-            )))
+            .min_width(Some(Dimension::Pixels(item_content_width)))
+            .max_width(Some(Dimension::Pixels(item_content_width)))
             .colors(filled_colors(
                 if is_hovered {
                     hover_bg
@@ -1012,10 +1056,10 @@ impl crate::TermWindow {
                 bg: bg.into(),
                 text: text.into(),
             })
-            .min_width(Some(Dimension::Pixels(SIDEBAR_CONTEXT_MENU_WIDTH_PX)))
-            .max_width(Some(Dimension::Pixels(SIDEBAR_CONTEXT_MENU_WIDTH_PX)));
+            .min_width(Some(Dimension::Pixels(menu_width)))
+            .max_width(Some(Dimension::Pixels(menu_width)));
 
-        let width = SIDEBAR_CONTEXT_MENU_WIDTH_PX;
+        let width = menu_width;
         let estimated_height = 40.0;
         let x = menu.anchor_x_px.clamp(
             4.0,

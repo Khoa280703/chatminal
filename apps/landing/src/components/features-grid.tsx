@@ -3,7 +3,7 @@ import { featureItems } from "@/lib/landing-data";
 
 export function FeaturesGrid() {
   return (
-    <section id="features" className="mx-auto mt-32 max-w-7xl px-6">
+    <section id="features" className="mx-auto mt-16 max-w-7xl px-6 md:mt-32">
       <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
         {featureItems.map((feature) => (
           <article

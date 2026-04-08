@@ -2238,6 +2238,55 @@ fn canonical_materializer_preserves_prompt_from_real_zsh_trace() {
 }
 
 #[test]
+fn canonical_materializer_replaces_changed_prompt_redraw_on_same_line() {
+    let previous_prompt = "khoa2807@192 ~ % ";
+    let next_prompt = "khoa2807@MacBook-Pro-cua-Khoa ~ % ";
+    let redraw = format!(
+        "\r\x1b[{}C{}",
+        previous_prompt.chars().count(),
+        next_prompt
+    );
+
+    let materialized = materialize_output_chunk(
+        previous_prompt,
+        previous_prompt.chars().count(),
+        false,
+        &redraw,
+    );
+
+    assert_eq!(materialized.records.len(), 1);
+    assert_eq!(materialized.records[0].text, next_prompt);
+    assert_eq!(materialized.open_fragment, next_prompt);
+    assert_eq!(materialized.cursor_col, next_prompt.chars().count());
+    assert!(!materialized.pending_carriage_return);
+}
+
+#[test]
+fn canonical_materializer_collapses_repeated_prompt_redraws_on_same_line() {
+    let previous_prompt = "khoa2807@192 ~ % ";
+    let next_prompt = "khoa2807@MacBook-Pro-cua-Khoa ~ % ";
+    let redraw = format!(
+        "\r\x1b[{}C{}{}",
+        previous_prompt.chars().count(),
+        next_prompt,
+        next_prompt
+    );
+
+    let materialized = materialize_output_chunk(
+        previous_prompt,
+        previous_prompt.chars().count(),
+        false,
+        &redraw,
+    );
+
+    assert_eq!(materialized.records.len(), 1);
+    assert_eq!(materialized.records[0].text, next_prompt);
+    assert_eq!(materialized.open_fragment, next_prompt);
+    assert_eq!(materialized.cursor_col, next_prompt.chars().count());
+    assert!(!materialized.pending_carriage_return);
+}
+
+#[test]
 fn logical_snapshot_backfills_missing_legacy_sequences_into_canonical_records() {
     let (state, session_id, _db) = create_state_with_session();
     let store = {

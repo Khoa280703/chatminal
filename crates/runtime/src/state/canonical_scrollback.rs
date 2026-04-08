@@ -26,8 +26,13 @@ pub(super) fn materialize_output_chunk(
     pending_carriage_return: bool,
     chunk: &str,
 ) -> MaterializedChunk {
+    let should_normalize_inline_prompt_redraw =
+        looks_like_shell_prompt_fragment(current_fragment) && chunk.as_bytes().contains(&b'\r');
     let mut reducer = LogicalReducer::new(current_fragment, cursor_col, pending_carriage_return);
     reducer.apply_chunk(chunk);
+    if should_normalize_inline_prompt_redraw {
+        reducer.normalize_inline_prompt_redraw();
+    }
     let open_fragment = reducer.render_current_fragment();
 
     let mut records = Vec::with_capacity(reducer.lines.len().saturating_add(1));
@@ -428,6 +433,20 @@ impl LogicalReducer {
         self.current_line.iter().collect()
     }
 
+    fn normalize_inline_prompt_redraw(&mut self) {
+        let rendered = self.render_current_fragment();
+        let collapsed = collapse_inline_prompt_redraw_fragment(&rendered);
+        if collapsed == rendered {
+            return;
+        }
+
+        let current_len = rendered.chars().count();
+        let cursor_from_end = current_len.saturating_sub(self.cursor_col);
+        self.current_line = collapsed.chars().collect();
+        let collapsed_len = self.current_line.len();
+        self.cursor_col = collapsed_len.saturating_sub(cursor_from_end.min(collapsed_len));
+    }
+
     fn write_char(&mut self, ch: char) {
         if self.cursor_col > self.current_line.len() {
             self.current_line.resize(self.cursor_col, ' ');
@@ -566,4 +585,48 @@ fn looks_like_shell_prompt_fragment(value: &str) -> bool {
         Some('>') => trimmed.starts_with("PS ") || trimmed.contains('@'),
         _ => false,
     }
+}
+
+fn collapse_inline_prompt_redraw_fragment(fragment: &str) -> String {
+    if !looks_like_shell_prompt_fragment(fragment) {
+        return fragment.to_string();
+    }
+
+    let mut boundaries = fragment
+        .char_indices()
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    boundaries.push(fragment.len());
+
+    for start in boundaries.iter().rev().skip(1).copied() {
+        if start == 0 {
+            break;
+        }
+        let suffix = &fragment[start..];
+        if !looks_like_shell_prompt_fragment(suffix) {
+            continue;
+        }
+
+        let prefix = &fragment[..start];
+        if trailing_prompt_fragment_start(prefix).is_some() {
+            return suffix.to_string();
+        }
+    }
+
+    fragment.to_string()
+}
+
+fn trailing_prompt_fragment_start(value: &str) -> Option<usize> {
+    let mut boundaries = value
+        .char_indices()
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    boundaries.push(value.len());
+
+    boundaries
+        .iter()
+        .rev()
+        .skip(1)
+        .copied()
+        .find(|&start| looks_like_shell_prompt_fragment(&value[start..]))
 }
