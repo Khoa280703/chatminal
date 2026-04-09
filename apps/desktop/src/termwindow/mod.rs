@@ -2,7 +2,7 @@
 use super::renderstate::*;
 use super::utilsprites::RenderMetrics;
 use crate::chatminal_layout::workspace_store::{
-    DEFAULT_LAYOUT_WORKSPACE_ID, DesktopWorkspaceLayoutStore,
+    DesktopWorkspaceLayoutStore, DEFAULT_LAYOUT_WORKSPACE_ID,
 };
 use crate::chatminal_sidebar::{ChatminalSidebar, SidebarSessionDropTarget};
 use crate::colorease::ColorEase;
@@ -13,29 +13,33 @@ use crate::desktop_session_host::overlay_shell::{
 };
 use crate::desktop_session_host::subscribe_runtime_notifications;
 use crate::desktop_session_host::{
-    PrimaryHostWindowId, host_window_initial_position, resolve_public_pane, resolved_window_title,
+    host_window_initial_position, resolve_public_pane, resolved_window_title, PrimaryHostWindowId,
 };
 use crate::desktop_termwindow_types::{
-    TerminalPaneLayout, TerminalSplit, TerminalUiKey, terminal_handle_for_ui_key,
-    terminal_ui_key_for_pane,
+    terminal_handle_for_ui_key, terminal_ui_key_for_pane, TerminalPaneLayout, TerminalSplit,
+    TerminalUiKey,
 };
 use crate::frontend::{front_end, try_front_end};
 use crate::inputmap::InputMap;
 use crate::overlay::confirm_close_tab as show_close_runtime_entry_overlay;
 use crate::overlay::{
-    CopyModeParams, CopyOverlay, LauncherArgs, LauncherFlags, QuickSelectOverlay,
-    confirm_quit_program, launcher, start_overlay,
+    confirm_quit_program, launcher, start_overlay, CopyModeParams, CopyOverlay, LauncherArgs,
+    LauncherFlags, QuickSelectOverlay,
 };
+#[cfg(target_os = "macos")]
+use crate::overlay::confirm_clear_all_data_native;
+#[cfg(not(target_os = "macos"))]
+use crate::overlay::confirm_clear_all_data;
 use crate::resize_increment_calculator::ResizeIncrementCalculator;
 use crate::runtime_module::{
+    desktop_activate_session, desktop_can_close_view_only,
+    desktop_detach_session_runtime_and_notify, desktop_focus_session_view_with_previous,
+    desktop_last_active_session_id, desktop_prepare_workspace_layout,
+    desktop_resize_visible_sessions, desktop_session_entry_bindings,
+    desktop_session_window_snapshot, notify_runtime_session_activated,
+    reconcile_runtime_session_lookup, run_runtime_session_startup_command,
     DesktopSessionBridgeAction, DesktopSessionRuntimeSummary, RuntimeId, SessionViewId,
-    TerminalInstanceId, WorkspaceLayoutState, desktop_activate_session,
-    desktop_can_close_view_only, desktop_detach_session_runtime_and_notify,
-    desktop_focus_session_view_with_previous, desktop_last_active_session_id,
-    desktop_prepare_workspace_layout, desktop_resize_visible_sessions,
-    desktop_session_entry_bindings, desktop_session_window_snapshot,
-    notify_runtime_session_activated, reconcile_runtime_session_lookup,
-    run_runtime_session_startup_command,
+    TerminalInstanceId, WorkspaceLayoutState,
 };
 use crate::scripting::guiwin::GuiWin;
 use crate::scripting::guiwin::PrimaryGuiWindowId;
@@ -44,7 +48,7 @@ use crate::selection::{Selection, SelectionMode};
 use crate::shapecache::*;
 use crate::tabbar::{SessionBarItem, SessionBarState};
 use crate::termwindow::background::{
-    LoadedBackgroundLayer, load_background_image, reload_background_image,
+    load_background_image, reload_background_image, LoadedBackgroundLayer,
 };
 use crate::termwindow::keyevent::{KeyTableArgs, KeyTableState};
 use crate::termwindow::modal::Modal;
@@ -57,7 +61,7 @@ use crate::termwindow::startup_recipe_modal::StartupRecipeModal;
 use crate::termwindow::webgpu::WebGpuState;
 use ::terminal_emulator::input::{ClickPosition, MouseButton as TMB};
 use ::window::*;
-use anyhow::{Context, anyhow, ensure};
+use anyhow::{anyhow, ensure, Context};
 use config::keyassignment::{
     Confirmation, KeyAssignment, LauncherActionArgs, Pattern, PromptInputLine,
     QuickSelectArguments, SessionDirection, SpawnCommand, SplitSize,
@@ -71,8 +75,8 @@ use dynamic::Value;
 use lfucache::*;
 use mlua::{FromLua, LuaSerdeExt, UserData, UserDataFields};
 use runtime::{HostRuntimeNotification, RuntimeWorkspace};
-use smol::Timer;
 use smol::channel::Sender;
+use smol::Timer;
 use std::cell::{RefCell, RefMut};
 use std::collections::{BTreeSet, HashMap, LinkedList};
 use std::convert::TryFrom;
@@ -1597,6 +1601,53 @@ impl TermWindow {
         }
     }
 
+    pub(crate) fn clear_all_chatminal_data(&mut self) {
+        if !self.chatminal_sidebar.is_enabled() {
+            return;
+        }
+        match self.chatminal_sidebar.clear_all_data() {
+            Ok(workspace) => {
+                DesktopWorkspaceLayoutStore::new(DEFAULT_LAYOUT_WORKSPACE_ID).clear();
+                self.apply_chatminal_profile_workspace(workspace);
+            }
+            Err(err) => {
+                log::error!("failed to clear all chatminal data: {err}");
+                toast_notification::persistent_toast_notification("Clear All Data Failed", &err);
+            }
+        }
+    }
+
+    fn request_clear_all_chatminal_data(&mut self) -> anyhow::Result<()> {
+        #[cfg(target_os = "macos")]
+        {
+            let Some(window) = self.window.as_ref().cloned() else {
+                anyhow::bail!("missing window");
+            };
+            promise::spawn::spawn_into_main_thread(async move {
+                if confirm_clear_all_data_native() {
+                    window.notify(TermWindowNotif::Apply(Box::new(|term_window| {
+                        term_window.clear_all_chatminal_data();
+                    })));
+                }
+            })
+            .detach();
+            return Ok(());
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+        let Some(window) = self.window.as_ref().cloned() else {
+            anyhow::bail!("missing window");
+        };
+        if !self.spawn_overlay_on_active_render_scope(move |_tab_id, term| {
+            confirm_clear_all_data(window.clone(), term)
+        }) {
+            anyhow::bail!("no active tab");
+        }
+        Ok(())
+        }
+    }
+
     fn apply_chatminal_profile_workspace(&mut self, workspace: RuntimeWorkspace) {
         let next_session_id = workspace.active_session_id.clone();
         self.chatminal_sidebar.apply_workspace(workspace);
@@ -1841,7 +1892,7 @@ impl TermWindow {
             leader_is_down: None,
             dead_key_status: DeadKeyStatus::None,
             show_session_bar,
-            show_terminal_footer: true,
+            show_terminal_footer: false,
             show_scroll_bar: config.enable_scroll_bar,
             tab_bar: SessionBarState::default(),
             fancy_tab_bar: None,

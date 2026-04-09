@@ -1334,6 +1334,18 @@ impl DesktopSessionHost {
         self.remove_tab_from_window(runtime_id);
     }
 
+    pub(crate) fn clear_runtime_entries(&self) {
+        let runtime_ids: Vec<RuntimeId> = {
+            let window = self.window.lock().unwrap();
+            window.iter().map(|entry| entry.runtime_id()).collect()
+        };
+        self.window.lock().unwrap().clear();
+        self.focused_pane_by_client.lock().unwrap().clear();
+        for runtime_id in runtime_ids {
+            self.remove_runtime_resources(runtime_id);
+        }
+    }
+
     pub(crate) fn record_focus_for_current_identity(&self, terminal_handle: SessionTerminalHandle) {
         if let Some(client_id) = self.active_client_value() {
             if let Some(runtime_id) = self.resolve_runtime_id_for_terminal_handle(terminal_handle) {

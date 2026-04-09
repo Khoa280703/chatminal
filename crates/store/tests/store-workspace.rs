@@ -958,3 +958,63 @@ fn session_startup_command_roundtrips_and_clears() {
         .expect("cleared session exists");
     assert!(cleared.startup_command.is_none());
 }
+
+#[test]
+fn clear_all_data_resets_store_to_default_profile_only() {
+    let temp = TempDb::new();
+    let store = Store::initialize(&temp.path).expect("initialize store");
+    let active_profile_id = store
+        .load_workspace()
+        .expect("load workspace")
+        .active_profile_id;
+
+    let extra_profile = store
+        .create_profile(Some("Work".to_string()))
+        .expect("create extra profile");
+    let session = store
+        .create_session(
+            &active_profile_id,
+            Some("Shell".to_string()),
+            "/tmp".to_string(),
+            "/bin/bash".to_string(),
+            true,
+        )
+        .expect("create session");
+    store
+        .append_scrollback_chunk(&session.session_id, 1, "hello\n", 100)
+        .expect("append history");
+    store
+        .set_string_state("workspace_layout:desktop-main", "{\"views\":[]}")
+        .expect("set layout state");
+
+    store.clear_all_data().expect("clear all data");
+
+    let workspace = store.load_workspace().expect("reload workspace");
+    assert_eq!(workspace.profiles.len(), 1);
+    assert_eq!(workspace.profiles[0].name, "Default");
+    assert_eq!(
+        workspace.active_profile_id,
+        workspace.profiles[0].profile_id
+    );
+    assert!(workspace.sessions.is_empty());
+    assert!(workspace.active_session_id.is_none());
+    assert!(
+        store
+            .get_string_state("workspace_layout:desktop-main")
+            .expect("read layout state")
+            .is_none()
+    );
+    assert!(
+        store
+            .get_session(&session.session_id)
+            .expect("get cleared session")
+            .is_none()
+    );
+    assert!(
+        store
+            .list_profiles()
+            .expect("list profiles")
+            .into_iter()
+            .all(|profile| profile.profile_id != extra_profile.profile_id)
+    );
+}

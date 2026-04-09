@@ -14,9 +14,9 @@ use finl_unicode::grapheme_clusters::Graphemes;
 use std::cell::RefCell;
 use std::rc::Rc;
 use terminal_emulator::color::{ColorAttribute, ColorPalette};
-use terminal_font::LoadedFont;
 use terminal_font::units::PixelUnit;
-use termwiz::cell::{Presentation, grapheme_column_width};
+use terminal_font::LoadedFont;
+use termwiz::cell::{grapheme_column_width, Presentation};
 use termwiz::surface::Line;
 use window::bitmaps::atlas::Sprite;
 use window::{RectF, WindowOps};
@@ -941,7 +941,11 @@ impl super::TermWindow {
                         }
                         None => false,
                     } && matches!(self.current_mouse_capture, None | Some(MouseCapture::UI));
-                if hovering { hc } else { &element.colors }
+                if hovering {
+                    hc
+                } else {
+                    &element.colors
+                }
             }
             None => &element.colors,
         };

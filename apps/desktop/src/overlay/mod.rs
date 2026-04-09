@@ -14,6 +14,10 @@ pub mod prompt;
 pub mod quickselect;
 pub mod selector;
 
+#[cfg(target_os = "macos")]
+pub use confirm_close_pane::confirm_clear_all_data_native;
+#[cfg(not(target_os = "macos"))]
+pub use confirm_close_pane::confirm_clear_all_data;
 pub use confirm_close_pane::{confirm_close_tab, confirm_quit_program};
 pub use copy::{CopyModeParams, CopyOverlay};
 pub use debug::show_debug_overlay;

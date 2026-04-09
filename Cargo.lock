@@ -1258,7 +1258,7 @@ dependencies = [
 
 [[package]]
 name = "desktop"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1268,6 +1268,7 @@ dependencies = [
  "cc",
  "chrono",
  "clap",
+ "cocoa",
  "codec",
  "colorgrad",
  "config",
@@ -1298,6 +1299,7 @@ dependencies = [
  "metrics",
  "mlua",
  "nucleo-matcher",
+ "objc",
  "open-url",
  "ordered-float 4.6.0",
  "parking_lot",
@@ -6590,6 +6592,7 @@ dependencies = [
  "downcast-rs",
  "euclid",
  "filedescriptor",
+ "foreign-types",
  "futures-lite",
  "futures-util",
  "gl_generator",

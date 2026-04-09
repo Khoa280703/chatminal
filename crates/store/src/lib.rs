@@ -1338,6 +1338,47 @@ impl Store {
         Ok(())
     }
 
+    pub fn clear_all_data(&self) -> Result<(), String> {
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|err| format!("open clear all data transaction failed: {err}"))?;
+
+        tx.execute("DELETE FROM session_explorer_state", [])
+            .map_err(|err| format!("clear session explorer state failed: {err}"))?;
+        tx.execute("DELETE FROM session_terminal_replay_chunks", [])
+            .map_err(|err| format!("clear terminal replay failed: {err}"))?;
+        tx.execute("DELETE FROM scrollback_records", [])
+            .map_err(|err| format!("clear canonical history failed: {err}"))?;
+        tx.execute("DELETE FROM scrollback_chunks", [])
+            .map_err(|err| format!("clear history failed: {err}"))?;
+        tx.execute("DELETE FROM sessions", [])
+            .map_err(|err| format!("clear sessions failed: {err}"))?;
+        tx.execute("DELETE FROM profiles", [])
+            .map_err(|err| format!("clear profiles failed: {err}"))?;
+        tx.execute("DELETE FROM app_state", [])
+            .map_err(|err| format!("clear app state failed: {err}"))?;
+        tx.execute("DELETE FROM settings", [])
+            .map_err(|err| format!("clear settings failed: {err}"))?;
+
+        let default_id = Uuid::new_v4().to_string();
+        let now = now_millis() as i64;
+        tx.execute(
+            "INSERT INTO profiles (id, name, sort_order, created_at, updated_at) VALUES (?1, ?2, 0, ?3, ?4)",
+            params![&default_id, DEFAULT_PROFILE_NAME, now, now],
+        )
+        .map_err(|err| format!("recreate default profile failed: {err}"))?;
+        tx.execute(
+            "INSERT INTO app_state (key, value) VALUES (?1, ?2)",
+            params![ACTIVE_PROFILE_KEY, default_id],
+        )
+        .map_err(|err| format!("set default active profile failed: {err}"))?;
+
+        tx.commit()
+            .map_err(|err| format!("commit clear all data failed: {err}"))?;
+        Ok(())
+    }
+
     fn init_schema(&self) -> Result<(), String> {
         let conn = self.conn()?;
         conn.execute_batch(schema::INIT_SQL)

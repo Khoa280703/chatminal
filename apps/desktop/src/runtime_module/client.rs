@@ -111,6 +111,10 @@ impl ChatminalRuntimeClient {
         self.runtime.state.profile_delete(profile_id)
     }
 
+    pub(crate) fn clear_all_data(&self) -> Result<RuntimeWorkspace, String> {
+        self.runtime.state.clear_all_data()
+    }
+
     pub(crate) fn session_restore_snapshot_get(
         &self,
         session_id: &str,

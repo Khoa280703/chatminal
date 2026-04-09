@@ -24,9 +24,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use terminal_emulator::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use termwiz::nerdfonts::NERD_FONTS;
+use window::color::LinearRgba;
 use window::DeadKeyStatus;
 use window::Modifiers;
-use window::color::LinearRgba;
 
 struct MatchResults {
     selection: String,

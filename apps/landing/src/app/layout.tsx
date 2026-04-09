@@ -18,6 +18,10 @@ export const metadata: Metadata = {
   title: "CHATMINAL | Vibe Coding Environment",
   description:
     "A monochrome landing page for Chatminal, adapted from the Stitch design project.",
+  icons: {
+    icon: "/chatminal-logo.svg",
+    shortcut: "/chatminal-logo.svg",
+  },
 };
 
 export default function RootLayout({

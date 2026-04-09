@@ -19,7 +19,9 @@ export function DownloadGrid() {
             </div>
             <a
               href={option.href}
-              download
+              download={option.directDownload}
+              target={option.directDownload ? undefined : "_blank"}
+              rel={option.directDownload ? undefined : "noreferrer"}
               className="w-full bg-white py-4 font-mono font-bold text-black transition-colors hover:bg-[#d4d4d4]"
             >
               {option.label}
@@ -29,7 +31,7 @@ export function DownloadGrid() {
             </span>
             {option.label.includes("MACOS") && (
               <span className="mt-2 font-mono text-[9px] text-terminal-mutedSoft">
-                Right-click → Open if blocked
+                Choose Apple Silicon or Intel on GitHub Releases
               </span>
             )}
           </div>

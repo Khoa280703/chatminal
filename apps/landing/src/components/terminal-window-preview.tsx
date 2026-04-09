@@ -358,7 +358,7 @@ function buildProtocolSyncTranscript() {
     `${ansi.muted} M${ansi.reset} apps/desktop/src/termwindow/render/chatminal_sidebar.rs`,
     "",
     `${prompt} ${ansi.white}npm run dev${ansi.reset}`,
-    `${ansi.blue}>${ansi.reset} chatminal-landing@0.1.0 dev`,
+    `${ansi.blue}>${ansi.reset} chatminal-landing@0.1.1 dev`,
     `${ansi.blue}>${ansi.reset} next dev`,
     `${ansi.green}✓${ansi.reset} Ready in 1180ms`,
     `${ansi.muted}○${ansi.reset} Local:    http://localhost:3000`,
@@ -413,7 +413,7 @@ function buildProtocolSyncPlayback(): TerminalPlaybackStep[] {
     },
     {
       kind: "print",
-      text: `${ansi.blue}>${ansi.reset} chatminal-landing@0.1.0 dev\r\n${ansi.blue}>${ansi.reset} next dev\r\n${ansi.green}✓${ansi.reset} Ready in 1180ms\r\n${ansi.muted}○${ansi.reset} Local:    http://localhost:3000\r\n\r\n`,
+      text: `${ansi.blue}>${ansi.reset} chatminal-landing@0.1.1 dev\r\n${ansi.blue}>${ansi.reset} next dev\r\n${ansi.green}✓${ansi.reset} Ready in 1180ms\r\n${ansi.muted}○${ansi.reset} Local:    http://localhost:3000\r\n\r\n`,
       delayAfter: 420,
       chunkSize: 4,
       charDelay: 9,

@@ -3,6 +3,7 @@
 
 use super::keycodes::*;
 use super::{nsstring, nsstring_to_str};
+use crate::bitmaps::BitmapImage;
 use crate::clipboard::Clipboard as ClipboardContext;
 use crate::connection::ConnectionOps;
 use crate::os::macos::menu::{MenuItem, RepresentedItem};
@@ -33,6 +34,7 @@ use core_foundation::bundle::{CFBundleGetBundleWithIdentifier, CFBundleGetFuncti
 use core_foundation::data::{CFData, CFDataGetBytePtr, CFDataRef};
 use core_foundation::string::{CFString, CFStringRef, UniChar};
 use core_foundation::{declare_TCFType, impl_TCFType};
+use foreign_types::ForeignType;
 use objc::declare::ClassDecl;
 use objc::rc::{StrongPtr, WeakPtr};
 use objc::runtime::{Class, Object, Protocol, Sel};
@@ -858,6 +860,23 @@ impl WindowOps for Window {
             inner.set_resize_increments(incr);
             Ok(())
         });
+    }
+
+    fn set_icon(&self, image: crate::bitmaps::Image) {
+        let (width, height) = image.image_dimensions();
+        let cg_image = crate::os::macos::bitmap::BitmapRef::with_image(&image);
+
+        unsafe {
+            let ns_image: StrongPtr = StrongPtr::new(msg_send![class!(NSImage), alloc]);
+            let ns_image: StrongPtr = StrongPtr::new(msg_send![
+                *ns_image,
+                initWithCGImage: cg_image.as_ptr()
+                size: NSSize::new(width as f64, height as f64)
+            ]);
+
+            let current_app = NSApplication::sharedApplication(nil);
+            let () = msg_send![current_app, setApplicationIconImage:*ns_image];
+        }
     }
 
     fn config_did_change(&self, config: &ConfigHandle) {

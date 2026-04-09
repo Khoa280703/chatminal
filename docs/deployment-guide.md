@@ -1,6 +1,6 @@
 # Deployment Guide
 
-Last updated: 2026-04-08
+Last updated: 2026-04-09
 
 ## Quick Install
 
@@ -19,7 +19,7 @@ Current curl|bash targets:
 Override release version:
 
 ```bash
-curl -fsSL https://chatminal.com/install | CHATMINAL_VERSION=v0.1.0 bash
+curl -fsSL https://chatminal.com/install | CHATMINAL_VERSION=v0.1.1 bash
 ```
 
 Override install locations:

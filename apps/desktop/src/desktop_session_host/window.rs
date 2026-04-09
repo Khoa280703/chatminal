@@ -151,6 +151,16 @@ impl Window {
         true
     }
 
+    pub(crate) fn clear(&mut self) {
+        if self.runtime_entries.is_empty() {
+            return;
+        }
+        self.runtime_entries.clear();
+        self.active = 0;
+        self.last_active = None;
+        self.invalidate();
+    }
+
     pub(crate) fn get_active(&self) -> Option<&WindowRuntimeEntry> {
         self.get_by_idx(self.active)
     }

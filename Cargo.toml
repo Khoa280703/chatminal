@@ -68,7 +68,7 @@ resolver = "2"
 [workspace.package]
 edition = "2024"
 rust-version = "1.93"
-version = "0.1.0"
+version = "0.1.1"
 
 [workspace.dependencies]
 ahash = "0.8"

@@ -1,7 +1,7 @@
-use crate::TermWindow;
 use crate::termwindow::box_model::ComputedElement;
+use crate::TermWindow;
 use config::keyassignment::KeyAssignment;
-use downcast_rs::{Downcast, impl_downcast};
+use downcast_rs::{impl_downcast, Downcast};
 use std::cell::Ref;
 use terminal_emulator::{KeyCode, KeyModifiers, MouseEvent};
 use window::DeadKeyStatus;

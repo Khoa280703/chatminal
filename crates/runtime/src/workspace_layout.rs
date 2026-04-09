@@ -381,6 +381,10 @@ pub struct WorkspaceLayoutRegistry {
 }
 
 impl WorkspaceLayoutRegistry {
+    pub fn clear(&mut self) {
+        self.layouts.clear();
+    }
+
     pub fn ensure_layout(
         &mut self,
         workspace_id: impl Into<String>,

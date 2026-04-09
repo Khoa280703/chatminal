@@ -186,6 +186,9 @@ impl TermWindow {
             CloseCurrentSession { confirm } => self.close_current_runtime_entry(*confirm),
             Nop | DisableDefaultAssignment => {}
             ReloadConfiguration => config::reload(),
+            ClearAllData => {
+                self.request_clear_all_chatminal_data()?;
+            }
             ScrollByPage(n) => self.scroll_by_page(**n, pane)?,
             ScrollByLine(n) => self.scroll_by_line(*n, pane)?,
             ScrollByCurrentEventWheelDelta => self.scroll_by_current_event_wheel_delta(pane)?,

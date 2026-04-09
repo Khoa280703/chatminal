@@ -1,6 +1,6 @@
 # Project Roadmap
 
-Last updated: 2026-04-08
+Last updated: 2026-04-09
 
 ## Completed Milestones
 
@@ -13,13 +13,13 @@ Last updated: 2026-04-08
 - [x] Crates renamed (removed `chatminal-` prefix)
 - [x] Marketing landing page scaffolded from Stitch design output (`apps/landing`)
 - [x] Curl/Bash installer path for GitHub Releases
+- [x] Landing page polish and release/download wiring
 
 ## In Progress
 
 - UI Shell improvements (GPU rendering, overlay bounds)
 - Window parity across platforms
 - Multi-session UX enhancements
-- Landing page polish and release/download wiring
 - Homebrew distribution path
 
 ## Future Plans
@@ -37,7 +37,7 @@ Last updated: 2026-04-08
 - Keyboard shortcut customization
 
 ### Phase 3: Ecosystem (Q4 2026)
-- Package manager integration (Homebrew, AUR)
+- Package manager integration (AUR and additional taps/formulas)
 - CI/CD improvements
 - Community contributions
 - Open source outreach

@@ -444,6 +444,7 @@ pub enum KeyAssignment {
         confirm: bool,
     },
     ReloadConfiguration,
+    ClearAllData,
     MoveSessionRelative(isize),
     MoveSession(usize),
     ScrollByPage(NotNan<f64>),

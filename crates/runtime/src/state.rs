@@ -627,6 +627,32 @@ impl RuntimeState {
         inner.load_workspace_snapshot()
     }
 
+    pub fn clear_all_data(&self) -> Result<RuntimeWorkspace, String> {
+        let runtimes = {
+            let mut inner = self
+                .inner
+                .lock()
+                .map_err(|_| "state lock poisoned".to_string())?;
+            let runtimes =
+                inner.disconnect_all_sessions_and_publish(runtime_lifecycle::DisconnectOptions {
+                    reset_history: true,
+                    bump_generation: true,
+                });
+            self.execution
+                .workspace_layouts()
+                .lock()
+                .map_err(|_| "workspace layout lock poisoned".to_string())?
+                .clear();
+            inner.sessions.clear();
+            inner.store.clear_all_data()?;
+            inner.publish_workspace_updated();
+            runtimes
+        };
+
+        kill_runtime_handles(runtimes);
+        self.workspace_load_passive()
+    }
+
     pub fn session_explorer_state_get(
         &self,
         session_id: &str,

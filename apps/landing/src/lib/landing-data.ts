@@ -3,10 +3,11 @@ export const githubDeveloperDocsUrl =
   "https://github.com/Khoa280703/chatminal/tree/main/docs";
 export const githubReleasesUrl =
   "https://github.com/Khoa280703/chatminal/releases";
+export const latestReleaseTag = "v0.1.1";
 export const downloadLinks = {
-  windows: "https://github.com/Khoa280703/chatminal/releases/download/v0.1.0-test6/Chatminal-v0.1.0-test6-windows-x86_64.zip",
-  macos: "https://github.com/Khoa280703/chatminal/releases/download/v0.1.0-test6/Chatminal-v0.1.0-test6-macos.dmg",
-  linux: "https://github.com/Khoa280703/chatminal/releases/download/v0.1.0-test6/Chatminal-v0.1.0-test6-linux-x86_64.tar.gz",
+  windows: `https://github.com/Khoa280703/chatminal/releases/download/${latestReleaseTag}/Chatminal-${latestReleaseTag}-windows-x86_64.zip`,
+  macos: githubReleasesUrl,
+  linux: `https://github.com/Khoa280703/chatminal/releases/download/${latestReleaseTag}/Chatminal-${latestReleaseTag}-linux-x86_64.tar.gz`,
 };
 
 export const navigationItems = [
@@ -44,9 +45,27 @@ export const commandSteps = [
 ];
 
 export const downloadOptions = [
-  { icon: "windows", label: "WINDOWS (X64)", artifact: "v0.1.0-test6 .ZIP", href: downloadLinks.windows },
-  { icon: "apple", label: "MACOS", artifact: "v0.1.0-test6 .DMG", href: downloadLinks.macos },
-  { icon: "linux", label: "LINUX (X64)", artifact: "v0.1.0-test6 .TAR.GZ", href: downloadLinks.linux },
+  {
+    icon: "windows",
+    label: "WINDOWS (X64)",
+    artifact: `${latestReleaseTag} .ZIP`,
+    href: downloadLinks.windows,
+    directDownload: true,
+  },
+  {
+    icon: "apple",
+    label: "MACOS",
+    artifact: `${latestReleaseTag} APPLE SILICON / INTEL`,
+    href: downloadLinks.macos,
+    directDownload: false,
+  },
+  {
+    icon: "linux",
+    label: "LINUX (X64)",
+    artifact: `${latestReleaseTag} .TAR.GZ`,
+    href: downloadLinks.linux,
+    directDownload: true,
+  },
 ];
 
 export const footerLinks = [

@@ -1,6 +1,6 @@
 mod client;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -171,6 +171,12 @@ fn desktop_last_active_session() -> Option<String> {
         .lock()
         .ok()
         .and_then(|session_id| session_id.clone())
+}
+
+fn clear_desktop_last_active_session() {
+    if let Ok(mut last_active_session_id) = desktop_last_active_registry().lock() {
+        *last_active_session_id = None;
+    }
 }
 
 fn remember_desktop_last_active_session(
@@ -866,6 +872,16 @@ pub fn create_runtime_profile(name: Option<String>) -> Result<RuntimeProfile, St
 
 pub fn delete_runtime_profile(profile_id: &str) -> Result<RuntimeWorkspace, String> {
     runtime_client()?.profile_delete(profile_id)
+}
+
+pub fn clear_runtime_all_data() -> Result<RuntimeWorkspace, String> {
+    if let Some(host) = desktop_session_host() {
+        host.reconcile_visible_sessions(&HashSet::new());
+        host.clear_runtime_entries();
+    }
+    let workspace = runtime_client()?.clear_all_data()?;
+    clear_desktop_last_active_session();
+    Ok(workspace)
 }
 
 pub fn read_session_restore_snapshot(session_id: &str) -> Result<RuntimeSessionSnapshot, String> {

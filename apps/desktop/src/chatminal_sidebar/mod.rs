@@ -8,10 +8,10 @@ use runtime::{RuntimeCreatedSession, RuntimeProfile, RuntimeWorkspace};
 
 use crate::runtime_module::DESKTOP_LAYOUT_WORKSPACE_ID;
 use crate::runtime_module::{
-    build_desktop_sidebar_sessions, close_runtime_session, create_runtime_profile,
-    create_runtime_session, delete_runtime_profile, desktop_workspace_subscribe,
-    move_runtime_session_to_profile, move_runtime_sessions_to_profile, rename_runtime_session,
-    set_runtime_session_startup_command, switch_runtime_profile,
+    build_desktop_sidebar_sessions, clear_runtime_all_data, close_runtime_session,
+    create_runtime_profile, create_runtime_session, delete_runtime_profile,
+    desktop_workspace_subscribe, move_runtime_session_to_profile, move_runtime_sessions_to_profile,
+    rename_runtime_session, set_runtime_session_startup_command, switch_runtime_profile,
 };
 pub use crate::runtime_module::{
     DesktopSidebarProfile as SidebarProfile, DesktopSidebarSession as SidebarSession,
@@ -359,15 +359,12 @@ impl ChatminalSidebar {
     }
 
     pub fn profile_context_menu(&self) -> Option<SidebarProfileContextMenu> {
-        self.shared
-            .lock()
-            .ok()
-            .and_then(|state| {
-                state
-                    .profile_context_menu
-                    .as_ref()
-                    .map(clone_profile_context_menu)
-            })
+        self.shared.lock().ok().and_then(|state| {
+            state
+                .profile_context_menu
+                .as_ref()
+                .map(clone_profile_context_menu)
+        })
     }
 
     fn start_inline_session_edit(
@@ -721,6 +718,10 @@ impl ChatminalSidebar {
 
     pub fn delete_profile(&self, profile_id: &str) -> Result<RuntimeWorkspace, String> {
         delete_runtime_profile(profile_id)
+    }
+
+    pub fn clear_all_data(&self) -> Result<RuntimeWorkspace, String> {
+        clear_runtime_all_data()
     }
 
     pub fn apply_workspace(&self, workspace: RuntimeWorkspace) {

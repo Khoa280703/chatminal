@@ -297,19 +297,36 @@ fn configure_macos_assets(repo_root: &Path, asset_root: &Path) {
     use anyhow::Context as _;
 
     let profile = std::env::var("PROFILE").expect("PROFILE");
+    let target_dir = build_target_dir(repo_root, &profile);
     let src_plist = asset_root
         .join("macos")
         .join("Chatminal.app")
         .join("Contents")
         .join("Info.plist");
-    let dest_plist = build_target_dir(repo_root, &profile).join("Info.plist");
+    let src_icon = asset_root
+        .join("macos")
+        .join("Chatminal.app")
+        .join("Contents")
+        .join("Resources")
+        .join("terminal.icns");
+    let dest_plist = target_dir.join("Info.plist");
+    let dest_icon = target_dir.join("terminal.icns");
     println!("cargo:rerun-if-changed={}", src_plist.display());
+    println!("cargo:rerun-if-changed={}", src_icon.display());
 
     std::fs::copy(&src_plist, &dest_plist)
         .context(format!(
             "copy {} -> {}",
             src_plist.display(),
             dest_plist.display()
+        ))
+        .unwrap();
+
+    std::fs::copy(&src_icon, &dest_icon)
+        .context(format!(
+            "copy {} -> {}",
+            src_icon.display(),
+            dest_icon.display()
         ))
         .unwrap();
 }

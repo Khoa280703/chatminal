@@ -1,0 +1,46 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width="648"
+  height="448"
+  viewBox="156 136 648 448"
+  fill="none"
+  role="img"
+  aria-labelledby="chatminal-logo-title"
+>
+  <title id="chatminal-logo-title">Chatminal terminal prompt mark</title>
+  <rect x="156" y="136" width="648" height="448" fill="#000000" />
+  <path
+    d="M220 150H170V570H220"
+    stroke="#F5F5F5"
+    stroke-width="28"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M270 250L370 360L270 470"
+    stroke="#F5F5F5"
+    stroke-width="28"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M420 415H540"
+    stroke="#F5F5F5"
+    stroke-width="28"
+    stroke-linecap="round"
+  />
+  <path
+    d="M690 250L590 360L690 470"
+    stroke="#F5F5F5"
+    stroke-width="28"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M740 150H790V570H740"
+    stroke="#F5F5F5"
+    stroke-width="28"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>

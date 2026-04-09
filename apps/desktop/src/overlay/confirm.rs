@@ -129,11 +129,6 @@ fn run_confirmation_impl(message: &str, term: &mut OverlayTerminal) -> anyhow::R
                 } else {
                     active = ActiveButton::None;
                 }
-
-                if mouse_buttons != MouseButtons::NONE {
-                    // Treat any other mouse button as cancel
-                    return Ok(false);
-                }
             }
             _ => {}
         }

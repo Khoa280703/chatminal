@@ -1,5 +1,30 @@
 # Project Changelog
 
+## 2026-04-09
+
+### Added
+- Desktop now supports a full local reset action:
+  - added `Clear All Data` command to wipe profiles, sessions, history, layouts, and local settings in one flow
+  - runtime/store reset paths recreate a fresh default profile after clearing persisted state
+  - regression coverage added for runtime workspace reset and store reset behavior
+
+### Changed
+- Release prep for `v0.1.1`:
+  - workspace and desktop crate versions bumped to `0.1.1`
+  - landing page release metadata now points to the stable release path instead of stale `v0.1.0-test6` assets
+  - macOS landing download now routes through the releases page because production artifacts are split by `aarch64` and `x86_64`
+  - landing favicon/header/footer now use the local SVG logo asset
+- Desktop packaging/assets:
+  - macOS build now copies `terminal.icns` into the build target explicitly so release bundles keep the updated app icon
+  - desktop shell chrome now defaults to hiding the terminal footer in the main window layout
+
+### Fixed
+- Release/distribution mismatches:
+  - landing page download buttons no longer point at missing prerelease artifacts
+  - installer docs/examples now reference the next stable installer tag consistently
+- Runtime reset consistency:
+  - clearing all local data now also clears workspace layout state before loading the fresh workspace
+
 ## 2026-04-08
 
 ### Added

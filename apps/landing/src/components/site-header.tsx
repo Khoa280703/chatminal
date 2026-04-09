@@ -14,11 +14,11 @@ export function SiteHeader() {
       <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4">
         <Link href="/" className="flex items-center gap-3">
           <Image
-            src="/chatminal-logo.png"
+            src="/chatminal-logo.svg"
             alt="Chatminal logo"
-            width={32}
-            height={32}
-            className="h-8 w-8"
+            width={58}
+            height={40}
+            className="h-10 w-auto"
             priority
           />
           <span className="font-headline text-xl font-bold uppercase tracking-tight text-white">

@@ -1078,6 +1078,14 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             menubar: &["Chatminal"],
             icon: Some("md_reload"),
         },
+        ClearAllData => CommandDef {
+            brief: "Clear All Data".into(),
+            doc: "Clears all local Chatminal data, including sessions, profiles, history, layouts, and local settings".into(),
+            keys: vec![],
+            args: &[ArgType::ActiveWindow],
+            menubar: &["Chatminal"],
+            icon: Some("md_delete_sweep"),
+        },
         QuitApplication => CommandDef {
             brief: "Quit Chatminal".into(),
             doc: "Quits Chatminal".into(),
@@ -1659,6 +1667,7 @@ fn compute_default_actions() -> Vec<KeyAssignment> {
     return vec![
         // ----------------- Chatminal
         ReloadConfiguration,
+        ClearAllData,
         #[cfg(target_os = "macos")]
         HideApplication,
         #[cfg(target_os = "macos")]

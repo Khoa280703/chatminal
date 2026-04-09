@@ -2241,11 +2241,7 @@ fn canonical_materializer_preserves_prompt_from_real_zsh_trace() {
 fn canonical_materializer_replaces_changed_prompt_redraw_on_same_line() {
     let previous_prompt = "khoa2807@192 ~ % ";
     let next_prompt = "khoa2807@MacBook-Pro-cua-Khoa ~ % ";
-    let redraw = format!(
-        "\r\x1b[{}C{}",
-        previous_prompt.chars().count(),
-        next_prompt
-    );
+    let redraw = format!("\r\x1b[{}C{}", previous_prompt.chars().count(), next_prompt);
 
     let materialized = materialize_output_chunk(
         previous_prompt,
@@ -2592,6 +2588,34 @@ fn workspace_history_clear_all_resets_all_sessions() {
         assert_eq!(snapshot.seq, 0);
         assert!(snapshot.content.is_empty());
     }
+}
+
+#[test]
+fn clear_all_data_resets_workspace_and_clears_layout_registry() {
+    let (state, session_a, _session_b, _db) = create_state_with_two_sessions();
+    let layout = WorkspaceLayoutState::new_single(session_a.clone());
+    state
+        .workspace_layout_replace("desktop-main", layout)
+        .expect("persist layout");
+
+    let workspace = state.clear_all_data().expect("clear all data");
+    assert_eq!(workspace.profiles.len(), 1);
+    assert_eq!(workspace.profiles[0].name, "Default");
+    assert_eq!(
+        workspace.active_profile_id.as_deref(),
+        Some(workspace.profiles[0].profile_id.as_str())
+    );
+    assert!(workspace.sessions.is_empty());
+    assert!(workspace.active_session_id.is_none());
+    assert!(
+        state
+            .workspace_layout_snapshot("desktop-main")
+            .expect("snapshot layout after clear")
+            .is_none()
+    );
+
+    let inner = state.inner.lock().expect("lock state");
+    assert!(inner.sessions.is_empty());
 }
 
 #[test]
