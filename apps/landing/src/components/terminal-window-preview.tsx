@@ -291,12 +291,12 @@ const profiles: Profile[] = [
     ],
   },
   {
-    name: "agent-swarm",
+    name: "chatminal-setup",
     icon: "folder",
     sessions: [
-      { name: "Orchestrator", icon: "robot_2" },
-      { name: "Task_Distributor", icon: "settings_ethernet" },
-      { name: "Result_Aggregator", icon: "robot_2" },
+      { name: "macOS", icon: "apple" },
+      { name: "Linux", icon: "linux" },
+      { name: "Windows", icon: "windows" },
     ],
   },
 ];
@@ -350,6 +350,49 @@ function buildGenericTranscript(sessionName: string) {
   return lines.join("\r\n");
 }
 
+function buildInstallTranscript(sessionName: string) {
+  if (sessionName === "macOS") {
+    return [
+      `${ansi.muted}# Chatminal install guide for macOS${ansi.reset}`,
+      "",
+      `${ansi.green}$${ansi.reset} ${ansi.blue}brew install --cask chatminal${ansi.reset}`,
+      `${ansi.muted}Install with Homebrew if you want a clean update path.${ansi.reset}`,
+      "",
+      `${ansi.green}$${ansi.reset} ${ansi.blue}curl -fsSL https://chatminal.com/install | bash${ansi.reset}`,
+      `${ansi.muted}Use the installer script if you want the fastest setup.${ansi.reset}`,
+      "",
+      `${ansi.green}$${ansi.reset} ${ansi.blue}open https://github.com/Khoa280703/chatminal/releases/latest${ansi.reset}`,
+      `${ansi.muted}Pick Apple Silicon or Intel manually from the latest release.${ansi.reset}`,
+    ].join("\r\n");
+  }
+
+  if (sessionName === "Linux") {
+    return [
+      `${ansi.muted}# Chatminal install guide for Linux${ansi.reset}`,
+      "",
+      `${ansi.green}$${ansi.reset} ${ansi.blue}curl -fsSL https://chatminal.com/install | bash${ansi.reset}`,
+      `${ansi.muted}Installs the latest stable Linux x86_64 release.${ansi.reset}`,
+      "",
+      `${ansi.green}$${ansi.reset} ${ansi.blue}curl -fL https://github.com/Khoa280703/chatminal/releases/download/v0.1.2/Chatminal-v0.1.2-linux-x86_64.tar.gz -o Chatminal-v0.1.2-linux-x86_64.tar.gz${ansi.reset}`,
+      `${ansi.muted}Use the tarball if you want a manual install flow.${ansi.reset}`,
+    ].join("\r\n");
+  }
+
+  if (sessionName === "Windows") {
+    return [
+      `${ansi.muted}# Chatminal install guide for Windows${ansi.reset}`,
+      "",
+      `${ansi.green}PS>${ansi.reset} ${ansi.blue}start https://github.com/Khoa280703/chatminal/releases/latest${ansi.reset}`,
+      `${ansi.muted}Download the latest Windows zip from the release page.${ansi.reset}`,
+      "",
+      `${ansi.green}PS>${ansi.reset} ${ansi.blue}Expand-Archive .\\Chatminal-v0.1.2-windows-x86_64.zip -DestinationPath .\\chatminal${ansi.reset}`,
+      `${ansi.muted}Unzip it, then launch Chatminal from the extracted folder.${ansi.reset}`,
+    ].join("\r\n");
+  }
+
+  return buildGenericTranscript(sessionName);
+}
+
 function buildProtocolSyncTranscript() {
   const prompt = `${ansi.green}khoa2807@chatminal${ansi.reset} ${ansi.blue}apps/landing${ansi.reset} ${ansi.yellow}%${ansi.reset}`;
   const lines = [
@@ -358,7 +401,7 @@ function buildProtocolSyncTranscript() {
     `${ansi.muted} M${ansi.reset} apps/desktop/src/termwindow/render/chatminal_sidebar.rs`,
     "",
     `${prompt} ${ansi.white}npm run dev${ansi.reset}`,
-    `${ansi.blue}>${ansi.reset} chatminal-landing@0.1.1 dev`,
+    `${ansi.blue}>${ansi.reset} chatminal-landing@0.1.2 dev`,
     `${ansi.blue}>${ansi.reset} next dev`,
     `${ansi.green}✓${ansi.reset} Ready in 1180ms`,
     `${ansi.muted}○${ansi.reset} Local:    http://localhost:3000`,
@@ -413,7 +456,7 @@ function buildProtocolSyncPlayback(): TerminalPlaybackStep[] {
     },
     {
       kind: "print",
-      text: `${ansi.blue}>${ansi.reset} chatminal-landing@0.1.1 dev\r\n${ansi.blue}>${ansi.reset} next dev\r\n${ansi.green}✓${ansi.reset} Ready in 1180ms\r\n${ansi.muted}○${ansi.reset} Local:    http://localhost:3000\r\n\r\n`,
+      text: `${ansi.blue}>${ansi.reset} chatminal-landing@0.1.2 dev\r\n${ansi.blue}>${ansi.reset} next dev\r\n${ansi.green}✓${ansi.reset} Ready in 1180ms\r\n${ansi.muted}○${ansi.reset} Local:    http://localhost:3000\r\n\r\n`,
       delayAfter: 420,
       chunkSize: 4,
       charDelay: 9,
@@ -462,6 +505,133 @@ function buildProtocolSyncPlayback(): TerminalPlaybackStep[] {
   ];
 }
 
+function buildInstallPlayback(sessionName: string): TerminalPlaybackStep[] {
+  if (sessionName === "macOS") {
+    const prompt = `${ansi.green}$${ansi.reset} `;
+    return [
+      {
+        kind: "print",
+        text: `${ansi.muted}# Install Chatminal on macOS${ansi.reset}\r\n\r\n`,
+        delayAfter: 200,
+        chunkSize: 4,
+        charDelay: 12,
+      },
+      {
+        kind: "command",
+        prompt,
+        input: "brew install --cask chatminal",
+        delayAfter: 180,
+        charDelay: 22,
+      },
+      {
+        kind: "print",
+        text: `${ansi.green}==>${ansi.reset} Downloading Chatminal.app\r\n${ansi.green}==>${ansi.reset} Linking ${ansi.blue}chatminal${ansi.reset} into ${ansi.gray}/opt/homebrew/bin${ansi.reset}\r\n\r\n`,
+        delayAfter: 450,
+        chunkSize: 4,
+        charDelay: 10,
+      },
+      {
+        kind: "command",
+        prompt,
+        input: "chatminal",
+        delayAfter: 180,
+        charDelay: 26,
+      },
+      {
+        kind: "print",
+        text: `${ansi.green}✓${ansi.reset} Chatminal launched\r\n${ansi.muted}Use Homebrew for future upgrades.${ansi.reset}\r\n`,
+        delayAfter: 900,
+        chunkSize: 4,
+        charDelay: 10,
+      },
+    ];
+  }
+
+  if (sessionName === "Linux") {
+    const prompt = `${ansi.green}$${ansi.reset} `;
+    return [
+      {
+        kind: "print",
+        text: `${ansi.muted}# Install Chatminal on Linux${ansi.reset}\r\n\r\n`,
+        delayAfter: 200,
+        chunkSize: 4,
+        charDelay: 12,
+      },
+      {
+        kind: "command",
+        prompt,
+        input: "curl -fsSL https://chatminal.com/install | bash",
+        delayAfter: 180,
+        charDelay: 18,
+      },
+      {
+        kind: "print",
+        text: `${ansi.green}==>${ansi.reset} Preparing Chatminal v0.1.2 for linux/x86_64\r\n${ansi.green}==>${ansi.reset} Installed ${ansi.blue}chatminal${ansi.reset} to ${ansi.gray}~/.local/bin/chatminal${ansi.reset}\r\n\r\n`,
+        delayAfter: 450,
+        chunkSize: 4,
+        charDelay: 10,
+      },
+      {
+        kind: "command",
+        prompt,
+        input: "chatminal",
+        delayAfter: 180,
+        charDelay: 26,
+      },
+      {
+        kind: "print",
+        text: `${ansi.green}✓${ansi.reset} Session tree ready\r\n${ansi.muted}Latest stable release installed.${ansi.reset}\r\n`,
+        delayAfter: 900,
+        chunkSize: 4,
+        charDelay: 10,
+      },
+    ];
+  }
+
+  if (sessionName === "Windows") {
+    const prompt = `${ansi.green}PS>${ansi.reset} `;
+    return [
+      {
+        kind: "print",
+        text: `${ansi.muted}# Install Chatminal on Windows${ansi.reset}\r\n\r\n`,
+        delayAfter: 200,
+        chunkSize: 4,
+        charDelay: 12,
+      },
+      {
+        kind: "command",
+        prompt,
+        input: "start https://github.com/Khoa280703/chatminal/releases/latest",
+        delayAfter: 180,
+        charDelay: 18,
+      },
+      {
+        kind: "print",
+        text: `${ansi.green}Opening${ansi.reset} latest release page in your browser...\r\n\r\n`,
+        delayAfter: 420,
+        chunkSize: 4,
+        charDelay: 10,
+      },
+      {
+        kind: "command",
+        prompt,
+        input: "Expand-Archive .\\Chatminal-v0.1.2-windows-x86_64.zip -DestinationPath .\\chatminal",
+        delayAfter: 180,
+        charDelay: 16,
+      },
+      {
+        kind: "print",
+        text: `${ansi.green}✓${ansi.reset} Archive extracted to ${ansi.gray}.\\chatminal${ansi.reset}\r\n${ansi.muted}Launch Chatminal from the extracted folder.${ansi.reset}\r\n`,
+        delayAfter: 900,
+        chunkSize: 4,
+        charDelay: 10,
+      },
+    ];
+  }
+
+  return [];
+}
+
 function transcriptForSession(sessionName: string) {
   if (sessionName === "Agent_Debugger") {
     return buildGeminiTranscript();
@@ -469,11 +639,19 @@ function transcriptForSession(sessionName: string) {
   if (sessionName === "Protocol_Sync") {
     return buildProtocolSyncTranscript();
   }
+  if (sessionName === "macOS" || sessionName === "Linux" || sessionName === "Windows") {
+    return buildInstallTranscript(sessionName);
+  }
   return buildGenericTranscript(sessionName);
 }
 
 function shouldAnimateTerminalSession(sessionName: string) {
-  return sessionName === "Protocol_Sync";
+  return (
+    sessionName === "Protocol_Sync" ||
+    sessionName === "macOS" ||
+    sessionName === "Linux" ||
+    sessionName === "Windows"
+  );
 }
 
 function tokenizeTerminalOutput(output: string) {
@@ -1046,7 +1224,7 @@ export function TerminalWindowPreview() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
     "vibe-engine": true,
     "neural-core": true,
-    "agent-swarm": true,
+    "chatminal-setup": true,
   });
   const [activeSession, setActiveSession] = useState<string>("Agent_Architect");
 
@@ -1179,6 +1357,92 @@ export function TerminalWindowPreview() {
     runStep();
   }, [playTokenChunk, scheduleTerminalStep, stopTerminalAnimation]);
 
+  const playInstallSetupSession = useCallback((term: XtermInstance, sessionName: string) => {
+    stopTerminalAnimation();
+
+    const steps = buildInstallPlayback(sessionName);
+    const runId = terminalAnimationRunIdRef.current;
+    let stepIndex = 0;
+
+    const restartPlayback = () => {
+      if (runId !== terminalAnimationRunIdRef.current) {
+        return;
+      }
+      term.clear();
+      term.write("\x1b[H\x1b[2J");
+      stepIndex = 0;
+      runStep();
+    };
+
+    const runStep = () => {
+      if (runId !== terminalAnimationRunIdRef.current) {
+        return;
+      }
+
+      const step = steps[stepIndex];
+      if (!step) {
+        scheduleTerminalStep(restartPlayback, 1200);
+        return;
+      }
+
+      if (step.kind === "pause") {
+        stepIndex += 1;
+        scheduleTerminalStep(runStep, step.delay);
+        return;
+      }
+
+      if (step.kind === "command") {
+        term.write(step.prompt);
+        const chars = Array.from(step.input);
+        let charIndex = 0;
+
+        const typeCommand = () => {
+          if (runId !== terminalAnimationRunIdRef.current) {
+            return;
+          }
+
+          if (charIndex < chars.length) {
+            term.write(chars[charIndex]);
+            charIndex += 1;
+            scheduleTerminalStep(typeCommand, step.charDelay ?? 22);
+            return;
+          }
+
+          term.write("\r\n");
+          stepIndex += 1;
+          scheduleTerminalStep(runStep, step.delayAfter ?? 180);
+        };
+
+        typeCommand();
+        return;
+      }
+
+      const tokens = tokenizeTerminalOutput(step.text);
+      const tokenIndexRef = { value: 0 };
+      const chunkSize = step.chunkSize ?? 3;
+      const charDelay = step.charDelay ?? 10;
+
+      const printChunk = () => {
+        if (runId !== terminalAnimationRunIdRef.current) {
+          return;
+        }
+
+        playTokenChunk(term, tokens, tokenIndexRef, chunkSize);
+        if (tokenIndexRef.value < tokens.length) {
+          scheduleTerminalStep(printChunk, charDelay);
+          return;
+        }
+
+        stepIndex += 1;
+        scheduleTerminalStep(runStep, step.delayAfter ?? 180);
+      };
+
+      printChunk();
+    };
+
+    runStep();
+  }, [playTokenChunk, scheduleTerminalStep, stopTerminalAnimation]);
+
   const writeTerminalSession = useCallback((term: XtermInstance, sessionName: string) => {
     const transcript = transcriptForSession(sessionName);
 
@@ -1193,8 +1457,13 @@ export function TerminalWindowPreview() {
       return;
     }
 
+    if (sessionName === "macOS" || sessionName === "Linux" || sessionName === "Windows") {
+      playInstallSetupSession(term, sessionName);
+      return;
+    }
+
     term.write(transcript);
-  }, [playProtocolSyncSession, stopTerminalAnimation]);
+  }, [playInstallSetupSession, playProtocolSyncSession, stopTerminalAnimation]);
 
   useEffect(() => {
     let disposed = false;
@@ -1395,23 +1664,25 @@ export function TerminalWindowPreview() {
                     </button>
 
                     {isExpanded && (
-                      <div className="relative ml-2 space-y-1 pl-6">
-                        <span
-                          aria-hidden="true"
-                          className="absolute bottom-[10px] left-[7px] top-[10px] w-px bg-white/45"
-                        />
+                      <div
+                        className={`ml-2 space-y-1 pl-6 ${
+                          isJoinedTree ? "relative pl-7" : ""
+                        }`}
+                      >
+                        {isJoinedTree && (
+                          <span
+                            aria-hidden="true"
+                            className="absolute bottom-[10px] left-[8px] top-[10px] w-[2px] rounded-full bg-white/40"
+                          />
+                        )}
                         {profile.sessions.map((session) => {
                           const isJoinedSessionActive =
                             isJoinedTree && isNeuralCoreSession(activeSession);
-                          const connectorTone =
-                            activeSession === session.name || isJoinedSessionActive
-                              ? "bg-white/70"
-                              : "bg-white/45";
 
                           return (
                             <button
                               key={session.name}
-                              className={`relative flex w-full items-center gap-2 pl-5 transition-colors ${
+                              className={`relative flex w-full items-center gap-2 pl-3 transition-colors ${
                                 activeSession === session.name || isJoinedSessionActive
                                   ? "font-bold text-white"
                                   : "text-[#a0a0a0] hover:text-white"
@@ -1420,10 +1691,12 @@ export function TerminalWindowPreview() {
                                 setActiveSession(isJoinedTree ? profile.name : session.name)
                               }
                             >
-                              <span
-                                aria-hidden="true"
-                                className={`absolute left-[7px] top-1/2 h-px w-[12px] -translate-y-1/2 ${connectorTone}`}
-                              />
+                              {isJoinedTree && (
+                                <span
+                                  aria-hidden="true"
+                                  className="absolute -left-[20px] top-1/2 h-[2px] w-[16px] -translate-y-1/2 rounded-full bg-white/40"
+                                />
+                              )}
                               <LandingIcon name={session.icon} className="h-[18px] w-[18px]" />
                               {session.name}
                             </button>

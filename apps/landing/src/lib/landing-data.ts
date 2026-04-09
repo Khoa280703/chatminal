@@ -3,11 +3,30 @@ export const githubDeveloperDocsUrl =
   "https://github.com/Khoa280703/chatminal/tree/main/docs";
 export const githubReleasesUrl =
   "https://github.com/Khoa280703/chatminal/releases";
-export const latestReleaseTag = "v0.1.1";
+export const latestReleaseTag = "v0.1.2";
 export const downloadLinks = {
   windows: `https://github.com/Khoa280703/chatminal/releases/download/${latestReleaseTag}/Chatminal-${latestReleaseTag}-windows-x86_64.zip`,
   macos: githubReleasesUrl,
   linux: `https://github.com/Khoa280703/chatminal/releases/download/${latestReleaseTag}/Chatminal-${latestReleaseTag}-linux-x86_64.tar.gz`,
+};
+
+export type DownloadMethod = {
+  id: string;
+  label: string;
+  description: string;
+  code: string;
+};
+
+export type DownloadPlatform = {
+  id: string;
+  label: string;
+  icon: string;
+  artifact: string;
+  downloadHref: string;
+  directDownload: boolean;
+  downloadLabel: string;
+  helperText: string;
+  methods: DownloadMethod[];
 };
 
 export const navigationItems = [
@@ -65,6 +84,75 @@ export const downloadOptions = [
     artifact: `${latestReleaseTag} .TAR.GZ`,
     href: downloadLinks.linux,
     directDownload: true,
+  },
+];
+
+export const downloadPlatforms: DownloadPlatform[] = [
+  {
+    id: "macos",
+    label: "macOS",
+    icon: "apple",
+    artifact: `${latestReleaseTag} APPLE SILICON / INTEL`,
+    downloadHref: githubReleasesUrl,
+    directDownload: false,
+    downloadLabel: "Open Releases",
+    helperText: "Choose Apple Silicon or Intel on GitHub Releases.",
+    methods: [
+      {
+        id: "brew",
+        label: "brew",
+        description: "Install it with Homebrew as a normal cask.",
+        code: "brew install --cask chatminal",
+      },
+      {
+        id: "bash",
+        label: "bash",
+        description: "Install the latest stable release with the installer script.",
+        code: "curl -fsSL https://chatminal.com/install | bash",
+      },
+    ],
+  },
+  {
+    id: "linux",
+    label: "Linux",
+    icon: "linux",
+    artifact: `${latestReleaseTag} .TAR.GZ`,
+    downloadHref: downloadLinks.linux,
+    directDownload: true,
+    downloadLabel: "Download Tarball",
+    helperText: "Direct download for Linux x86_64.",
+    methods: [
+      {
+        id: "bash",
+        label: "bash",
+        description: "Install the latest stable release with the installer script.",
+        code: "curl -fsSL https://chatminal.com/install | bash",
+      },
+      {
+        id: "tarball",
+        label: "tarball",
+        description: "Download the Linux artifact directly from the release.",
+        code: `curl -fL ${downloadLinks.linux} -o Chatminal-${latestReleaseTag}-linux-x86_64.tar.gz`,
+      },
+    ],
+  },
+  {
+    id: "windows",
+    label: "Windows",
+    icon: "windows",
+    artifact: `${latestReleaseTag} .ZIP`,
+    downloadHref: downloadLinks.windows,
+    directDownload: true,
+    downloadLabel: "Download Zip",
+    helperText: "Direct download for Windows x64.",
+    methods: [
+      {
+        id: "powershell",
+        label: "powershell",
+        description: "Open the latest release page from PowerShell.",
+        code: "start https://github.com/Khoa280703/chatminal/releases/latest",
+      },
+    ],
   },
 ];
 

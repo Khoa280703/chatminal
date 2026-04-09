@@ -86,6 +86,30 @@ export default function DocsPage() {
                     <code>{section.code}</code>
                   </pre>
                 )}
+
+                {section.methods && (
+                  <div className="mt-8 grid gap-4 md:grid-cols-3">
+                    {section.methods.map((method) => (
+                      <div
+                        key={method.id}
+                        className="border border-white/10 bg-white/[0.02] p-4"
+                      >
+                        <p className="font-mono text-[11px] uppercase tracking-[0.3em] text-terminal-muted">
+                          {method.label}
+                        </p>
+                        <h4 className="mt-3 font-headline text-2xl font-bold text-white">
+                          {method.title}
+                        </h4>
+                        <p className="mt-3 font-mono text-sm leading-6 text-terminal-muted">
+                          {method.body}
+                        </p>
+                        <pre className="mt-5 overflow-x-auto border-l border-white/20 pl-4 font-mono text-sm leading-6 text-white">
+                          <code>{method.code}</code>
+                        </pre>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </section>
             ))}
           </div>

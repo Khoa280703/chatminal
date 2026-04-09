@@ -39,7 +39,11 @@ repomix-output.xml
 home/
 **/node_modules/
 **/.next/
+**/.next-build/
 .stitch-downloads/
+apps/landing/stitch/
+apps/landing/claudecode-color-2.png
+apps/landing/public/stitch-chatminal-landing-reference.png
 
 # ==============================================================================
 # Developer Tools (Internal)

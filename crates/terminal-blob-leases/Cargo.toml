@@ -1,6 +1,6 @@
 [package]
 name = "terminal-blob-leases"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "Manage image blob caching/leasing for Chatminal"
 license = "MIT"

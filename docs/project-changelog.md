@@ -12,6 +12,10 @@
   - docs now include `brew tap ...` and `brew install --cask chatminal`
 
 ### Changed
+- Release prep for `v0.1.2`:
+  - workspace, desktop, and landing package metadata bumped to `0.1.2`
+  - public landing/docs/install examples now point at `v0.1.2`
+  - internal planning artifacts are no longer tracked in the public repo
 - Release prep for `v0.1.1`:
   - workspace and desktop crate versions bumped to `0.1.1`
   - landing page release metadata now points to the stable release path instead of stale `v0.1.0-test6` assets
@@ -116,7 +120,7 @@
 - Follow-up phase 01 config ownership completion landed:
   - `chatminal-window`, `chatminal-terminal-font`, `chatminal-time-funcs`, and `chatminal-ratelim` product paths now use explicit config ownership/snapshot wiring instead of live `configuration()` polling
   - residual `configuration()` reads are now limited to `chatminal-config` foundation helpers plus tests/comment seams
-  - follow-up plan `plans/260403-1800-post-unification-followups/plan.md` is now fully completed
+  - follow-up plan cho scope hậu unification đã hoàn tất
 - Architecture unification plan `260401-0949-architecture-unification` đã được chốt `done`:
   - final closeout checklist đã được hoàn tất
   - `with_mux(` / `with_mux_strict(` sạch trong code `crates/` + `apps/`
@@ -128,7 +132,6 @@
     - `cargo test --manifest-path apps/chatminal-desktop/Cargo.toml -- --test-threads=1`
     - `make window` bounded smoke launch
   - deferred scope đã có follow-up plan rõ ràng, và follow-up đó hiện đã hoàn tất:
-    - `plans/260403-1800-post-unification-followups/plan.md`
     - `Phase 02` rename/cosmetic sweep
 - Merge-wave blocker cuối của architecture unification đã được gỡ:
   - desktop tests đụng `build_initial_host_mux()` / `shutdown_host_mux()` giờ dùng shared lock ở `desktop_host_runtime`, nên `session_pane` và `session_host` không còn race nhau trên global host-mux lifecycle
@@ -488,7 +491,7 @@
     - canonical persistence dùng logical newline để không làm mất open fragment/prompt tail
 - Cleanup:
   - bỏ helper/store path dead không còn dùng trong active canonical flow
-  - sync plan `plans/260327-1638-history-reflow-canonical-scrollback/`
+  - sync implementation notes cho canonical scrollback rollout
 
 ### Verification
 - `cargo test --manifest-path crates/chatminal-store/Cargo.toml` pass
@@ -766,7 +769,7 @@
 - Phase closeout `260305-1458`:
   - thêm module `apps/chatminal-app/src/window_wezterm_gui/chatminal_ipc_mux_target.rs` và race tests tương ứng.
   - refactor `proxy-wezterm-session` sang target module chung để gom logic input UTF-8 boundary, batch flush, event ordering.
-  - toàn bộ checklist plan `plans/260305-1458-wezterm-gui-window-migration-daemon-ipc/` đã đóng.
+  - toàn bộ checklist implementation cho đợt cutover này đã đóng.
   - manual host-specific gates (macOS smoke + IME matrix) được giữ ở external preflight checklist, không để TODO mở trong coding plan.
 - Phase 05 fidelity gate hardening (late update):
   - `scripts/fidelity/phase03-fidelity-matrix-smoke.sh` thêm case `ctrl-c-burst` và `stress-paste`.
@@ -776,8 +779,8 @@
   - phase06 wrapper report status rõ hơn: `passed_manual_pending` khi chưa có IME manual sign-off.
   - benchmark hard fail gate RTT nới từ `p95<=45ms` lên `p95<=50ms` để giảm false-fail trong môi trường tải cao (target p95 vẫn giữ 30ms).
 - Rollout artifacts sync:
-  - thêm canary sign-off report Linux: `plans/260305-1458-wezterm-gui-window-migration-daemon-ipc/reports/canary-signoff-2026-03-05.md`.
-  - refresh fidelity/soak/release compare artifacts trong `plans/260305-1458-wezterm-gui-window-migration-daemon-ipc/reports/`.
+  - thêm Linux canary sign-off report cho đợt cutover.
+  - refresh fidelity/soak/release compare artifacts trong khu vực internal reports.
 - Build shortcuts chuyển `make window` sang `window-wezterm-gui`; nhánh fallback `window-legacy` đã được gỡ ở batch cutover mới nhất.
 - `README.md` cập nhật cách chạy window mới và biến môi trường `CHATMINAL_WEZTERM_BIN`.
 - Bổ sung rollback selector cho window runtime:
@@ -811,7 +814,7 @@
   - `phase06-killswitch-verify.sh` fallback path (không có `timeout/gtimeout`) giờ trả đúng exit code nếu attach thoát sớm, tránh false-pass
 - Rollout docs/status sync:
   - phase-06 strategy đồng bộ default `wezterm` + `legacy` kill-switch (không còn mô tả default `legacy`)
-  - migration checklist cập nhật evidence path mới trong `plans/.../reports`
+  - migration checklist cập nhật evidence path mới trong khu vực internal reports
   - milestone roadmap sync phase-06/phase-07 sang trạng thái Completed
 - CI quality gate:
   - thêm 2 job scheduled `nightly-soak-linux` + `nightly-soak-macos` chạy soak mode `nightly` 2h và upload JSON report artifact
@@ -1015,12 +1018,12 @@
   - wired into runtime input paths (`attach-wezterm`; lịch sử có `window-wezterm` trước khi hard-cut sang GUI window command)
   - added legacy mapping helpers + regression tests
 - Added migration artifacts:
-  - `plans/.../reports/migration-wave-checklist.md`
-  - `plans/.../reports/rollback-drill-log.md`
-  - `plans/.../reports/windows-input-parity-report.md`
-  - `plans/.../reports/baseline-input-gap-map.md`
-  - `plans/.../reports/baseline-input-kpi.json`
-  - `plans/.../reports/ime-manual-matrix.md`
+  - migration wave checklist
+  - rollback drill log
+  - windows input parity report
+  - baseline input gap map
+  - baseline input KPI snapshot
+  - IME manual matrix
 - Deployment/docs sync:
   - `docs/deployment-guide.md` thêm rollback runbook cho input pipeline mode
   - `docs/code-standards.md` thêm input pipeline invariants
@@ -1030,7 +1033,7 @@
 - Documentation sync:
   - `docs/release-checklist.md` cập nhật memory gate mới: daemon `120/160`, app `180/220`, total `300/350` (target/hard-fail MB)
   - `docs/terminal-fidelity-matrix.md` cập nhật required subset mới và note manual-evidence cho semantic line-edit
-  - thêm schema mẫu: `plans/260305-0812-wezterm-input-pipeline-daemon-first-parity/reports/gate-sample-report-schema.md`
+  - thêm schema mẫu `gate-sample-report-schema.md` trong internal reports
 
 ### Phase 08 Follow-up (2026-03-06)
 - WezTerm GUI ownership inversion:
@@ -1054,7 +1057,7 @@
   - product path moved from default `mux_default()` hooks to `host_default()` hooks in host-runtime spawn/localpane/PTY seams
   - desktop local spawn target now opts into `LocalSpawnHooks::host_default()` for both local and serial paths
 - Scope decisions made explicit:
-  - config sectioning / singleton replacement remains follow-up work in `plans/260403-1800-post-unification-followups`
+  - config sectioning / singleton replacement remains follow-up work trong backlog hậu unification
   - crate rename/cosmetic sweep also moved to that follow-up plan
 - Final verify gates that passed:
   - `cargo check --workspace`

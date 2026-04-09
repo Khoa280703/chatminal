@@ -1258,7 +1258,7 @@ dependencies = [
 
 [[package]]
 name = "desktop"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1472,7 +1472,7 @@ dependencies = [
 
 [[package]]
 name = "dynamic-derive"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5223,7 +5223,7 @@ dependencies = [
 
 [[package]]
 name = "terminal-blob-leases"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "getrandom 0.3.4",
  "serde",

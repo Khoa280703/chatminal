@@ -5,6 +5,13 @@ export type UserDocsSection = {
   body: string;
   bullets: string[];
   code?: string;
+  methods?: {
+    id: string;
+    label: string;
+    title: string;
+    body: string;
+    code: string;
+  }[];
 };
 
 export const docsSections: UserDocsSection[] = [
@@ -13,14 +20,36 @@ export const docsSections: UserDocsSection[] = [
     label: "Install",
     title: "Install Chatminal",
     body:
-      "Chatminal is a desktop terminal for people who want their shell sessions to stay organized and easy to resume. The fastest path is the install script or a prebuilt release.",
+      "Chatminal is a desktop terminal for people who want their shell sessions to stay organized and easy to resume. Choose the install path that matches your platform and how you prefer to manage updates.",
     bullets: [
-      "Use the install script if you want the quickest setup.",
+      "Use the install script if you want the fastest terminal-first setup on macOS or Linux.",
       "Use Homebrew on macOS if you want install and upgrade through brew.",
-      "Use GitHub Releases if you prefer downloading a build manually.",
-      "Current release artifacts target macOS and Linux.",
+      "Use the GitHub Release download if you prefer a direct app archive or you are on Windows.",
+      "Current prebuilt artifacts cover macOS, Linux x86_64, and Windows x64.",
     ],
-    code: "curl -fsSL https://chatminal.com/install | bash\n# or\nbrew tap Khoa280703/chatminal https://github.com/Khoa280703/chatminal\nbrew install --cask chatminal",
+    methods: [
+      {
+        id: "bash",
+        label: "bash",
+        title: "Install with Bash",
+        body: "This installs the latest stable release and is the quickest path from a terminal.",
+        code: "curl -fsSL https://chatminal.com/install | bash",
+      },
+      {
+        id: "brew",
+        label: "brew",
+        title: "Install with Homebrew",
+        body: "Use this on macOS if you want Chatminal managed as a normal cask.",
+        code: "brew tap Khoa280703/chatminal https://github.com/Khoa280703/chatminal\nbrew install --cask chatminal",
+      },
+      {
+        id: "windows",
+        label: "windows",
+        title: "Download for Windows",
+        body: "Windows is currently distributed through the latest GitHub Release zip.",
+        code: "start https://github.com/Khoa280703/chatminal/releases/latest",
+      },
+    ],
   },
   {
     id: "first-launch",
