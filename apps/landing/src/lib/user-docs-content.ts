@@ -20,7 +20,7 @@ export const docsSections: UserDocsSection[] = [
       "Use GitHub Releases if you prefer downloading a build manually.",
       "Current release artifacts target macOS and Linux.",
     ],
-    code: "curl -fsSL https://chatminal.com/install | bash\n# or\nbrew tap Khoa280703/chatminal https://github.com/Khoa280703/chatminal\nbrew install --cask Khoa280703/chatminal/chatminal",
+    code: "curl -fsSL https://chatminal.com/install | bash\n# or\nbrew tap Khoa280703/chatminal https://github.com/Khoa280703/chatminal\nbrew install --cask chatminal",
   },
   {
     id: "first-launch",

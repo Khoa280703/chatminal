@@ -40,7 +40,7 @@ curl -fsSL https://chatminal.com/install | CHATMINAL_VERSION=v0.1.1 bash
 
 ```bash
 brew tap Khoa280703/chatminal https://github.com/Khoa280703/chatminal
-brew install --cask Khoa280703/chatminal/chatminal
+brew install --cask chatminal
 ```
 
 ### From Source

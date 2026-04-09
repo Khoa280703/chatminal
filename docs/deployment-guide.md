@@ -14,14 +14,14 @@ Use this repo itself as the tap:
 
 ```bash
 brew tap Khoa280703/chatminal https://github.com/Khoa280703/chatminal
-brew install --cask Khoa280703/chatminal/chatminal
+brew install --cask chatminal
 ```
 
 Upgrade later with:
 
 ```bash
 brew update
-brew upgrade --cask Khoa280703/chatminal/chatminal
+brew upgrade --cask chatminal
 ```
 
 Remove the tap with:
