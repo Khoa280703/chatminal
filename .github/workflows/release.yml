@@ -19,7 +19,15 @@ env:
 jobs:
   # ── macOS ──────────────────────────────────────────────────────────────────
   build-macos:
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            arch: aarch64
+          - runner: macos-13
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -43,8 +51,10 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: macos-dmg
-          path: dist/*.dmg
+          name: macos-release-${{ matrix.arch }}
+          path: |
+            dist/*.dmg
+            dist/*.tar.gz
 
   # ── Linux ──────────────────────────────────────────────────────────────────
   build-linux:
@@ -159,6 +169,23 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+
+      - name: Prepare release assets
+        run: |
+          cp scripts/install.sh dist/install.sh
+          (
+            cd dist
+            sha256sum * > SHA256SUMS
+          )
+
+      - name: Verify installer asset contract
+        run: |
+          ls dist
+          test -f dist/install.sh
+          test -f dist/SHA256SUMS
+          test -f "dist/Chatminal-${CHATMINAL_VERSION}-macos-aarch64.tar.gz"
+          test -f "dist/Chatminal-${CHATMINAL_VERSION}-macos-x86_64.tar.gz"
+          test -f "dist/Chatminal-${CHATMINAL_VERSION}-linux-x86_64.tar.gz"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

@@ -8,7 +8,13 @@ TARGET_DIR="$REPO_ROOT/target/release"
 DIST_DIR="$REPO_ROOT/dist"
 
 VERSION="${CHATMINAL_VERSION:-$(grep '^version' "$REPO_ROOT/Cargo.toml" | head -1 | sed 's/.*"\(.*\)".*/\1/')}"
-ARCH="$(uname -m)"
+RAW_ARCH="$(uname -m)"
+case "$RAW_ARCH" in
+    arm64) ARCH="aarch64" ;;
+    amd64) ARCH="x86_64" ;;
+    x86_64|aarch64) ARCH="$RAW_ARCH" ;;
+    *) ARCH="$RAW_ARCH" ;;
+esac
 ARCHIVE_NAME="Chatminal-${VERSION}-linux-${ARCH}.tar.gz"
 STAGING_DIR="$REPO_ROOT/target/linux-staging/chatminal-${VERSION}"
 

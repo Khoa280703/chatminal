@@ -1,5 +1,24 @@
 # Project Changelog
 
+## 2026-04-08
+
+### Added
+- Curl/Bash distribution path for desktop releases:
+  - added `scripts/install.sh` to install latest or pinned GitHub Release locally on macOS/Linux
+  - installer verifies downloaded assets against `SHA256SUMS`
+  - pinned installs now bootstrap the versioned `install.sh` attached to the selected GitHub Release
+  - Linux install now links `chatminal` into `~/.local/bin` and wires desktop entry/icon into `~/.local/share`
+  - macOS install now places `Chatminal.app` into `~/Applications` and links the launcher into `~/.local/bin`
+
+### Changed
+- Release packaging now emits installer-friendly tarballs in addition to GUI-native artifacts:
+  - macOS release job now uploads both `.dmg` and `Chatminal-<version>-macos-<arch>.tar.gz` for `aarch64` and `x86_64`
+  - Linux installer target is explicitly `x86_64` in this first release path
+  - publish job now attaches `install.sh` and generated `SHA256SUMS` to each GitHub Release
+- Docs updated for quick install flow:
+  - `README.md`
+  - `docs/deployment-guide.md`
+
 ## 2026-04-06
 
 ### Added

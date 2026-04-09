@@ -17,6 +17,25 @@
 
 ## 📦 Installation
 
+### Quick Install
+
+```bash
+curl -fsSL https://chatminal.com/install | bash
+```
+
+Default behavior installs the latest stable release.
+Current installer targets:
+
+- macOS `aarch64`
+- macOS `x86_64`
+- Linux `x86_64`
+
+Optional:
+
+```bash
+curl -fsSL https://chatminal.com/install | CHATMINAL_VERSION=v0.1.0 bash
+```
+
 ### From Source
 
 ```bash
@@ -32,6 +51,13 @@ make window
 
 - **Rust**: Stable version (>= 1.93)
 - **Platform**: macOS or Linux
+
+### Install Locations
+
+- **Linux app files**: `~/.local/share/chatminal/<version>`
+- **Linux launcher**: `~/.local/bin/chatminal`
+- **macOS app**: `~/Applications/Chatminal.app`
+- **macOS launcher**: `~/.local/bin/chatminal`
 
 > **Note**: On first build, vendor dependencies will be hydrated automatically.
 

@@ -12,7 +12,14 @@ BINARY_NAME="chatminal-desktop"   # matches CFBundleExecutable in Info.plist
 DIST_DIR="$REPO_ROOT/dist"
 
 VERSION="${CHATMINAL_VERSION:-$(grep '^version' "$REPO_ROOT/Cargo.toml" | head -1 | sed 's/.*"\(.*\)".*/\1/')}"
-DMG_NAME="Chatminal-${VERSION}-macos.dmg"
+RAW_ARCH="$(uname -m)"
+case "$RAW_ARCH" in
+    arm64) ARCH="aarch64" ;;
+    x86_64) ARCH="x86_64" ;;
+    *) ARCH="$RAW_ARCH" ;;
+esac
+DMG_NAME="Chatminal-${VERSION}-macos-${ARCH}.dmg"
+ARCHIVE_NAME="Chatminal-${VERSION}-macos-${ARCH}.tar.gz"
 
 echo "==> Building Chatminal $VERSION for macOS"
 
@@ -79,3 +86,11 @@ hdiutil create \
 
 rm -rf "$STAGING"
 echo "==> Done: $DIST_DIR/$DMG_NAME"
+
+# ── 6. Create installer tarball ──────────────────────────────────────────────
+echo "==> Creating $ARCHIVE_NAME"
+tar -czf "$DIST_DIR/$ARCHIVE_NAME" \
+    -C "$REPO_ROOT/target" \
+    "$BUNDLE_NAME"
+
+echo "==> Done: $DIST_DIR/$ARCHIVE_NAME"

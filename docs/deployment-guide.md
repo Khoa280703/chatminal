@@ -1,10 +1,49 @@
 # Deployment Guide
 
-Last updated: 2026-04-06
+Last updated: 2026-04-08
+
+## Quick Install
+
+```bash
+curl -fsSL https://chatminal.com/install | bash
+```
+
+Default behavior installs the latest stable GitHub Release. For prerelease tags, pin `CHATMINAL_VERSION` explicitly.
+
+Current curl|bash targets:
+
+- macOS `aarch64`
+- macOS `x86_64`
+- Linux `x86_64`
+
+Override release version:
+
+```bash
+curl -fsSL https://chatminal.com/install | CHATMINAL_VERSION=v0.1.0 bash
+```
+
+Override install locations:
+
+```bash
+curl -fsSL https://chatminal.com/install | \
+CHATMINAL_BIN_DIR="$HOME/.local/bin" \
+CHATMINAL_INSTALL_DIR="$HOME/.local/share/chatminal" \
+bash
+```
 
 ## Build Target
 
 - `apps/desktop` (single-process desktop app)
+
+## Installer Release Assets
+
+- `Chatminal-<version>-macos-<arch>.tar.gz`
+- `Chatminal-<version>-macos-<arch>.dmg`
+- `Chatminal-<version>-linux-<arch>.tar.gz`
+- `SHA256SUMS`
+- `install.sh`
+
+Windows `.zip` artifacts remain part of the full GitHub Release, but they are not used by the curl|bash installer path.
 
 ## Prerequisites
 

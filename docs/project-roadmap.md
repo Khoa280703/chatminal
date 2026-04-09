@@ -1,6 +1,6 @@
 # Project Roadmap
 
-Last updated: 2026-04-06
+Last updated: 2026-04-08
 
 ## Completed Milestones
 
@@ -12,6 +12,7 @@ Last updated: 2026-04-06
 - [x] Performance optimizations
 - [x] Crates renamed (removed `chatminal-` prefix)
 - [x] Marketing landing page scaffolded from Stitch design output (`apps/landing`)
+- [x] Curl/Bash installer path for GitHub Releases
 
 ## In Progress
 
@@ -19,6 +20,7 @@ Last updated: 2026-04-06
 - Window parity across platforms
 - Multi-session UX enhancements
 - Landing page polish and release/download wiring
+- Homebrew distribution path
 
 ## Future Plans
 
