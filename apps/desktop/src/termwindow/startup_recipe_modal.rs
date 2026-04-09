@@ -14,7 +14,7 @@ use terminal_emulator::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEve
 
 const MODAL_MAX_VISIBLE_LINES: usize = 10;
 const MODAL_MIN_INPUT_HEIGHT_PX: f32 = 220.0;
-const MODAL_INPUT_HORIZONTAL_PADDING_PX: f32 = 10.0;
+const MODAL_INPUT_HORIZONTAL_PADDING_PX: f32 = 12.0;
 const MODAL_VISIBLE_COLUMN_GUTTER: usize = 6;
 const MODAL_CURSOR_BLINK_MS: u64 = 530;
 const MODAL_CURSOR_GLYPH: char = '|';
@@ -331,7 +331,9 @@ impl StartupRecipeModal {
         font: &std::rc::Rc<terminal_font::LoadedFont>,
         label: &str,
         item_type: UIItemType,
+        border: LinearRgba,
         bg: LinearRgba,
+        hover_border: LinearRgba,
         hover: LinearRgba,
         text: LinearRgba,
     ) -> Element {
@@ -339,26 +341,26 @@ impl StartupRecipeModal {
             .item_type(item_type)
             .display(DisplayType::Inline)
             .padding(BoxDimension {
-                left: Dimension::Pixels(13.0),
-                right: Dimension::Pixels(13.0),
-                top: Dimension::Pixels(8.0),
-                bottom: Dimension::Pixels(8.0),
+                left: Dimension::Pixels(14.0),
+                right: Dimension::Pixels(14.0),
+                top: Dimension::Pixels(7.0),
+                bottom: Dimension::Pixels(7.0),
             })
             .margin(BoxDimension {
                 left: Dimension::Pixels(0.0),
-                right: Dimension::Pixels(8.0),
+                right: Dimension::Pixels(10.0),
                 top: Dimension::Pixels(0.0),
                 bottom: Dimension::Pixels(0.0),
             })
             .border(BoxDimension::new(Dimension::Pixels(1.0)))
-            .border_corners(Some(rounded_corners(7.0)))
+            .border_corners(Some(rounded_corners(5.0)))
             .colors(ElementColors {
-                border: BorderColor::new(bg),
+                border: BorderColor::new(border),
                 bg: bg.into(),
                 text: text.into(),
             })
             .hover_colors(Some(ElementColors {
-                border: BorderColor::new(hover),
+                border: BorderColor::new(hover_border),
                 bg: hover.into(),
                 text: text.into(),
             }))
@@ -370,13 +372,13 @@ impl StartupRecipeModal {
         let metrics = RenderMetrics::with_font_metrics(&font.metrics());
         let dimensions = term_window.dimensions;
         let max_panel_width = (dimensions.pixel_width as f32 - 48.0).max(360.0);
-        let width_px = (dimensions.pixel_width as f32 * 0.48)
-            .clamp(520.0, 820.0)
+        let width_px = (dimensions.pixel_width as f32 * 0.54)
+            .clamp(560.0, 820.0)
             .min(max_panel_width);
         let height_px = dimensions.pixel_height as f32;
         let panel_x = ((dimensions.pixel_width as f32 - width_px) / 2.0).max(24.0);
-        let panel_y = (dimensions.pixel_height as f32 * 0.10).max(34.0);
-        let panel_height = (dimensions.pixel_height as f32 * 0.80).max(460.0);
+        let panel_y = (dimensions.pixel_height as f32 * 0.14).max(42.0);
+        let panel_height = (dimensions.pixel_height as f32 * 0.68).max(400.0);
         let visible_columns = ((width_px - MODAL_INPUT_HORIZONTAL_PADDING_PX * 2.0)
             / metrics.cell_size.width as f32)
             .floor()
@@ -390,32 +392,33 @@ impl StartupRecipeModal {
             .min_height(Some(Dimension::Pixels(dimensions.pixel_height as f32)))
             .colors(ElementColors {
                 border: BorderColor::default(),
-                bg: LinearRgba::with_components(0.0, 0.0, 0.0, 0.64).into(),
+                bg: LinearRgba::with_components(0.0, 0.0, 0.0, 0.58).into(),
                 text: LinearRgba::TRANSPARENT.into(),
             });
 
-        let text = LinearRgba::with_components(0.92, 0.92, 0.92, 1.0);
-        let sub_muted = LinearRgba::with_components(0.52, 0.52, 0.52, 1.0);
-        let panel_bg = LinearRgba::with_components(0.007, 0.007, 0.007, 1.0);
-        let card_bg = panel_bg;
-        let border = LinearRgba::with_components(0.053, 0.053, 0.053, 1.0);
+        let text = LinearRgba::with_components(0.88, 0.88, 0.88, 1.0);
+        let sub_muted = LinearRgba::with_components(0.50, 0.50, 0.50, 1.0);
+        let panel_bg = LinearRgba::with_components(0.02, 0.02, 0.02, 1.0);
+        let border = LinearRgba::with_components(0.12, 0.12, 0.12, 1.0);
         let cursor_visible = Self::cursor_visible(term_window);
         let input_bg = if *self.select_all.borrow() {
-            LinearRgba::with_components(0.07, 0.16, 0.29, 1.0)
+            LinearRgba::with_components(0.08, 0.08, 0.08, 1.0)
         } else {
-            panel_bg
+            LinearRgba::with_components(0.01, 0.01, 0.01, 1.0)
         };
         let input_border = if *self.select_all.borrow() {
-            LinearRgba::with_components(0.18, 0.45, 0.82, 1.0)
+            LinearRgba::with_components(0.34, 0.34, 0.34, 1.0)
         } else {
-            LinearRgba::with_components(0.12, 0.12, 0.12, 1.0)
+            LinearRgba::with_components(0.18, 0.18, 0.18, 1.0)
         };
-        let button_bg = LinearRgba::with_components(0.09, 0.09, 0.09, 1.0);
-        let button_hover = LinearRgba::with_components(0.15, 0.15, 0.15, 1.0);
-        let save_bg = LinearRgba::with_components(0.11, 0.27, 0.49, 1.0);
-        let save_hover = LinearRgba::with_components(0.15, 0.33, 0.60, 1.0);
-        let run_bg = LinearRgba::with_components(0.10, 0.31, 0.20, 1.0);
-        let run_hover = LinearRgba::with_components(0.14, 0.39, 0.25, 1.0);
+        let button_border = LinearRgba::with_components(0.18, 0.18, 0.18, 1.0);
+        let button_bg = panel_bg;
+        let button_hover_border = LinearRgba::with_components(0.28, 0.28, 0.28, 1.0);
+        let button_hover = LinearRgba::with_components(0.06, 0.06, 0.06, 1.0);
+        let save_border = LinearRgba::with_components(0.96, 0.96, 0.96, 1.0);
+        let save_bg = LinearRgba::with_components(0.96, 0.96, 0.96, 1.0);
+        let save_hover = LinearRgba::with_components(0.86, 0.86, 0.86, 1.0);
+        let save_text = LinearRgba::with_components(0.03, 0.03, 0.03, 1.0);
 
         let recipe_lines: Vec<Element> = self
             .visible_recipe_lines(visible_columns.max(1), cursor_visible)
@@ -423,39 +426,22 @@ impl StartupRecipeModal {
             .map(|line| Self::text_block(&font, line, text))
             .collect();
 
-        let input_card = Element::new(
+        let editor = Element::new(
             &font,
             ElementContent::Children(vec![
-                Self::text_block(&font, "Startup recipe", text).padding(BoxDimension {
-                    left: Dimension::Pixels(0.0),
-                    right: Dimension::Pixels(0.0),
-                    top: Dimension::Pixels(0.0),
-                    bottom: Dimension::Pixels(6.0),
-                }),
-                Self::text_block(
-                    &font,
-                    "Click below and type commands. One step per line.",
-                    sub_muted,
-                )
-                .padding(BoxDimension {
-                    left: Dimension::Pixels(0.0),
-                    right: Dimension::Pixels(0.0),
-                    top: Dimension::Pixels(0.0),
-                    bottom: Dimension::Pixels(10.0),
-                }),
                 Element::new(&font, ElementContent::Children(recipe_lines))
                     .item_type(UIItemType::ChatminalStartupRecipeModalInput)
                     .display(DisplayType::Block)
                     .min_width(Some(Dimension::Percent(1.0)))
-                    .min_height(Some(Dimension::Pixels(MODAL_MIN_INPUT_HEIGHT_PX + 24.0)))
+                    .min_height(Some(Dimension::Pixels(MODAL_MIN_INPUT_HEIGHT_PX)))
                     .padding(BoxDimension {
-                        left: Dimension::Pixels(MODAL_INPUT_HORIZONTAL_PADDING_PX + 2.0),
-                        right: Dimension::Pixels(MODAL_INPUT_HORIZONTAL_PADDING_PX + 2.0),
+                        left: Dimension::Pixels(MODAL_INPUT_HORIZONTAL_PADDING_PX),
+                        right: Dimension::Pixels(MODAL_INPUT_HORIZONTAL_PADDING_PX),
                         top: Dimension::Pixels(12.0),
                         bottom: Dimension::Pixels(12.0),
                     })
                     .border(BoxDimension::new(Dimension::Pixels(1.0)))
-                    .border_corners(Some(rounded_corners(7.0)))
+                    .border_corners(Some(rounded_corners(4.0)))
                     .colors(ElementColors {
                         border: BorderColor::new(input_border),
                         bg: input_bg.into(),
@@ -466,22 +452,14 @@ impl StartupRecipeModal {
         .item_type(UIItemType::ChatminalStartupRecipeModalPanel)
         .display(DisplayType::Block)
         .padding(BoxDimension {
-            left: Dimension::Pixels(16.0),
-            right: Dimension::Pixels(16.0),
-            top: Dimension::Pixels(14.0),
-            bottom: Dimension::Pixels(14.0),
-        })
-        .margin(BoxDimension {
             left: Dimension::Pixels(0.0),
             right: Dimension::Pixels(0.0),
             top: Dimension::Pixels(0.0),
-            bottom: Dimension::Pixels(12.0),
+            bottom: Dimension::Pixels(0.0),
         })
-        .border(BoxDimension::new(Dimension::Pixels(1.0)))
-        .border_corners(Some(rounded_corners(7.0)))
         .colors(ElementColors {
-            border: BorderColor::new(border),
-            bg: card_bg.into(),
+            border: BorderColor::default(),
+            bg: LinearRgba::TRANSPARENT.into(),
             text: text.into(),
         });
 
@@ -492,7 +470,9 @@ impl StartupRecipeModal {
                     &font,
                     "Cancel",
                     UIItemType::ChatminalStartupRecipeModalCancel,
+                    button_border,
                     button_bg,
+                    button_hover_border,
                     button_hover,
                     text,
                 )
@@ -501,17 +481,21 @@ impl StartupRecipeModal {
                     &font,
                     "Save",
                     UIItemType::ChatminalStartupRecipeModalSave,
+                    save_border,
                     save_bg,
+                    save_border,
                     save_hover,
-                    text,
+                    save_text,
                 )
                 .float(Float::Right),
                 Self::action_button(
                     &font,
                     "Run now",
                     UIItemType::ChatminalStartupRecipeModalRun,
-                    run_bg,
-                    run_hover,
+                    button_border,
+                    button_bg,
+                    button_hover_border,
+                    button_hover,
                     text,
                 )
                 .float(Float::Right),
@@ -522,17 +506,39 @@ impl StartupRecipeModal {
         let panel = Element::new(
             &font,
             ElementContent::Children(vec![
-                input_card,
+                Self::text_block(&font, "Startup recipe", text).padding(BoxDimension {
+                    left: Dimension::Pixels(0.0),
+                    right: Dimension::Pixels(0.0),
+                    top: Dimension::Pixels(0.0),
+                    bottom: Dimension::Pixels(4.0),
+                }),
                 Self::text_block(
                     &font,
-                    "Esc cancel, Ctrl/Cmd+Enter save, Ctrl/Cmd+R run now.",
+                    "Save a command sequence for this session.",
                     sub_muted,
                 )
                 .padding(BoxDimension {
                     left: Dimension::Pixels(0.0),
                     right: Dimension::Pixels(0.0),
-                    top: Dimension::Pixels(2.0),
+                    top: Dimension::Pixels(0.0),
+                    bottom: Dimension::Pixels(14.0),
+                }),
+                editor.padding(BoxDimension {
+                    left: Dimension::Pixels(0.0),
+                    right: Dimension::Pixels(0.0),
+                    top: Dimension::Pixels(0.0),
                     bottom: Dimension::Pixels(12.0),
+                }),
+                Self::text_block(
+                    &font,
+                    "Esc close  Save: Ctrl/Cmd+Enter  Run: Ctrl/Cmd+R",
+                    sub_muted,
+                )
+                .padding(BoxDimension {
+                    left: Dimension::Pixels(0.0),
+                    right: Dimension::Pixels(0.0),
+                    top: Dimension::Pixels(0.0),
+                    bottom: Dimension::Pixels(14.0),
                 }),
                 footer_actions,
             ]),
@@ -540,13 +546,13 @@ impl StartupRecipeModal {
         .item_type(UIItemType::ChatminalStartupRecipeModalPanel)
         .display(DisplayType::Block)
         .padding(BoxDimension {
-            left: Dimension::Pixels(20.0),
-            right: Dimension::Pixels(20.0),
-            top: Dimension::Pixels(20.0),
-            bottom: Dimension::Pixels(20.0),
+            left: Dimension::Pixels(18.0),
+            right: Dimension::Pixels(18.0),
+            top: Dimension::Pixels(18.0),
+            bottom: Dimension::Pixels(18.0),
         })
         .border(BoxDimension::new(Dimension::Pixels(1.0)))
-        .border_corners(Some(rounded_corners(7.0)))
+        .border_corners(Some(rounded_corners(5.0)))
         .colors(ElementColors {
             border: BorderColor::new(border),
             bg: panel_bg.into(),
