@@ -14,13 +14,13 @@ Last updated: 2026-04-09
 - [x] Marketing landing page scaffolded from Stitch design output (`apps/landing`)
 - [x] Curl/Bash installer path for GitHub Releases
 - [x] Landing page polish and release/download wiring
+- [x] Homebrew distribution path
 
 ## In Progress
 
 - UI Shell improvements (GPU rendering, overlay bounds)
 - Window parity across platforms
 - Multi-session UX enhancements
-- Homebrew distribution path
 
 ## Future Plans
 

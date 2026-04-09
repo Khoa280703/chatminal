@@ -7,6 +7,9 @@
   - added `Clear All Data` command to wipe profiles, sessions, history, layouts, and local settings in one flow
   - runtime/store reset paths recreate a fresh default profile after clearing persisted state
   - regression coverage added for runtime workspace reset and store reset behavior
+- Homebrew distribution path in the main repo:
+  - added `Casks/chatminal.rb` so the current repo can be used directly as a Homebrew tap
+  - docs now include `brew tap ...` and `brew install --cask chatminal`
 
 ### Changed
 - Release prep for `v0.1.1`:

@@ -36,6 +36,13 @@ Optional:
 curl -fsSL https://chatminal.com/install | CHATMINAL_VERSION=v0.1.1 bash
 ```
 
+### Homebrew
+
+```bash
+brew tap Khoa280703/chatminal https://github.com/Khoa280703/chatminal
+brew install --cask Khoa280703/chatminal/chatminal
+```
+
 ### From Source
 
 ```bash

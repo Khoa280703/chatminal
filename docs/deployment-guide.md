@@ -8,6 +8,29 @@ Last updated: 2026-04-09
 curl -fsSL https://chatminal.com/install | bash
 ```
 
+## Homebrew Install
+
+Use this repo itself as the tap:
+
+```bash
+brew tap Khoa280703/chatminal https://github.com/Khoa280703/chatminal
+brew install --cask Khoa280703/chatminal/chatminal
+```
+
+Upgrade later with:
+
+```bash
+brew update
+brew upgrade --cask Khoa280703/chatminal/chatminal
+```
+
+Remove the tap with:
+
+```bash
+brew uninstall --cask chatminal
+brew untap Khoa280703/chatminal
+```
+
 Default behavior installs the latest stable GitHub Release. For prerelease tags, pin `CHATMINAL_VERSION` explicitly.
 
 Current curl|bash targets:
@@ -44,6 +67,12 @@ bash
 - `install.sh`
 
 Windows `.zip` artifacts remain part of the full GitHub Release, but they are not used by the curl|bash installer path.
+
+## Homebrew Cask Asset
+
+- `Casks/chatminal.rb`
+- targets macOS `aarch64` and `x86_64`
+- pulls `.dmg` assets from the matching GitHub Release tag
 
 ## Prerequisites
 

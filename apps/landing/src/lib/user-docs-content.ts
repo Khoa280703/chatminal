@@ -16,10 +16,11 @@ export const docsSections: UserDocsSection[] = [
       "Chatminal is a desktop terminal for people who want their shell sessions to stay organized and easy to resume. The fastest path is the install script or a prebuilt release.",
     bullets: [
       "Use the install script if you want the quickest setup.",
+      "Use Homebrew on macOS if you want install and upgrade through brew.",
       "Use GitHub Releases if you prefer downloading a build manually.",
       "Current release artifacts target macOS and Linux.",
     ],
-    code: "curl -fsSL https://chatminal.com/install | bash",
+    code: "curl -fsSL https://chatminal.com/install | bash\n# or\nbrew tap Khoa280703/chatminal https://github.com/Khoa280703/chatminal\nbrew install --cask Khoa280703/chatminal/chatminal",
   },
   {
     id: "first-launch",
