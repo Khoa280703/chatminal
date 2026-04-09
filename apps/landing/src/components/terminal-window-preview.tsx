@@ -1395,31 +1395,23 @@ export function TerminalWindowPreview() {
                     </button>
 
                     {isExpanded && (
-                      <div
-                        className={`relative ml-2 space-y-1 ${
-                          isJoinedTree ? "" : "pl-6"
-                        }`}
-                      >
-                        {isJoinedTree && (
-                          <span
-                            aria-hidden="true"
-                            className="absolute bottom-[10px] left-0 top-[10px] w-px bg-white/50"
-                          />
-                        )}
+                      <div className="relative ml-2 space-y-1 pl-6">
+                        <span
+                          aria-hidden="true"
+                          className="absolute bottom-[10px] left-[7px] top-[10px] w-px bg-white/45"
+                        />
                         {profile.sessions.map((session) => {
                           const isJoinedSessionActive =
                             isJoinedTree && isNeuralCoreSession(activeSession);
                           const connectorTone =
                             activeSession === session.name || isJoinedSessionActive
                               ? "bg-white/70"
-                              : "bg-white/50";
+                              : "bg-white/45";
 
                           return (
                             <button
                               key={session.name}
-                              className={`relative flex w-full items-center gap-2 ${
-                                isJoinedTree ? "pl-5" : ""
-                              } transition-colors ${
+                              className={`relative flex w-full items-center gap-2 pl-5 transition-colors ${
                                 activeSession === session.name || isJoinedSessionActive
                                   ? "font-bold text-white"
                                   : "text-[#a0a0a0] hover:text-white"
@@ -1428,12 +1420,10 @@ export function TerminalWindowPreview() {
                                 setActiveSession(isJoinedTree ? profile.name : session.name)
                               }
                             >
-                              {isJoinedTree && (
-                                <span
-                                  aria-hidden="true"
-                                  className={`absolute left-0 top-1/2 h-px w-[10px] -translate-y-1/2 ${connectorTone}`}
-                                />
-                              )}
+                              <span
+                                aria-hidden="true"
+                                className={`absolute left-[7px] top-1/2 h-px w-[12px] -translate-y-1/2 ${connectorTone}`}
+                              />
                               <LandingIcon name={session.icon} className="h-[18px] w-[18px]" />
                               {session.name}
                             </button>

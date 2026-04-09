@@ -1,5 +1,5 @@
 export const githubRepoUrl = "https://github.com/Khoa280703/chatminal";
-export const githubDocsUrl =
+export const githubDeveloperDocsUrl =
   "https://github.com/Khoa280703/chatminal/tree/main/docs";
 export const githubReleasesUrl =
   "https://github.com/Khoa280703/chatminal/releases";
@@ -10,30 +10,30 @@ export const downloadLinks = {
 };
 
 export const navigationItems = [
-  { label: "HOME", href: "#top", active: true },
-  { label: "FEATURES", href: "#features" },
-  { label: "DOWNLOADS", href: "#downloads" },
-  { label: "DOCS", href: githubDocsUrl },
+  { label: "HOME", href: "/" },
+  { label: "FEATURES", href: "/#features" },
+  { label: "DOWNLOADS", href: "/#downloads" },
+  { label: "DOCS", href: "/docs" },
 ];
 
 export const featureItems = [
   {
-    icon: "group_work",
-    title: "Multi-Agent Orchestration",
+    icon: "robot_2",
+    title: "Multi-Agent Control",
     description:
-      "Deploy distinct agents for architecture, debugging, and testing. Manage them simultaneously in a single tree view for maximum cognitive flow.",
+      "Run multiple AI agent sessions at once, keep them connected in the sidebar tree, and move across parallel branches without losing the shape of the job.",
   },
   {
     icon: "integration_instructions",
-    title: "Deep IDE Integration",
+    title: "Sessions And Profiles",
     description:
-      "Direct hooks into VS Code, NeoVim, and JetBrains. Your terminal knows your code as well as you do, without manual context dumping.",
+      "Organize shell sessions by task, project, or workflow, group them into profiles, and keep each context separate instead of piling everything into one terminal.",
   },
   {
     icon: "tune",
-    title: "Atomic Sessions",
+    title: "Resume And Restart Fast",
     description:
-      "Every task is an isolated, highly customizable session. Freeze, fork, or merge sessions as you navigate complex architectural transitions.",
+      "Restore workspace state when you come back, keep useful history, and use startup commands to reopen recurring setups with less manual repetition.",
   },
 ];
 
@@ -50,11 +50,12 @@ export const downloadOptions = [
 ];
 
 export const footerLinks = [
-  { label: "TERMINAL_X", href: "#top" },
+  { label: "HOME", href: "/" },
+  { label: "USER_DOCS", href: "/docs" },
   { label: "GITHUB_REPO", href: githubRepoUrl },
   { label: "STATUS_LOG", href: githubReleasesUrl },
   {
-    label: "LEGAL_DOCS",
-    href: "https://github.com/chatminal/chatminal/blob/main/LICENSE",
+    label: "DEV_DOCS",
+    href: githubDeveloperDocsUrl,
   },
 ];
