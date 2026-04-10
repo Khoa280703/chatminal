@@ -84,6 +84,7 @@ body {
   height: 100%;
   min-width: 0;
   overflow: hidden;
+  pointer-events: none;
   text-align: left;
 }
 
