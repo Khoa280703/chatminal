@@ -1625,7 +1625,7 @@ export function TerminalWindowPreview() {
           </div>
 
           <div className="flex h-[540px] min-w-0 flex-row">
-            <aside className="w-1/4 border-r border-white/10 p-4 font-mono text-xs text-[#c6c6c6]">
+            <aside className="w-1/4 border-r border-white/10 p-4 font-mono text-xs text-terminal-muted">
               <div className="mb-4 flex items-center gap-2 font-bold tracking-widest text-white">
                 <LandingIcon name="account_tree" className="h-[18px] w-[18px] text-white" />
                 PROJECTS
@@ -1685,7 +1685,7 @@ export function TerminalWindowPreview() {
                               className={`relative flex w-full items-center gap-2 pl-3 transition-colors ${
                                 activeSession === session.name || isJoinedSessionActive
                                   ? "font-bold text-white"
-                                  : "text-[#a0a0a0] hover:text-white"
+                                  : "text-terminal-muted hover:text-white"
                               }`}
                               onClick={() =>
                                 setActiveSession(isJoinedTree ? profile.name : session.name)
