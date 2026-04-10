@@ -902,14 +902,14 @@ function claudeToneClasses(tone: AgentMessageStep["tone"]) {
       };
     case "muted":
       return {
-        label: "text-[#8d8d8d]",
-        text: "text-[#b5b5b5]",
+        label: "text-[#a8a8a8]",
+        text: "text-[#cdcdcd]",
         caret: "bg-[#8d8d8d]",
       };
     case "user":
     default:
       return {
-        label: "text-[#8d8d8d]",
+        label: "text-[#a8a8a8]",
         text: "text-[#f2f2f2]",
         caret: "bg-[#D77757]",
       };
@@ -996,7 +996,7 @@ function ClaudeTerminalPanel({ compact = false }: { compact?: boolean }) {
               }`}
             >
               <span className="text-[#D77757]">Claude Code</span>
-              <span className="text-[#b5b5b5]"> v2.1.89</span>
+              <span className="text-[#cdcdcd]"> v2.1.89</span>
             </legend>
 
             <div
@@ -1037,7 +1037,7 @@ function ClaudeTerminalPanel({ compact = false }: { compact?: boolean }) {
                   />
                 </div>
                 <div
-                  className={`w-full space-y-0.5 leading-tight text-[#b5b5b5] ${
+                  className={`w-full space-y-0.5 leading-tight text-[#cdcdcd] ${
                     compact
                       ? "max-w-[112px] text-[7px] md:max-w-[124px] md:text-[7.5px]"
                       : "max-w-[132px] text-[8px] md:max-w-[146px] md:text-[9px] xl:max-w-[180px] xl:text-[13px]"
@@ -1061,7 +1061,7 @@ function ClaudeTerminalPanel({ compact = false }: { compact?: boolean }) {
                   <p className={`font-semibold leading-tight text-[rgba(215,119,87,0.86)] ${compact ? "mb-0.5" : "mb-0.5 md:mb-1"}`}>
                     Tips for getting started
                   </p>
-                  <p className={`break-words text-[#b5b5b5] ${compact ? "leading-[1.25]" : "leading-[1.35]"}`}>
+                  <p className={`break-words text-[#cdcdcd] ${compact ? "leading-[1.25]" : "leading-[1.35]"}`}>
                     Run /init to create a CLAUDE.md file with instructions for
                     this workspace.
                   </p>
@@ -1071,7 +1071,7 @@ function ClaudeTerminalPanel({ compact = false }: { compact?: boolean }) {
                   <p className={`font-semibold leading-tight text-[rgba(215,119,87,0.86)] ${compact ? "mb-0.5" : "mb-0.5 md:mb-1"}`}>
                     Recent activity
                   </p>
-                  <p className="break-words text-[#b5b5b5]">No recent activity</p>
+                  <p className="break-words text-[#cdcdcd]">No recent activity</p>
                 </div>
               </div>
             </div>
