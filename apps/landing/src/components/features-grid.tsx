@@ -16,7 +16,7 @@ export function FeaturesGrid() {
             <h2 className="mb-4 font-headline text-2xl font-bold uppercase text-white">
               {feature.title}
             </h2>
-            <p className="font-mono text-sm leading-relaxed text-[#a0a0a0]">
+            <p className="font-mono text-sm leading-relaxed text-terminal-muted">
               {feature.description}
             </p>
           </article>

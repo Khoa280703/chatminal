@@ -10,7 +10,7 @@ export function CommandClusterSection() {
             <br />
             AI CLUSTER.
           </h2>
-          <p className="mb-8 font-mono leading-relaxed text-[#a0a0a0]">
+          <p className="mb-8 font-mono leading-relaxed text-terminal-muted">
             Vibe coding is not just chatting. It is orchestration. Use CLI
             commands to distribute tasks across your agent tree.
           </p>
@@ -40,11 +40,11 @@ export function CommandClusterSection() {
               <div className="text-terminal-text">
                 const cluster = new AgentTree({'vibe_v1'});
               </div>
-              <div className="text-[#a0a0a0]">cluster.assign({"{"})</div>
-              <div className="pl-4 text-[#a0a0a0]">role: {'Architect'},</div>
-              <div className="pl-4 text-[#a0a0a0]">behavior: {'Aggressive_Refactor'},</div>
-              <div className="pl-4 text-[#a0a0a0]">context: {'./src/lib'}</div>
-              <div className="text-[#a0a0a0]">{"});"}</div>
+              <div className="text-terminal-muted">cluster.assign({"{"})</div>
+              <div className="pl-4 text-terminal-muted">role: {'Architect'},</div>
+              <div className="pl-4 text-terminal-muted">behavior: {'Aggressive_Refactor'},</div>
+              <div className="pl-4 text-terminal-muted">context: {'./src/lib'}</div>
+              <div className="text-terminal-muted">{"});"}</div>
               <br />
               <div className="text-green-300">await cluster.vibeCheck();</div>
               <div className="text-terminal-text">cluster.execute();</div>

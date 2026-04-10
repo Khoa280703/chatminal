@@ -6,7 +6,7 @@ export function HeroSection() {
       <h1 className="text-balance mb-8 max-w-4xl font-headline text-5xl font-bold leading-none tracking-tight text-white md:text-8xl">
         A Terminal for Vibe Coding.
       </h1>
-      <p className="mb-10 max-w-2xl font-mono text-lg text-[#a0a0a0]">
+      <p className="mb-10 max-w-2xl font-mono text-lg text-terminal-muted">
         Orchestrate multiple AI agents through a structured tree hierarchy.
         Fluid, focused, and engineered for the speed of thought.
       </p>
