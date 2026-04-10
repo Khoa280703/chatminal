@@ -6,7 +6,7 @@ import { footerLinks } from "@/lib/landing-data";
 export function SiteFooter() {
   return (
     <>
-      <footer className="mt-24 flex w-full flex-col items-center justify-between gap-8 border-t border-white/10 bg-black px-8 py-12 md:flex-row">
+      <footer className="mt-24 flex w-full flex-col items-center justify-between gap-8 border-t border-white/15 bg-black px-8 py-12 md:flex-row">
         <div className="flex flex-col items-center gap-3 md:flex-row">
           <Link href="/" className="flex items-center gap-3">
             <Image
@@ -20,7 +20,7 @@ export function SiteFooter() {
               CHATMINAL
             </span>
           </Link>
-          <span className="font-mono text-[10px] text-terminal-mutedSoft md:ml-3">
+          <span className="font-mono text-[10px] text-terminal-muted md:ml-3">
             © 2026 ALL RIGHTS RESERVED.
           </span>
         </div>
@@ -29,7 +29,7 @@ export function SiteFooter() {
             <Link
               key={link.label}
               href={link.href}
-              className="font-mono text-[12px] uppercase tracking-widest text-terminal-muted transition-colors hover:text-white"
+              className="font-mono text-[12px] uppercase tracking-widest text-[#d6d6d6] transition-colors hover:text-white"
             >
               {link.label}
             </Link>
