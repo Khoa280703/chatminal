@@ -145,6 +145,10 @@ impl super::TermWindow {
             | UIItemType::ChatminalStartupRecipeModalCancel
             | UIItemType::ChatminalStartupRecipeModalRun
             | UIItemType::ChatminalStartupRecipeModalSave
+            | UIItemType::ChatminalSettingsModalBackdrop
+            | UIItemType::ChatminalSettingsModalPanel
+            | UIItemType::ChatminalSettingsModalTab(_)
+            | UIItemType::ChatminalSettingsModalAction(_)
             | UIItemType::AboveScrollThumb(_)
             | UIItemType::BelowScrollThumb(_)
             | UIItemType::ScrollThumb(_)
@@ -179,6 +183,10 @@ impl super::TermWindow {
             | UIItemType::ChatminalStartupRecipeModalCancel
             | UIItemType::ChatminalStartupRecipeModalRun
             | UIItemType::ChatminalStartupRecipeModalSave
+            | UIItemType::ChatminalSettingsModalBackdrop
+            | UIItemType::ChatminalSettingsModalPanel
+            | UIItemType::ChatminalSettingsModalTab(_)
+            | UIItemType::ChatminalSettingsModalAction(_)
             | UIItemType::AboveScrollThumb(_)
             | UIItemType::BelowScrollThumb(_)
             | UIItemType::ScrollThumb(_)
@@ -676,7 +684,11 @@ impl super::TermWindow {
             | UIItemType::ChatminalStartupRecipeModalInput
             | UIItemType::ChatminalStartupRecipeModalCancel
             | UIItemType::ChatminalStartupRecipeModalRun
-            | UIItemType::ChatminalStartupRecipeModalSave => {}
+            | UIItemType::ChatminalStartupRecipeModalSave
+            | UIItemType::ChatminalSettingsModalBackdrop
+            | UIItemType::ChatminalSettingsModalPanel
+            | UIItemType::ChatminalSettingsModalTab(_)
+            | UIItemType::ChatminalSettingsModalAction(_) => {}
         }
     }
 
@@ -727,6 +739,10 @@ impl super::TermWindow {
         if matches!(event.kind, WMEK::Press(_) | WMEK::Release(_)) {
             self.dismiss_chatminal_sidebar_context_menu(context);
             self.cancel_chatminal_sidebar_inline_session_edit(context);
+        }
+        if matches!(event.kind, WMEK::Release(MousePress::Left)) {
+            self.open_chatminal_settings_modal();
+            context.invalidate();
         }
         context.set_cursor(Some(MouseCursor::Arrow));
     }

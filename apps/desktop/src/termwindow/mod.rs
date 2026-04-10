@@ -21,15 +21,15 @@ use crate::desktop_termwindow_types::{
 };
 use crate::frontend::{front_end, try_front_end};
 use crate::inputmap::InputMap;
+#[cfg(not(target_os = "macos"))]
+use crate::overlay::confirm_clear_all_data;
+#[cfg(target_os = "macos")]
+use crate::overlay::confirm_clear_all_data_native;
 use crate::overlay::confirm_close_tab as show_close_runtime_entry_overlay;
 use crate::overlay::{
     confirm_quit_program, launcher, start_overlay, CopyModeParams, CopyOverlay, LauncherArgs,
     LauncherFlags, QuickSelectOverlay,
 };
-#[cfg(target_os = "macos")]
-use crate::overlay::confirm_clear_all_data_native;
-#[cfg(not(target_os = "macos"))]
-use crate::overlay::confirm_clear_all_data;
 use crate::resize_increment_calculator::ResizeIncrementCalculator;
 use crate::runtime_module::{
     desktop_activate_session, desktop_can_close_view_only,
@@ -57,6 +57,9 @@ use crate::termwindow::render::{
     CachedLineState, LineQuadCacheKey, LineQuadCacheValue, LineToEleShapeCacheKey,
     LineToElementShapeItem,
 };
+use crate::termwindow::settings_modal::{
+    build_catalog as build_settings_catalog, SettingsCatalog, SettingsModal,
+};
 use crate::termwindow::startup_recipe_modal::StartupRecipeModal;
 use crate::termwindow::webgpu::WebGpuState;
 use ::terminal_emulator::input::{ClickPosition, MouseButton as TMB};
@@ -77,13 +80,13 @@ use mlua::{FromLua, LuaSerdeExt, UserData, UserDataFields};
 use runtime::{HostRuntimeNotification, RuntimeWorkspace};
 use smol::channel::Sender;
 use smol::Timer;
-use std::cell::{RefCell, RefMut};
+use std::cell::{Cell, RefCell, RefMut};
 use std::collections::{BTreeSet, HashMap, LinkedList};
 use std::convert::TryFrom;
 use std::ops::Add;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use terminal_emulator::color::ColorPalette;
 use terminal_emulator::input::LastMouseClick;
@@ -106,6 +109,7 @@ mod prevcursor;
 pub mod render;
 pub mod resize;
 mod selection;
+pub(crate) mod settings_modal;
 pub mod spawn;
 mod startup_recipe_modal;
 pub mod webgpu;
@@ -113,6 +117,32 @@ use crate::spawn::SpawnWhere;
 use prevcursor::PrevCursorPos;
 
 const ATLAS_SIZE: usize = 128;
+const SETTINGS_MODAL_PROFILE_ENV: &str = "CHATMINAL_PROFILE_SETTINGS_MODAL";
+const ACTION_FINDER_PROFILE_ENV: &str = "CHATMINAL_PROFILE_ACTION_FINDER";
+
+pub(crate) fn settings_modal_perf_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var(SETTINGS_MODAL_PROFILE_ENV)
+            .map(|value| {
+                let normalized = value.trim().to_ascii_lowercase();
+                !normalized.is_empty() && normalized != "0" && normalized != "false"
+            })
+            .unwrap_or(false)
+    })
+}
+
+pub(crate) fn action_finder_perf_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var(ACTION_FINDER_PROFILE_ENV)
+            .map(|value| {
+                let normalized = value.trim().to_ascii_lowercase();
+                !normalized.is_empty() && normalized != "0" && normalized != "false"
+            })
+            .unwrap_or(false)
+    })
+}
 
 lazy_static::lazy_static! {
     static ref WINDOW_CLASS: Mutex<String> = Mutex::new(gui_subcommands::DEFAULT_WINDOW_CLASS.to_owned());
@@ -227,6 +257,10 @@ pub enum UIItemType {
     ChatminalStartupRecipeModalCancel,
     ChatminalStartupRecipeModalRun,
     ChatminalStartupRecipeModalSave,
+    ChatminalSettingsModalBackdrop,
+    ChatminalSettingsModalPanel,
+    ChatminalSettingsModalTab(usize),
+    ChatminalSettingsModalAction(usize),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -504,6 +538,9 @@ pub struct TermWindow {
     gl: Option<Rc<glium::backend::Context>>,
     webgpu: Option<Rc<WebGpuState>>,
     config_subscription: Option<config::ConfigSubscription>,
+    settings_modal_catalog: Option<Rc<SettingsCatalog>>,
+    chatminal_settings_modal_open: Cell<bool>,
+    command_palette_modal_open: Cell<bool>,
     chatminal_sidebar: ChatminalSidebar,
     chatminal_sidebar_seen_version: u64,
     chatminal_sidebar_poll_started: bool,
@@ -523,6 +560,14 @@ impl TermWindow {
     pub(crate) fn chatminal_sidebar_width(&self) -> usize {
         self.chatminal_sidebar
             .width_pixels_for_window(self.dimensions.pixel_width, self.dimensions.dpi)
+    }
+
+    pub(crate) fn settings_modal_perf_logging_active(&self) -> bool {
+        settings_modal_perf_enabled() && self.chatminal_settings_modal_open.get()
+    }
+
+    pub(crate) fn action_finder_perf_logging_active(&self) -> bool {
+        action_finder_perf_enabled() && self.command_palette_modal_open.get()
     }
 
     fn chatminal_shell_enabled_for_dimensions(pixel_width: usize, dpi: usize) -> bool {
@@ -1491,6 +1536,49 @@ impl TermWindow {
         )));
     }
 
+    fn open_chatminal_settings_modal(&mut self) {
+        let start = Instant::now();
+        let cache_hit = self.settings_modal_catalog.is_some();
+        let catalog = match self.settings_modal_catalog.clone() {
+            Some(catalog) => catalog,
+            None => {
+                let catalog = Rc::new(build_settings_catalog(&self.config));
+                self.settings_modal_catalog = Some(catalog.clone());
+                catalog
+            }
+        };
+        let modal = SettingsModal::new(catalog);
+        self.set_modal(Rc::new(modal));
+        self.chatminal_settings_modal_open.set(true);
+
+        if settings_modal_perf_enabled() {
+            log::info!(
+                "settings-modal.open elapsed={:?} cache_hit={} tabs={} entries={}",
+                start.elapsed(),
+                cache_hit,
+                self.settings_modal_catalog
+                    .as_ref()
+                    .map(|catalog| catalog.tab_count())
+                    .unwrap_or(0),
+                self.settings_modal_catalog
+                    .as_ref()
+                    .map(|catalog| catalog.entry_count())
+                    .unwrap_or(0),
+            );
+        }
+    }
+
+    pub(crate) fn open_command_palette_modal(&mut self) {
+        let start = Instant::now();
+        let modal = crate::termwindow::palette::CommandPalette::new(self);
+        self.set_modal(Rc::new(modal));
+        self.command_palette_modal_open.set(true);
+
+        if action_finder_perf_enabled() {
+            log::info!("action-finder.open elapsed={:?}", start.elapsed());
+        }
+    }
+
     fn rename_chatminal_session(&mut self, session_id: &str, name: &str) {
         if !self.chatminal_sidebar.is_enabled() {
             return;
@@ -1636,15 +1724,15 @@ impl TermWindow {
 
         #[cfg(not(target_os = "macos"))]
         {
-        let Some(window) = self.window.as_ref().cloned() else {
-            anyhow::bail!("missing window");
-        };
-        if !self.spawn_overlay_on_active_render_scope(move |_tab_id, term| {
-            confirm_clear_all_data(window.clone(), term)
-        }) {
-            anyhow::bail!("no active tab");
-        }
-        Ok(())
+            let Some(window) = self.window.as_ref().cloned() else {
+                anyhow::bail!("missing window");
+            };
+            if !self.spawn_overlay_on_active_render_scope(move |_tab_id, term| {
+                confirm_clear_all_data(window.clone(), term)
+            }) {
+                anyhow::bail!("no active tab");
+            }
+            Ok(())
         }
     }
 
@@ -1861,6 +1949,9 @@ impl TermWindow {
             last_frame_duration: Duration::ZERO,
             fps: 0.,
             config_subscription: None,
+            settings_modal_catalog: None,
+            chatminal_settings_modal_open: Cell::new(false),
+            command_palette_modal_open: Cell::new(false),
             os_parameters: None,
             gl: None,
             webgpu: None,

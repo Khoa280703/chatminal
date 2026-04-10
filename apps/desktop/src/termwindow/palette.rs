@@ -22,11 +22,11 @@ use std::cell::{Ref, RefCell};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::Instant;
 use terminal_emulator::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use termwiz::nerdfonts::NERD_FONTS;
 use window::color::LinearRgba;
 use window::DeadKeyStatus;
-use window::Modifiers;
 
 struct MatchResults {
     selection: String,
@@ -98,6 +98,7 @@ fn build_commands(
     session_ui_mode: bool,
     filter_copy_mode: bool,
 ) -> Vec<ExpandedCommand> {
+    let start = Instant::now();
     let mut commands =
         CommandDef::actions_for_palette_and_menubar_with_session_ui(config, session_ui_mode);
 
@@ -172,6 +173,16 @@ fn build_commands(
         }
     });
 
+    if crate::termwindow::action_finder_perf_enabled() {
+        log::info!(
+            "action-finder.build-commands elapsed={:?} commands={} session_ui_mode={} filter_copy_mode={}",
+            start.elapsed(),
+            commands.len(),
+            session_ui_mode,
+            filter_copy_mode,
+        );
+    }
+
     commands
 }
 
@@ -236,19 +247,19 @@ fn visible_row_summary(total: usize, top_row: usize, rows_per_page: usize) -> St
     parts.join("  ")
 }
 
-fn sidebar_like_panel_bg() -> LinearRgba {
+pub(crate) fn sidebar_like_panel_bg() -> LinearRgba {
     LinearRgba::with_components(0.007, 0.007, 0.007, 1.0)
 }
 
-fn sidebar_like_border() -> LinearRgba {
+pub(crate) fn sidebar_like_border() -> LinearRgba {
     LinearRgba::with_components(0.053, 0.053, 0.053, 1.0)
 }
 
-fn sidebar_like_text() -> LinearRgba {
+pub(crate) fn sidebar_like_text() -> LinearRgba {
     LinearRgba::with_components(0.800, 0.800, 0.800, 1.0)
 }
 
-fn sidebar_like_muted_text() -> LinearRgba {
+pub(crate) fn sidebar_like_muted_text() -> LinearRgba {
     LinearRgba::with_components(0.616, 0.616, 0.616, 1.0)
 }
 
@@ -280,7 +291,7 @@ fn sidebar_like_text_style() -> TextStyle {
     }
 }
 
-fn resolve_sidebar_like_font(
+pub(crate) fn resolve_sidebar_like_font(
     term_window: &mut TermWindow,
 ) -> anyhow::Result<std::rc::Rc<terminal_font::LoadedFont>> {
     let style = sidebar_like_text_style();
@@ -322,7 +333,7 @@ fn compute_matches(selection: &str, commands: &[ExpandedCommand]) -> Vec<usize> 
     } else {
         let pattern = matcher_pattern(selection);
 
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         let mut scores: Vec<MatchResult> = commands
             .par_iter()
             .enumerate()
@@ -336,12 +347,23 @@ fn compute_matches(selection: &str, commands: &[ExpandedCommand]) -> Vec<usize> 
         scores.sort_by(|a, b| a.score.cmp(&b.score).reverse());
         log::trace!("matching took {:?}", start.elapsed());
 
+        if crate::termwindow::action_finder_perf_enabled() {
+            log::info!(
+                "action-finder.match elapsed={:?} selection_len={} commands={} hits={}",
+                start.elapsed(),
+                selection.chars().count(),
+                commands.len(),
+                scores.len(),
+            );
+        }
+
         scores.iter().map(|result| result.row_idx).collect()
     }
 }
 
 impl CommandPalette {
     pub fn new(term_window: &mut TermWindow) -> Self {
+        let start = Instant::now();
         // Showing the CopyMode actions in the palette is useless
         // if the CopyOverlay isn't active, so figure out if that
         // is the case so that we can filter them out in build_commands.
@@ -367,6 +389,16 @@ impl CommandPalette {
             session_ui_mode,
             filter_copy_mode,
         );
+
+        if crate::termwindow::action_finder_perf_enabled() {
+            log::info!(
+                "action-finder.new elapsed={:?} commands={} session_ui_mode={} filter_copy_mode={}",
+                start.elapsed(),
+                commands.len(),
+                session_ui_mode,
+                filter_copy_mode,
+            );
+        }
 
         Self {
             element: RefCell::new(None),
@@ -397,15 +429,20 @@ impl CommandPalette {
         selected_row: usize,
         top_row: usize,
     ) -> anyhow::Result<Vec<ComputedElement>> {
+        let compute_start = Instant::now();
+        let font_start = Instant::now();
         let font = resolve_sidebar_like_font(term_window)
             .expect("to resolve sidebar-like command palette font");
+        let font_elapsed = font_start.elapsed();
+        if crate::termwindow::action_finder_perf_enabled() {
+            log::info!("action-finder.font elapsed={:?}", font_elapsed);
+        }
         let metrics = RenderMetrics::with_font_metrics(&font.metrics());
         let panel_bg = sidebar_like_panel_bg();
         let root_border = sidebar_like_border();
         let text_color = sidebar_like_text();
         let muted_text = sidebar_like_muted_text();
         let active_bg = LinearRgba::with_components(0.016, 0.224, 0.369, 1.0);
-        let hover_bg = LinearRgba::with_components(0.071, 0.102, 0.141, 1.0);
 
         let top_bar_height =
             if term_window.show_session_bar && !term_window.config.session_bar_at_bottom {
@@ -459,12 +496,6 @@ impl CommandPalette {
             .skip(top_row)
             .take(max_rows_on_screen)
         {
-            let group = if command.menubar.is_empty() {
-                String::new()
-            } else {
-                format!("{}: ", command.menubar.join(" | "))
-            };
-
             let icon = match &command.icon {
                 Some(nf) => NERD_FONTS.get(nf.as_ref()).unwrap_or_else(|| {
                     log::error!("nerdfont {nf} not found in NERD_FONTS");
@@ -475,115 +506,20 @@ impl CommandPalette {
 
             let solid_bg_color: InheritableColor = active_bg.into();
             let solid_fg_color: InheritableColor = text_color.into();
-            let inactive_key_bg: InheritableColor = hover_bg.into();
 
             let (bg, text) = if display_idx == selected_row {
                 (solid_bg_color.clone(), solid_fg_color.clone())
             } else {
                 (LinearRgba::TRANSPARENT.into(), solid_fg_color.clone())
             };
-
-            let (label_bg, label_text) = if display_idx == selected_row {
-                (solid_bg_color.clone(), solid_fg_color.clone())
+            let label = if *icon == ' ' {
+                command.brief.to_string()
             } else {
-                (inactive_key_bg.clone(), solid_fg_color.clone())
+                format!("{icon} {}", command.brief)
             };
-
-            // DRY if the brief and doc are the same
-            let label = if command.doc.is_empty()
-                || command.brief.to_ascii_lowercase() == command.doc.to_ascii_lowercase()
-            {
-                format!("{group}{}", command.brief)
-            } else {
-                format!("{group}{}. {}", command.brief, command.doc)
-            };
-
-            let mut row = vec![
-                Element::new(&font, ElementContent::Text(icon.to_string()))
-                    .min_width(Some(Dimension::Cells(2.))),
-                Element::new(&font, ElementContent::Text(label)),
-            ];
-
-            if !command.keys.is_empty() {
-                let mut keys = command.keys.clone();
-
-                keys.sort_by(|(a_mods, a_key), (b_mods, b_key)| {
-                    fn score_mods(mods: &Modifiers) -> usize {
-                        let mut score: usize = mods.bits() as usize;
-                        // Prefer keys with CMD on macOS, but not on other systems,
-                        // where CMD tends to be reserved by the desktop environment
-                        if cfg!(target_os = "macos") && mods.contains(Modifiers::SUPER) {
-                            score += 1000;
-                        } else if !cfg!(target_os = "macos") && !mods.contains(Modifiers::SUPER) {
-                            score += 1000;
-                        }
-                        score
-                    }
-
-                    let a_mods = score_mods(a_mods);
-                    let b_mods = score_mods(b_mods);
-
-                    match b_mods.cmp(&a_mods) {
-                        Ordering::Equal => {}
-                        ordering => return ordering,
-                    }
-
-                    a_key.cmp(&b_key)
-                });
-
-                let separator = if term_window.config.ui_key_cap_rendering
-                    == ::window::UIKeyCapRendering::AppleSymbols
-                {
-                    " "
-                } else {
-                    "-"
-                };
-
-                let mut keys = keys
-                    .into_iter()
-                    .map(|(mods, keycode)| {
-                        let mut mod_string =
-                            mods.to_string_with_separator(::window::ModifierToStringArgs {
-                                separator,
-                                want_none: false,
-                                ui_key_cap_rendering: Some(term_window.config.ui_key_cap_rendering),
-                            });
-                        if !mod_string.is_empty() {
-                            mod_string.push_str(separator);
-                        }
-                        let keycode = crate::inputmap::ui_key(
-                            &keycode,
-                            term_window.config.ui_key_cap_rendering,
-                        );
-                        format!("{mod_string}{keycode}")
-                    })
-                    .collect::<Vec<_>>();
-
-                keys.dedup();
-                keys.truncate(term_window.config.palette_max_key_assigments_for_action);
-
-                let key_label = keys.join(", ");
-
-                row.push(
-                    Element::new(&font, ElementContent::Text(key_label))
-                        .float(Float::Right)
-                        .padding(BoxDimension {
-                            left: Dimension::Cells(1.25),
-                            right: Dimension::Cells(0.5),
-                            top: Dimension::Cells(0.),
-                            bottom: Dimension::Cells(0.),
-                        })
-                        .zindex(10)
-                        .colors(ElementColors {
-                            border: BorderColor::default(),
-                            bg: label_bg.clone(),
-                            text: label_text.clone(),
-                        }),
-                );
-            }
 
             elements.push(
-                Element::new(&font, ElementContent::Children(row))
+                Element::new(&font, ElementContent::Text(label))
                     .colors(ElementColors {
                         border: BorderColor::default(),
                         bg,
@@ -706,7 +642,21 @@ impl CommandPalette {
             &element,
         )?;
 
-        Ok(vec![computed])
+        let computed_elements = vec![computed];
+
+        if crate::termwindow::action_finder_perf_enabled() {
+            log::info!(
+                "action-finder.compute elapsed={:?} font_elapsed={:?} selection_len={} total_matches={} visible_rows={} commands={}",
+                compute_start.elapsed(),
+                font_elapsed,
+                selection.chars().count(),
+                total_matches,
+                total_matches.saturating_sub(top_row).min(max_rows_on_screen),
+                commands.len(),
+            );
+        }
+
+        Ok(computed_elements)
     }
 
     fn updated_input(&self) {
@@ -944,6 +894,7 @@ impl Modal for CommandPalette {
         &self,
         term_window: &mut TermWindow,
     ) -> anyhow::Result<Ref<'_, [ComputedElement]>> {
+        let computed_start = Instant::now();
         let selection = self.effective_selection();
         let selection = selection.as_str();
 
@@ -967,14 +918,23 @@ impl Modal for CommandPalette {
             .map(|m| m.selection != selection)
             .unwrap_or(true);
         if rebuild_matches {
+            let match_start = Instant::now();
             results.replace(MatchResults {
                 selection: selection.to_string(),
                 matches: compute_matches(selection, &self.commands),
             });
+            if crate::termwindow::action_finder_perf_enabled() {
+                log::info!(
+                    "action-finder.rebuild-matches elapsed={:?} selection_len={}",
+                    match_start.elapsed(),
+                    selection.chars().count(),
+                );
+            }
         };
         let matches = results.as_ref().unwrap();
 
         if self.element.borrow().is_none() {
+            let layout_start = Instant::now();
             let element = Self::compute(
                 term_window,
                 selection,
@@ -985,6 +945,22 @@ impl Modal for CommandPalette {
                 *self.top_row.borrow(),
             )?;
             self.element.borrow_mut().replace(element);
+            if crate::termwindow::action_finder_perf_enabled() {
+                log::info!(
+                    "action-finder.compute-element elapsed={:?} selection_len={} matches={}",
+                    layout_start.elapsed(),
+                    selection.chars().count(),
+                    matches.matches.len(),
+                );
+            }
+        }
+        if crate::termwindow::action_finder_perf_enabled() {
+            log::info!(
+                "action-finder.computed-element elapsed={:?} rebuild_matches={} reused_element={}",
+                computed_start.elapsed(),
+                rebuild_matches,
+                self.element.borrow().is_some(),
+            );
         }
         Ok(Ref::map(self.element.borrow(), |v| {
             v.as_ref().unwrap().as_slice()

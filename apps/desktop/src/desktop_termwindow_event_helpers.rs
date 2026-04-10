@@ -181,6 +181,7 @@ impl TermWindow {
             }
         };
         self.config = config.clone();
+        self.settings_modal_catalog = None;
         self.palette.take();
 
         let num_runtime_entries = self.get_session_entry_information().len();
@@ -289,6 +290,8 @@ impl TermWindow {
 
     pub fn cancel_modal(&self) {
         self.modal.borrow_mut().take();
+        self.chatminal_settings_modal_open.set(false);
+        self.command_palette_modal_open.set(false);
         if let Some(window) = self.window.as_ref() {
             window.invalidate();
         }
@@ -296,6 +299,8 @@ impl TermWindow {
 
     pub fn set_modal(&self, modal: Rc<dyn Modal>) {
         self.modal.borrow_mut().replace(modal);
+        self.chatminal_settings_modal_open.set(false);
+        self.command_palette_modal_open.set(false);
         if let Some(window) = self.window.as_ref() {
             window.invalidate();
         }

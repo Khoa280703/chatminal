@@ -162,6 +162,14 @@ impl crate::TermWindow {
     }
 
     pub fn paint_pass(&mut self) -> anyhow::Result<()> {
+        let modal_perf_name = if self.settings_modal_perf_logging_active() {
+            Some("settings-modal")
+        } else if self.action_finder_perf_logging_active() {
+            Some("action-finder")
+        } else {
+            None
+        };
+        let paint_pass_start = modal_perf_name.map(|_| Instant::now());
         {
             let gl_state = self.render_state.as_ref().unwrap();
             for layer in gl_state.layers.borrow().iter() {
@@ -283,7 +291,22 @@ impl crate::TermWindow {
         self.paint_window_borders(&mut layers)
             .context("paint_window_borders")?;
         drop(layers);
+        let modal_paint_start = modal_perf_name.map(|_| Instant::now());
         self.paint_modal().context("paint_modal")?;
+
+        if let (Some(name), Some(start)) = (modal_perf_name, paint_pass_start) {
+            let total_elapsed = start.elapsed();
+            let modal_elapsed = modal_paint_start.map(|modal_start| modal_start.elapsed());
+            if total_elapsed >= Duration::from_millis(8)
+                || modal_elapsed.is_some_and(|elapsed| elapsed >= Duration::from_millis(4))
+            {
+                log::info!(
+                    "{name}.paint-pass elapsed={:?} modal_elapsed={:?}",
+                    total_elapsed,
+                    modal_elapsed.unwrap_or_default(),
+                );
+            }
+        }
 
         Ok(())
     }

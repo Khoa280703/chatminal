@@ -420,8 +420,7 @@ pub fn perform_key_assignment(
             open_url::open_url(link);
         }
         ActivateCommandPalette => {
-            let modal = crate::termwindow::palette::CommandPalette::new(self);
-            self.set_modal(Rc::new(modal));
+            self.open_command_palette_modal();
         }
         PromptInputLine(args) => self.show_prompt_input_line(args),
         InputSelector(args) => self.show_input_selector(args),

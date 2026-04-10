@@ -428,26 +428,27 @@ impl StartupRecipeModal {
 
         let editor = Element::new(
             &font,
-            ElementContent::Children(vec![
-                Element::new(&font, ElementContent::Children(recipe_lines))
-                    .item_type(UIItemType::ChatminalStartupRecipeModalInput)
-                    .display(DisplayType::Block)
-                    .min_width(Some(Dimension::Percent(1.0)))
-                    .min_height(Some(Dimension::Pixels(MODAL_MIN_INPUT_HEIGHT_PX)))
-                    .padding(BoxDimension {
-                        left: Dimension::Pixels(MODAL_INPUT_HORIZONTAL_PADDING_PX),
-                        right: Dimension::Pixels(MODAL_INPUT_HORIZONTAL_PADDING_PX),
-                        top: Dimension::Pixels(12.0),
-                        bottom: Dimension::Pixels(12.0),
-                    })
-                    .border(BoxDimension::new(Dimension::Pixels(1.0)))
-                    .border_corners(Some(rounded_corners(4.0)))
-                    .colors(ElementColors {
-                        border: BorderColor::new(input_border),
-                        bg: input_bg.into(),
-                        text: text.into(),
-                    }),
-            ]),
+            ElementContent::Children(vec![Element::new(
+                &font,
+                ElementContent::Children(recipe_lines),
+            )
+            .item_type(UIItemType::ChatminalStartupRecipeModalInput)
+            .display(DisplayType::Block)
+            .min_width(Some(Dimension::Percent(1.0)))
+            .min_height(Some(Dimension::Pixels(MODAL_MIN_INPUT_HEIGHT_PX)))
+            .padding(BoxDimension {
+                left: Dimension::Pixels(MODAL_INPUT_HORIZONTAL_PADDING_PX),
+                right: Dimension::Pixels(MODAL_INPUT_HORIZONTAL_PADDING_PX),
+                top: Dimension::Pixels(12.0),
+                bottom: Dimension::Pixels(12.0),
+            })
+            .border(BoxDimension::new(Dimension::Pixels(1.0)))
+            .border_corners(Some(rounded_corners(4.0)))
+            .colors(ElementColors {
+                border: BorderColor::new(input_border),
+                bg: input_bg.into(),
+                text: text.into(),
+            })]),
         )
         .item_type(UIItemType::ChatminalStartupRecipeModalPanel)
         .display(DisplayType::Block)
