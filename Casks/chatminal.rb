@@ -1,9 +1,9 @@
 cask "chatminal" do
   arch arm: "aarch64", intel: "x86_64"
 
-  version "0.1.2"
-  sha256 arm:   "8d1f2b884d06d28a3a40319b2a97fbe9a79cb5640c93eb72e23ee989fdc576b7",
-         intel: "f1217ab420e0fd1b234d29585f00f1f3ba87a19bf3a8fba1fbc4fbcc6bdb2871"
+  version "0.1.3"
+  sha256 arm:   "e7e2a0062940a3d9afb8b489f18c002f2b32eb52a2a1f2e771a696d2dd4e528d",
+         intel: "40f25a46ec29debe578894921e9f68ed1f572a3ba311f1033d720ed19f74a143"
 
   url "https://github.com/Khoa280703/chatminal/releases/download/v#{version}/Chatminal-v#{version}-macos-#{arch}.dmg"
   name "Chatminal"
@@ -12,6 +12,11 @@ cask "chatminal" do
 
   app "Chatminal.app"
   binary "#{appdir}/Chatminal.app/Contents/MacOS/chatminal-desktop", target: "chatminal"
+
+  postflight do
+    system_command "/usr/bin/xattr",
+                   args: ["-dr", "com.apple.quarantine", "#{appdir}/Chatminal.app"]
+  end
 
   zap trash: [
     "~/Library/Application Support/chatminal",
