@@ -42,8 +42,19 @@ mkdir -p "$BUNDLE_OUT/Contents/Frameworks"
 cp "$TARGET_DIR/desktop" "$BUNDLE_OUT/Contents/MacOS/$BINARY_NAME"
 chmod +x "$BUNDLE_OUT/Contents/MacOS/$BINARY_NAME"
 
+# Refuse to ship binaries that still depend on Homebrew-installed libs from
+# the build machine. Release artifacts must be self-contained apart from
+# Apple system frameworks and the bundled ANGLE dylibs copied below.
+if otool -L "$BUNDLE_OUT/Contents/MacOS/$BINARY_NAME" | grep -E '/(opt/homebrew|usr/local/opt)/' >/dev/null; then
+    echo "error: release binary links against Homebrew libraries from the build machine" >&2
+    otool -L "$BUNDLE_OUT/Contents/MacOS/$BINARY_NAME" >&2
+    exit 1
+fi
+
 # Info.plist
 cp "$ASSET_DIR/Chatminal.app/Contents/Info.plist" "$BUNDLE_OUT/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$BUNDLE_OUT/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$BUNDLE_OUT/Contents/Info.plist"
 
 # App icon
 cp "$ASSET_DIR/Chatminal.app/Contents/Resources/terminal.icns" "$BUNDLE_OUT/Contents/Resources/terminal.icns"
@@ -64,7 +75,9 @@ if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
         "$BUNDLE_OUT"
 else
     echo "==> Skipping code-sign (set CODESIGN_IDENTITY to enable)"
-    # Ad-hoc sign so macOS Gatekeeper doesn't block local runs entirely
+    # Ad-hoc sign keeps the bundle structurally signed for local testing.
+    # Real Homebrew/internet distribution still needs Developer ID signing
+    # plus notarization to satisfy Gatekeeper on end-user machines.
     codesign --deep --force --sign - "$BUNDLE_OUT" 2>/dev/null || true
 fi
 

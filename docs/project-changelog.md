@@ -1,5 +1,15 @@
 # Project Changelog
 
+## 2026-04-11
+
+### Fixed
+- macOS release packaging no longer links Chatminal against Homebrew OpenSSL from the build machine:
+  - enabled `git2` `vendored-openssl` so release binaries stop depending on `/opt/homebrew/opt/openssl@3/...`
+  - added a macOS packaging guard that fails the release build if the app bundle still links against Homebrew-managed dylibs
+ - release prep for `v0.1.3`:
+   - workspace, desktop, and landing package metadata bumped to `0.1.3`
+   - public installer/docs/landing references now point at `v0.1.3`
+
 ## 2026-04-09
 
 ### Added
