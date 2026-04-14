@@ -3,6 +3,20 @@
 ## 2026-04-14
 
 ### Added
+- Landing page localization:
+  - localized route structure added under `apps/landing/src/app/[locale]`
+  - dictionaries added for English, Vietnamese, French, Hindi, Russian, and Simplified Chinese
+  - localized preview transcript copy, metadata helpers, sitemap, and robots wiring added for public pages
+
+### Changed
+- Landing page components now read copy from locale-aware dictionaries instead of hard-coded English strings
+
+### Fixed
+- Release prep for `v0.1.5`:
+  - workspace, desktop, and landing package metadata bumped to `0.1.5`
+  - public installer/docs/landing references now point at `v0.1.5`
+
+### Added
 - Desktop sidebar profile workflows:
   - profile context menu can rename a profile inline
   - profile context menu can create a new session directly inside the selected profile
@@ -17,6 +31,7 @@
 ### Fixed
 - Sidebar inline editing now works for both sessions and profiles through one shared state path
 - Runtime snapshot restore now collapses duplicated prompt tails from terminal replay more reliably
+- Homebrew cask now tracks the published `v0.1.4` macOS assets
 - Release prep for `v0.1.4`:
   - workspace, desktop, and landing package metadata bumped to `0.1.4`
   - public installer/docs/landing references now point at `v0.1.4`

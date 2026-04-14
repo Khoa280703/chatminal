@@ -33,7 +33,7 @@ Current installer targets:
 Optional:
 
 ```bash
-curl -fsSL https://chatminal.com/install | CHATMINAL_VERSION=v0.1.4 bash
+curl -fsSL https://chatminal.com/install | CHATMINAL_VERSION=v0.1.5 bash
 ```
 
 ### Homebrew
