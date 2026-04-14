@@ -1,5 +1,26 @@
 # Project Changelog
 
+## 2026-04-14
+
+### Added
+- Desktop sidebar profile workflows:
+  - profile context menu can rename a profile inline
+  - profile context menu can create a new session directly inside the selected profile
+- Runtime coverage for the new profile rename flow and duplicate prompt restore normalization
+
+### Changed
+- Desktop modal behavior and shell startup handling:
+  - command palette and settings modal instances are now cached between opens to reduce repeated layout cost
+  - settings and palette lists now render an internal scrollbar when the content overflows
+  - macOS startup shims now cover both `zsh` and `bash`, including history-friendly bash `--rcfile` bootstrapping
+
+### Fixed
+- Sidebar inline editing now works for both sessions and profiles through one shared state path
+- Runtime snapshot restore now collapses duplicated prompt tails from terminal replay more reliably
+- Release prep for `v0.1.4`:
+  - workspace, desktop, and landing package metadata bumped to `0.1.4`
+  - public installer/docs/landing references now point at `v0.1.4`
+
 ## 2026-04-11
 
 ### Fixed

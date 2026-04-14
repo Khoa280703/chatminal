@@ -373,7 +373,7 @@ function buildInstallTranscript(sessionName: string) {
       `${ansi.green}$${ansi.reset} ${ansi.blue}curl -fsSL https://chatminal.com/install | bash${ansi.reset}`,
       `${ansi.muted}Installs the latest stable Linux x86_64 release.${ansi.reset}`,
       "",
-      `${ansi.green}$${ansi.reset} ${ansi.blue}curl -fL https://github.com/Khoa280703/chatminal/releases/download/v0.1.3/Chatminal-v0.1.3-linux-x86_64.tar.gz -o Chatminal-v0.1.3-linux-x86_64.tar.gz${ansi.reset}`,
+      `${ansi.green}$${ansi.reset} ${ansi.blue}curl -fL https://github.com/Khoa280703/chatminal/releases/download/v0.1.4/Chatminal-v0.1.4-linux-x86_64.tar.gz -o Chatminal-v0.1.4-linux-x86_64.tar.gz${ansi.reset}`,
       `${ansi.muted}Use the tarball if you want a manual install flow.${ansi.reset}`,
     ].join("\r\n");
   }
@@ -385,7 +385,7 @@ function buildInstallTranscript(sessionName: string) {
       `${ansi.green}PS>${ansi.reset} ${ansi.blue}start https://github.com/Khoa280703/chatminal/releases/latest${ansi.reset}`,
       `${ansi.muted}Download the latest Windows zip from the release page.${ansi.reset}`,
       "",
-      `${ansi.green}PS>${ansi.reset} ${ansi.blue}Expand-Archive .\\Chatminal-v0.1.3-windows-x86_64.zip -DestinationPath .\\chatminal${ansi.reset}`,
+      `${ansi.green}PS>${ansi.reset} ${ansi.blue}Expand-Archive .\\Chatminal-v0.1.4-windows-x86_64.zip -DestinationPath .\\chatminal${ansi.reset}`,
       `${ansi.muted}Unzip it, then launch Chatminal from the extracted folder.${ansi.reset}`,
     ].join("\r\n");
   }
@@ -401,7 +401,7 @@ function buildProtocolSyncTranscript() {
     `${ansi.muted} M${ansi.reset} apps/desktop/src/termwindow/render/chatminal_sidebar.rs`,
     "",
     `${prompt} ${ansi.white}npm run dev${ansi.reset}`,
-    `${ansi.blue}>${ansi.reset} chatminal-landing@0.1.3 dev`,
+    `${ansi.blue}>${ansi.reset} chatminal-landing@0.1.4 dev`,
     `${ansi.blue}>${ansi.reset} next dev`,
     `${ansi.green}✓${ansi.reset} Ready in 1180ms`,
     `${ansi.muted}○${ansi.reset} Local:    http://localhost:3000`,
@@ -456,7 +456,7 @@ function buildProtocolSyncPlayback(): TerminalPlaybackStep[] {
     },
     {
       kind: "print",
-      text: `${ansi.blue}>${ansi.reset} chatminal-landing@0.1.3 dev\r\n${ansi.blue}>${ansi.reset} next dev\r\n${ansi.green}✓${ansi.reset} Ready in 1180ms\r\n${ansi.muted}○${ansi.reset} Local:    http://localhost:3000\r\n\r\n`,
+      text: `${ansi.blue}>${ansi.reset} chatminal-landing@0.1.4 dev\r\n${ansi.blue}>${ansi.reset} next dev\r\n${ansi.green}✓${ansi.reset} Ready in 1180ms\r\n${ansi.muted}○${ansi.reset} Local:    http://localhost:3000\r\n\r\n`,
       delayAfter: 420,
       chunkSize: 4,
       charDelay: 9,
@@ -566,7 +566,7 @@ function buildInstallPlayback(sessionName: string): TerminalPlaybackStep[] {
       },
       {
         kind: "print",
-        text: `${ansi.green}==>${ansi.reset} Preparing Chatminal v0.1.3 for linux/x86_64\r\n${ansi.green}==>${ansi.reset} Installed ${ansi.blue}chatminal${ansi.reset} to ${ansi.gray}~/.local/bin/chatminal${ansi.reset}\r\n\r\n`,
+        text: `${ansi.green}==>${ansi.reset} Preparing Chatminal v0.1.4 for linux/x86_64\r\n${ansi.green}==>${ansi.reset} Installed ${ansi.blue}chatminal${ansi.reset} to ${ansi.gray}~/.local/bin/chatminal${ansi.reset}\r\n\r\n`,
         delayAfter: 450,
         chunkSize: 4,
         charDelay: 10,
@@ -615,7 +615,7 @@ function buildInstallPlayback(sessionName: string): TerminalPlaybackStep[] {
       {
         kind: "command",
         prompt,
-        input: "Expand-Archive .\\Chatminal-v0.1.3-windows-x86_64.zip -DestinationPath .\\chatminal",
+        input: "Expand-Archive .\\Chatminal-v0.1.4-windows-x86_64.zip -DestinationPath .\\chatminal",
         delayAfter: 180,
         charDelay: 16,
       },

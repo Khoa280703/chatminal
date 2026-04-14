@@ -3,7 +3,7 @@ export const githubDeveloperDocsUrl =
   "https://github.com/Khoa280703/chatminal/tree/main/docs";
 export const githubReleasesUrl =
   "https://github.com/Khoa280703/chatminal/releases";
-export const latestReleaseTag = "v0.1.3";
+export const latestReleaseTag = "v0.1.4";
 export const downloadLinks = {
   windows: `https://github.com/Khoa280703/chatminal/releases/download/${latestReleaseTag}/Chatminal-${latestReleaseTag}-windows-x86_64.zip`,
   macos: githubReleasesUrl,

@@ -68,7 +68,7 @@ resolver = "2"
 [workspace.package]
 edition = "2024"
 rust-version = "1.93"
-version = "0.1.3"
+version = "0.1.4"
 
 [workspace.dependencies]
 ahash = "0.8"
@@ -269,13 +269,13 @@ wayland-egl = "0.32"
 wayland-protocols = "0.32"
 wayland-protocols-plasma = { version = "0.3.6", features = ["client"] }
 terminal-bidi = { path = "crates/terminal-bidi", version = "0.2.3", default-features = false }
-terminal-blob-leases = { path = "crates/terminal-blob-leases", version = "0.1.3" }
+terminal-blob-leases = { path = "crates/terminal-blob-leases", version = "0.1.4" }
 terminal-cell = { path = "crates/terminal-cell" }
 terminal-char-props = { path = "crates/terminal-char-props", default-features = false }
 terminal-color-types = { path = "crates/terminal-color-types", version = "0.3", default-features = false }
 config-derive = { path = "crates/config-derive", version = "0.1" }
 dynamic = { path = "crates/dynamic", version = "0.2.1", default-features = false }
-dynamic-derive = { path = "crates/dynamic-derive", version = "0.1.3" }
+dynamic-derive = { path = "crates/dynamic-derive", version = "0.1.4" }
 terminal-escape-parser = { path = "crates/terminal-escape-parser", version = "0.1.0" }
 terminal-font = { path = "crates/terminal-font" }
 gui-subcommands = { path = "crates/gui-subcommands" }

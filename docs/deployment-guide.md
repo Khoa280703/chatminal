@@ -42,7 +42,7 @@ Current curl|bash targets:
 Override release version:
 
 ```bash
-curl -fsSL https://chatminal.com/install | CHATMINAL_VERSION=v0.1.3 bash
+curl -fsSL https://chatminal.com/install | CHATMINAL_VERSION=v0.1.4 bash
 ```
 
 Override install locations:
