@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { LandingIcon } from "@/components/landing-icon";
-import { downloadPlatforms } from "@/lib/landing-data";
+import type { SiteDictionary } from "@/lib/site-dictionary";
 
 type TerminalTokenTone = "prompt" | "command" | "flag" | "url" | "string" | "plain";
 
@@ -76,7 +76,12 @@ function renderTerminalCommand(code: string, platformId: string) {
   });
 }
 
-export function DownloadGrid() {
+type DownloadGridProps = {
+  copy: SiteDictionary["downloads"];
+};
+
+export function DownloadGrid({ copy }: DownloadGridProps) {
+  const downloadPlatforms = copy.platforms;
   const [platformId, setPlatformId] = useState(downloadPlatforms[0]?.id ?? "macos");
   const [methodIdByPlatform, setMethodIdByPlatform] = useState<Record<string, string>>({
     macos: "brew",
@@ -87,7 +92,7 @@ export function DownloadGrid() {
 
   const activePlatform = useMemo(
     () => downloadPlatforms.find((platform) => platform.id === platformId) ?? downloadPlatforms[0],
-    [platformId]
+    [downloadPlatforms, platformId]
   );
   const activeMethod =
     activePlatform.methods.find(
@@ -114,10 +119,10 @@ export function DownloadGrid() {
     <section id="downloads" className="mx-auto mt-40 max-w-7xl px-6">
       <div className="mb-10 text-center">
         <h2 className="font-headline text-4xl font-bold uppercase tracking-tight text-white">
-          Download
+          {copy.title}
         </h2>
         <p className="mx-auto mt-4 max-w-2xl font-mono text-sm text-terminal-mutedSoft">
-          Pick a platform, then copy the install path that matches how you work.
+          {copy.description}
         </p>
       </div>
 
@@ -128,7 +133,7 @@ export function DownloadGrid() {
             <span className="h-3 w-3 rounded-full bg-[#ffbd2f]" />
             <span className="h-3 w-3 rounded-full bg-[#28c840]" />
             <span className="ml-3 font-mono text-[11px] uppercase tracking-[0.34em] text-terminal-mutedSoft">
-              install-terminal
+              {copy.terminalLabel}
             </span>
           </div>
 
@@ -187,7 +192,7 @@ export function DownloadGrid() {
                   onClick={handleCopyCommand}
                   className="bg-white/[0.06] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.24em] text-terminal-muted transition hover:bg-white/[0.12] hover:text-white"
                 >
-                  {isCopied ? "copied" : "copy and run"}
+                  {isCopied ? copy.copiedLabel : copy.copyAndRunLabel}
                 </button>
               </div>
               <p className="mb-4 max-w-2xl font-mono text-xs leading-6 text-terminal-mutedSoft">

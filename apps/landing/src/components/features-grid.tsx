@@ -1,11 +1,15 @@
 import { LandingIcon } from "@/components/landing-icon";
-import { featureItems } from "@/lib/landing-data";
+import type { FeatureItem } from "@/lib/site-dictionary";
 
-export function FeaturesGrid() {
+type FeaturesGridProps = {
+  items: FeatureItem[];
+};
+
+export function FeaturesGrid({ items }: FeaturesGridProps) {
   return (
     <section id="features" className="mx-auto mt-16 max-w-7xl px-6 md:mt-32">
       <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
-        {featureItems.map((feature) => (
+        {items.map((feature) => (
           <article
             key={feature.title}
             className="group border border-white/10 bg-black p-8 transition-all duration-300 hover:border-white"

@@ -1,14 +1,35 @@
 import Image from "next/image";
 import Link from "next/link";
 
-import { footerLinks } from "@/lib/landing-data";
+import { githubDeveloperDocsUrl, githubRepoUrl, githubReleasesUrl } from "@/lib/landing-data";
+import { withLocale, type Locale } from "@/lib/i18n";
 
-export function SiteFooter() {
+type SiteFooterProps = {
+  locale: Locale;
+  copy: {
+    copyright: string;
+    home: string;
+    userDocs: string;
+    githubRepo: string;
+    statusLog: string;
+    devDocs: string;
+  };
+};
+
+export function SiteFooter({ locale, copy }: SiteFooterProps) {
+  const footerLinks = [
+    { label: copy.home, href: withLocale(locale, "/") },
+    { label: copy.userDocs, href: withLocale(locale, "/docs") },
+    { label: copy.githubRepo, href: githubRepoUrl },
+    { label: copy.statusLog, href: githubReleasesUrl },
+    { label: copy.devDocs, href: githubDeveloperDocsUrl },
+  ];
+
   return (
     <>
       <footer className="mt-24 flex w-full flex-col items-center justify-between gap-8 border-t border-white/15 bg-black px-8 py-12 md:flex-row">
         <div className="flex flex-col items-center gap-3 md:flex-row">
-          <Link href="/" className="flex items-center gap-3">
+          <Link href={withLocale(locale, "/")} className="flex items-center gap-3">
             <Image
               src="/chatminal-logo.svg"
               alt="Chatminal logo"
@@ -21,7 +42,7 @@ export function SiteFooter() {
             </span>
           </Link>
           <span className="font-mono text-[10px] text-terminal-muted md:ml-3">
-            © 2026 ALL RIGHTS RESERVED.
+            {copy.copyright}
           </span>
         </div>
         <div className="flex flex-wrap items-center justify-center gap-6">

@@ -1,20 +1,10 @@
-import { DownloadGrid } from "@/components/download-grid";
-import { FeaturesGrid } from "@/components/features-grid";
-import { HeroSection } from "@/components/hero-section";
-import { SiteFooter } from "@/components/site-footer";
-import { SiteHeader } from "@/components/site-header";
+import { redirect } from "next/navigation";
 
-export default function HomePage() {
-  return (
-    <div id="top" className="terminal-shell min-h-screen bg-black">
-      <div className="terminal-overlay" />
-      <SiteHeader />
-      <main className="relative overflow-x-hidden pb-20 pt-20">
-        <HeroSection />
-        <FeaturesGrid />
-        <DownloadGrid />
-      </main>
-      <SiteFooter />
-    </div>
-  );
+import { withLocale } from "@/lib/i18n";
+import { getPreferredLocale } from "@/lib/i18n-server";
+
+export default async function HomePage() {
+  const locale = await getPreferredLocale();
+
+  redirect(withLocale(locale, "/"));
 }

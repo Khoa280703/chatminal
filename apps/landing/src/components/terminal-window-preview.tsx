@@ -4,6 +4,9 @@ import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { LandingIcon } from "@/components/landing-icon";
+import type { Locale } from "@/lib/i18n";
+import { getPreviewTranscriptDictionary } from "@/lib/preview-transcript-dictionary";
+import type { SiteDictionary } from "@/lib/site-dictionary";
 
 type Session = {
   name: string;
@@ -61,194 +64,49 @@ type AgentThinkingStep = {
 
 type AgentConversationStep = AgentMessageStep | AgentThinkingStep;
 
-const claudeConversationScript: AgentConversationStep[] = [
-  { kind: "line", label: "you", tone: "user", text: "Hello Claude" },
-  {
-    kind: "thinking",
-    label: "Scanning repo",
-    initialSeconds: 3,
-    initialTokens: 180,
-    ticks: 2,
-  },
-  {
-    kind: "line",
-    label: "claude",
-    tone: "agent",
-    text: "Hi, I'm Claude. What should I work on?",
-  },
-  {
-    kind: "line",
-    label: "you",
-    tone: "user",
-    text: "Create an email service for me.",
-  },
-  {
-    kind: "line",
-    label: "",
-    tone: "agent",
-    text: "I can set up a provider interface, template rendering, and a retry-safe send pipeline.",
-  },
-  {
-    kind: "line",
-    label: "",
-    tone: "agent",
-    text: "● Entered plan mode",
-  },
-  {
-    kind: "line",
-    label: "",
-    tone: "agent",
-    text: "● Read(auth flow, queue layer, env config)",
-  },
-  {
-    kind: "line",
-    label: "",
-    tone: "muted",
-    text: "⎿ Done (9 tool uses · 24.7k tokens · 42s)",
-    instant: true,
-    ephemeral: true,
-  },
-  {
-    kind: "line",
-    label: "",
-    tone: "agent",
-    text: "● Plan(provider client + templates + delivery jobs)",
-  },
-  {
-    kind: "line",
-    label: "",
-    tone: "muted",
-    text: "⎿ Done (14 tool uses · 35.8k tokens · 1m 03s)",
-    instant: true,
-    ephemeral: true,
-  },
-  {
-    kind: "line",
-    label: "",
-    tone: "agent",
-    text: "I would keep email composition separate from delivery so transactional emails, retries, and provider swaps stay predictable.",
-  },
-  {
-    kind: "line",
-    label: "",
-    tone: "agent",
-    text: "● Updated plan",
-  },
-  {
-    kind: "line",
-    label: "",
-    tone: "muted",
-    text: "⎿ /plan to preview",
-    instant: true,
-  },
-  {
-    kind: "line",
-    label: "",
-    tone: "agent",
-    text: "● Bash(rg -n \"email|mailer|queue|template\" src server packages)",
-  },
-  {
-    kind: "thinking",
-    label: "Spelunking",
-    initialSeconds: 146,
-    initialTokens: 6200,
-    ticks: 6,
-  },
-  {
-    kind: "line",
-    label: "claude",
-    tone: "agent",
-    text: "Next I would add the provider adapter, build `sendWelcomeEmail()`, and cover failures with queue-backed retries.",
-  },
-];
+function getClaudeConversationScript(locale: Locale): AgentConversationStep[] {
+  const copy = getPreviewTranscriptDictionary(locale).claudeConversation;
 
-const geminiConversationScript: AgentConversationStep[] = [
-  { kind: "line", label: "you", tone: "user", text: "Hello Gemini" },
-  {
-    kind: "thinking",
-    label: "Tracing runtime",
-    initialSeconds: 2,
-    initialTokens: 140,
-    ticks: 2,
-  },
-  {
-    kind: "line",
-    label: "gemini",
-    tone: "agent",
-    text: "Hi, I'm Gemini. What do you want me to inspect?",
-  },
-  {
-    kind: "line",
-    label: "you",
-    tone: "user",
-    text: "Find the mobile overflow bug for me.",
-  },
-  {
-    kind: "line",
-    label: "",
-    tone: "agent",
-    text: "I can inspect the render tree, reproduce the overflow, and narrow it to the component that owns the spacing.",
-  },
-  {
-    kind: "line",
-    label: "",
-    tone: "agent",
-    text: "● Read(settings modal, sheet layout, mobile breakpoints)",
-  },
-  {
-    kind: "line",
-    label: "",
-    tone: "agent",
-    text: "● Inspect(scroll container, min-width rules, action footer)",
-  },
-  {
-    kind: "line",
-    label: "",
-    tone: "muted",
-    text: "⎿ Found overflow caused by nested flex children keeping `min-width: auto`",
-    instant: true,
-    ephemeral: true,
-  },
-  {
-    kind: "line",
-    label: "",
-    tone: "agent",
-    text: "● Draft fix and verify mobile layout",
-  },
-  {
-    kind: "thinking",
-    label: "Synthesizing",
-    initialSeconds: 22,
-    initialTokens: 540,
-    ticks: 5,
-  },
-  {
-    kind: "line",
-    label: "",
-    tone: "agent",
-    text: "I would relax the nested flex widths, clamp the modal padding, and keep the footer actions on a tighter wrap rule.",
-  },
-  {
-    kind: "line",
-    label: "",
-    tone: "agent",
-    text: "● Edit(modal content width, footer wrapping, mobile spacing)",
-  },
-  {
-    kind: "line",
-    label: "",
-    tone: "muted",
-    text: "⎿ Tightened spacing and removed the horizontal overflow on narrow viewports",
-    instant: true,
-    ephemeral: true,
-  },
-  {
-    kind: "line",
-    label: "gemini",
-    tone: "agent",
-    text: "If you want, I can also separate the permanent layout rules from the component-specific fixes so the next modal does not inherit the same bug.",
-  },
-];
+  return [
+    { kind: "line", label: copy.youLabel, tone: "user", text: copy.hello },
+    { kind: "thinking", label: copy.scanningRepo, initialSeconds: 3, initialTokens: 180, ticks: 2 },
+    { kind: "line", label: copy.claudeLabel, tone: "agent", text: copy.greeting },
+    { kind: "line", label: copy.youLabel, tone: "user", text: copy.taskRequest },
+    { kind: "line", label: "", tone: "agent", text: copy.setupPlan },
+    { kind: "line", label: "", tone: "agent", text: copy.enteredPlanMode },
+    { kind: "line", label: "", tone: "agent", text: copy.readContext },
+    { kind: "line", label: "", tone: "muted", text: copy.firstDone, instant: true, ephemeral: true },
+    { kind: "line", label: "", tone: "agent", text: copy.planStep },
+    { kind: "line", label: "", tone: "muted", text: copy.secondDone, instant: true, ephemeral: true },
+    { kind: "line", label: "", tone: "agent", text: copy.architectureNote },
+    { kind: "line", label: "", tone: "agent", text: copy.updatedPlan },
+    { kind: "line", label: "", tone: "muted", text: copy.planPreview, instant: true },
+    { kind: "line", label: "", tone: "agent", text: copy.bashSearch },
+    { kind: "thinking", label: copy.spelunking, initialSeconds: 146, initialTokens: 6200, ticks: 6 },
+    { kind: "line", label: copy.claudeLabel, tone: "agent", text: copy.nextStep },
+  ];
+}
+
+function getGeminiConversationScript(locale: Locale): AgentConversationStep[] {
+  const copy = getPreviewTranscriptDictionary(locale).geminiConversation;
+
+  return [
+    { kind: "line", label: copy.youLabel, tone: "user", text: copy.hello },
+    { kind: "thinking", label: copy.tracingRuntime, initialSeconds: 2, initialTokens: 140, ticks: 2 },
+    { kind: "line", label: copy.geminiLabel, tone: "agent", text: copy.greeting },
+    { kind: "line", label: copy.youLabel, tone: "user", text: copy.taskRequest },
+    { kind: "line", label: "", tone: "agent", text: copy.inspectPlan },
+    { kind: "line", label: "", tone: "agent", text: copy.readModal },
+    { kind: "line", label: "", tone: "agent", text: copy.inspectScroll },
+    { kind: "line", label: "", tone: "muted", text: copy.foundOverflow, instant: true, ephemeral: true },
+    { kind: "line", label: "", tone: "agent", text: copy.draftFix },
+    { kind: "thinking", label: copy.synthesizing, initialSeconds: 22, initialTokens: 540, ticks: 5 },
+    { kind: "line", label: "", tone: "agent", text: copy.fixPlan },
+    { kind: "line", label: "", tone: "agent", text: copy.editStep },
+    { kind: "line", label: "", tone: "muted", text: copy.fixedResult, instant: true, ephemeral: true },
+    { kind: "line", label: copy.geminiLabel, tone: "agent", text: copy.followUp },
+  ];
+}
 
 const geminiShortAsciiLogo = `   █████████  ██████████ ██████   ██████ █████ ██████   █████ █████
   ███░░░░░███░░███░░░░░█░░██████ ██████ ░░███ ░░██████ ░░███ ░░███
@@ -315,7 +173,7 @@ const ansi = {
   yellow: "\x1b[38;2;253;224;71m",
 };
 
-function buildGeminiTranscript() {
+function buildGeminiTranscript(waitingText: string) {
   const lines = [
     `${ansi.blueSoft}   █████████  ██████████ ██████   ██████ █████ ██████   █████ █████${ansi.reset}`,
     `${ansi.blue}  ███░░░░░███░░███░░░░░█░░██████ ██████ ░░███ ░░██████ ░░███ ░░███${ansi.reset}`,
@@ -326,23 +184,24 @@ function buildGeminiTranscript() {
     `${ansi.blue} ░░█████████  ██████████ █████     █████ █████ █████  ░░█████ █████${ansi.reset}`,
     `${ansi.blueSoft}  ░░░░░░░░░  ░░░░░░░░░░ ░░░░░     ░░░░░ ░░░░░ ░░░░░    ░░░░░ ░░░░░${ansi.reset}`,
     "",
-    `${ansi.muted}Gemini CLI waiting for auth in chatminal workspace${ansi.reset}`,
+    `${ansi.muted}${waitingText}${ansi.reset}`,
   ];
 
   return lines.join("\r\n");
 }
 
-function buildGenericTranscript(sessionName: string) {
+function buildGenericTranscript(sessionName: string, locale: Locale) {
+  const copy = getPreviewTranscriptDictionary(locale).genericTranscript;
   const lines = [
-    `${ansi.muted}[14:20:01]${ansi.reset} ${ansi.white}${sessionName}${ansi.reset} attached to chatminal workspace`,
-    `${ansi.muted}[14:20:02]${ansi.reset} ${ansi.green}✓${ansi.reset} Context loaded from ${ansi.blue}./src${ansi.reset}`,
-    `${ansi.muted}[14:20:03]${ansi.reset} ${ansi.green}✓${ansi.reset} Ready for instructions`,
+    `${ansi.muted}[14:20:01]${ansi.reset} ${ansi.white}${sessionName}${ansi.reset} ${copy.attachedToWorkspace}`,
+    `${ansi.muted}[14:20:02]${ansi.reset} ${ansi.green}✓${ansi.reset} ${copy.contextLoadedFrom} ${ansi.blue}./src${ansi.reset}`,
+    `${ansi.muted}[14:20:03]${ansi.reset} ${ansi.green}✓${ansi.reset} ${copy.readyForInstructions}`,
     "",
-    `${ansi.white}>_${ansi.reset} help me inspect runtime state and session layout`,
+    `${ansi.white}>_${ansi.reset} ${copy.helpInspectRuntime}`,
     "",
-    `${ansi.yellow}→${ansi.reset} Reading workspace metadata`,
-    `${ansi.yellow}→${ansi.reset} Inspecting current terminal topology`,
-    `${ansi.yellow}→${ansi.reset} Preparing summary`,
+    `${ansi.yellow}→${ansi.reset} ${copy.readingWorkspaceMetadata}`,
+    `${ansi.yellow}→${ansi.reset} ${copy.inspectingTerminalTopology}`,
+    `${ansi.yellow}→${ansi.reset} ${copy.preparingSummary}`,
     "",
     `${ansi.white}~${ansi.reset} ${sessionName.toLowerCase()}`,
   ];
@@ -350,47 +209,48 @@ function buildGenericTranscript(sessionName: string) {
   return lines.join("\r\n");
 }
 
-function buildInstallTranscript(sessionName: string) {
+function buildInstallTranscript(sessionName: string, locale: Locale) {
+  const copy = getPreviewTranscriptDictionary(locale).installTranscript;
   if (sessionName === "macOS") {
     return [
-      `${ansi.muted}# Chatminal install guide for macOS${ansi.reset}`,
+      `${ansi.muted}# ${copy.macosGuide}${ansi.reset}`,
       "",
       `${ansi.green}$${ansi.reset} ${ansi.blue}brew install --cask chatminal${ansi.reset}`,
-      `${ansi.muted}Install with Homebrew if you want a clean update path.${ansi.reset}`,
+      `${ansi.muted}${copy.macosHomebrewNote}${ansi.reset}`,
       "",
       `${ansi.green}$${ansi.reset} ${ansi.blue}curl -fsSL https://chatminal.com/install | bash${ansi.reset}`,
-      `${ansi.muted}Use the installer script if you want the fastest setup.${ansi.reset}`,
+      `${ansi.muted}${copy.macosInstallerNote}${ansi.reset}`,
       "",
       `${ansi.green}$${ansi.reset} ${ansi.blue}open https://github.com/Khoa280703/chatminal/releases/latest${ansi.reset}`,
-      `${ansi.muted}Pick Apple Silicon or Intel manually from the latest release.${ansi.reset}`,
+      `${ansi.muted}${copy.macosReleaseNote}${ansi.reset}`,
     ].join("\r\n");
   }
 
   if (sessionName === "Linux") {
     return [
-      `${ansi.muted}# Chatminal install guide for Linux${ansi.reset}`,
+      `${ansi.muted}# ${copy.linuxGuide}${ansi.reset}`,
       "",
       `${ansi.green}$${ansi.reset} ${ansi.blue}curl -fsSL https://chatminal.com/install | bash${ansi.reset}`,
-      `${ansi.muted}Installs the latest stable Linux x86_64 release.${ansi.reset}`,
+      `${ansi.muted}${copy.linuxInstallerNote}${ansi.reset}`,
       "",
-      `${ansi.green}$${ansi.reset} ${ansi.blue}curl -fL https://github.com/Khoa280703/chatminal/releases/download/v0.1.4/Chatminal-v0.1.4-linux-x86_64.tar.gz -o Chatminal-v0.1.4-linux-x86_64.tar.gz${ansi.reset}`,
-      `${ansi.muted}Use the tarball if you want a manual install flow.${ansi.reset}`,
+      `${ansi.green}$${ansi.reset} ${ansi.blue}curl -fL https://github.com/Khoa280703/chatminal/releases/download/v0.1.5/Chatminal-v0.1.5-linux-x86_64.tar.gz -o Chatminal-v0.1.5-linux-x86_64.tar.gz${ansi.reset}`,
+      `${ansi.muted}${copy.linuxTarballNote}${ansi.reset}`,
     ].join("\r\n");
   }
 
   if (sessionName === "Windows") {
     return [
-      `${ansi.muted}# Chatminal install guide for Windows${ansi.reset}`,
+      `${ansi.muted}# ${copy.windowsGuide}${ansi.reset}`,
       "",
       `${ansi.green}PS>${ansi.reset} ${ansi.blue}start https://github.com/Khoa280703/chatminal/releases/latest${ansi.reset}`,
-      `${ansi.muted}Download the latest Windows zip from the release page.${ansi.reset}`,
+      `${ansi.muted}${copy.windowsReleaseNote}${ansi.reset}`,
       "",
-      `${ansi.green}PS>${ansi.reset} ${ansi.blue}Expand-Archive .\\Chatminal-v0.1.4-windows-x86_64.zip -DestinationPath .\\chatminal${ansi.reset}`,
-      `${ansi.muted}Unzip it, then launch Chatminal from the extracted folder.${ansi.reset}`,
+      `${ansi.green}PS>${ansi.reset} ${ansi.blue}Expand-Archive .\\Chatminal-v0.1.5-windows-x86_64.zip -DestinationPath .\\chatminal${ansi.reset}`,
+      `${ansi.muted}${copy.windowsExtractNote}${ansi.reset}`,
     ].join("\r\n");
   }
 
-  return buildGenericTranscript(sessionName);
+  return buildGenericTranscript(sessionName, locale);
 }
 
 function buildProtocolSyncTranscript() {
@@ -401,7 +261,7 @@ function buildProtocolSyncTranscript() {
     `${ansi.muted} M${ansi.reset} apps/desktop/src/termwindow/render/chatminal_sidebar.rs`,
     "",
     `${prompt} ${ansi.white}npm run dev${ansi.reset}`,
-    `${ansi.blue}>${ansi.reset} chatminal-landing@0.1.4 dev`,
+    `${ansi.blue}>${ansi.reset} chatminal-landing@0.1.5 dev`,
     `${ansi.blue}>${ansi.reset} next dev`,
     `${ansi.green}✓${ansi.reset} Ready in 1180ms`,
     `${ansi.muted}○${ansi.reset} Local:    http://localhost:3000`,
@@ -456,7 +316,7 @@ function buildProtocolSyncPlayback(): TerminalPlaybackStep[] {
     },
     {
       kind: "print",
-      text: `${ansi.blue}>${ansi.reset} chatminal-landing@0.1.4 dev\r\n${ansi.blue}>${ansi.reset} next dev\r\n${ansi.green}✓${ansi.reset} Ready in 1180ms\r\n${ansi.muted}○${ansi.reset} Local:    http://localhost:3000\r\n\r\n`,
+      text: `${ansi.blue}>${ansi.reset} chatminal-landing@0.1.5 dev\r\n${ansi.blue}>${ansi.reset} next dev\r\n${ansi.green}✓${ansi.reset} Ready in 1180ms\r\n${ansi.muted}○${ansi.reset} Local:    http://localhost:3000\r\n\r\n`,
       delayAfter: 420,
       chunkSize: 4,
       charDelay: 9,
@@ -505,13 +365,14 @@ function buildProtocolSyncPlayback(): TerminalPlaybackStep[] {
   ];
 }
 
-function buildInstallPlayback(sessionName: string): TerminalPlaybackStep[] {
+function buildInstallPlayback(sessionName: string, locale: Locale): TerminalPlaybackStep[] {
+  const copy = getPreviewTranscriptDictionary(locale).installPlayback;
   if (sessionName === "macOS") {
     const prompt = `${ansi.green}$${ansi.reset} `;
     return [
       {
         kind: "print",
-        text: `${ansi.muted}# Install Chatminal on macOS${ansi.reset}\r\n\r\n`,
+        text: `${ansi.muted}# ${copy.macosTitle}${ansi.reset}\r\n\r\n`,
         delayAfter: 200,
         chunkSize: 4,
         charDelay: 12,
@@ -525,7 +386,7 @@ function buildInstallPlayback(sessionName: string): TerminalPlaybackStep[] {
       },
       {
         kind: "print",
-        text: `${ansi.green}==>${ansi.reset} Downloading Chatminal.app\r\n${ansi.green}==>${ansi.reset} Linking ${ansi.blue}chatminal${ansi.reset} into ${ansi.gray}/opt/homebrew/bin${ansi.reset}\r\n\r\n`,
+        text: `${ansi.green}==>${ansi.reset} ${copy.macosDownloading}\r\n${ansi.green}==>${ansi.reset} ${copy.macosLinking}\r\n\r\n`,
         delayAfter: 450,
         chunkSize: 4,
         charDelay: 10,
@@ -539,7 +400,7 @@ function buildInstallPlayback(sessionName: string): TerminalPlaybackStep[] {
       },
       {
         kind: "print",
-        text: `${ansi.green}✓${ansi.reset} Chatminal launched\r\n${ansi.muted}Use Homebrew for future upgrades.${ansi.reset}\r\n`,
+        text: `${ansi.green}✓${ansi.reset} ${copy.macosLaunched}\r\n${ansi.muted}${copy.macosUpgradeNote}${ansi.reset}\r\n`,
         delayAfter: 900,
         chunkSize: 4,
         charDelay: 10,
@@ -552,7 +413,7 @@ function buildInstallPlayback(sessionName: string): TerminalPlaybackStep[] {
     return [
       {
         kind: "print",
-        text: `${ansi.muted}# Install Chatminal on Linux${ansi.reset}\r\n\r\n`,
+        text: `${ansi.muted}# ${copy.linuxTitle}${ansi.reset}\r\n\r\n`,
         delayAfter: 200,
         chunkSize: 4,
         charDelay: 12,
@@ -566,7 +427,7 @@ function buildInstallPlayback(sessionName: string): TerminalPlaybackStep[] {
       },
       {
         kind: "print",
-        text: `${ansi.green}==>${ansi.reset} Preparing Chatminal v0.1.4 for linux/x86_64\r\n${ansi.green}==>${ansi.reset} Installed ${ansi.blue}chatminal${ansi.reset} to ${ansi.gray}~/.local/bin/chatminal${ansi.reset}\r\n\r\n`,
+        text: `${ansi.green}==>${ansi.reset} ${copy.linuxPreparing}\r\n${ansi.green}==>${ansi.reset} ${copy.linuxInstalledTo}\r\n\r\n`,
         delayAfter: 450,
         chunkSize: 4,
         charDelay: 10,
@@ -580,7 +441,7 @@ function buildInstallPlayback(sessionName: string): TerminalPlaybackStep[] {
       },
       {
         kind: "print",
-        text: `${ansi.green}✓${ansi.reset} Session tree ready\r\n${ansi.muted}Latest stable release installed.${ansi.reset}\r\n`,
+        text: `${ansi.green}✓${ansi.reset} ${copy.linuxTreeReady}\r\n${ansi.muted}${copy.linuxStableNote}${ansi.reset}\r\n`,
         delayAfter: 900,
         chunkSize: 4,
         charDelay: 10,
@@ -593,7 +454,7 @@ function buildInstallPlayback(sessionName: string): TerminalPlaybackStep[] {
     return [
       {
         kind: "print",
-        text: `${ansi.muted}# Install Chatminal on Windows${ansi.reset}\r\n\r\n`,
+        text: `${ansi.muted}# ${copy.windowsTitle}${ansi.reset}\r\n\r\n`,
         delayAfter: 200,
         chunkSize: 4,
         charDelay: 12,
@@ -607,7 +468,7 @@ function buildInstallPlayback(sessionName: string): TerminalPlaybackStep[] {
       },
       {
         kind: "print",
-        text: `${ansi.green}Opening${ansi.reset} latest release page in your browser...\r\n\r\n`,
+        text: `${ansi.green}${copy.windowsOpening}${ansi.reset}\r\n\r\n`,
         delayAfter: 420,
         chunkSize: 4,
         charDelay: 10,
@@ -615,13 +476,13 @@ function buildInstallPlayback(sessionName: string): TerminalPlaybackStep[] {
       {
         kind: "command",
         prompt,
-        input: "Expand-Archive .\\Chatminal-v0.1.4-windows-x86_64.zip -DestinationPath .\\chatminal",
+        input: "Expand-Archive .\\Chatminal-v0.1.5-windows-x86_64.zip -DestinationPath .\\chatminal",
         delayAfter: 180,
         charDelay: 16,
       },
       {
         kind: "print",
-        text: `${ansi.green}✓${ansi.reset} Archive extracted to ${ansi.gray}.\\chatminal${ansi.reset}\r\n${ansi.muted}Launch Chatminal from the extracted folder.${ansi.reset}\r\n`,
+        text: `${ansi.green}✓${ansi.reset} ${copy.windowsExtracted}\r\n${ansi.muted}${copy.windowsLaunchNote}${ansi.reset}\r\n`,
         delayAfter: 900,
         chunkSize: 4,
         charDelay: 10,
@@ -632,17 +493,21 @@ function buildInstallPlayback(sessionName: string): TerminalPlaybackStep[] {
   return [];
 }
 
-function transcriptForSession(sessionName: string) {
+function transcriptForSession(
+  sessionName: string,
+  previewCopy: SiteDictionary["preview"],
+  locale: Locale,
+) {
   if (sessionName === "Agent_Debugger") {
-    return buildGeminiTranscript();
+    return buildGeminiTranscript(previewCopy.geminiWaiting);
   }
   if (sessionName === "Protocol_Sync") {
     return buildProtocolSyncTranscript();
   }
   if (sessionName === "macOS" || sessionName === "Linux" || sessionName === "Windows") {
-    return buildInstallTranscript(sessionName);
+    return buildInstallTranscript(sessionName, locale);
   }
-  return buildGenericTranscript(sessionName);
+  return buildGenericTranscript(sessionName, locale);
 }
 
 function shouldAnimateTerminalSession(sessionName: string) {
@@ -967,9 +832,18 @@ function renderAgentLineText(text: string, isTyping: boolean) {
   );
 }
 
-function ClaudeTerminalPanel({ compact = false }: { compact?: boolean }) {
+function ClaudeTerminalPanel({
+  compact = false,
+  copy,
+  locale,
+}: {
+  compact?: boolean;
+  copy: SiteDictionary["preview"];
+  locale: Locale;
+}) {
   usePrefersReducedMotion();
-  const conversation = useAgentConversation(claudeConversationScript, false);
+  const transcriptCopy = getPreviewTranscriptDictionary(locale);
+  const conversation = useAgentConversation(getClaudeConversationScript(locale), false);
   const scrollRef = useAutoFollowScroll(conversation);
 
   return (
@@ -1020,7 +894,7 @@ function ClaudeTerminalPanel({ compact = false }: { compact?: boolean }) {
                   }`}
                   style={compact ? { fontSize: "clamp(8.5px, 0.72vw, 10.5px)" } : undefined}
                 >
-                  Welcome back Chatminal
+                  {copy.welcomeBack}
                 </p>
                 <div className={compact ? "my-1" : "my-1.5 md:my-2 xl:my-4"}>
                   <Image
@@ -1059,19 +933,18 @@ function ClaudeTerminalPanel({ compact = false }: { compact?: boolean }) {
               >
                 <div className={compact ? "pb-1" : "pb-1"}>
                   <p className={`font-semibold leading-tight text-[rgba(215,119,87,0.86)] ${compact ? "mb-0.5" : "mb-0.5 md:mb-1"}`}>
-                    Tips for getting started
+                    {copy.tipsTitle}
                   </p>
                   <p className={`break-words text-[#cdcdcd] ${compact ? "leading-[1.25]" : "leading-[1.35]"}`}>
-                    Run /init to create a CLAUDE.md file with instructions for
-                    this workspace.
+                    {copy.tipsBody}
                   </p>
                 </div>
 
                 <div className={`border-t border-[#D77757] ${compact ? "pt-1" : "pt-1"}`}>
                   <p className={`font-semibold leading-tight text-[rgba(215,119,87,0.86)] ${compact ? "mb-0.5" : "mb-0.5 md:mb-1"}`}>
-                    Recent activity
+                    {copy.recentTitle}
                   </p>
-                  <p className="break-words text-[#cdcdcd]">No recent activity</p>
+                  <p className="break-words text-[#cdcdcd]">{copy.recentEmpty}</p>
                 </div>
               </div>
             </div>
@@ -1081,7 +954,7 @@ function ClaudeTerminalPanel({ compact = false }: { compact?: boolean }) {
             {conversation.map((message, index) =>
               message.kind === "thinking" ? (
                 <div key={`thinking-${index}`} className={`flex min-w-0 items-start ${compact ? "gap-1.5" : "gap-2"}`}>
-                  <span className={`text-[#9a6b5e] ${compact ? "min-w-[42px]" : "min-w-[52px] md:min-w-[58px]"}`}>thinking</span>
+                  <span className={`text-[#9a6b5e] ${compact ? "min-w-[42px]" : "min-w-[52px] md:min-w-[58px]"}`}>{transcriptCopy.thinkingLabel}</span>
                   <p className="min-w-0 break-words text-[#caa08f]">
                     <span>
                       ✶ {message.label}… ({message.seconds}s · ↓{" "}
@@ -1121,7 +994,13 @@ function ClaudeTerminalPanel({ compact = false }: { compact?: boolean }) {
   );
 }
 
-function GeminiChatPanel({ conversation }: { conversation: ReturnType<typeof useAgentConversation> }) {
+function GeminiChatPanel({
+  conversation,
+  thinkingLabel,
+}: {
+  conversation: ReturnType<typeof useAgentConversation>;
+  thinkingLabel: string;
+}) {
   usePrefersReducedMotion();
 
   return (
@@ -1130,7 +1009,7 @@ function GeminiChatPanel({ conversation }: { conversation: ReturnType<typeof use
         {conversation.map((message, index) =>
           message.kind === "thinking" ? (
             <div key={`gemini-thinking-${index}`} className="flex min-w-0 items-start gap-2">
-              <span className="min-w-[52px] text-[#60a5fa] md:min-w-[58px]">thinking</span>
+              <span className="min-w-[52px] text-[#60a5fa] md:min-w-[58px]">{thinkingLabel}</span>
               <p className="min-w-0 break-words text-[#93c5fd]">
                 <span>
                   ✦ {message.label}… ({message.seconds}s · ↓{" "}
@@ -1168,8 +1047,15 @@ function GeminiChatPanel({ conversation }: { conversation: ReturnType<typeof use
   );
 }
 
-function GeminiTerminalPanel() {
-  const conversation = useAgentConversation(geminiConversationScript, false);
+function GeminiTerminalPanel({
+  copy,
+  locale,
+}: {
+  copy: SiteDictionary["preview"];
+  locale: Locale;
+}) {
+  const transcriptCopy = getPreviewTranscriptDictionary(locale);
+  const conversation = useAgentConversation(getGeminiConversationScript(locale), false);
   const scrollRef = useAutoFollowScroll(conversation);
 
   return (
@@ -1190,23 +1076,29 @@ function GeminiTerminalPanel() {
             ))}
           </pre>
           <div className="break-words text-left text-[9px] text-[#94a3b8] md:text-[10px] xl:text-[12px]">
-            Gemini CLI waiting for auth in chatminal workspace
+            {copy.geminiWaiting}
           </div>
-          <GeminiChatPanel conversation={conversation} />
+          <GeminiChatPanel conversation={conversation} thinkingLabel={transcriptCopy.thinkingLabel} />
         </div>
       </div>
     </div>
   );
 }
 
-function NeuralCoreTerminalStack() {
+function NeuralCoreTerminalStack({
+  copy,
+  locale,
+}: {
+  copy: SiteDictionary["preview"];
+  locale: Locale;
+}) {
   return (
     <div className="flex h-full bg-black">
       <div className="min-h-0 min-w-0 flex-1 overflow-hidden border-r border-white/10">
-        <ClaudeTerminalPanel compact />
+        <ClaudeTerminalPanel compact copy={copy} locale={locale} />
       </div>
       <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-        <GeminiTerminalPanel />
+        <GeminiTerminalPanel copy={copy} locale={locale} />
       </div>
     </div>
   );
@@ -1220,7 +1112,12 @@ function fontSizeForSession(sessionName: string) {
   return 10;
 }
 
-export function TerminalWindowPreview() {
+type TerminalWindowPreviewProps = {
+  locale: Locale;
+  copy: SiteDictionary["preview"];
+};
+
+export function TerminalWindowPreview({ locale, copy }: TerminalWindowPreviewProps) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
     "vibe-engine": true,
     "neural-core": true,
@@ -1357,10 +1254,10 @@ export function TerminalWindowPreview() {
     runStep();
   }, [playTokenChunk, scheduleTerminalStep, stopTerminalAnimation]);
 
-  const playInstallSetupSession = useCallback((term: XtermInstance, sessionName: string) => {
+  const playInstallSetupSession = useCallback((term: XtermInstance, sessionName: string, locale: Locale) => {
     stopTerminalAnimation();
 
-    const steps = buildInstallPlayback(sessionName);
+    const steps = buildInstallPlayback(sessionName, locale);
     const runId = terminalAnimationRunIdRef.current;
     let stepIndex = 0;
 
@@ -1444,7 +1341,7 @@ export function TerminalWindowPreview() {
   }, [playTokenChunk, scheduleTerminalStep, stopTerminalAnimation]);
 
   const writeTerminalSession = useCallback((term: XtermInstance, sessionName: string) => {
-    const transcript = transcriptForSession(sessionName);
+    const transcript = transcriptForSession(sessionName, copy, locale);
 
     stopTerminalAnimation();
     if (!shouldAnimateTerminalSession(sessionName)) {
@@ -1458,12 +1355,12 @@ export function TerminalWindowPreview() {
     }
 
     if (sessionName === "macOS" || sessionName === "Linux" || sessionName === "Windows") {
-      playInstallSetupSession(term, sessionName);
+      playInstallSetupSession(term, sessionName, locale);
       return;
     }
 
     term.write(transcript);
-  }, [playInstallSetupSession, playProtocolSyncSession, stopTerminalAnimation]);
+  }, [copy, locale, playInstallSetupSession, playProtocolSyncSession, stopTerminalAnimation]);
 
   useEffect(() => {
     let disposed = false;
@@ -1721,17 +1618,17 @@ export function TerminalWindowPreview() {
                 />
                 {isNeuralCoreSession(activeSession) && (
                   <div className="absolute inset-0">
-                    <NeuralCoreTerminalStack />
+                    <NeuralCoreTerminalStack copy={copy} locale={locale} />
                   </div>
                 )}
                 {isClaudeLogoSession(activeSession) && (
                   <div className="absolute inset-0">
-                    <ClaudeTerminalPanel />
+                    <ClaudeTerminalPanel copy={copy} locale={locale} />
                   </div>
                 )}
                 {isGeminiAgentSession(activeSession) && (
                   <div className="absolute inset-0">
-                    <GeminiTerminalPanel />
+                    <GeminiTerminalPanel copy={copy} locale={locale} />
                   </div>
                 )}
               </div>
