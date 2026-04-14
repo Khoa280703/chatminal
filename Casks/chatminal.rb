@@ -1,9 +1,9 @@
 cask "chatminal" do
   arch arm: "aarch64", intel: "x86_64"
 
-  version "0.1.3"
-  sha256 arm:   "e7e2a0062940a3d9afb8b489f18c002f2b32eb52a2a1f2e771a696d2dd4e528d",
-         intel: "40f25a46ec29debe578894921e9f68ed1f572a3ba311f1033d720ed19f74a143"
+  version "0.1.5"
+  sha256 arm:   "a8e0a7e47b345bfe8bea1ce1282f250e69c98f086a148901e2e0b19b77cb0a74",
+         intel: "85c34ee4c9998a602851286cf320042cd93b595fa2f8f2f8da687b7efaf55698"
 
   url "https://github.com/Khoa280703/chatminal/releases/download/v#{version}/Chatminal-v#{version}-macos-#{arch}.dmg"
   name "Chatminal"

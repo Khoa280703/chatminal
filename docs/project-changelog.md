@@ -12,6 +12,7 @@
 - Landing page components now read copy from locale-aware dictionaries instead of hard-coded English strings
 
 ### Fixed
+- Homebrew cask now tracks the published `v0.1.5` macOS assets
 - Release prep for `v0.1.5`:
   - workspace, desktop, and landing package metadata bumped to `0.1.5`
   - public installer/docs/landing references now point at `v0.1.5`
