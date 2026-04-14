@@ -6,6 +6,7 @@ use crate::chatminal_layout::workspace_store::{
 };
 use crate::chatminal_sidebar::{ChatminalSidebar, SidebarSessionDropTarget};
 use crate::colorease::ColorEase;
+use crate::commands::ExpandedCommand;
 use crate::desktop_session_host::overlay_shell::{
     OverlayAssignmentResult as PerformAssignmentResult, OverlayCachePolicy as CachePolicy,
     OverlayCloseReason as CloseReason, OverlayPane, OverlayPattern, OverlayTerminal,
@@ -250,6 +251,8 @@ pub enum UIItemType {
     ChatminalSidebarSessionMenuRunStartupCommand(String),
     ChatminalSidebarSessionMenuDelete(String),
     ChatminalSidebarProfileMenu,
+    ChatminalSidebarProfileMenuRename(String),
+    ChatminalSidebarProfileMenuAddSession(String),
     ChatminalSidebarProfileMenuDelete(String),
     ChatminalStartupRecipeModalBackdrop,
     ChatminalStartupRecipeModalPanel,
@@ -539,6 +542,14 @@ pub struct TermWindow {
     webgpu: Option<Rc<WebGpuState>>,
     config_subscription: Option<config::ConfigSubscription>,
     settings_modal_catalog: Option<Rc<SettingsCatalog>>,
+    /// Pre-built command list for the Action Finder palette.
+    /// Avoids rebuilding InputMap + expanded_commands on every palette open.
+    cached_palette_base_commands: Option<Rc<Vec<ExpandedCommand>>>,
+    /// Cached palette modal instance — reused across opens to preserve
+    /// the element/shape cache computed on first render.
+    cached_command_palette_modal: Option<Rc<crate::termwindow::palette::CommandPalette>>,
+    /// Cached settings modal instance — reused across opens.
+    cached_settings_modal: Option<Rc<crate::termwindow::settings_modal::SettingsModal>>,
     chatminal_settings_modal_open: Cell<bool>,
     command_palette_modal_open: Cell<bool>,
     chatminal_sidebar: ChatminalSidebar,
@@ -1518,6 +1529,21 @@ impl TermWindow {
         }
     }
 
+    fn prompt_rename_chatminal_profile(&mut self, profile_id: &str) {
+        if !self.chatminal_sidebar.is_enabled() {
+            return;
+        }
+        if self
+            .chatminal_sidebar
+            .start_inline_profile_rename(profile_id)
+        {
+            self.cancel_modal();
+            if let Some(window) = self.window.as_ref() {
+                window.invalidate();
+            }
+        }
+    }
+
     fn prompt_startup_command_chatminal_session(&mut self, session_id: &str) {
         if !self.chatminal_sidebar.is_enabled() {
             return;
@@ -1538,40 +1564,43 @@ impl TermWindow {
 
     fn open_chatminal_settings_modal(&mut self) {
         let start = Instant::now();
-        let cache_hit = self.settings_modal_catalog.is_some();
-        let catalog = match self.settings_modal_catalog.clone() {
-            Some(catalog) => catalog,
-            None => {
-                let catalog = Rc::new(build_settings_catalog(&self.config));
-                self.settings_modal_catalog = Some(catalog.clone());
-                catalog
-            }
+        let modal = if let Some(cached) = self.cached_settings_modal.clone() {
+            // Reuse cached instance — element/shape cache preserved for fast render
+            cached.reset_for_reopen();
+            cached
+        } else {
+            let catalog = match self.settings_modal_catalog.clone() {
+                Some(catalog) => catalog,
+                None => {
+                    let catalog = Rc::new(build_settings_catalog(&self.config));
+                    self.settings_modal_catalog = Some(catalog.clone());
+                    catalog
+                }
+            };
+            let m = Rc::new(SettingsModal::new(catalog));
+            self.cached_settings_modal = Some(m.clone());
+            m
         };
-        let modal = SettingsModal::new(catalog);
-        self.set_modal(Rc::new(modal));
+        self.set_modal(modal);
         self.chatminal_settings_modal_open.set(true);
 
         if settings_modal_perf_enabled() {
-            log::info!(
-                "settings-modal.open elapsed={:?} cache_hit={} tabs={} entries={}",
-                start.elapsed(),
-                cache_hit,
-                self.settings_modal_catalog
-                    .as_ref()
-                    .map(|catalog| catalog.tab_count())
-                    .unwrap_or(0),
-                self.settings_modal_catalog
-                    .as_ref()
-                    .map(|catalog| catalog.entry_count())
-                    .unwrap_or(0),
-            );
+            log::info!("settings-modal.open elapsed={:?}", start.elapsed());
         }
     }
 
     pub(crate) fn open_command_palette_modal(&mut self) {
         let start = Instant::now();
-        let modal = crate::termwindow::palette::CommandPalette::new(self);
-        self.set_modal(Rc::new(modal));
+        let modal = if let Some(cached) = self.cached_command_palette_modal.clone() {
+            // Reuse cached instance — shape/glyph cache preserved from last open
+            cached.reset_for_reopen();
+            cached
+        } else {
+            let m = Rc::new(crate::termwindow::palette::CommandPalette::new(self));
+            self.cached_command_palette_modal = Some(m.clone());
+            m
+        };
+        self.set_modal(modal);
         self.command_palette_modal_open.set(true);
 
         if action_finder_perf_enabled() {
@@ -1593,6 +1622,24 @@ impl TermWindow {
             }
             Err(err) => {
                 log::error!("failed to rename sidebar session {session_id}: {err}");
+            }
+        }
+    }
+
+    fn rename_chatminal_profile(&mut self, profile_id: &str, name: &str) {
+        if !self.chatminal_sidebar.is_enabled() {
+            return;
+        }
+        match self.chatminal_sidebar.rename_profile(profile_id, name) {
+            Ok(workspace) => {
+                self.chatminal_sidebar.apply_workspace(workspace);
+                self.update_title_post_status();
+                if let Some(window) = self.window.as_ref() {
+                    window.invalidate();
+                }
+            }
+            Err(err) => {
+                log::error!("failed to rename sidebar profile {profile_id}: {err}");
             }
         }
     }
@@ -1671,6 +1718,25 @@ impl TermWindow {
             }
             Err(err) => {
                 log::error!("failed to create sidebar profile: {err}");
+            }
+        }
+    }
+
+    fn create_chatminal_session_in_profile(&mut self, profile_id: &str) {
+        if !self.chatminal_sidebar.is_enabled() {
+            return;
+        }
+        match self.chatminal_sidebar.create_session_in_profile(
+            profile_id,
+            self.terminal_size.cols.max(20),
+            self.terminal_size.rows.max(5),
+        ) {
+            Ok((created, workspace)) => {
+                self.apply_chatminal_profile_workspace(workspace);
+                self.switch_chatminal_session(&created.session_id);
+            }
+            Err(err) => {
+                log::error!("failed to create sidebar session in profile {profile_id}: {err}");
             }
         }
     }
@@ -1949,7 +2015,12 @@ impl TermWindow {
             last_frame_duration: Duration::ZERO,
             fps: 0.,
             config_subscription: None,
-            settings_modal_catalog: None,
+            settings_modal_catalog: Some(Rc::new(build_settings_catalog(&config))),
+            cached_palette_base_commands: Some(Rc::new(
+                crate::desktop_commands::CommandDef::actions_for_palette_and_menubar_with_session_ui(&config, true),
+            )),
+            cached_command_palette_modal: None,
+            cached_settings_modal: None,
             chatminal_settings_modal_open: Cell::new(false),
             command_palette_modal_open: Cell::new(false),
             os_parameters: None,

@@ -3,7 +3,7 @@ use crate::inputmap::ui_key;
 use crate::termwindow::box_model::*;
 use crate::termwindow::modal::Modal;
 use crate::termwindow::palette::{
-    sidebar_like_border, sidebar_like_muted_text, sidebar_like_panel_bg, sidebar_like_text,
+    sidebar_like_muted_text, sidebar_like_panel_bg, sidebar_like_text,
 };
 use crate::termwindow::render::corners::{
     BOTTOM_LEFT_ROUNDED_CORNER, BOTTOM_RIGHT_ROUNDED_CORNER, TOP_LEFT_ROUNDED_CORNER,
@@ -74,6 +74,14 @@ impl SettingsModal {
         }
     }
 
+    /// Reset selection state for reuse across opens. Keeps catalog and element cache.
+    pub fn reset_for_reopen(&self) {
+        *self.selected_tab.borrow_mut() = 0;
+        *self.selected_row.borrow_mut() = 0;
+        *self.top_row.borrow_mut() = 0;
+        self.element.borrow_mut().take();
+    }
+
     fn current_entries(&self) -> &[SettingsEntry] {
         let tab_idx = (*self.selected_tab.borrow()).min(self.catalog.tabs.len().saturating_sub(1));
         self.catalog
@@ -106,6 +114,46 @@ impl SettingsModal {
 
     fn invalidate_cache(&self) {
         self.element.borrow_mut().take();
+    }
+
+    fn clear_hover(term_window: &mut TermWindow) {
+        term_window.current_mouse_event = None;
+    }
+
+    fn estimated_row_height_px(entry: &SettingsEntry, line_height: f32) -> f32 {
+        // Row height must match the actual box-model chrome closely; otherwise the
+        // settings panel grows past its fixed viewport because the box model does
+        // not support max-height clipping for child blocks.
+        let mut height = 24.0 + line_height;
+        if !entry.section.is_empty() {
+            height += 4.0 + line_height;
+        }
+        height.ceil().max(34.0)
+    }
+
+    fn visible_end_for_height(
+        entries: &[SettingsEntry],
+        top_row: usize,
+        available_height: f32,
+        line_height: f32,
+    ) -> usize {
+        if entries.is_empty() {
+            return 0;
+        }
+
+        let max_height = (available_height - 2.0).max(0.0);
+        let mut used_height = 0.0;
+        let mut end = top_row.min(entries.len());
+        for entry in entries.iter().skip(top_row) {
+            let row_height = Self::estimated_row_height_px(entry, line_height);
+            if end > top_row && used_height + row_height > max_height {
+                break;
+            }
+            used_height += row_height;
+            end += 1;
+        }
+
+        end.max((top_row + 1).min(entries.len()))
     }
 
     fn set_selected_tab(&self, index: usize) {
@@ -193,6 +241,95 @@ impl SettingsModal {
             })
     }
 
+    fn list_scrollbar(
+        font: &std::rc::Rc<terminal_font::LoadedFont>,
+        viewport_height: f32,
+        total_rows: usize,
+        visible_rows: usize,
+        top_row: usize,
+    ) -> Option<Element> {
+        if total_rows <= visible_rows || visible_rows == 0 {
+            return None;
+        }
+
+        let track_padding_top = 12.0;
+        let track_padding_bottom = 4.0;
+        let track_width = 6.0;
+        let track_bg = LinearRgba::with_components(0.028, 0.028, 0.028, 1.0);
+        let thumb_bg = LinearRgba::with_components(0.220, 0.220, 0.220, 1.0);
+        let track_inner_height =
+            (viewport_height - track_padding_top - track_padding_bottom).max(1.0);
+        let thumb_height = ((visible_rows as f32 / total_rows as f32) * track_inner_height)
+            .clamp(24.0, track_inner_height);
+        let max_scroll = total_rows.saturating_sub(visible_rows).max(1) as f32;
+        let max_thumb_offset = (track_inner_height - thumb_height).max(0.0);
+        let thumb_offset = (top_row.min(total_rows.saturating_sub(visible_rows)) as f32
+            / max_scroll)
+            * max_thumb_offset;
+
+        Some(
+            Element::new(
+                font,
+                ElementContent::Children(vec![Element::new(
+                    font,
+                    ElementContent::Children(vec![Element::new(
+                        font,
+                        ElementContent::Children(vec![]),
+                    )
+                    .display(DisplayType::Block)
+                    .min_width(Some(Dimension::Pixels(track_width)))
+                    .max_width(Some(Dimension::Pixels(track_width)))
+                    .min_height(Some(Dimension::Pixels(thumb_height)))
+                    .margin(BoxDimension {
+                        left: Dimension::Pixels(0.0),
+                        right: Dimension::Pixels(0.0),
+                        top: Dimension::Pixels(thumb_offset),
+                        bottom: Dimension::Pixels(0.0),
+                    })
+                    .border(BoxDimension::new(Dimension::Pixels(1.0)))
+                    .border_corners(Some(rounded_corners(3.0)))
+                    .colors(ElementColors {
+                        border: BorderColor::new(thumb_bg),
+                        bg: thumb_bg.into(),
+                        text: LinearRgba::TRANSPARENT.into(),
+                    })]),
+                )
+                .display(DisplayType::Block)
+                .min_width(Some(Dimension::Pixels(track_width)))
+                .max_width(Some(Dimension::Pixels(track_width)))
+                .min_height(Some(Dimension::Pixels(track_inner_height)))
+                .margin(BoxDimension {
+                    left: Dimension::Pixels(0.0),
+                    right: Dimension::Pixels(0.0),
+                    top: Dimension::Pixels(track_padding_top),
+                    bottom: Dimension::Pixels(track_padding_bottom),
+                })
+                .border(BoxDimension::new(Dimension::Pixels(1.0)))
+                .border_corners(Some(rounded_corners(3.0)))
+                .colors(ElementColors {
+                    border: BorderColor::new(track_bg),
+                    bg: track_bg.into(),
+                    text: LinearRgba::TRANSPARENT.into(),
+                })]),
+            )
+            .display(DisplayType::Inline)
+            .min_width(Some(Dimension::Pixels(track_width)))
+            .max_width(Some(Dimension::Pixels(track_width)))
+            .min_height(Some(Dimension::Pixels(viewport_height)))
+            .margin(BoxDimension {
+                left: Dimension::Pixels(8.0),
+                right: Dimension::Pixels(0.0),
+                top: Dimension::Pixels(0.0),
+                bottom: Dimension::Pixels(0.0),
+            })
+            .colors(ElementColors {
+                border: BorderColor::default(),
+                bg: LinearRgba::TRANSPARENT.into(),
+                text: LinearRgba::TRANSPARENT.into(),
+            }),
+        )
+    }
+
     fn chip(
         font: &std::rc::Rc<terminal_font::LoadedFont>,
         label: &str,
@@ -218,9 +355,14 @@ impl SettingsModal {
                 top: Dimension::Pixels(0.0),
                 bottom: Dimension::Pixels(8.0),
             })
-            .border_corners(Some(rounded_corners(5.0)))
+            .border(BoxDimension::new(Dimension::Pixels(1.0)))
+            .border_corners(Some(rounded_corners(7.0)))
             .colors(ElementColors {
-                border: BorderColor::default(),
+                border: if active {
+                    BorderColor::new(active_bg)
+                } else {
+                    BorderColor::default()
+                },
                 bg: if active {
                     active_bg
                 } else {
@@ -230,7 +372,7 @@ impl SettingsModal {
                 text: if active { text } else { muted }.into(),
             })
             .hover_colors(Some(ElementColors {
-                border: BorderColor::default(),
+                border: BorderColor::new(hover_bg),
                 bg: hover_bg.into(),
                 text: text.into(),
             }))
@@ -246,23 +388,42 @@ impl SettingsModal {
         }
         let metrics = RenderMetrics::with_font_metrics(&font.metrics());
         let dimensions = term_window.dimensions;
-        let width_px = (dimensions.pixel_width as f32 * 0.62).clamp(640.0, 920.0);
-        let height_px = (dimensions.pixel_height as f32 * 0.72).clamp(420.0, 760.0);
-        let panel_x = ((dimensions.pixel_width as f32 - width_px) / 2.0).max(24.0);
-        let panel_y = ((dimensions.pixel_height as f32 - height_px) / 2.0).max(28.0);
-        let row_height = (metrics.cell_size.height as f32 * 2.1).max(34.0);
-        let rows_per_page = ((height_px - 210.0) / row_height).floor().max(4.0) as usize;
-        *self.max_rows_on_screen.borrow_mut() = rows_per_page;
-        self.clamp_selection();
-
+        let horizontal_margin = (dimensions.pixel_width as f32 * 0.04).clamp(12.0, 24.0);
+        let vertical_margin = (dimensions.pixel_height as f32 * 0.04).clamp(12.0, 28.0);
+        let max_panel_width = (dimensions.pixel_width as f32 - horizontal_margin * 2.0).max(220.0);
+        let top_bar_height =
+            if term_window.show_session_bar && !term_window.config.session_bar_at_bottom {
+                term_window.tab_bar_pixel_height().unwrap_or(0.0)
+            } else {
+                0.0
+            };
+        let (_, padding_top) = term_window.padding_left_top();
+        let window_border = term_window.get_os_border();
+        let safe_top =
+            (top_bar_height + padding_top + window_border.top.get() as f32).max(vertical_margin);
+        let safe_bottom = vertical_margin;
+        let max_panel_height = (dimensions.pixel_height as f32 - safe_top - safe_bottom).max(220.0);
+        let width_px = 920.0_f32.min(max_panel_width);
+        let height_px = 760.0_f32.min(max_panel_height);
+        let panel_x = ((dimensions.pixel_width as f32 - width_px) / 2.0).max(horizontal_margin);
+        let panel_y = safe_top + ((max_panel_height - height_px) / 2.0).max(0.0);
         let text = sidebar_like_text();
         let muted = sidebar_like_muted_text();
-        let sub_muted = LinearRgba::with_components(0.47, 0.47, 0.47, 1.0);
+        let sub_muted = sidebar_like_muted_text();
         let panel_bg = sidebar_like_panel_bg();
-        let border = sidebar_like_border();
-        let list_border = sidebar_like_border();
+        let border = panel_bg;
+        let list_bg = LinearRgba::with_components(0.015, 0.015, 0.015, 1.0);
+        let list_border = list_bg;
         let row_hover = accent_hover_bg();
         let row_selected = accent_active_bg();
+        let line_height = metrics.cell_size.height as f32;
+        // Settings has variable-height rows plus tab chips, so a hard-coded chrome
+        // allowance tends to clip the bottom edge by a couple of pixels on shorter
+        // windows. Keep the panel fixed, but derive the non-list chrome from the
+        // current font metrics so the list viewport shrinks first.
+        let panel_chrome_height = (line_height * 4.0) + 126.0;
+        let list_rows_height = (height_px - panel_chrome_height).max(96.0);
+        let list_viewport_height = list_rows_height + 16.0;
 
         let tabs = self
             .catalog
@@ -281,10 +442,30 @@ impl SettingsModal {
             })
             .collect::<Vec<_>>();
 
+        let entries = self.current_entries();
+        let mut rows_per_page = Self::visible_end_for_height(
+            entries,
+            *self.top_row.borrow(),
+            list_rows_height,
+            line_height,
+        )
+        .saturating_sub(*self.top_row.borrow())
+        .max(1);
+        *self.max_rows_on_screen.borrow_mut() = rows_per_page;
+        self.clamp_selection();
+
+        let top_row = *self.top_row.borrow();
+        rows_per_page =
+            Self::visible_end_for_height(entries, top_row, list_rows_height, line_height)
+                .saturating_sub(top_row)
+                .max(1);
+        *self.max_rows_on_screen.borrow_mut() = rows_per_page;
+        self.clamp_selection();
+
         let top_row = *self.top_row.borrow();
         let selected_row = *self.selected_row.borrow();
-        let entries = self.current_entries();
-        let visible_end = (top_row + rows_per_page).min(entries.len());
+        let visible_end =
+            Self::visible_end_for_height(entries, top_row, list_rows_height, line_height);
         let action_rows = if entries.is_empty() {
             vec![Self::text_block(&font, "No actions", muted)]
         } else {
@@ -306,7 +487,9 @@ impl SettingsModal {
                                 .colors(text_colors(muted)),
                         ]),
                     )
-                    .display(DisplayType::Block);
+                    .display(DisplayType::Block)
+                    .min_width(Some(Dimension::Percent(1.0)))
+                    .max_width(Some(Dimension::Percent(1.0)));
 
                     let mut children = vec![row_text];
                     if !entry.section.is_empty() {
@@ -325,6 +508,8 @@ impl SettingsModal {
                     Element::new(&font, ElementContent::Children(children))
                         .item_type(UIItemType::ChatminalSettingsModalAction(row_idx))
                         .display(DisplayType::Block)
+                        .min_width(Some(Dimension::Percent(1.0)))
+                        .max_width(Some(Dimension::Percent(1.0)))
                         .padding(BoxDimension {
                             left: Dimension::Pixels(12.0),
                             right: Dimension::Pixels(12.0),
@@ -337,9 +522,14 @@ impl SettingsModal {
                             top: Dimension::Pixels(0.0),
                             bottom: Dimension::Pixels(4.0),
                         })
-                        .border_corners(Some(rounded_corners(4.0)))
+                        .border(BoxDimension::new(Dimension::Pixels(1.0)))
+                        .border_corners(Some(rounded_corners(7.0)))
                         .colors(ElementColors {
-                            border: BorderColor::default(),
+                            border: if is_selected {
+                                BorderColor::new(row_selected)
+                            } else {
+                                BorderColor::default()
+                            },
                             bg: if is_selected {
                                 row_selected
                             } else {
@@ -349,7 +539,7 @@ impl SettingsModal {
                             text: text.into(),
                         })
                         .hover_colors(Some(ElementColors {
-                            border: BorderColor::default(),
+                            border: BorderColor::new(row_hover),
                             bg: row_hover.into(),
                             text: text.into(),
                         }))
@@ -362,6 +552,29 @@ impl SettingsModal {
         } else {
             format!("{}-{} / {}", top_row + 1, visible_end, entries.len())
         };
+        let list_scrollbar = Self::list_scrollbar(
+            &font,
+            list_rows_height,
+            entries.len(),
+            visible_end.saturating_sub(top_row),
+            top_row,
+        );
+        let rows_width = if list_scrollbar.is_some() { 0.965 } else { 1.0 };
+        let mut list_children = vec![Element::new(&font, ElementContent::Children(action_rows))
+            .item_type(UIItemType::ChatminalSettingsModalPanel)
+            .display(DisplayType::Inline)
+            .padding(BoxDimension {
+                left: Dimension::Pixels(0.0),
+                right: Dimension::Pixels(0.0),
+                top: Dimension::Pixels(12.0),
+                bottom: Dimension::Pixels(4.0),
+            })
+            .min_height(Some(Dimension::Pixels(list_rows_height)))
+            .min_width(Some(Dimension::Percent(rows_width)))
+            .max_width(Some(Dimension::Percent(rows_width)))];
+        if let Some(scrollbar) = list_scrollbar {
+            list_children.push(scrollbar);
+        }
 
         let backdrop = Element::new(&font, ElementContent::Children(vec![]))
             .item_type(UIItemType::ChatminalSettingsModalBackdrop)
@@ -398,23 +611,21 @@ impl SettingsModal {
                         top: Dimension::Pixels(0.0),
                         bottom: Dimension::Pixels(8.0),
                     }),
-                Element::new(&font, ElementContent::Children(action_rows))
+                Element::new(&font, ElementContent::Children(list_children))
                     .item_type(UIItemType::ChatminalSettingsModalPanel)
                     .display(DisplayType::Block)
                     .padding(BoxDimension {
                         left: Dimension::Pixels(12.0),
                         right: Dimension::Pixels(12.0),
-                        top: Dimension::Pixels(12.0),
-                        bottom: Dimension::Pixels(4.0),
+                        top: Dimension::Pixels(0.0),
+                        bottom: Dimension::Pixels(0.0),
                     })
-                    .min_height(Some(Dimension::Pixels(
-                        (row_height * rows_per_page as f32).max(180.0),
-                    )))
+                    .min_height(Some(Dimension::Pixels(list_viewport_height)))
                     .border(BoxDimension::new(Dimension::Pixels(1.0)))
-                    .border_corners(Some(rounded_corners(5.0)))
+                    .border_corners(Some(rounded_corners(7.0)))
                     .colors(ElementColors {
                         border: BorderColor::new(list_border),
-                        bg: panel_bg.into(),
+                        bg: list_bg.into(),
                         text: text.into(),
                     }),
                 Self::text_block(
@@ -439,7 +650,7 @@ impl SettingsModal {
             bottom: Dimension::Pixels(18.0),
         })
         .border(BoxDimension::new(Dimension::Pixels(1.0)))
-        .border_corners(Some(rounded_corners(5.0)))
+        .border_corners(Some(rounded_corners(7.0)))
         .colors(ElementColors {
             border: BorderColor::new(border),
             bg: panel_bg.into(),
@@ -541,18 +752,37 @@ impl Modal for SettingsModal {
         mods: KeyModifiers,
         term_window: &mut TermWindow,
     ) -> anyhow::Result<bool> {
+        let mods = mods.remove_positional_mods();
         match (key, mods) {
             (KeyCode::Escape, KeyModifiers::NONE) | (KeyCode::Char('g'), KeyModifiers::CTRL) => {
                 term_window.cancel_modal();
             }
-            (KeyCode::LeftArrow, KeyModifiers::NONE) => self.move_tab(-1),
-            (KeyCode::RightArrow, KeyModifiers::NONE) => self.move_tab(1),
-            (KeyCode::UpArrow, KeyModifiers::NONE) => self.move_row(-1),
-            (KeyCode::DownArrow, KeyModifiers::NONE) => self.move_row(1),
+            (KeyCode::ApplicationLeftArrow, KeyModifiers::NONE)
+            | (KeyCode::LeftArrow, KeyModifiers::NONE) => {
+                Self::clear_hover(term_window);
+                self.move_tab(-1);
+            }
+            (KeyCode::ApplicationRightArrow, KeyModifiers::NONE)
+            | (KeyCode::RightArrow, KeyModifiers::NONE) => {
+                Self::clear_hover(term_window);
+                self.move_tab(1);
+            }
+            (KeyCode::ApplicationUpArrow, KeyModifiers::NONE)
+            | (KeyCode::UpArrow, KeyModifiers::NONE) => {
+                Self::clear_hover(term_window);
+                self.move_row(-1);
+            }
+            (KeyCode::ApplicationDownArrow, KeyModifiers::NONE)
+            | (KeyCode::DownArrow, KeyModifiers::NONE) => {
+                Self::clear_hover(term_window);
+                self.move_row(1);
+            }
             (KeyCode::PageUp, KeyModifiers::NONE) => {
+                Self::clear_hover(term_window);
                 self.scroll_by_lines(-(*self.max_rows_on_screen.borrow() as isize))
             }
             (KeyCode::PageDown, KeyModifiers::NONE) => {
+                Self::clear_hover(term_window);
                 self.scroll_by_lines(*self.max_rows_on_screen.borrow() as isize)
             }
             (KeyCode::Enter, KeyModifiers::NONE) => {
@@ -610,11 +840,11 @@ fn rounded_corners(radius: f32) -> Corners {
 }
 
 fn accent_active_bg() -> LinearRgba {
-    LinearRgba::with_components(0.016, 0.224, 0.369, 1.0)
+    LinearRgba::with_components(0.112, 0.112, 0.112, 1.0)
 }
 
 fn accent_hover_bg() -> LinearRgba {
-    LinearRgba::with_components(0.071, 0.102, 0.141, 1.0)
+    LinearRgba::with_components(0.066, 0.066, 0.066, 1.0)
 }
 
 fn text_colors(text: LinearRgba) -> ElementColors {

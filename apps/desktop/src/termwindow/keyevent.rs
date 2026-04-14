@@ -223,7 +223,7 @@ impl super::TermWindow {
             if c.is_control() {
                 continue;
             }
-            if self.chatminal_sidebar.inline_session_edit_push(c) {
+            if self.chatminal_sidebar.inline_edit_push(c) {
                 changed = true;
             }
         }
@@ -241,35 +241,40 @@ impl super::TermWindow {
         context: &dyn WindowOps,
     ) -> bool {
         if !self.chatminal_sidebar.is_enabled()
-            || self.chatminal_sidebar.inline_session_edit_state().is_none()
+            || self.chatminal_sidebar.inline_edit_state().is_none()
         {
             return false;
         }
 
         match key {
             Key::Code(::termwiz::input::KeyCode::Escape) => {
-                if self.chatminal_sidebar.inline_session_edit_cancel() {
+                if self.chatminal_sidebar.inline_edit_cancel() {
                     context.invalidate();
                 }
                 true
             }
             Key::Code(::termwiz::input::KeyCode::Enter) => {
-                if let Some((_kind, session_id, input)) =
-                    self.chatminal_sidebar.inline_session_edit_commit()
-                {
-                    self.rename_chatminal_session(&session_id, &input);
+                if let Some((kind, item_id, input)) = self.chatminal_sidebar.inline_edit_commit() {
+                    match kind {
+                        crate::chatminal_sidebar::SidebarInlineEditKind::RenameSession => {
+                            self.rename_chatminal_session(&item_id, &input);
+                        }
+                        crate::chatminal_sidebar::SidebarInlineEditKind::RenameProfile => {
+                            self.rename_chatminal_profile(&item_id, &input);
+                        }
+                    }
                 }
                 context.invalidate();
                 true
             }
             Key::Code(::termwiz::input::KeyCode::Backspace) if raw_modifiers == Modifiers::NONE => {
-                if self.chatminal_sidebar.inline_session_edit_backspace() {
+                if self.chatminal_sidebar.inline_edit_backspace() {
                     context.invalidate();
                 }
                 true
             }
             Key::Code(::termwiz::input::KeyCode::Char('u')) if raw_modifiers == Modifiers::CTRL => {
-                if self.chatminal_sidebar.inline_session_edit_clear() {
+                if self.chatminal_sidebar.inline_edit_clear() {
                     context.invalidate();
                 }
                 true
@@ -543,7 +548,7 @@ impl super::TermWindow {
     }
 
     pub fn raw_key_event_impl(&mut self, key: RawKeyEvent, context: &dyn WindowOps) {
-        if self.chatminal_sidebar.inline_session_edit_state().is_some() {
+        if self.chatminal_sidebar.inline_edit_state().is_some() {
             if key.key_is_down {
                 let mapped = self.win_key_code_to_termwiz_key_code(&key.key);
                 if self.process_chatminal_sidebar_inline_session_edit_key(
@@ -565,18 +570,28 @@ impl super::TermWindow {
             if key.key_is_down {
                 let modal = self.get_modal().unwrap();
                 let modifiers = key.modifiers.remove_positional_mods();
-                match self.win_key_code_to_termwiz_key_code(&key.key) {
-                    Key::Code(term_key) => {
-                        if let Err(err) = modal.key_down(term_key, modifiers, self) {
-                            log::error!("Error dispatching raw key to modal: {err:#}");
+                let mut modal_keys = vec![];
+                if let Some(phys_code) = key.phys_code {
+                    modal_keys.push(::window::KeyCode::Physical(phys_code));
+                }
+                modal_keys.push(key.key.clone());
+
+                for modal_key in modal_keys {
+                    match self.win_key_code_to_termwiz_key_code(&modal_key) {
+                        Key::Code(term_key) => {
+                            if let Err(err) = modal.key_down(term_key, modifiers, self) {
+                                log::error!("Error dispatching raw key to modal: {err:#}");
+                            }
+                            break;
                         }
-                    }
-                    Key::Composed(text) => {
-                        if let Err(err) = modal.text_input(&text, modifiers, self) {
-                            log::error!("Error dispatching raw text to modal: {err:#}");
+                        Key::Composed(text) => {
+                            if let Err(err) = modal.text_input(&text, modifiers, self) {
+                                log::error!("Error dispatching raw text to modal: {err:#}");
+                            }
+                            break;
                         }
+                        Key::None => {}
                     }
-                    Key::None => {}
                 }
             }
             key.set_handled();
@@ -801,7 +816,7 @@ impl super::TermWindow {
             return;
         }
 
-        if self.chatminal_sidebar.inline_session_edit_state().is_some() {
+        if self.chatminal_sidebar.inline_edit_state().is_some() {
             self.process_chatminal_sidebar_inline_session_edit_window_key(&window_key, context);
             if window_key.key_is_down {
                 self.key_table_state.pop_until_unknown();

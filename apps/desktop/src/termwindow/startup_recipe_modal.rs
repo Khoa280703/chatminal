@@ -1,6 +1,9 @@
 use crate::color::LinearRgba;
 use crate::termwindow::box_model::*;
 use crate::termwindow::modal::Modal;
+use crate::termwindow::palette::{
+    sidebar_like_border, sidebar_like_muted_text, sidebar_like_panel_bg, sidebar_like_text,
+};
 use crate::termwindow::render::corners::{
     BOTTOM_LEFT_ROUNDED_CORNER, BOTTOM_RIGHT_ROUNDED_CORNER, TOP_LEFT_ROUNDED_CORNER,
     TOP_RIGHT_ROUNDED_CORNER,
@@ -353,7 +356,7 @@ impl StartupRecipeModal {
                 bottom: Dimension::Pixels(0.0),
             })
             .border(BoxDimension::new(Dimension::Pixels(1.0)))
-            .border_corners(Some(rounded_corners(5.0)))
+            .border_corners(Some(rounded_corners(7.0)))
             .colors(ElementColors {
                 border: BorderColor::new(border),
                 bg: bg.into(),
@@ -371,19 +374,36 @@ impl StartupRecipeModal {
         let font = Self::command_font(term_window)?;
         let metrics = RenderMetrics::with_font_metrics(&font.metrics());
         let dimensions = term_window.dimensions;
-        let max_panel_width = (dimensions.pixel_width as f32 - 48.0).max(360.0);
+        let horizontal_margin = (dimensions.pixel_width as f32 * 0.04).clamp(12.0, 24.0);
+        let vertical_margin = (dimensions.pixel_height as f32 * 0.04).clamp(12.0, 28.0);
+        let max_panel_width = (dimensions.pixel_width as f32 - horizontal_margin * 2.0).max(240.0);
+        let top_bar_height =
+            if term_window.show_session_bar && !term_window.config.session_bar_at_bottom {
+                term_window.tab_bar_pixel_height().unwrap_or(0.0)
+            } else {
+                0.0
+            };
+        let (_, padding_top) = term_window.padding_left_top();
+        let window_border = term_window.get_os_border();
+        let safe_top =
+            (top_bar_height + padding_top + window_border.top.get() as f32).max(vertical_margin);
+        let safe_bottom = vertical_margin;
+        let max_panel_height = (dimensions.pixel_height as f32 - safe_top - safe_bottom).max(240.0);
         let width_px = (dimensions.pixel_width as f32 * 0.54)
-            .clamp(560.0, 820.0)
+            .clamp(320.0, 820.0)
             .min(max_panel_width);
         let height_px = dimensions.pixel_height as f32;
-        let panel_x = ((dimensions.pixel_width as f32 - width_px) / 2.0).max(24.0);
-        let panel_y = (dimensions.pixel_height as f32 * 0.14).max(42.0);
-        let panel_height = (dimensions.pixel_height as f32 * 0.68).max(400.0);
+        let panel_height = (dimensions.pixel_height as f32 * 0.68)
+            .clamp(260.0, 720.0)
+            .min(max_panel_height);
+        let panel_x = ((dimensions.pixel_width as f32 - width_px) / 2.0).max(horizontal_margin);
+        let panel_y = safe_top + ((max_panel_height - panel_height) / 2.0).max(0.0);
         let visible_columns = ((width_px - MODAL_INPUT_HORIZONTAL_PADDING_PX * 2.0)
             / metrics.cell_size.width as f32)
             .floor()
             .max(8.0) as usize;
         let visible_columns = visible_columns.saturating_sub(MODAL_VISIBLE_COLUMN_GUTTER);
+        let editor_min_height = (panel_height - 182.0).max(96.0);
 
         let backdrop = Element::new(&font, ElementContent::Children(vec![]))
             .item_type(UIItemType::ChatminalStartupRecipeModalBackdrop)
@@ -396,29 +416,29 @@ impl StartupRecipeModal {
                 text: LinearRgba::TRANSPARENT.into(),
             });
 
-        let text = LinearRgba::with_components(0.88, 0.88, 0.88, 1.0);
-        let sub_muted = LinearRgba::with_components(0.50, 0.50, 0.50, 1.0);
-        let panel_bg = LinearRgba::with_components(0.02, 0.02, 0.02, 1.0);
-        let border = LinearRgba::with_components(0.12, 0.12, 0.12, 1.0);
+        let text = sidebar_like_text();
+        let sub_muted = sidebar_like_muted_text();
+        let panel_bg = sidebar_like_panel_bg();
+        let border = panel_bg;
         let cursor_visible = Self::cursor_visible(term_window);
         let input_bg = if *self.select_all.borrow() {
-            LinearRgba::with_components(0.08, 0.08, 0.08, 1.0)
+            LinearRgba::with_components(0.034, 0.034, 0.034, 1.0)
         } else {
-            LinearRgba::with_components(0.01, 0.01, 0.01, 1.0)
+            LinearRgba::with_components(0.015, 0.015, 0.015, 1.0)
         };
         let input_border = if *self.select_all.borrow() {
-            LinearRgba::with_components(0.34, 0.34, 0.34, 1.0)
+            sidebar_like_border()
         } else {
-            LinearRgba::with_components(0.18, 0.18, 0.18, 1.0)
+            input_bg
         };
-        let button_border = LinearRgba::with_components(0.18, 0.18, 0.18, 1.0);
+        let button_border = panel_bg;
         let button_bg = panel_bg;
-        let button_hover_border = LinearRgba::with_components(0.28, 0.28, 0.28, 1.0);
-        let button_hover = LinearRgba::with_components(0.06, 0.06, 0.06, 1.0);
-        let save_border = LinearRgba::with_components(0.96, 0.96, 0.96, 1.0);
-        let save_bg = LinearRgba::with_components(0.96, 0.96, 0.96, 1.0);
-        let save_hover = LinearRgba::with_components(0.86, 0.86, 0.86, 1.0);
-        let save_text = LinearRgba::with_components(0.03, 0.03, 0.03, 1.0);
+        let button_hover = LinearRgba::with_components(0.055, 0.055, 0.055, 1.0);
+        let button_hover_border = button_hover;
+        let save_bg = LinearRgba::with_components(0.112, 0.112, 0.112, 1.0);
+        let save_border = save_bg;
+        let save_hover = LinearRgba::with_components(0.154, 0.154, 0.154, 1.0);
+        let save_text = text;
 
         let recipe_lines: Vec<Element> = self
             .visible_recipe_lines(visible_columns.max(1), cursor_visible)
@@ -435,7 +455,9 @@ impl StartupRecipeModal {
             .item_type(UIItemType::ChatminalStartupRecipeModalInput)
             .display(DisplayType::Block)
             .min_width(Some(Dimension::Percent(1.0)))
-            .min_height(Some(Dimension::Pixels(MODAL_MIN_INPUT_HEIGHT_PX)))
+            .min_height(Some(Dimension::Pixels(
+                MODAL_MIN_INPUT_HEIGHT_PX.min(editor_min_height),
+            )))
             .padding(BoxDimension {
                 left: Dimension::Pixels(MODAL_INPUT_HORIZONTAL_PADDING_PX),
                 right: Dimension::Pixels(MODAL_INPUT_HORIZONTAL_PADDING_PX),
@@ -443,7 +465,7 @@ impl StartupRecipeModal {
                 bottom: Dimension::Pixels(12.0),
             })
             .border(BoxDimension::new(Dimension::Pixels(1.0)))
-            .border_corners(Some(rounded_corners(4.0)))
+            .border_corners(Some(rounded_corners(7.0)))
             .colors(ElementColors {
                 border: BorderColor::new(input_border),
                 bg: input_bg.into(),
@@ -553,7 +575,7 @@ impl StartupRecipeModal {
             bottom: Dimension::Pixels(18.0),
         })
         .border(BoxDimension::new(Dimension::Pixels(1.0)))
-        .border_corners(Some(rounded_corners(5.0)))
+        .border_corners(Some(rounded_corners(7.0)))
         .colors(ElementColors {
             border: BorderColor::new(border),
             bg: panel_bg.into(),

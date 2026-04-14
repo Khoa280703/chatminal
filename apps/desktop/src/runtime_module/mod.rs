@@ -870,6 +870,10 @@ pub fn create_runtime_profile(name: Option<String>) -> Result<RuntimeProfile, St
     runtime_client()?.profile_create(name)
 }
 
+pub fn rename_runtime_profile(profile_id: &str, name: &str) -> Result<RuntimeWorkspace, String> {
+    runtime_client()?.profile_rename(profile_id, name)
+}
+
 pub fn delete_runtime_profile(profile_id: &str) -> Result<RuntimeWorkspace, String> {
     runtime_client()?.profile_delete(profile_id)
 }

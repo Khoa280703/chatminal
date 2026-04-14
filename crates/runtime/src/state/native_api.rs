@@ -50,6 +50,16 @@ impl StateInner {
         Ok(created.into())
     }
 
+    pub(super) fn profile_rename(
+        &mut self,
+        profile_id: &str,
+        name: &str,
+    ) -> Result<RuntimeWorkspace, String> {
+        self.store.rename_profile(profile_id, name)?;
+        self.publish_workspace_updated();
+        self.load_workspace_snapshot()
+    }
+
     pub(super) fn profile_switch(&mut self, profile_id: &str) -> Result<RuntimeWorkspace, String> {
         let exists = self
             .store

@@ -22,6 +22,7 @@ use std::cell::{Ref, RefCell};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use std::time::Instant;
 use terminal_emulator::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use termwiz::nerdfonts::NERD_FONTS;
@@ -50,15 +51,32 @@ struct Recent {
     frecency: Frecency,
 }
 
+// Cache recents in memory to avoid file I/O on every CommandPalette open.
+// Invalidated after each save_recent call.
+static RECENTS_CACHE: Mutex<Option<Vec<Recent>>> = Mutex::new(None);
+
 fn recent_file_name() -> PathBuf {
     config::DATA_DIR.join("recent-commands.json")
 }
 
 fn load_recents() -> anyhow::Result<Vec<Recent>> {
+    // Return cached value if available
+    if let Ok(guard) = RECENTS_CACHE.lock() {
+        if let Some(ref cached) = *guard {
+            return Ok(cached.clone());
+        }
+    }
+
     let file_name = recent_file_name();
     let f = std::fs::File::open(&file_name)?;
     let mut recents: Vec<Recent> = serde_json::from_reader(f)?;
     recents.sort_by(|a, b| b.frecency.score().partial_cmp(&a.frecency.score()).unwrap());
+
+    // Populate cache
+    if let Ok(mut guard) = RECENTS_CACHE.lock() {
+        *guard = Some(recents.clone());
+    }
+
     Ok(recents)
 }
 
@@ -79,6 +97,12 @@ fn save_recent(command: &ExpandedCommand) -> anyhow::Result<()> {
     let json = serde_json::to_string(&recents)?;
     let file_name = recent_file_name();
     std::fs::write(&file_name, json)?;
+
+    // Invalidate cache so next open reads updated data from disk
+    if let Ok(mut guard) = RECENTS_CACHE.lock() {
+        *guard = None;
+    }
+
     Ok(())
 }
 
@@ -97,10 +121,13 @@ fn build_commands(
     pane: Option<TerminalRef>,
     session_ui_mode: bool,
     filter_copy_mode: bool,
+    // Pre-built base commands from TermWindow cache; avoids redundant InputMap + expanded_commands
+    base_commands: Option<Vec<ExpandedCommand>>,
 ) -> Vec<ExpandedCommand> {
     let start = Instant::now();
-    let mut commands =
-        CommandDef::actions_for_palette_and_menubar_with_session_ui(config, session_ui_mode);
+    let mut commands = base_commands.unwrap_or_else(|| {
+        CommandDef::actions_for_palette_and_menubar_with_session_ui(config, session_ui_mode)
+    });
 
     match config::run_immediate_with_lua_config(|lua| {
         let mut entries: Vec<UserPaletteEntry> = vec![];
@@ -247,6 +274,118 @@ fn visible_row_summary(total: usize, top_row: usize, rows_per_page: usize) -> St
     parts.join("  ")
 }
 
+fn rounded_corners(radius: f32) -> Corners {
+    Corners {
+        top_left: SizedPoly {
+            width: Dimension::Pixels(radius),
+            height: Dimension::Pixels(radius),
+            poly: TOP_LEFT_ROUNDED_CORNER,
+        },
+        top_right: SizedPoly {
+            width: Dimension::Pixels(radius),
+            height: Dimension::Pixels(radius),
+            poly: TOP_RIGHT_ROUNDED_CORNER,
+        },
+        bottom_left: SizedPoly {
+            width: Dimension::Pixels(radius),
+            height: Dimension::Pixels(radius),
+            poly: BOTTOM_LEFT_ROUNDED_CORNER,
+        },
+        bottom_right: SizedPoly {
+            width: Dimension::Pixels(radius),
+            height: Dimension::Pixels(radius),
+            poly: BOTTOM_RIGHT_ROUNDED_CORNER,
+        },
+    }
+}
+
+fn list_scrollbar(
+    font: &std::rc::Rc<terminal_font::LoadedFont>,
+    viewport_height: f32,
+    total_rows: usize,
+    visible_rows: usize,
+    top_row: usize,
+) -> Option<Element> {
+    if total_rows <= visible_rows || visible_rows == 0 {
+        return None;
+    }
+
+    let track_padding_top = 12.0;
+    let track_padding_bottom = 4.0;
+    let track_width = 6.0;
+    let track_bg = LinearRgba::with_components(0.028, 0.028, 0.028, 1.0);
+    let thumb_bg = LinearRgba::with_components(0.220, 0.220, 0.220, 1.0);
+    let track_inner_height = (viewport_height - track_padding_top - track_padding_bottom).max(1.0);
+    let thumb_height = ((visible_rows as f32 / total_rows as f32) * track_inner_height)
+        .clamp(24.0, track_inner_height);
+    let max_scroll = total_rows.saturating_sub(visible_rows).max(1) as f32;
+    let max_thumb_offset = (track_inner_height - thumb_height).max(0.0);
+    let thumb_offset = (top_row.min(total_rows.saturating_sub(visible_rows)) as f32 / max_scroll)
+        * max_thumb_offset;
+
+    Some(
+        Element::new(
+            font,
+            ElementContent::Children(vec![Element::new(
+                font,
+                ElementContent::Children(vec![Element::new(
+                    font,
+                    ElementContent::Children(vec![]),
+                )
+                .display(DisplayType::Block)
+                .min_width(Some(Dimension::Pixels(track_width)))
+                .max_width(Some(Dimension::Pixels(track_width)))
+                .min_height(Some(Dimension::Pixels(thumb_height)))
+                .margin(BoxDimension {
+                    left: Dimension::Pixels(0.0),
+                    right: Dimension::Pixels(0.0),
+                    top: Dimension::Pixels(thumb_offset),
+                    bottom: Dimension::Pixels(0.0),
+                })
+                .border(BoxDimension::new(Dimension::Pixels(1.0)))
+                .border_corners(Some(rounded_corners(3.0)))
+                .colors(ElementColors {
+                    border: BorderColor::new(thumb_bg),
+                    bg: thumb_bg.into(),
+                    text: LinearRgba::TRANSPARENT.into(),
+                })]),
+            )
+            .display(DisplayType::Block)
+            .min_width(Some(Dimension::Pixels(track_width)))
+            .max_width(Some(Dimension::Pixels(track_width)))
+            .min_height(Some(Dimension::Pixels(track_inner_height)))
+            .margin(BoxDimension {
+                left: Dimension::Pixels(0.0),
+                right: Dimension::Pixels(0.0),
+                top: Dimension::Pixels(track_padding_top),
+                bottom: Dimension::Pixels(track_padding_bottom),
+            })
+            .border(BoxDimension::new(Dimension::Pixels(1.0)))
+            .border_corners(Some(rounded_corners(3.0)))
+            .colors(ElementColors {
+                border: BorderColor::new(track_bg),
+                bg: track_bg.into(),
+                text: LinearRgba::TRANSPARENT.into(),
+            })]),
+        )
+        .display(DisplayType::Inline)
+        .min_width(Some(Dimension::Pixels(track_width)))
+        .max_width(Some(Dimension::Pixels(track_width)))
+        .min_height(Some(Dimension::Pixels(viewport_height)))
+        .margin(BoxDimension {
+            left: Dimension::Pixels(8.0),
+            right: Dimension::Pixels(0.0),
+            top: Dimension::Pixels(0.0),
+            bottom: Dimension::Pixels(0.0),
+        })
+        .colors(ElementColors {
+            border: BorderColor::default(),
+            bg: LinearRgba::TRANSPARENT.into(),
+            text: LinearRgba::TRANSPARENT.into(),
+        }),
+    )
+}
+
 pub(crate) fn sidebar_like_panel_bg() -> LinearRgba {
     LinearRgba::with_components(0.007, 0.007, 0.007, 1.0)
 }
@@ -382,12 +521,20 @@ impl CommandPalette {
             });
         let session_ui_mode = term_window.active_session_id().is_some();
 
+        // Use pre-built base commands from TermWindow cache to avoid rebuilding
+        // InputMap + expanded_commands on every palette open.
+        let base_commands = term_window
+            .cached_palette_base_commands
+            .as_ref()
+            .map(|rc| rc.as_ref().clone());
+
         let commands = build_commands(
             &term_window.config,
             GuiWin::new(term_window),
             pane_ref,
             session_ui_mode,
             filter_copy_mode,
+            base_commands,
         );
 
         if crate::termwindow::action_finder_perf_enabled() {
@@ -412,6 +559,17 @@ impl CommandPalette {
         }
     }
 
+    /// Reset input state for reuse across opens. Keeps the commands list (expensive
+    /// to build) and clears selection/matches/element so the palette starts fresh.
+    pub fn reset_for_reopen(&self) {
+        self.selection.borrow_mut().clear();
+        self.composing.borrow_mut().take();
+        self.matches.borrow_mut().take();
+        self.element.borrow_mut().take();
+        *self.selected_row.borrow_mut() = 0;
+        *self.top_row.borrow_mut() = 0;
+    }
+
     fn effective_selection(&self) -> String {
         let mut selection = self.selection.borrow().clone();
         if let Some(composing) = self.composing.borrow().as_ref() {
@@ -428,22 +586,26 @@ impl CommandPalette {
         max_rows_on_screen: usize,
         selected_row: usize,
         top_row: usize,
+        font: std::rc::Rc<terminal_font::LoadedFont>,
     ) -> anyhow::Result<Vec<ComputedElement>> {
         let compute_start = Instant::now();
-        let font_start = Instant::now();
-        let font = resolve_sidebar_like_font(term_window)
-            .expect("to resolve sidebar-like command palette font");
-        let font_elapsed = font_start.elapsed();
-        if crate::termwindow::action_finder_perf_enabled() {
-            log::info!("action-finder.font elapsed={:?}", font_elapsed);
-        }
         let metrics = RenderMetrics::with_font_metrics(&font.metrics());
+        let dimensions = term_window.dimensions;
         let panel_bg = sidebar_like_panel_bg();
-        let root_border = sidebar_like_border();
+        let root_border = panel_bg;
         let text_color = sidebar_like_text();
         let muted_text = sidebar_like_muted_text();
-        let active_bg = LinearRgba::with_components(0.016, 0.224, 0.369, 1.0);
-
+        let input_bg = LinearRgba::with_components(0.015, 0.015, 0.015, 1.0);
+        let input_border = input_bg;
+        let list_bg = LinearRgba::with_components(0.015, 0.015, 0.015, 1.0);
+        let list_border = list_bg;
+        let active_bg = LinearRgba::with_components(0.112, 0.112, 0.112, 1.0);
+        let hover_bg = LinearRgba::with_components(0.066, 0.066, 0.066, 1.0);
+        let line_height = metrics.cell_size.height as f32;
+        let row_height = (metrics.cell_size.height as f32 * 2.1).max(34.0);
+        let horizontal_margin = (dimensions.pixel_width as f32 * 0.04).clamp(12.0, 24.0);
+        let vertical_margin = (dimensions.pixel_height as f32 * 0.04).clamp(12.0, 28.0);
+        let max_panel_width = (dimensions.pixel_width as f32 - horizontal_margin * 2.0).max(240.0);
         let top_bar_height =
             if term_window.show_session_bar && !term_window.config.session_bar_at_bottom {
                 term_window.tab_bar_pixel_height().unwrap()
@@ -453,40 +615,22 @@ impl CommandPalette {
         let (padding_left, padding_top) = term_window.padding_left_top();
         let border = term_window.get_os_border();
         let top_pixel_y = top_bar_height + padding_top + border.top.get() as f32;
-
-        let mut elements = vec![
-            Element::new(&font, ElementContent::Text("Action Finder".to_string()))
-                .colors(ElementColors {
-                    border: BorderColor::default(),
-                    bg: LinearRgba::TRANSPARENT.into(),
-                    text: text_color.into(),
-                })
-                .display(DisplayType::Block),
-            Element::new(
-                &font,
-                ElementContent::Text("Find and run Chatminal actions".to_string()),
-            )
-            .colors(ElementColors {
-                border: BorderColor::default(),
-                bg: LinearRgba::TRANSPARENT.into(),
-                text: muted_text.into(),
-            })
-            .padding(BoxDimension {
-                left: Dimension::Cells(0.0),
-                right: Dimension::Cells(0.0),
-                top: Dimension::Cells(0.0),
-                bottom: Dimension::Cells(0.25),
-            })
-            .display(DisplayType::Block),
-            Element::new(&font, ElementContent::Text(format!("> {selection}_")))
-                .colors(ElementColors {
-                    border: BorderColor::default(),
-                    bg: LinearRgba::TRANSPARENT.into(),
-                    text: text_color.into(),
-                })
-                .display(DisplayType::Block),
-        ];
+        let safe_top = top_pixel_y.max(vertical_margin);
+        let safe_bottom = vertical_margin;
+        let available_height = (dimensions.pixel_height as f32 - safe_top - safe_bottom).max(220.0);
+        let max_panel_height = available_height;
+        // Action Finder has a fixed chrome made of title/subtitle, input field,
+        // summary line and outer panel padding. This needs to track font metrics
+        // so the panel height remains inside the current Chatminal window.
+        let panel_chrome_height = 122.0 + line_height * 4.0;
+        let list_min_height = (row_height * max_rows_on_screen.max(1) as f32)
+            .min((max_panel_height - panel_chrome_height).max(row_height))
+            .max(row_height);
+        let list_viewport_height = list_min_height + 16.0;
+        let panel_height = (panel_chrome_height + list_min_height).min(max_panel_height);
         let total_matches = matches.matches.len();
+        let selection_text = format!("> {selection}_");
+        let mut action_rows = vec![];
 
         for (display_idx, command) in matches
             .matches
@@ -518,103 +662,192 @@ impl CommandPalette {
                 format!("{icon} {}", command.brief)
             };
 
-            elements.push(
+            action_rows.push(
                 Element::new(&font, ElementContent::Text(label))
                     .colors(ElementColors {
-                        border: BorderColor::default(),
+                        border: if display_idx == selected_row {
+                            BorderColor::new(active_bg)
+                        } else {
+                            BorderColor::default()
+                        },
                         bg,
                         text,
                     })
                     .padding(BoxDimension {
-                        left: Dimension::Cells(0.25),
-                        right: Dimension::Cells(0.25),
-                        top: Dimension::Cells(0.),
-                        bottom: Dimension::Cells(0.),
+                        left: Dimension::Pixels(12.0),
+                        right: Dimension::Pixels(12.0),
+                        top: Dimension::Pixels(9.0),
+                        bottom: Dimension::Pixels(9.0),
                     })
+                    .margin(BoxDimension {
+                        left: Dimension::Pixels(0.0),
+                        right: Dimension::Pixels(0.0),
+                        top: Dimension::Pixels(0.0),
+                        bottom: Dimension::Pixels(4.0),
+                    })
+                    .border(BoxDimension::new(Dimension::Pixels(1.0)))
+                    .border_corners(Some(rounded_corners(7.0)))
+                    .hover_colors(Some(ElementColors {
+                        border: BorderColor::new(hover_bg),
+                        bg: hover_bg.into(),
+                        text: text_color.into(),
+                    }))
                     .min_width(Some(Dimension::Percent(1.)))
+                    .max_width(Some(Dimension::Percent(1.)))
                     .display(DisplayType::Block),
             );
         }
 
-        elements.push(
-            Element::new(
-                &font,
-                ElementContent::Text(visible_row_summary(
-                    total_matches,
-                    top_row,
-                    max_rows_on_screen,
-                )),
-            )
-            .colors(ElementColors {
-                border: BorderColor::default(),
-                bg: LinearRgba::TRANSPARENT.into(),
-                text: muted_text.into(),
-            })
-            .padding(BoxDimension {
-                left: Dimension::Cells(0.25),
-                right: Dimension::Cells(0.25),
-                top: Dimension::Cells(0.25),
-                bottom: Dimension::Cells(0.),
-            })
-            .display(DisplayType::Block),
+        if action_rows.is_empty() {
+            action_rows.push(
+                Element::new(&font, ElementContent::Text("No actions".to_string()))
+                    .colors(ElementColors {
+                        border: BorderColor::default(),
+                        bg: LinearRgba::TRANSPARENT.into(),
+                        text: muted_text.into(),
+                    })
+                    .display(DisplayType::Block),
+            );
+        }
+        let list_scrollbar = list_scrollbar(
+            &font,
+            list_min_height,
+            total_matches,
+            total_matches
+                .saturating_sub(top_row)
+                .min(max_rows_on_screen),
+            top_row,
         );
-
-        let dimensions = term_window.dimensions;
-        let size = term_window.terminal_size;
-
-        // Avoid covering the entire width
-        let desired_width = (size.cols / 2).max(132).min(size.cols);
-
-        // Center it
-        let avail_pixel_width =
-            size.cols as f32 * term_window.render_metrics.cell_size.width as f32;
-        let desired_pixel_width =
-            desired_width as f32 * term_window.render_metrics.cell_size.width as f32;
-
-        let element = Element::new(&font, ElementContent::Children(elements))
-            .colors(ElementColors {
-                border: BorderColor::new(root_border),
-                bg: panel_bg.into(),
-                text: text_color.into(),
-            })
-            .margin(BoxDimension {
-                left: Dimension::Cells(0.25),
-                right: Dimension::Cells(0.25),
-                top: Dimension::Cells(0.25),
-                bottom: Dimension::Cells(0.25),
-            })
+        let rows_width = if list_scrollbar.is_some() { 0.965 } else { 1.0 };
+        let mut list_children = vec![Element::new(&font, ElementContent::Children(action_rows))
+            .display(DisplayType::Inline)
             .padding(BoxDimension {
-                left: Dimension::Cells(0.25),
-                right: Dimension::Cells(0.25),
-                top: Dimension::Cells(0.25),
-                bottom: Dimension::Cells(0.25),
+                left: Dimension::Pixels(0.0),
+                right: Dimension::Pixels(0.0),
+                top: Dimension::Pixels(12.0),
+                bottom: Dimension::Pixels(4.0),
             })
-            .border(BoxDimension::new(Dimension::Pixels(1.)))
-            .border_corners(Some(Corners {
-                top_left: SizedPoly {
-                    width: Dimension::Cells(0.25),
-                    height: Dimension::Cells(0.25),
-                    poly: TOP_LEFT_ROUNDED_CORNER,
-                },
-                top_right: SizedPoly {
-                    width: Dimension::Cells(0.25),
-                    height: Dimension::Cells(0.25),
-                    poly: TOP_RIGHT_ROUNDED_CORNER,
-                },
-                bottom_left: SizedPoly {
-                    width: Dimension::Cells(0.25),
-                    height: Dimension::Cells(0.25),
-                    poly: BOTTOM_LEFT_ROUNDED_CORNER,
-                },
-                bottom_right: SizedPoly {
-                    width: Dimension::Cells(0.25),
-                    height: Dimension::Cells(0.25),
-                    poly: BOTTOM_RIGHT_ROUNDED_CORNER,
-                },
-            }))
-            .min_width(Some(Dimension::Pixels(desired_pixel_width)));
+            .min_height(Some(Dimension::Pixels(list_min_height)))
+            .min_width(Some(Dimension::Percent(rows_width)))
+            .max_width(Some(Dimension::Percent(rows_width)))];
+        if let Some(scrollbar) = list_scrollbar {
+            list_children.push(scrollbar);
+        }
 
-        let x_adjust = ((avail_pixel_width - padding_left) - desired_pixel_width) / 2.;
+        let desired_pixel_width = (dimensions.pixel_width as f32 * 0.62)
+            .clamp(360.0, 920.0)
+            .min(max_panel_width);
+
+        let element = Element::new(
+            &font,
+            ElementContent::Children(vec![
+                Element::new(&font, ElementContent::Text("Action Finder".to_string()))
+                    .colors(ElementColors {
+                        border: BorderColor::default(),
+                        bg: LinearRgba::TRANSPARENT.into(),
+                        text: text_color.into(),
+                    })
+                    .display(DisplayType::Block)
+                    .padding(BoxDimension {
+                        left: Dimension::Pixels(0.0),
+                        right: Dimension::Pixels(0.0),
+                        top: Dimension::Pixels(0.0),
+                        bottom: Dimension::Pixels(4.0),
+                    }),
+                Element::new(
+                    &font,
+                    ElementContent::Text("Find and run Chatminal actions".to_string()),
+                )
+                .colors(ElementColors {
+                    border: BorderColor::default(),
+                    bg: LinearRgba::TRANSPARENT.into(),
+                    text: muted_text.into(),
+                })
+                .display(DisplayType::Block)
+                .padding(BoxDimension {
+                    left: Dimension::Pixels(0.0),
+                    right: Dimension::Pixels(0.0),
+                    top: Dimension::Pixels(0.0),
+                    bottom: Dimension::Pixels(14.0),
+                }),
+                Element::new(&font, ElementContent::Text(selection_text))
+                    .colors(ElementColors {
+                        border: BorderColor::new(input_border),
+                        bg: input_bg.into(),
+                        text: text_color.into(),
+                    })
+                    .display(DisplayType::Block)
+                    .padding(BoxDimension {
+                        left: Dimension::Pixels(12.0),
+                        right: Dimension::Pixels(12.0),
+                        top: Dimension::Pixels(12.0),
+                        bottom: Dimension::Pixels(12.0),
+                    })
+                    .border(BoxDimension::new(Dimension::Pixels(1.0)))
+                    .border_corners(Some(rounded_corners(7.0)))
+                    .margin(BoxDimension {
+                        left: Dimension::Pixels(0.0),
+                        right: Dimension::Pixels(0.0),
+                        top: Dimension::Pixels(0.0),
+                        bottom: Dimension::Pixels(12.0),
+                    }),
+                Element::new(&font, ElementContent::Children(list_children))
+                    .display(DisplayType::Block)
+                    .padding(BoxDimension {
+                        left: Dimension::Pixels(12.0),
+                        right: Dimension::Pixels(12.0),
+                        top: Dimension::Pixels(0.0),
+                        bottom: Dimension::Pixels(0.0),
+                    })
+                    .min_height(Some(Dimension::Pixels(list_viewport_height)))
+                    .border(BoxDimension::new(Dimension::Pixels(1.0)))
+                    .border_corners(Some(rounded_corners(7.0)))
+                    .colors(ElementColors {
+                        border: BorderColor::new(list_border),
+                        bg: list_bg.into(),
+                        text: text_color.into(),
+                    }),
+                Element::new(
+                    &font,
+                    ElementContent::Text(visible_row_summary(
+                        total_matches,
+                        top_row,
+                        max_rows_on_screen,
+                    )),
+                )
+                .colors(ElementColors {
+                    border: BorderColor::default(),
+                    bg: LinearRgba::TRANSPARENT.into(),
+                    text: muted_text.into(),
+                })
+                .display(DisplayType::Block)
+                .padding(BoxDimension {
+                    left: Dimension::Pixels(0.0),
+                    right: Dimension::Pixels(0.0),
+                    top: Dimension::Pixels(14.0),
+                    bottom: Dimension::Pixels(0.0),
+                }),
+            ]),
+        )
+        .colors(ElementColors {
+            border: BorderColor::new(root_border),
+            bg: panel_bg.into(),
+            text: text_color.into(),
+        })
+        .padding(BoxDimension {
+            left: Dimension::Pixels(18.0),
+            right: Dimension::Pixels(18.0),
+            top: Dimension::Pixels(18.0),
+            bottom: Dimension::Pixels(18.0),
+        })
+        .border(BoxDimension::new(Dimension::Pixels(1.)))
+        .border_corners(Some(rounded_corners(7.0)))
+        .min_width(Some(Dimension::Pixels(desired_pixel_width)))
+        .max_width(Some(Dimension::Pixels(desired_pixel_width)));
+
+        let panel_x =
+            ((dimensions.pixel_width as f32 - desired_pixel_width) / 2.0).max(horizontal_margin);
+        let panel_y = safe_top + ((available_height - panel_height) / 2.0).max(0.0);
 
         let computed = term_window.compute_element(
             &LayoutContext {
@@ -629,10 +862,10 @@ impl CommandPalette {
                     pixel_cell: metrics.cell_size.width as f32,
                 },
                 bounds: euclid::rect(
-                    padding_left + x_adjust,
-                    top_pixel_y,
+                    panel_x.max(padding_left),
+                    panel_y,
                     desired_pixel_width,
-                    size.rows as f32 * term_window.render_metrics.cell_size.height as f32,
+                    panel_height,
                 ),
                 metrics: &metrics,
                 gl_state: term_window.render_state.as_ref().unwrap(),
@@ -646,9 +879,8 @@ impl CommandPalette {
 
         if crate::termwindow::action_finder_perf_enabled() {
             log::info!(
-                "action-finder.compute elapsed={:?} font_elapsed={:?} selection_len={} total_matches={} visible_rows={} commands={}",
+                "action-finder.compute elapsed={:?} selection_len={} total_matches={} visible_rows={} commands={}",
                 compute_start.elapsed(),
-                font_elapsed,
                 selection.chars().count(),
                 total_matches,
                 total_matches.saturating_sub(top_row).min(max_rows_on_screen),
@@ -903,11 +1135,21 @@ impl Modal for CommandPalette {
         let font =
             resolve_sidebar_like_font(term_window).expect("to resolve sidebar-like palette font");
         let metrics = RenderMetrics::with_font_metrics(&font.metrics());
+        let vertical_margin = (term_window.dimensions.pixel_height as f32 * 0.04).clamp(12.0, 28.0);
+        let row_height = (metrics.cell_size.height as f32 * 2.1).max(34.0);
+        let max_panel_height =
+            (term_window.dimensions.pixel_height as f32 - vertical_margin * 2.0).max(220.0);
+        let chrome_height = 180.0;
 
         let mut max_rows_on_screen = ((term_window.dimensions.pixel_height * 8 / 10)
             / metrics.cell_size.height as usize)
             .saturating_sub(3)
             .max(1);
+        max_rows_on_screen = max_rows_on_screen.min(
+            ((max_panel_height - chrome_height) / row_height)
+                .floor()
+                .max(1.0) as usize,
+        );
         if let Some(size) = term_window.config.command_palette_rows {
             max_rows_on_screen = max_rows_on_screen.min(size);
         }
@@ -943,6 +1185,7 @@ impl Modal for CommandPalette {
                 max_rows_on_screen,
                 *self.selected_row.borrow(),
                 *self.top_row.borrow(),
+                font,
             )?;
             self.element.borrow_mut().replace(element);
             if crate::termwindow::action_finder_perf_enabled() {

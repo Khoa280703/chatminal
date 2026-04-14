@@ -107,6 +107,14 @@ impl ChatminalRuntimeClient {
         self.runtime.state.profile_create(name)
     }
 
+    pub(crate) fn profile_rename(
+        &self,
+        profile_id: &str,
+        name: &str,
+    ) -> Result<RuntimeWorkspace, String> {
+        self.runtime.state.profile_rename(profile_id, name)
+    }
+
     pub(crate) fn profile_delete(&self, profile_id: &str) -> Result<RuntimeWorkspace, String> {
         self.runtime.state.profile_delete(profile_id)
     }

@@ -804,7 +804,9 @@ impl crate::TermWindow {
             return None;
         }
         match &item.item_type {
-            UIItemType::ChatminalSidebarProfileMenuDelete(_) => Some(item.item_type.clone()),
+            UIItemType::ChatminalSidebarProfileMenuRename(_)
+            | UIItemType::ChatminalSidebarProfileMenuAddSession(_)
+            | UIItemType::ChatminalSidebarProfileMenuDelete(_) => Some(item.item_type.clone()),
             _ => None,
         }
     }
@@ -1021,13 +1023,14 @@ impl crate::TermWindow {
         let bg = LinearRgba::with_components(0.03, 0.03, 0.03, 1.0);
         let border = bg;
         let (menu_width, item_content_width) =
-            self.sidebar_context_menu_dimensions(&body_font, &["Delete"])?;
+            self.sidebar_context_menu_dimensions(&body_font, &["Rename", "Add Session", "Delete"])?;
         let hovered_item = self.hovered_sidebar_profile_menu_item();
-        let item_type = UIItemType::ChatminalSidebarProfileMenuDelete(profile.profile_id.clone());
-        let is_hovered = hovered_item.as_ref() == Some(&item_type);
-        let child = Element::new(&body_font, ElementContent::Text("Delete".into()))
+        let rename_item_type =
+            UIItemType::ChatminalSidebarProfileMenuRename(profile.profile_id.clone());
+        let rename_hovered = hovered_item.as_ref() == Some(&rename_item_type);
+        let rename_child = Element::new(&body_font, ElementContent::Text("Rename".into()))
             .display(crate::termwindow::box_model::DisplayType::Block)
-            .item_type(item_type)
+            .item_type(rename_item_type)
             .padding(BoxDimension {
                 left: Dimension::Pixels(SIDEBAR_CONTEXT_MENU_ITEM_HORIZONTAL_PADDING_PX),
                 right: Dimension::Pixels(SIDEBAR_CONTEXT_MENU_ITEM_HORIZONTAL_PADDING_PX),
@@ -1037,7 +1040,51 @@ impl crate::TermWindow {
             .min_width(Some(Dimension::Pixels(item_content_width)))
             .max_width(Some(Dimension::Pixels(item_content_width)))
             .colors(filled_colors(
-                if is_hovered {
+                if rename_hovered {
+                    hover_bg
+                } else {
+                    LinearRgba::TRANSPARENT
+                },
+                text,
+            ));
+        let add_session_item_type =
+            UIItemType::ChatminalSidebarProfileMenuAddSession(profile.profile_id.clone());
+        let add_session_hovered = hovered_item.as_ref() == Some(&add_session_item_type);
+        let add_session_child =
+            Element::new(&body_font, ElementContent::Text("Add Session".into()))
+                .display(crate::termwindow::box_model::DisplayType::Block)
+                .item_type(add_session_item_type)
+                .padding(BoxDimension {
+                    left: Dimension::Pixels(SIDEBAR_CONTEXT_MENU_ITEM_HORIZONTAL_PADDING_PX),
+                    right: Dimension::Pixels(SIDEBAR_CONTEXT_MENU_ITEM_HORIZONTAL_PADDING_PX),
+                    top: Dimension::Pixels(6.0),
+                    bottom: Dimension::Pixels(6.0),
+                })
+                .min_width(Some(Dimension::Pixels(item_content_width)))
+                .max_width(Some(Dimension::Pixels(item_content_width)))
+                .colors(filled_colors(
+                    if add_session_hovered {
+                        hover_bg
+                    } else {
+                        LinearRgba::TRANSPARENT
+                    },
+                    text,
+                ));
+        let delete_item_type = UIItemType::ChatminalSidebarProfileMenuDelete(profile.profile_id.clone());
+        let delete_hovered = hovered_item.as_ref() == Some(&delete_item_type);
+        let delete_child = Element::new(&body_font, ElementContent::Text("Delete".into()))
+            .display(crate::termwindow::box_model::DisplayType::Block)
+            .item_type(delete_item_type)
+            .padding(BoxDimension {
+                left: Dimension::Pixels(SIDEBAR_CONTEXT_MENU_ITEM_HORIZONTAL_PADDING_PX),
+                right: Dimension::Pixels(SIDEBAR_CONTEXT_MENU_ITEM_HORIZONTAL_PADDING_PX),
+                top: Dimension::Pixels(6.0),
+                bottom: Dimension::Pixels(6.0),
+            })
+            .min_width(Some(Dimension::Pixels(item_content_width)))
+            .max_width(Some(Dimension::Pixels(item_content_width)))
+            .colors(filled_colors(
+                if delete_hovered {
                     hover_bg
                 } else {
                     LinearRgba::TRANSPARENT
@@ -1045,7 +1092,10 @@ impl crate::TermWindow {
                 text,
             ));
 
-        let root = Element::new(&body_font, ElementContent::Children(vec![child]))
+        let root = Element::new(
+            &body_font,
+            ElementContent::Children(vec![rename_child, add_session_child, delete_child]),
+        )
             .display(crate::termwindow::box_model::DisplayType::Block)
             .item_type(UIItemType::ChatminalSidebarProfileMenu)
             .padding(BoxDimension::default())
@@ -1060,7 +1110,7 @@ impl crate::TermWindow {
             .max_width(Some(Dimension::Pixels(menu_width)));
 
         let width = menu_width;
-        let estimated_height = 40.0;
+        let estimated_height = 110.0;
         let x = menu.anchor_x_px.clamp(
             4.0,
             (self.dimensions.pixel_width as f32 - width - 4.0).max(4.0),
@@ -1209,6 +1259,46 @@ impl crate::TermWindow {
             },
             self.sidebar_icon_size_px(),
         )?;
+        let inline_edit = self.chatminal_sidebar.inline_edit_state();
+        let is_inline_edit = inline_edit
+            .as_ref()
+            .map(|edit| {
+                edit.kind == crate::chatminal_sidebar::SidebarInlineEditKind::RenameProfile
+                    && edit.item_id == profile.profile_id
+            })
+            .unwrap_or(false);
+        let is_inline_edit_selected = inline_edit
+            .as_ref()
+            .map(|edit| {
+                edit.kind == crate::chatminal_sidebar::SidebarInlineEditKind::RenameProfile
+                    && edit.item_id == profile.profile_id
+                    && edit.select_all
+            })
+            .unwrap_or(false);
+        let profile_label = if is_inline_edit {
+            let edit = inline_edit.as_ref().filter(|edit| {
+                edit.kind == crate::chatminal_sidebar::SidebarInlineEditKind::RenameProfile
+                    && edit.item_id == profile.profile_id
+            });
+            format!("{}_", edit.map(|edit| edit.input.as_str()).unwrap_or(""))
+        } else {
+            profile.name.clone()
+        };
+        let rename_bg = if is_inline_edit_selected {
+            LinearRgba::with_components(0.086, 0.322, 0.620, 1.0)
+        } else {
+            LinearRgba::with_components(0.12, 0.12, 0.12, 1.0)
+        };
+        let rename_border = if is_inline_edit_selected {
+            LinearRgba::with_components(0.184, 0.510, 0.855, 1.0)
+        } else {
+            LinearRgba::with_components(0.28, 0.28, 0.28, 1.0)
+        };
+        let rename_text = if is_inline_edit_selected {
+            LinearRgba::with_components(1.0, 1.0, 1.0, 1.0)
+        } else {
+            fg
+        };
 
         Ok(Element::new(
             body_font,
@@ -1221,10 +1311,33 @@ impl crate::TermWindow {
                     0.0,
                 ),
                 inline_icon(folder.colors(text_colors(folder_fg)), 7.0),
-                Element::new(body_font, ElementContent::Text(profile.name.clone()))
+                Element::new(body_font, ElementContent::Text(profile_label))
                     .display(crate::termwindow::box_model::DisplayType::Inline)
                     .vertical_align(VerticalAlign::Middle)
-                    .colors(text_colors(fg)),
+                    .padding(if is_inline_edit {
+                        BoxDimension {
+                            left: Dimension::Pixels(6.0),
+                            right: Dimension::Pixels(6.0),
+                            top: Dimension::Pixels(1.0),
+                            bottom: Dimension::Pixels(1.0),
+                        }
+                    } else {
+                        BoxDimension::default()
+                    })
+                    .border(if is_inline_edit {
+                        BoxDimension::new(Dimension::Pixels(1.0))
+                    } else {
+                        BoxDimension::default()
+                    })
+                    .colors(if is_inline_edit {
+                        ElementColors {
+                            border: BorderColor::new(rename_border),
+                            bg: rename_bg.into(),
+                            text: rename_text.into(),
+                        }
+                    } else {
+                        text_colors(fg)
+                    }),
             ]),
         )
         .display(crate::termwindow::box_model::DisplayType::Block)
@@ -1315,19 +1428,29 @@ impl crate::TermWindow {
         };
         let terminal =
             self.sidebar_icon_element(LucideIcon::SquareTerminal, self.sidebar_icon_size_px())?;
-        let inline_edit = self.chatminal_sidebar.inline_session_edit_state();
+        let inline_edit = self.chatminal_sidebar.inline_edit_state();
         let is_inline_edit = inline_edit
             .as_ref()
-            .map(|edit| edit.session_id == session.session_id)
+            .map(|edit| {
+                edit.kind == crate::chatminal_sidebar::SidebarInlineEditKind::RenameSession
+                    && edit.item_id == session.session_id
+            })
             .unwrap_or(false);
         let is_inline_edit_selected = inline_edit
             .as_ref()
-            .map(|edit| edit.session_id == session.session_id && edit.select_all)
+            .map(|edit| {
+                edit.kind == crate::chatminal_sidebar::SidebarInlineEditKind::RenameSession
+                    && edit.item_id == session.session_id
+                    && edit.select_all
+            })
             .unwrap_or(false);
         let session_label = if is_inline_edit {
             let edit = inline_edit
                 .as_ref()
-                .filter(|edit| edit.session_id == session.session_id);
+                .filter(|edit| {
+                    edit.kind == crate::chatminal_sidebar::SidebarInlineEditKind::RenameSession
+                        && edit.item_id == session.session_id
+                });
             format!("{}_", edit.map(|edit| edit.input.as_str()).unwrap_or(""))
         } else {
             session.name.clone()

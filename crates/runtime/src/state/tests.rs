@@ -504,6 +504,36 @@ fn native_workspace_load_passive_returns_runtime_snapshot() {
 }
 
 #[test]
+fn profile_rename_updates_runtime_workspace_snapshot() {
+    let (state, _session_id, _db) = create_state_with_session();
+    let workspace = state
+        .workspace_load_passive()
+        .expect("load runtime workspace");
+    let profile_id = workspace.active_profile_id.expect("active profile");
+
+    let renamed = state
+        .profile_rename(&profile_id, "Work")
+        .expect("rename profile");
+
+    assert!(
+        renamed
+            .profiles
+            .iter()
+            .any(|profile| profile.profile_id == profile_id && profile.name == "Work")
+    );
+
+    let reloaded = state
+        .workspace_load_passive()
+        .expect("reload runtime workspace");
+    assert!(
+        reloaded
+            .profiles
+            .iter()
+            .any(|profile| profile.profile_id == profile_id && profile.name == "Work")
+    );
+}
+
+#[test]
 fn workspace_layout_roundtrip_persists_for_active_profile() {
     let (state, session_a, session_b, _db) = create_state_with_two_sessions();
     let workspace_id = "desktop-main";
@@ -1847,6 +1877,28 @@ fn restore_snapshot_collapses_duplicate_prompt_tail_from_terminal_replay() {
     let snapshot = restore_snapshot(&state, &session_id);
     assert_eq!(snapshot.seq, 1);
     assert_eq!(snapshot.content, "echo hi\r\nkhoa2807@192 ~ % ");
+}
+
+#[test]
+fn restore_snapshot_collapses_inline_duplicate_prompt_tail_from_terminal_replay() {
+    let (state, session_id, _db) = create_state_with_session();
+    {
+        let mut inner = state.inner.lock().expect("lock state");
+        inner
+            .sessions
+            .get_mut(&session_id)
+            .expect("session entry exists")
+            .session
+            .status = StoredSessionStatus::Running;
+        inner
+            .store
+            .append_terminal_replay_chunk(&session_id, 1, "khoa2807@192 ~ % khoa2807@192 ~ % ", 1)
+            .expect("append replay");
+    }
+
+    let snapshot = restore_snapshot(&state, &session_id);
+    assert_eq!(snapshot.seq, 1);
+    assert_eq!(snapshot.content, "khoa2807@192 ~ % ");
 }
 
 #[test]

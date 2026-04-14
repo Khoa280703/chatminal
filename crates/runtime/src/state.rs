@@ -307,6 +307,14 @@ impl RuntimeState {
         inner.profile_create(name)
     }
 
+    pub fn profile_rename(&self, profile_id: &str, name: &str) -> Result<RuntimeWorkspace, String> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|_| "state lock poisoned".to_string())?;
+        inner.profile_rename(profile_id, name)
+    }
+
     pub fn profile_switch(&self, profile_id: &str) -> Result<RuntimeWorkspace, String> {
         let mut inner = self
             .inner
@@ -1114,6 +1122,7 @@ fn snapshot_trailing_fragment(snapshot: &StoredSessionSnapshot) -> Option<String
 fn normalize_restore_replay_snapshot(mut snapshot: StoredSessionSnapshot) -> StoredSessionSnapshot {
     snapshot.content = strip_volatile_terminal_control_sequences(&snapshot.content);
     snapshot.content = collapse_trailing_restored_prompt_fragment_dup(&snapshot.content);
+    snapshot.content = collapse_trailing_duplicate_prompt_redraws(&snapshot.content);
     snapshot
 }
 
@@ -1396,7 +1405,6 @@ fn collapse_trailing_restored_prompt_fragment_dup(content: &str) -> String {
     format!("{prefix}{}", last.raw)
 }
 
-#[cfg(test)]
 fn collapse_trailing_duplicate_prompt_redraws(content: &str) -> String {
     if content.is_empty() {
         return String::new();
@@ -1530,7 +1538,6 @@ fn split_lines_with_endings(content: &str) -> Vec<SnapshotLine<'_>> {
     out
 }
 
-#[cfg(test)]
 fn find_repeated_trailing_prompt_suffix(line: &str) -> Option<(usize, String)> {
     if line.is_empty() {
         return None;
@@ -1561,7 +1568,6 @@ fn find_repeated_trailing_prompt_suffix(line: &str) -> Option<(usize, String)> {
     None
 }
 
-#[cfg(test)]
 fn raw_index_for_visible_offset(raw: &str, target_visible_offset: usize) -> Option<usize> {
     if target_visible_offset == 0 {
         return Some(0);

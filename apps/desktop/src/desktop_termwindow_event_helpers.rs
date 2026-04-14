@@ -181,7 +181,7 @@ impl TermWindow {
             }
         };
         self.config = config.clone();
-        self.settings_modal_catalog = None;
+        self.settings_modal_catalog = Some(Rc::new(build_settings_catalog(&config)));
         self.palette.take();
 
         let num_runtime_entries = self.get_session_entry_information().len();
@@ -231,6 +231,11 @@ impl TermWindow {
         self.invalidate_fancy_tab_bar();
         self.invalidate_modal();
         self.input_map = InputMap::new(&config);
+        self.cached_palette_base_commands = Some(Rc::new(
+            crate::desktop_commands::CommandDef::actions_for_palette_and_menubar_with_session_ui(&config, true),
+        ));
+        self.cached_command_palette_modal = None;
+        self.cached_settings_modal = None;
         self.leader_is_down = None;
         self.render_state.as_mut().map(|rs| rs.config_changed());
         let dimensions = self.dimensions;
