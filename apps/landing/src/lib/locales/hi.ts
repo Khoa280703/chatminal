@@ -20,7 +20,7 @@ export const hiDictionary: SiteDictionary = {
     languageLabel: "भाषा",
   },
   hero: {
-    title: "एक टर्मिनल वर्कस्पेस जहाँ कई AI सेशन एक साथ चलें।",
+    title: "कई AI सेशनों के बीच vibe coding के लिए एक टर्मिनल वर्कस्पेस।",
     description:
       "Chatminal shell sessions, agent runs और बार-बार इस्तेमाल होने वाले setups को व्यवस्थित रखता है ताकि आप समानांतर काम की शाखाओं में बिना सब कुछ एक ही टर्मिनल में ठूँसे आगे बढ़ सकें।",
   },

@@ -20,7 +20,7 @@ export const frDictionary: SiteDictionary = {
     languageLabel: "Langue",
   },
   hero: {
-    title: "Un espace terminal pour exécuter plusieurs sessions IA en même temps.",
+    title: "Un espace terminal pour faire du vibe coding à travers plusieurs sessions IA.",
     description:
       "Chatminal garde vos shells, vos runs d'agents et vos setups récurrents bien structurés pour que vous puissiez avancer sur plusieurs branches sans tout écraser dans un seul terminal.",
   },

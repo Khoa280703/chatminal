@@ -19,7 +19,7 @@ export const zhCnDictionary: SiteDictionary = {
     languageLabel: "语言",
   },
   hero: {
-    title: "一个可以同时运行多个 AI 会话的终端工作区。",
+    title: "一个适合在多个 AI 会话之间进行 vibe coding 的终端工作区。",
     description:
       "Chatminal 让 shell session、agent 运行与重复性 setup 保持有序，这样你可以在并行工作分支之间切换，而不用把一切都塞进同一个终端里。",
   },
