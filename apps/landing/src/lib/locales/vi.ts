@@ -20,7 +20,7 @@ export const viDictionary: SiteDictionary = {
     languageLabel: "Ngôn ngữ",
   },
   hero: {
-    title: "Không gian terminal cho vibe coding qua nhiều phiên AI.",
+    title: "Không gian terminal cho vibe coding.",
     description:
       "Chatminal giữ shell session, agent run và các setup lặp lại luôn gọn gàng, để bạn di chuyển giữa nhiều nhánh công việc song song mà không dồn hết vào một terminal.",
   },

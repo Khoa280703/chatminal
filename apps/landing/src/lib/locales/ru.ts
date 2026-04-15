@@ -20,7 +20,7 @@ export const ruDictionary: SiteDictionary = {
     languageLabel: "Язык",
   },
   hero: {
-    title: "Терминальное рабочее пространство для vibe coding через несколько AI-сессий.",
+    title: "Терминальное рабочее пространство для vibe coding.",
     description:
       "Chatminal держит shell-сессии, agent run и повторяемые setup в порядке, чтобы вы могли двигаться по параллельным веткам работы, не сваливая всё в один терминал.",
   },

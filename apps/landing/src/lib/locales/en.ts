@@ -20,7 +20,7 @@ export const enDictionary: SiteDictionary = {
     languageLabel: "Language",
   },
   hero: {
-    title: "A terminal workspace for vibe coding across multiple AI sessions.",
+    title: "A terminal workspace for vibe coding.",
     description:
       "Chatminal keeps shell sessions, agent runs, and repeatable setups organized so you can move across parallel work without flattening everything into one terminal.",
   },
