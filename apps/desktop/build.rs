@@ -298,17 +298,8 @@ fn configure_macos_assets(repo_root: &Path, asset_root: &Path) {
 
     let profile = std::env::var("PROFILE").expect("PROFILE");
     let target_dir = build_target_dir(repo_root, &profile);
-    let src_plist = asset_root
-        .join("macos")
-        .join("Chatminal.app")
-        .join("Contents")
-        .join("Info.plist");
-    let src_icon = asset_root
-        .join("macos")
-        .join("Chatminal.app")
-        .join("Contents")
-        .join("Resources")
-        .join("terminal.icns");
+    let src_plist = asset_root.join("macos").join("contents").join("Info.plist");
+    let src_icon = asset_root.join("macos").join("resources").join("terminal.icns");
     let dest_plist = target_dir.join("Info.plist");
     let dest_icon = target_dir.join("terminal.icns");
     println!("cargo:rerun-if-changed={}", src_plist.display());

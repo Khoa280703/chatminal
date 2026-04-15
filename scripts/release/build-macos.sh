@@ -44,7 +44,7 @@ chmod +x "$BUNDLE_OUT/Contents/MacOS/$BINARY_NAME"
 
 # Refuse to ship binaries that still depend on Homebrew-installed libs from
 # the build machine. Release artifacts must be self-contained apart from
-# Apple system frameworks and the bundled ANGLE dylibs copied below.
+# Apple system frameworks and the app assets copied below.
 if otool -L "$BUNDLE_OUT/Contents/MacOS/$BINARY_NAME" | grep -E '/(opt/homebrew|usr/local/opt)/' >/dev/null; then
     echo "error: release binary links against Homebrew libraries from the build machine" >&2
     otool -L "$BUNDLE_OUT/Contents/MacOS/$BINARY_NAME" >&2
@@ -52,20 +52,12 @@ if otool -L "$BUNDLE_OUT/Contents/MacOS/$BINARY_NAME" | grep -E '/(opt/homebrew|
 fi
 
 # Info.plist
-cp "$ASSET_DIR/Chatminal.app/Contents/Info.plist" "$BUNDLE_OUT/Contents/Info.plist"
+cp "$ASSET_DIR/contents/Info.plist" "$BUNDLE_OUT/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$BUNDLE_OUT/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$BUNDLE_OUT/Contents/Info.plist"
 
 # App icon
-cp "$ASSET_DIR/Chatminal.app/Contents/Resources/terminal.icns" "$BUNDLE_OUT/Contents/Resources/terminal.icns"
-
-# ANGLE / EGL dylibs — must be alongside binary (macOS rpath @executable_path)
-for dylib in libEGL.dylib libGLESv2.dylib libGLESv1_CM.dylib; do
-    src="$ASSET_DIR/$dylib"
-    if [[ -f "$src" ]]; then
-        cp "$src" "$BUNDLE_OUT/Contents/MacOS/$dylib"
-    fi
-done
+cp "$ASSET_DIR/resources/terminal.icns" "$BUNDLE_OUT/Contents/Resources/terminal.icns"
 
 # ── 4. Code-sign (optional — requires CODESIGN_IDENTITY env var) ──────────────
 if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then

@@ -44,6 +44,10 @@ home/
 apps/landing/stitch/
 apps/landing/claudecode-color-2.png
 apps/landing/public/stitch-chatminal-landing-reference.png
+apps/desktop/assets/macos/Chatminal.app/
+frontend/node_modules/
+frontend/dist/
+third_party/terminal-engine-reference/docs/screenshots/
 
 # ==============================================================================
 # Developer Tools (Internal)
